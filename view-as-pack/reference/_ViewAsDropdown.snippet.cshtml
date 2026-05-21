@@ -1,0 +1,77 @@
+@* ViewAs dropdown + banner -- paste into _Layout.cshtml. Together with
+   ViewAsClaimsTransformer + Account/ViewAs this gives a SiteAdmin a one-click
+   way to test what the site looks like to lower roles.
+
+   Place the @using/@{ block at the top of _Layout.cshtml (merge with the
+   existing one). Place the dropdown <li> inside the right-aligned <ul>
+   in the navbar (before the user-avatar dropdown). Place the banner block
+   immediately after </nav> so it sits between the navbar and main content. *@
+
+@using HelpDesk.Models
+@using HelpDesk.Services
+@{
+    var role          = User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    var originalRole  = User?.FindFirst(ViewAsClaimsTransformer.OriginalRoleClaim)?.Value;
+    var realRole      = originalRole ?? role;
+    var impersonating = originalRole != null && originalRole != role;
+    var canViewAs     = realRole == ViewAsClaimsTransformer.ImpersonatorRole;
+    var returnUrl     = Context.Request.Path + Context.Request.QueryString;
+    // List the roles a SiteAdmin can impersonate -- everything except themselves.
+    var viewAsRoles   = UserRoles.All.Where(r => r != ViewAsClaimsTransformer.ImpersonatorRole).ToArray();
+}
+
+@* ---- 1. Dropdown in the navbar (visible only to real SiteAdmins) ---- *@
+@if (canViewAs)
+{
+    <li class="nav-item dropdown">
+        <a class="nav-link dropdown-toggle @(impersonating ? "text-warning fw-semibold" : "")"
+           href="#" data-bs-toggle="dropdown"
+           title="View site as another role (testing)">
+            <i class="bi bi-incognito me-1"></i>View as: @role
+        </a>
+        <ul class="dropdown-menu dropdown-menu-end">
+            <li><h6 class="dropdown-header">View site as</h6></li>
+            @foreach (var r in viewAsRoles)
+            {
+                <li>
+                    <form asp-controller="Account" asp-action="ViewAs" method="post" class="d-inline">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="role" value="@r" />
+                        <input type="hidden" name="returnUrl" value="@returnUrl" />
+                        <button type="submit" class="dropdown-item @(role == r ? "active" : "")">
+                            <i class="bi bi-person me-2"></i>@r
+                        </button>
+                    </form>
+                </li>
+            }
+            <li><hr class="dropdown-divider" /></li>
+            <li>
+                <form asp-controller="Account" asp-action="ViewAs" method="post" class="d-inline">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="role" value="" />
+                    <input type="hidden" name="returnUrl" value="@returnUrl" />
+                    <button type="submit" class="dropdown-item @(!impersonating ? "active" : "")">
+                        <i class="bi bi-person-check me-2"></i>Become self (@ViewAsClaimsTransformer.ImpersonatorRole)
+                    </button>
+                </form>
+            </li>
+        </ul>
+    </li>
+}
+
+@* ---- 2. Banner below the navbar -- only while impersonating ---- *@
+@if (impersonating)
+{
+    <div class="alert alert-warning rounded-0 mb-0 py-2 d-flex align-items-center" role="alert">
+        <i class="bi bi-incognito me-2"></i>
+        <span>Viewing the site as <strong>@role</strong> (your real role: <strong>@originalRole</strong>).</span>
+        <form asp-controller="Account" asp-action="ViewAs" method="post" class="ms-auto">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="role" value="" />
+            <input type="hidden" name="returnUrl" value="@returnUrl" />
+            <button type="submit" class="btn btn-sm btn-warning">
+                <i class="bi bi-person-check me-1"></i>Become self
+            </button>
+        </form>
+    </div>
+}

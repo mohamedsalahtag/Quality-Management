@@ -1,0 +1,236 @@
+@using System.Text.Json
+@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.ViewModels
+@model DashboardVm
+@{
+    ViewData["Title"] = "Dashboard";
+    var role     = User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    var fullName = User?.FindFirst(System.Security.Claims.ClaimTypes.GivenName)?.Value;
+
+    string ArrivalBadge(string s) => s switch
+    {
+        ArrivalStatus.Draft     => "bg-warning text-dark",
+        ArrivalStatus.Completed => "bg-success",
+        ArrivalStatus.Cancelled => "bg-secondary",
+        _ => "bg-light text-dark"
+    };
+
+    var avgDefect = Model.AvgDefectPctLast30;
+    string DefectTone() => avgDefect == null
+        ? ""
+        : (avgDefect > Model.Thresholds.DefectPctRed    ? "text-danger"
+        : (avgDefect > Model.Thresholds.DefectPctYellow ? "text-warning"
+        :  "text-success"));
+
+    // JSON payload consumed by dashboard.js. Camel-cased so the JS reads
+    // `trend`, `qoByStatus`, `avgDefectPct`, `thresholds`.
+    var payload = new
+    {
+        trend         = Model.ArrivalsTrend,
+        qoByStatus    = Model.QoByStatus,
+        avgDefectPct  = Model.AvgDefectPctLast30,
+        thresholds    = Model.Thresholds
+    };
+    var payloadJson = JsonSerializer.Serialize(payload);
+}
+
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+        <h1 class="h3 mb-1">Welcome, @fullName</h1>
+        <p class="text-muted mb-0">Sharbatly Quality Management System</p>
+    </div>
+    <span class="badge bg-secondary fs-6">@role</span>
+</div>
+
+@* ---- KPI tiles ---- *@
+<div class="row g-3 mb-3">
+    <div class="col-6 col-md-4 col-xl-2">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body py-3">
+                <div class="text-muted small text-uppercase fw-semibold mb-1">
+                    <i class="bi bi-pencil-square text-primary me-1"></i>Arrivals in Draft
+                </div>
+                <div class="fs-2 fw-semibold lh-1">@Model.Counts.ArrivalsDraft</div>
+                <div class="text-muted small mt-1">Awaiting checklist completion</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body py-3">
+                <div class="text-muted small text-uppercase fw-semibold mb-1">
+                    <i class="bi bi-check2-circle text-success me-1"></i>Completed (30 d)
+                </div>
+                <div class="fs-2 fw-semibold lh-1">@Model.Counts.ArrivalsCompletedLast30</div>
+                <div class="text-muted small mt-1">Arrivals signed off</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body py-3">
+                <div class="text-muted small text-uppercase fw-semibold mb-1">
+                    <i class="bi bi-clipboard-data text-primary me-1"></i>Quality Orders Open
+                </div>
+                <div class="fs-2 fw-semibold lh-1">@Model.Counts.QoOpen</div>
+                <div class="text-muted small mt-1">Initial, Open & Reopened</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+        <div class="card border-0 shadow-sm h-100 @(Model.Counts.StaleArrivals > 0 ? "border-start border-4 border-danger" : "")">
+            <div class="card-body py-3">
+                <div class="text-muted small text-uppercase fw-semibold mb-1">
+                    <i class="bi bi-hourglass-split text-danger me-1"></i>Stale Arrivals
+                </div>
+                <div class="fs-2 fw-semibold lh-1 @(Model.Counts.StaleArrivals > 0 ? "text-danger" : "")">@Model.Counts.StaleArrivals</div>
+                <div class="text-muted small mt-1">Draft &gt; @Model.Thresholds.StaleArrivalDays day(s)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+        <div class="card border-0 shadow-sm h-100 @(Model.Counts.AgedOpenQos > 0 ? "border-start border-4 border-warning" : "")">
+            <div class="card-body py-3">
+                <div class="text-muted small text-uppercase fw-semibold mb-1">
+                    <i class="bi bi-stopwatch text-warning me-1"></i>Aged Open QOs
+                </div>
+                <div class="fs-2 fw-semibold lh-1 @(Model.Counts.AgedOpenQos > 0 ? "text-warning" : "")">@Model.Counts.AgedOpenQos</div>
+                <div class="text-muted small mt-1">Open &gt; @Model.Thresholds.OpenQoDays day(s)</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body py-3">
+                <div class="text-muted small text-uppercase fw-semibold mb-1">
+                    <i class="bi bi-graph-down-arrow text-info me-1"></i>Avg Defect % (30 d)
+                </div>
+                <div class="fs-2 fw-semibold lh-1 @DefectTone()">
+                    @(avgDefect == null ? "—" : $"{avgDefect.Value:0.0}%")
+                </div>
+                <div class="text-muted small mt-1">Across closed QOs</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ---- Charts row ---- *@
+<div class="row g-3 mb-3">
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
+                <span class="fw-semibold"><i class="bi bi-activity me-1"></i>Arrivals Trend</span>
+                <span class="text-muted small">Last 12 weeks</span>
+            </div>
+            <div class="card-body pt-0">
+                <div style="position: relative; height: 240px;">
+                    <canvas id="chartArrivalsTrend"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
+                <span class="fw-semibold"><i class="bi bi-pie-chart-fill me-1"></i>Quality Orders by Status</span>
+            </div>
+            <div class="card-body pt-0">
+                <div style="position: relative; height: 240px;">
+                    <canvas id="chartQoStatus"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
+                <span class="fw-semibold"><i class="bi bi-speedometer me-1"></i>Defect Rate</span>
+                <span class="text-muted small" title="Red above @(Model.Thresholds.DefectPctRed)%, Amber above @(Model.Thresholds.DefectPctYellow)%">
+                    <i class="bi bi-info-circle"></i>
+                </span>
+            </div>
+            <div class="card-body pt-0">
+                <div style="position: relative; height: 240px;">
+                    <canvas id="chartDefectGauge"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ---- Bottom row: Recent activity + Online users ---- *@
+<div class="row g-3 mb-3">
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
+                <span class="fw-semibold"><i class="bi bi-clock-history me-1"></i>Recent Arrivals</span>
+                <a asp-controller="Arrivals" asp-action="Index" class="small text-decoration-none">
+                    View all <i class="bi bi-arrow-right-short"></i>
+                </a>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Arrival</th>
+                            <th>Container</th>
+                            <th>Vendor</th>
+                            <th>Status</th>
+                            <th class="text-end">Created</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var a in Model.RecentArrivals)
+                        {
+                            <tr>
+                                <td>
+                                    <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@a.ArrivalId"
+                                       class="text-decoration-none">@a.ArrivalNo</a>
+                                </td>
+                                <td><code>@a.ContainerNo</code></td>
+                                <td>@a.VendorName</td>
+                                <td><span class="badge @ArrivalBadge(a.StatusCode)">@a.StatusCode</span></td>
+                                <td class="text-end small text-muted">@a.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                            </tr>
+                        }
+                        @if (Model.RecentArrivals.Count == 0)
+                        {
+                            <tr><td colspan="5" class="text-center text-muted small py-3">No arrivals yet.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
+                <span class="fw-semibold"><i class="bi bi-people-fill me-1"></i>Online Users</span>
+                <span class="badge bg-success-subtle text-success-emphasis">@Model.OnlineUserCount online</span>
+            </div>
+            <ul class="list-group list-group-flush">
+                @foreach (var u in Model.OnlineUsers)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center py-2">
+                        <div>
+                            <span class="d-inline-block rounded-circle bg-success me-2" style="width:.5rem;height:.5rem;"></span>
+                            <span class="fw-semibold">@u.FullName</span>
+                            <div class="text-muted small ms-3">@u.Department</div>
+                        </div>
+                        <span class="badge bg-light text-dark">@u.Role</span>
+                    </li>
+                }
+                @if (Model.OnlineUserCount == 0)
+                {
+                    <li class="list-group-item text-center text-muted small py-3">No one is online.</li>
+                }
+            </ul>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+    <script id="dash-data" type="application/json">@Html.Raw(payloadJson)</script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="~/js/dashboard.js" asp-append-version="true"></script>
+}

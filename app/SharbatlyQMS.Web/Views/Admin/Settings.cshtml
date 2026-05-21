@@ -1,0 +1,1069 @@
+@using SharbatlyQMS.Web.Controllers
+@using SharbatlyQMS.Web.Services
+@using SharbatlyQMS.Web.Services.Sap
+@model SettingsVm
+@{
+    ViewData["Title"] = "Site Configuration";
+    var activeTab = (ViewBag.ActiveTab as string) ?? "sap";
+    string TabClass(string id)    => activeTab == id ? "nav-link active" : "nav-link";
+    string TabPaneClass(string id) => activeTab == id ? "tab-pane fade show active" : "tab-pane fade";
+    var preview = ViewBag.PreviewBody as string;
+    var previewOk = (bool?)ViewBag.PreviewOk ?? false;
+    var previewUrl = ViewBag.PreviewUrl as string;
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0"><i class="bi bi-gear me-1"></i>Site Configuration</h1>
+</div>
+
+<ul class="nav nav-tabs mb-3" role="tablist">
+    <li class="nav-item">
+        <button class="@TabClass("sap")" data-bs-toggle="tab" data-bs-target="#tab-sap" type="button">
+            <i class="bi bi-cloud-arrow-down me-1"></i>SAP OData
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="@TabClass("branding")" data-bs-toggle="tab" data-bs-target="#tab-branding" type="button">
+            <i class="bi bi-palette2 me-1"></i>Branding
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="@TabClass("smtp")" data-bs-toggle="tab" data-bs-target="#tab-smtp" type="button">
+            <i class="bi bi-envelope-at me-1"></i>Email (SMTP)
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="@TabClass("thumbnails")" data-bs-toggle="tab" data-bs-target="#tab-thumbnails" type="button">
+            <i class="bi bi-image me-1"></i>Images / Thumbnails
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="@TabClass("alerts")" data-bs-toggle="tab" data-bs-target="#tab-alerts" type="button">
+            <i class="bi bi-bell me-1"></i>Alert Thresholds
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="@TabClass("syncstatus")" data-bs-toggle="tab" data-bs-target="#tab-syncstatus" type="button">
+            <i class="bi bi-arrow-repeat me-1"></i>Sync Status
+        </button>
+    </li>
+    <li class="nav-item">
+        <button class="@TabClass("ad")" data-bs-toggle="tab" data-bs-target="#tab-ad" type="button">
+            <i class="bi bi-person-lines-fill me-1"></i>Active Directory
+        </button>
+    </li>
+    <li class="nav-item ms-auto">
+        <button class="@TabClass("danger") text-danger" data-bs-toggle="tab" data-bs-target="#tab-danger" type="button">
+            <i class="bi bi-exclamation-octagon-fill me-1"></i>Danger Zone
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content">
+
+@* ===================== SAP OData ===================== *@
+<div class="@TabPaneClass("sap")" id="tab-sap">
+    <div class="card">
+        <div class="card-header bg-primary text-white"><i class="bi bi-cloud-arrow-down me-1"></i>SAP S/4HANA OData endpoints</div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                Fill in the OData URL for each CDS view. The application reads from these
+                endpoints (read-only) to power the arrival search, material details,
+                vendor lookup, shipment data and PO context. Leave any field empty until
+                its CDS view is published &mdash; the arrival search will fall back to the
+                in-memory demo data while URLs are blank.
+                <br />
+                Use the <strong>Test</strong> button to verify connectivity (probes the URL with <code>$top=1</code>)
+                and <strong>Preview</strong> to inspect the actual JSON SAP returns. Both work
+                against the value currently in the input box &mdash; you do not need to Save first.
+            </p>
+            <form asp-action="SaveSapSettings" method="post" id="sap-form">
+                @Html.AntiForgeryToken()
+                <div class="row g-3">
+                    <div class="col-md-12">
+                        <div class="alert alert-light border small mb-0">
+                            <i class="bi bi-info-circle me-1"></i>
+                            <strong>How credentials are resolved:</strong> the per-URL <em>User</em> and <em>Password</em>
+                            below each endpoint take priority. If a per-URL <em>User</em> is left blank, the global
+                            default below is used instead. This lets you point one URL at a dev server and another
+                            at production with different accounts.
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">SAP username <span class="text-muted small">(global default)</span></label>
+                        <input asp-for="Sap.User" class="form-control" autocomplete="off" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label d-flex align-items-center gap-2">
+                            <span>SAP password <span class="text-muted small">(global default)</span></span>
+                            @if (!string.IsNullOrEmpty(Model.Sap.Password))
+                            {
+                                <span class="badge bg-success" title="A password is stored. Leave this field blank to keep it.">
+                                    <i class="bi bi-shield-check"></i> Saved
+                                </span>
+                            }
+                        </label>
+                        <input name="Sap.Password" type="password" class="form-control" autocomplete="new-password"
+                               placeholder="@(!string.IsNullOrEmpty(Model.Sap.Password) ? "•••••••• (saved — leave blank to keep)" : "Enter password")" />
+                        <small class="text-muted">Leave blank to keep existing password.</small>
+                    </div>
+                </div>
+                <hr />
+
+                <h6 class="text-uppercase small fw-bold text-success mt-2 mb-2">
+                    <i class="bi bi-arrow-repeat me-1"></i>Master data &mdash; synced into local cache
+                </h6>
+                <p class="small text-muted mb-3">
+                    Material Master and Vendor Master are pulled into a local cache so lookups are fast.
+                    Use <strong>Sync now</strong> to pull immediately, or schedule auto-sync hours
+                    on the <em>Sync Status</em> tab.
+                </p>
+
+                @{
+                    // Renders one configurable endpoint row: URL + Test + Preview (+ optional Sync now)
+                    // plus a second line with per-URL User / Password (blank = inherit global).
+                    void EndpointRow(string label, bool syncable, string urlAsp, string userAsp, string pwdAsp,
+                                     string idBase, string endpointKey, string urlValue, string userValue,
+                                     bool hasSavedPassword,
+                                     string placeholder, string hint, EndpointSyncConfig? sync, bool searchOnly)
+                    {
+                        var urlId  = $"sap-url-{idBase}";
+                        var userId = $"sap-user-{idBase}";
+                        var pwdId  = $"sap-pwd-{idBase}";
+                        var resultId = $"{urlId}-result";
+                        <div class="mb-4 border rounded p-2">
+                            <label class="form-label fw-semibold mb-1">
+                                @label
+                                @if (searchOnly) { <span class="badge bg-info text-dark ms-1">Search-only</span> }
+                            </label>
+                            <div class="input-group mb-1">
+                                <input id="@urlId" name="@urlAsp" value="@urlValue" class="form-control font-monospace" placeholder="@placeholder" />
+                                <button type="button" class="btn btn-outline-info"
+                                        onclick="sapTest('@urlId','@userId','@pwdId','@endpointKey','@resultId')">
+                                    <i class="bi bi-plug"></i> Test
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary"
+                                        onclick="sapPreview('@urlId','@userId','@pwdId','@endpointKey','@resultId')">
+                                    <i class="bi bi-eye"></i> Preview
+                                </button>
+                                @if (syncable)
+                                {
+                                    <button type="button" class="btn btn-success"
+                                            onclick="sapSync('@endpointKey','@resultId')">
+                                        <i class="bi bi-arrow-down-circle"></i> Sync now
+                                    </button>
+                                }
+                            </div>
+                            <div class="row g-2 mb-1">
+                                <div class="col-md-6">
+                                    <input id="@userId" name="@userAsp" value="@userValue"
+                                           class="form-control form-control-sm" autocomplete="off"
+                                           placeholder="SAP user for this URL (blank = use global default)" />
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="input-group input-group-sm">
+                                        <input id="@pwdId" name="@pwdAsp" type="password"
+                                               class="form-control form-control-sm" autocomplete="new-password"
+                                               placeholder="@(hasSavedPassword ? "•••••••• (saved — leave blank to keep)" : "Password for this URL (blank = use global)")" />
+                                        @if (hasSavedPassword)
+                                        {
+                                            <span class="input-group-text bg-success text-white" title="A password is stored for this URL. Test/Preview/Sync use it automatically when this field is blank.">
+                                                <i class="bi bi-shield-check"></i>&nbsp;Saved
+                                            </span>
+                                        }
+                                    </div>
+                                </div>
+                            </div>
+                            <small class="text-muted">@hint@(searchOnly ? " Data is fetched live when an inspector creates an arrival checklist and snapshotted on save — never bulk-synced." : "")</small>
+                            @if (syncable && sync != null)
+                            {
+                                <div class="small mt-1">
+                                    <strong>Last sync:</strong>
+                                    <span class="@(sync.LastRunUtc.HasValue ? "" : "text-muted")">
+                                        @(sync.LastRunUtc.HasValue ? sync.LastRunUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "never")
+                                    </span>
+                                    @if (sync.LastRowCount.HasValue)
+                                    {
+                                        <span class="text-muted ms-2">(@sync.LastRowCount rows)</span>
+                                    }
+                                    @if (!string.IsNullOrWhiteSpace(sync.LastResult))
+                                    {
+                                        var okResult = sync.LastResult!.StartsWith("OK", StringComparison.OrdinalIgnoreCase);
+                                        <span class="ms-2 @(okResult ? "text-success" : "text-danger")">— @sync.LastResult</span>
+                                    }
+                                </div>
+                            }
+                            <div id="@resultId" class="mt-2"></div>
+                        </div>
+                    }
+                }
+
+                @{ EndpointRow("Material Master URL", syncable:true,
+                    urlAsp:"Sap.MaterialMasterUrl", userAsp:"Sap.MaterialMasterUser", pwdAsp:"Sap.MaterialMasterPassword",
+                    idBase:"material", endpointKey:SyncableEndpoints.MaterialMaster,
+                    urlValue:Model.Sap.MaterialMasterUrl, userValue:Model.Sap.MaterialMasterUser,
+                    hasSavedPassword:!string.IsNullOrEmpty(Model.Sap.MaterialMasterPassword),
+                    placeholder:"https://host:port/sap/opu/odata/sap/MATERIAL_CDS/Materials",
+                    hint:"Provides material description, group, origin, variety, class, weight, size, brand, pack type.",
+                    sync:Model.MaterialSync, searchOnly:false); }
+                @{ EndpointRow("Vendor Master URL", syncable:true,
+                    urlAsp:"Sap.VendorMasterUrl", userAsp:"Sap.VendorMasterUser", pwdAsp:"Sap.VendorMasterPassword",
+                    idBase:"vendor", endpointKey:SyncableEndpoints.VendorMaster,
+                    urlValue:Model.Sap.VendorMasterUrl, userValue:Model.Sap.VendorMasterUser,
+                    hasSavedPassword:!string.IsNullOrEmpty(Model.Sap.VendorMasterPassword),
+                    placeholder:"https://host:port/sap/opu/odata/sap/VENDOR_CDS/Vendors",
+                    hint:"Vendor / supplier identity and name lookup.",
+                    sync:Model.VendorSync, searchOnly:false); }
+
+                <h6 class="text-uppercase small fw-bold text-info mt-4 mb-2">
+                    <i class="bi bi-search me-1"></i>Search-only &mdash; live OData, snapshotted on arrival save
+                </h6>
+                <p class="small text-muted mb-3">
+                    PO / Shipment / Container search calls SAP live when inspectors create an arrival checklist.
+                    The exact slice they pick is then snapshotted into the arrival, and downstream Quality Order /
+                    Sample / Report flows read the snapshot &mdash; never SAP. These URLs are <strong>not</strong> bulk-synced.
+                </p>
+
+                @{ EndpointRow("Container Search URL", syncable:false,
+                    urlAsp:"Sap.ContainerSearchUrl", userAsp:"Sap.ContainerSearchUser", pwdAsp:"Sap.ContainerSearchPassword",
+                    idBase:"container", endpointKey:"ContainerSearch",
+                    urlValue:Model.Sap.ContainerSearchUrl, userValue:Model.Sap.ContainerSearchUser,
+                    hasSavedPassword:!string.IsNullOrEmpty(Model.Sap.ContainerSearchPassword),
+                    placeholder:"https://host:port/sap/opu/odata/sap/CONTAINER_CDS/Containers",
+                    hint:"Combined view: ekko + ekpo + ekes + lfa1 + mara + makt joined with zqc_arrival to drive the SAP search grid.",
+                    sync:null, searchOnly:true); }
+                @{ EndpointRow("Shipment Data URL", syncable:false,
+                    urlAsp:"Sap.ShipmentDataUrl", userAsp:"Sap.ShipmentDataUser", pwdAsp:"Sap.ShipmentDataPassword",
+                    idBase:"shipment", endpointKey:"ShipmentData",
+                    urlValue:Model.Sap.ShipmentDataUrl, userValue:Model.Sap.ShipmentDataUser,
+                    hasSavedPassword:!string.IsNullOrEmpty(Model.Sap.ShipmentDataPassword),
+                    placeholder:"https://host:port/sap/opu/odata/sap/SHIPMENT_CDS/Shipments",
+                    hint:"Vessel, voyage, loading/sailing/arrival dates, transit days, ports.",
+                    sync:null, searchOnly:true); }
+                @{ EndpointRow("Purchase Order URL", syncable:false,
+                    urlAsp:"Sap.PurchaseOrderUrl", userAsp:"Sap.PurchaseOrderUser", pwdAsp:"Sap.PurchaseOrderPassword",
+                    idBase:"po", endpointKey:"PurchaseOrder",
+                    urlValue:Model.Sap.PurchaseOrderUrl, userValue:Model.Sap.PurchaseOrderUser,
+                    hasSavedPassword:!string.IsNullOrEmpty(Model.Sap.PurchaseOrderPassword),
+                    placeholder:"https://host:port/sap/opu/odata/sap/PO_CDS/PurchaseOrders",
+                    hint:"PO header and item context, plant, storage location, quantities, batches.",
+                    sync:null, searchOnly:true); }
+
+                <button type="submit" class="btn btn-primary mt-2">
+                    <i class="bi bi-save me-1"></i>Save SAP settings
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    // SAP endpoint Test / Preview AJAX helpers. Reads the live input value
+    // (no need to Save first) and renders the result inline below the row.
+    function _csrfToken() {
+        var el = document.querySelector('input[name="__RequestVerificationToken"]');
+        return el ? el.value : '';
+    }
+    function _escapeHtml(s) {
+        return (s || '').replace(/[&<>"']/g, function (c) {
+            return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+        });
+    }
+    // Builds the form body for sapTest/sapPreview. Per-URL user/password (read live
+    // from the input fields) are sent on the wire so the admin can validate dev vs
+    // prod credentials WITHOUT saving the form first. The endpointKey tells the
+    // server which row this is, so when the password input is left blank the
+    // server can substitute the previously-saved password for that endpoint
+    // (rendered password fields never echo saved values back for security).
+    async function _sapPost(action, url, user, password, endpointKey) {
+        var token = _csrfToken();
+        var body = 'url=' + encodeURIComponent(url) +
+                   '&user=' + encodeURIComponent(user || '') +
+                   '&password=' + encodeURIComponent(password || '') +
+                   '&endpointKey=' + encodeURIComponent(endpointKey || '') +
+                   '&__RequestVerificationToken=' + encodeURIComponent(token);
+        var resp = await fetch(action, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'X-CSRF-TOKEN':  token,
+                'Accept':        'application/json'
+            },
+            body: body
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        return await resp.json();
+    }
+    function _readFieldsForRow(inputId, userId, pwdId) {
+        var url  = (document.getElementById(inputId)?.value || '').trim();
+        var user = (document.getElementById(userId)?.value  || '').trim();
+        var pwd  = (document.getElementById(pwdId)?.value   || '');
+        return { url: url, user: user, pwd: pwd };
+    }
+    async function sapTest(inputId, userId, pwdId, endpointKey, resultId) {
+        var f = _readFieldsForRow(inputId, userId, pwdId);
+        var result = document.getElementById(resultId);
+        if (!f.url) {
+            result.innerHTML = '<div class="alert alert-warning small mb-0 py-2">URL is empty</div>';
+            return;
+        }
+        var credLabel = f.user
+            ? '<span class="text-muted small ms-2">as <code>' + _escapeHtml(f.user) + '</code>' + (f.pwd ? '' : ' (using saved password)') + '</span>'
+            : '<span class="text-muted small ms-2">using saved/global credentials</span>';
+        result.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>Testing...' + credLabel + '</div>';
+        try {
+            var data = await _sapPost('@Url.Action("TestSapEndpointAjax")', f.url, f.user, f.pwd, endpointKey);
+            result.innerHTML = data.ok
+                ? '<div class="alert alert-success small mb-0 py-2"><i class="bi bi-check-circle me-1"></i>' + _escapeHtml(data.message) + credLabel + '</div>'
+                : '<div class="alert alert-danger small mb-0 py-2"><i class="bi bi-x-circle me-1"></i><pre class="mb-0 small" style="white-space:pre-wrap">' + _escapeHtml(data.message) + '</pre></div>';
+        } catch (e) {
+            result.innerHTML = '<div class="alert alert-danger small mb-0 py-2">Request failed: ' + _escapeHtml(e.message) + '</div>';
+        }
+    }
+    async function sapSync(endpointKey, resultId) {
+        var result = document.getElementById(resultId);
+        if (!confirm('Run a full sync now for ' + endpointKey + '? This may take a few minutes for large catalogues.')) return;
+        try {
+            var token = _csrfToken();
+            var resp = await fetch('@Url.Action("SyncSapEndpointAjax")', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'X-CSRF-TOKEN':  token,
+                    'Accept':        'application/json'
+                },
+                body: 'endpointKey=' + encodeURIComponent(endpointKey) + '&__RequestVerificationToken=' + encodeURIComponent(token)
+            });
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            var data = await resp.json();
+            if (!data.ok) {
+                result.innerHTML = '<div class="alert alert-danger small mb-0 py-2"><i class="bi bi-x-circle me-1"></i>' + _escapeHtml(data.message) + '</div>';
+                return;
+            }
+            // Sync is running in background -- poll for completion every 3s.
+            result.innerHTML = '<div class="alert alert-info small mb-0 py-2"><span class="spinner-border spinner-border-sm me-1"></span>' + _escapeHtml(data.message) + ' <span class="poll-count">(rows so far: 0)</span></div>';
+            pollSyncStatus(endpointKey, resultId);
+        } catch (e) {
+            result.innerHTML = '<div class="alert alert-danger small mb-0 py-2">Request failed: ' + _escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    async function pollSyncStatus(endpointKey, resultId) {
+        var result = document.getElementById(resultId);
+        var attempts = 0;
+        var poll = async function () {
+            attempts++;
+            try {
+                var resp = await fetch('@Url.Action("SyncStatusAjax")?endpointKey=' + encodeURIComponent(endpointKey),
+                    { headers: { 'Accept': 'application/json' } });
+                var data = await resp.json();
+                if (data.running) {
+                    result.innerHTML = '<div class="alert alert-info small mb-0 py-2">' +
+                        '<span class="spinner-border spinner-border-sm me-1"></span>' +
+                        'Sync in progress... <strong>' + (data.cacheCount || 0).toLocaleString() + '</strong> rows in cache so far.' +
+                        ' <span class="text-muted">(check ' + attempts + ')</span></div>';
+                    if (attempts < 200) setTimeout(poll, 3000);
+                } else {
+                    var ok = data.success === true;
+                    var icon = ok ? 'bi-check-circle' : 'bi-x-circle';
+                    var cls  = ok ? 'alert-success' : 'alert-danger';
+                    result.innerHTML = '<div class="alert ' + cls + ' small mb-0 py-2">' +
+                        '<i class="bi ' + icon + ' me-1"></i>' +
+                        (ok ? 'Sync complete &mdash; ' : 'Sync failed: ') +
+                        _escapeHtml(data.message || '') +
+                        ' Cache: ' + (data.cacheCount || 0).toLocaleString() + ' rows.' +
+                        ' <a href="' + window.location.pathname + '?activeTab=syncstatus">view sync status</a></div>';
+                }
+            } catch (e) {
+                result.innerHTML = '<div class="alert alert-warning small mb-0 py-2">Status poll failed: ' + _escapeHtml(e.message) + '</div>';
+            }
+        };
+        setTimeout(poll, 1500);
+    }
+    async function sapPreview(inputId, userId, pwdId, endpointKey, resultId) {
+        var f = _readFieldsForRow(inputId, userId, pwdId);
+        var result = document.getElementById(resultId);
+        if (!f.url) {
+            result.innerHTML = '<div class="alert alert-warning small mb-0 py-2">URL is empty</div>';
+            return;
+        }
+        result.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>Fetching first record...</div>';
+        try {
+            var data = await _sapPost('@Url.Action("PreviewSapEndpointAjax")', f.url, f.user, f.pwd, endpointKey);
+            var icon = data.ok ? 'bi-check-circle text-success' : 'bi-x-circle text-danger';
+            var label = data.ok ? 'First record from SAP' : 'Preview failed';
+            result.innerHTML =
+                '<div class="border rounded">' +
+                  '<div class="px-2 py-1 small d-flex justify-content-between align-items-center" style="background:var(--theme-surface-alt)">' +
+                    '<span><i class="bi ' + icon + ' me-1"></i>' + label + '</span>' +
+                    '<button type="button" class="btn btn-sm btn-link p-0" onclick="this.closest(\'.border\').remove()">close</button>' +
+                  '</div>' +
+                  '<pre class="bg-light p-2 small mb-0" style="max-height:400px;overflow:auto">' + _escapeHtml(data.body) + '</pre>' +
+                '</div>';
+        } catch (e) {
+            result.innerHTML = '<div class="alert alert-danger small mb-0 py-2">Request failed: ' + _escapeHtml(e.message) + '</div>';
+        }
+    }
+
+    // ---- Active Directory: Test connection (does NOT save) ----
+    (function () {
+        var btn = document.getElementById('testAdBtn');
+        var out = document.getElementById('testAdResult');
+        if (!btn || !out) return;
+        btn.addEventListener('click', async function () {
+            out.className = 'ms-2 small text-muted';
+            out.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing…';
+            try {
+                var token = _csrfToken();
+                var body  = new URLSearchParams();
+                body.append('__RequestVerificationToken', token);
+                body.append('domain',          document.getElementById('ad-domain').value);
+                body.append('ldapPath',        document.getElementById('ad-ldap').value);
+                body.append('serviceUser',     document.getElementById('ad-user').value);
+                body.append('servicePassword', document.getElementById('ad-pass').value);
+                var res = await fetch('@Url.Action("TestAdConnectionAjax", "Admin")', {
+                    method: 'POST',
+                    headers: { 'X-CSRF-TOKEN': token, 'Accept': 'application/json' },
+                    body: body.toString(),
+                    credentials: 'same-origin'
+                });
+                var data = await res.json();
+                out.className = 'ms-2 small ' + (data.ok ? 'text-success' : 'text-danger');
+                out.innerHTML = (data.ok ? '<i class="bi bi-check-circle me-1"></i>' : '<i class="bi bi-x-circle me-1"></i>')
+                    + _escapeHtml(data.message || (data.ok ? 'OK' : 'Failed'));
+            } catch (e) {
+                out.className = 'ms-2 small text-danger';
+                out.textContent = 'Request failed: ' + e.message;
+            }
+        });
+    })();
+
+    // Danger Zone -- enable Purge button only when the exact phrase is typed.
+    (function () {
+        var inp = document.getElementById('purgeConfirm');
+        var btn = document.getElementById('purgeBtn');
+        if (!inp || !btn) return;
+        inp.addEventListener('input', function () {
+            btn.disabled = inp.value !== 'PURGE ALL';
+        });
+    })();
+</script>
+}
+
+@* ===================== Branding ===================== *@
+<div class="@TabPaneClass("branding")" id="tab-branding">
+    <div class="card mb-3">
+        <div class="card-header bg-primary text-white"><i class="bi bi-palette2 me-1"></i>Company branding for reports</div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">
+                Company name, footer text, and logo shown on every printed report (Arrival Checklist, Quality
+                Control Report, etc.). The logo is rendered at the top-left of each PDF page; if no logo is
+                uploaded, a "QMS" placeholder is drawn instead.
+            </p>
+            <form asp-action="SaveBrandingSettings" method="post" class="row g-3">
+                @Html.AntiForgeryToken()
+                <div class="col-md-6">
+                    <label class="form-label">Company name <span class="text-muted small">(shown above every report title)</span></label>
+                    <input asp-for="Branding.CompanyName" class="form-control" />
+                </div>
+                <div class="col-md-12">
+                    <label class="form-label">Footer line <span class="text-muted small">(small text at the bottom of every PDF page)</span></label>
+                    <input asp-for="Branding.FooterLine" class="form-control" />
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>Save branding text</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header bg-primary text-white"><i class="bi bi-image me-1"></i>Company logo</div>
+        <div class="card-body">
+            <div class="row g-3 align-items-center">
+                <div class="col-md-4 text-center">
+                    @if (Model.Branding.HasLogo)
+                    {
+                        <img src="@Model.Branding.LogoWebPath" alt="Company logo"
+                             class="img-fluid border rounded p-2"
+                             style="max-height:160px;background:#fff;" />
+                        <div class="small text-muted mt-1">@Model.Branding.LogoFilename</div>
+                    }
+                    else
+                    {
+                        <div class="border rounded p-4 text-muted">
+                            <i class="bi bi-image fs-1"></i>
+                            <div class="small mt-2">No logo uploaded</div>
+                        </div>
+                    }
+                </div>
+                <div class="col-md-8">
+                    <form asp-action="UploadCompanyLogo" method="post" enctype="multipart/form-data" class="mb-3">
+                        @Html.AntiForgeryToken()
+                        <label class="form-label">Upload new logo</label>
+                        <div class="input-group">
+                            <input name="logo" type="file" class="form-control" accept="image/*" required />
+                            <button type="submit" class="btn btn-primary"><i class="bi bi-cloud-upload me-1"></i>Upload</button>
+                        </div>
+                        <small class="text-muted">PNG / JPG / GIF / WEBP / SVG. Up to 2 MB. Recommended: a square or wide logo ~300 x 300 px on a transparent background.</small>
+                    </form>
+                    @if (Model.Branding.HasLogo)
+                    {
+                        <form asp-action="RemoveCompanyLogo" method="post" onsubmit="return confirm('Remove the current logo? The placeholder will be used until a new one is uploaded.');">
+                            @Html.AntiForgeryToken()
+                            <button type="submit" class="btn btn-outline-danger btn-sm">
+                                <i class="bi bi-trash me-1"></i>Remove current logo
+                            </button>
+                        </form>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @* ---- Page icon (favicon) ---- *@
+    <div class="card mt-3">
+        <div class="card-header bg-primary text-white"><i class="bi bi-globe me-1"></i>Page icon (browser tab favicon)</div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">
+                Icon shown in the browser tab and bookmark bar. Real photo-style 3D fruit images
+                from Microsoft's Fluent UI Emoji set — identical on every browser. Apple and
+                banana are first because they're Sharbatly's majors.
+            </p>
+            <style>
+                .fav-tile {
+                    border: 2px solid var(--bs-border-color);
+                    border-radius: .4rem;
+                    padding: .35rem .25rem;
+                    text-align: center;
+                    cursor: pointer;
+                    transition: all .15s;
+                    background: var(--bs-body-bg);
+                }
+                .fav-tile:hover { border-color: var(--bs-primary); }
+                .fav-tile.selected {
+                    border-color: var(--bs-primary);
+                    box-shadow: 0 0 0 .12rem rgba(13,110,253,.25);
+                    background: var(--bs-primary-bg-subtle, #cfe2ff);
+                }
+                .fav-tile .fav-img { width: 32px; height: 32px; object-fit: contain; display: block; margin: 0 auto; }
+                .fav-tile .fav-default-icon { font-size: 1.5rem; line-height: 1; color: var(--bs-primary); }
+                .fav-tile .fav-label { font-size: .7rem; margin-top: .2rem; color: var(--bs-body-color); }
+                .fav-tile button { all: unset; display: block; width: 100%; }
+            </style>
+            <form asp-action="SaveFaviconChoice" method="post" id="favChoiceForm">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="choice" id="favChoiceInput" value="@Model.Branding.FaviconChoice" />
+                <div class="row row-cols-3 row-cols-md-6 row-cols-lg-8 g-2">
+                    @* Default (current bundled favicon.ico) *@
+                    @{
+                        var isDefault = string.IsNullOrEmpty(Model.Branding.FaviconChoice);
+                    }
+                    <div class="col">
+                        <div class="fav-tile @(isDefault ? "selected" : "")" data-fav="">
+                            <button type="button" title="Default QMS icon">
+                                <div class="fav-default-icon"><i class="bi bi-clipboard2-check"></i></div>
+                                <div class="fav-label">Default</div>
+                            </button>
+                        </div>
+                    </div>
+
+                    @* Built-in fruit choices (real 3D images, singles only) *@
+                    @foreach (var (key, label) in FaviconChoices.BuiltIn)
+                    {
+                        var isSel = Model.Branding.FaviconChoice == key;
+                        <div class="col">
+                            <div class="fav-tile @(isSel ? "selected" : "")" data-fav="@key">
+                                <button type="button" title="@label">
+                                    <img class="fav-img" src="@FaviconChoices.WebPath(key)" alt="@label" />
+                                    <div class="fav-label">@label</div>
+                                </button>
+                            </div>
+                        </div>
+                    }
+
+                    @* Custom uploaded image tile.
+                       Two states:
+                         - HasCustomFavicon=false: tile is a <label> wrapping the
+                           hidden file input below. Clicking it opens the OS file
+                           picker; selecting a file auto-submits the upload form.
+                         - HasCustomFavicon=true: tile picks the "custom" choice
+                           (same as a fruit tile) and an extra "Replace" link
+                           (also a <label> for the same hidden input) lets the
+                           user swap the file. *@
+                    @{
+                        var isCustom = Model.Branding.FaviconChoice == FaviconChoices.Custom
+                                       && Model.Branding.HasCustomFavicon;
+                    }
+                    @if (Model.Branding.HasCustomFavicon)
+                    {
+                        <div class="col">
+                            <div class="fav-tile @(isCustom ? "selected" : "")" data-fav="@FaviconChoices.Custom">
+                                <button type="button" title="Use my uploaded image">
+                                    @* Cache-bust the preview with a timestamp so a freshly-replaced
+                                       file shows up immediately. *@
+                                    <img class="fav-img"
+                                         src="/branding/@Model.Branding.FaviconCustomFilename?v=@DateTime.UtcNow.Ticks"
+                                         alt="My uploaded image" />
+                                    <div class="fav-label">My image</div>
+                                </button>
+                            </div>
+                            <div class="text-center mt-1">
+                                <label for="custom-favicon-file"
+                                       class="text-primary small"
+                                       style="cursor:pointer; font-size:.7rem;">
+                                    <i class="bi bi-arrow-repeat"></i> Replace
+                                </label>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="col">
+                            @* The whole tile is a <label> that triggers the hidden
+                               file input. No JS needed -- native HTML behavior. *@
+                            <label for="custom-favicon-file" class="fav-tile m-0" style="cursor:pointer;">
+                                <div class="fav-default-icon"><i class="bi bi-cloud-arrow-up text-success"></i></div>
+                                <div class="fav-label">Upload yours</div>
+                            </label>
+                        </div>
+                    }
+                </div>
+            </form>
+
+            @* The single hidden upload form. Both the "Upload yours" tile (when
+               no custom file exists) and the "Replace" link (when one does)
+               point at this same file input. Auto-submits when a file is
+               picked, so the user never sees a separate "save" step. *@
+            <form asp-action="UploadCustomFavicon" method="post"
+                  enctype="multipart/form-data" id="customUploadForm" class="d-none">
+                @Html.AntiForgeryToken()
+                <input type="file"
+                       id="custom-favicon-file"
+                       name="favicon"
+                       accept=".png,.jpg,.jpeg,.gif,.webp,.svg,.ico" />
+            </form>
+
+            @if (Model.Branding.HasCustomFavicon)
+            {
+                <div class="mt-3 d-flex align-items-center gap-2">
+                    <small class="text-muted">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Current upload: <code>@Model.Branding.FaviconCustomFilename</code>
+                    </small>
+                    <form asp-action="RemoveCustomFavicon" method="post" class="ms-auto"
+                          onsubmit="return confirm('Remove your uploaded image? If it is currently active, the default icon will be restored.');">
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="btn btn-outline-danger btn-sm">
+                            <i class="bi bi-trash me-1"></i>Remove uploaded image
+                        </button>
+                    </form>
+                </div>
+            }
+            <div class="mt-2 small text-muted">
+                Accepts PNG / JPG / SVG / ICO up to 2 MB. Square images (32x32 px or larger) work best.
+                After uploading, your image becomes the page icon — press <kbd>Ctrl</kbd>+<kbd>F5</kbd> to refresh the tab.
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        // Auto-submit the picker form when a tile with data-fav is clicked.
+        // Tiles without data-fav (the upload-trigger tile when no custom
+        // file exists yet) fall through to native <label for=...> behavior,
+        // which opens the OS file dialog for the hidden file input.
+        var form  = document.getElementById('favChoiceForm');
+        var input = document.getElementById('favChoiceInput');
+        if (form && input) {
+            document.querySelectorAll('.fav-tile[data-fav]').forEach(function (tile) {
+                tile.addEventListener('click', function () {
+                    input.value = tile.getAttribute('data-fav') || '';
+                    form.submit();
+                });
+            });
+        }
+
+        // Auto-submit the upload form the moment the user picks a file --
+        // no separate "Upload" button. One click on the tile -> file picker
+        // -> select -> form submits -> page reloads with the new favicon.
+        var fileInput = document.getElementById('custom-favicon-file');
+        var uploadForm = document.getElementById('customUploadForm');
+        if (fileInput && uploadForm) {
+            fileInput.addEventListener('change', function () {
+                if (fileInput.files && fileInput.files.length > 0) {
+                    uploadForm.submit();
+                }
+            });
+        }
+    })();
+</script>
+
+@* ===================== SMTP ===================== *@
+<div class="@TabPaneClass("smtp")" id="tab-smtp">
+    <div class="card">
+        <div class="card-header bg-primary text-white"><i class="bi bi-envelope-at me-1"></i>Email / SMTP</div>
+        <div class="card-body">
+            <form asp-action="SaveSmtpSettings" method="post">
+                @Html.AntiForgeryToken()
+                <div class="row g-3">
+                    <div class="col-md-8">
+                        <label class="form-label">SMTP host</label>
+                        <input asp-for="Smtp.Host" class="form-control" placeholder="smtp.sendgrid.net" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label">Port</label>
+                        <input asp-for="Smtp.Port" type="number" class="form-control" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">SMTP username</label>
+                        <input asp-for="Smtp.User" class="form-control" autocomplete="off" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">SMTP password</label>
+                        <input asp-for="Smtp.Password" type="password" class="form-control" autocomplete="new-password" />
+                        <small class="text-muted">Leave blank to keep existing password.</small>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">From email</label>
+                        <input asp-for="Smtp.FromEmail" type="email" class="form-control" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">From name</label>
+                        <input asp-for="Smtp.FromName" class="form-control" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Site name</label>
+                        <input asp-for="Smtp.SiteName" class="form-control" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Site URL (used in email links)</label>
+                        <input asp-for="Smtp.SiteUrl" class="form-control" placeholder="http://localhost:5300" />
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check form-switch">
+                            <input asp-for="Smtp.EnableSsl" class="form-check-input" type="checkbox" role="switch" />
+                            <label asp-for="Smtp.EnableSsl" class="form-check-label">Use TLS / SSL</label>
+                        </div>
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary mt-3">
+                    <i class="bi bi-save me-1"></i>Save SMTP settings
+                </button>
+            </form>
+        </div>
+        <div class="card-footer">
+            <form asp-action="SendTestEmail" method="post" class="row g-2 align-items-end">
+                @Html.AntiForgeryToken()
+                <div class="col-md-6">
+                    <label class="form-label">Send test email to</label>
+                    <input name="toEmail" type="email" class="form-control" placeholder="you@sharbatlyfruit.com" />
+                </div>
+                <div class="col-md-3">
+                    <button type="submit" class="btn btn-info w-100">
+                        <i class="bi bi-send me-1"></i>Send test
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@* ===================== Thumbnails ===================== *@
+<div class="@TabPaneClass("thumbnails")" id="tab-thumbnails">
+    <div class="card">
+        <div class="card-header bg-primary text-white"><i class="bi bi-image me-1"></i>Image / Thumbnail sizes</div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                Controls thumbnail dimensions on screen and inside the PDF report.
+                Cover crops to fill, Contain shows the full image with letterboxing.
+            </p>
+            <form asp-action="SaveThumbnailSettings" method="post" class="row g-3">
+                @Html.AntiForgeryToken()
+                <div class="col-md-6">
+                    <label class="form-label">Screen thumbnail width (px)</label>
+                    <input asp-for="Thumbnails.ScreenWidth" type="number" class="form-control" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Screen thumbnail height (px)</label>
+                    <input asp-for="Thumbnails.ScreenHeight" type="number" class="form-control" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">PDF thumbnail width (px)</label>
+                    <input asp-for="Thumbnails.PdfWidth" type="number" class="form-control" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">PDF thumbnail height (px)</label>
+                    <input asp-for="Thumbnails.PdfHeight" type="number" class="form-control" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Fit mode</label>
+                    <select asp-for="Thumbnails.FitMode" class="form-select">
+                        <option value="Cover">Cover (crop to fill)</option>
+                        <option value="Contain">Contain (whole image visible)</option>
+                    </select>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save me-1"></i>Save thumbnail settings
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@* ===================== Alerts ===================== *@
+<div class="@TabPaneClass("alerts")" id="tab-alerts">
+    <div class="card">
+        <div class="card-header bg-primary text-white"><i class="bi bi-bell me-1"></i>Alert thresholds</div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                Used by the alert engine to classify QMS records as Yellow (warning) or Red (critical)
+                and fan out emails to the configured email groups.
+            </p>
+            <form asp-action="SaveAlertSettings" method="post" class="row g-3">
+                @Html.AntiForgeryToken()
+                <div class="col-md-6">
+                    <label class="form-label">Stale arrival (Draft) days</label>
+                    <input asp-for="Alerts.StaleArrivalDays" type="number" class="form-control" />
+                    <small class="text-muted">Arrival in Draft for more than N days triggers a warning.</small>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Open Quality Order days</label>
+                    <input asp-for="Alerts.OpenQoDays" type="number" class="form-control" />
+                    <small class="text-muted">Open QO not closed within N days triggers a warning.</small>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Defect % red threshold</label>
+                    <input asp-for="Alerts.DefectPctRed" type="number" class="form-control" />
+                    <small class="text-muted">Sample defect % above this is critical.</small>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Defect % yellow threshold</label>
+                    <input asp-for="Alerts.DefectPctYellow" type="number" class="form-control" />
+                    <small class="text-muted">Sample defect % above this is a warning.</small>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save me-1"></i>Save alert thresholds
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@* ===================== Sync Status / Auto Sync ===================== *@
+<div class="@TabPaneClass("syncstatus")" id="tab-syncstatus">
+    <div class="card mb-3">
+        <div class="card-header bg-primary text-white"><i class="bi bi-bar-chart me-1"></i>Per-endpoint sync status</div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Endpoint</th>
+                        <th>Last sync</th>
+                        <th class="text-end">Rows</th>
+                        <th>Result</th>
+                        <th>Auto-sync</th>
+                        <th>Hours</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in new[] { Model.MaterialSync, Model.VendorSync })
+                    {
+                        var label = s.EndpointKey == SyncableEndpoints.MaterialMaster ? "Material Master" : "Vendor Master";
+                        var ok = !string.IsNullOrWhiteSpace(s.LastResult) && s.LastResult!.StartsWith("OK", StringComparison.OrdinalIgnoreCase);
+                        <tr>
+                            <td><strong>@label</strong></td>
+                            <td>@(s.LastRunUtc.HasValue ? s.LastRunUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "—")</td>
+                            <td class="text-end">@(s.LastRowCount?.ToString("N0") ?? "—")</td>
+                            <td>
+                                @if (string.IsNullOrWhiteSpace(s.LastResult))
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                                else
+                                {
+                                    <span class="@(ok ? "text-success" : "text-danger") small">@s.LastResult</span>
+                                }
+                            </td>
+                            <td>
+                                @if (s.Enabled)
+                                {
+                                    <span class="badge bg-success">Enabled</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Disabled</span>
+                                }
+                            </td>
+                            <td>
+                                @(s.Hours.Count > 0
+                                  ? string.Join(", ", s.Hours.OrderBy(h => h).Select(h => h.ToString("D2") + ":00"))
+                                  : "—")
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    @* ---- Per-endpoint schedule editor ---- *@
+    @foreach (var s in new[] { Model.MaterialSync, Model.VendorSync })
+    {
+        var label = s.EndpointKey == SyncableEndpoints.MaterialMaster ? "Material Master" : "Vendor Master";
+        var hoursCsv = string.Join(", ", s.Hours.OrderBy(h => h));
+        <div class="card mb-3">
+            <div class="card-header bg-primary text-white">
+                <i class="bi bi-clock-history me-1"></i>@label &mdash; auto-sync schedule
+            </div>
+            <div class="card-body">
+                <form asp-action="SaveEndpointSync" method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="endpointKey" value="@s.EndpointKey" />
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" role="switch"
+                               id="enabled-@s.EndpointKey" name="enabled" value="true"
+                               @(s.Enabled ? "checked" : "") />
+                        <label class="form-check-label fw-bold" for="enabled-@s.EndpointKey">
+                            Enable scheduled auto-sync
+                        </label>
+                        <div class="text-muted small">
+                            Background scheduler polls every minute; same hour will not trigger twice.
+                        </div>
+                    </div>
+                    <label class="form-label small fw-bold mb-1">Scheduled hours (24-hour clock, comma-separated)</label>
+                    <input type="text" name="hoursCsv" value="@hoursCsv"
+                           class="form-control font-monospace mb-2" placeholder="e.g. 2, 14" />
+                    <small class="text-muted d-block mb-3">
+                        Example: <code>2, 14</code> runs at 02:00 and 14:00 server local time.
+                        Leave blank to disable scheduled runs.
+                    </small>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save me-1"></i>Save @label schedule
+                    </button>
+                </form>
+            </div>
+        </div>
+    }
+</div>
+
+@* ===================== Active Directory ===================== *@
+<div class="@TabPaneClass("ad")" id="tab-ad">
+    <div class="card">
+        <div class="card-header bg-primary text-white"><i class="bi bi-person-lines-fill me-1"></i>Active Directory (domain sign-in)</div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                When configured, users sign in with their <strong>domain credentials</strong>
+                (LDAP bind). The local seed admin still works as a recovery path.
+                Use the <strong>Test connection</strong> button to verify the values without saving.
+            </p>
+            <form asp-action="SaveAdSettings" method="post" id="ad-form">
+                @Html.AntiForgeryToken()
+                <div class="row g-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Domain *</label>
+                        <input name="Domain" id="ad-domain" value="@Model.Ad.Domain"
+                               class="form-control" placeholder="sharbatly.local" />
+                        <div class="form-text">e.g. <code>sharbatly.local</code> or <code>corp.example.com</code>.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">LDAP path</label>
+                        <input name="LdapPath" id="ad-ldap" value="@Model.Ad.LdapPath"
+                               class="form-control" placeholder="dc1.sharbatly.local/DC=sharbatly,DC=local" />
+                        <div class="form-text">Optional. Server + base DN. Leave blank to use the domain.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Service account user</label>
+                        <input name="ServiceUser" id="ad-user" value="@Model.Ad.ServiceUser"
+                               class="form-control" placeholder="svc-qms" />
+                        <div class="form-text">Read-only AD account used for browsing the user list and the Test button.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label">Service account password</label>
+                        <input name="ServicePassword" id="ad-pass" type="password"
+                               class="form-control" placeholder="Leave blank to keep the saved password"
+                               autocomplete="new-password" />
+                    </div>
+                    <div class="col-12">
+                        <div class="form-check form-switch">
+                            <input name="AutoCreateOnLogin" id="ad-autocreate" class="form-check-input"
+                                   type="checkbox" role="switch" value="true"
+                                   @(Model.Ad.AutoCreateOnLogin ? "checked" : "") />
+                            <label class="form-check-label" for="ad-autocreate">
+                                Auto-create local profile on first successful AD login
+                                <span class="text-muted small">— new users land with the <strong>Viewer</strong> role until an admin promotes them. Leave off to require admins to pick AD users explicitly.</span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-3 d-flex gap-2 flex-wrap align-items-center">
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>Save AD settings</button>
+                    <button type="button" id="testAdBtn" class="btn btn-outline-secondary">
+                        <i class="bi bi-plug me-1"></i>Test connection
+                    </button>
+                    <span id="testAdResult" class="ms-2 small"></span>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+@* ===================== Danger Zone ===================== *@
+<div class="@TabPaneClass("danger")" id="tab-danger">
+    <div class="card border-danger">
+        <div class="card-header bg-danger text-white d-flex align-items-center">
+            <i class="bi bi-exclamation-octagon-fill me-2"></i>
+            <strong>Danger Zone</strong>
+            <span class="badge bg-light text-danger ms-2">Destructive &mdash; irreversible</span>
+        </div>
+        <div class="card-body">
+            <h5 class="text-danger"><i class="bi bi-trash3-fill me-1"></i>Purge all operational data</h5>
+            <p class="mb-2">
+                Use this when moving from <strong>testing</strong> to <strong>production</strong> so the live system
+                starts with a clean slate. Everything users have created during testing is wiped; the system goes
+                back to a freshly-installed state.
+            </p>
+            <div class="alert alert-danger mb-3">
+                <strong><i class="bi bi-exclamation-triangle-fill me-1"></i>This action will permanently delete:</strong>
+                <ul class="mb-1 mt-2">
+                    <li><strong>All Arrival Overviews</strong> &mdash; including arrival items, checklists, and SAP/shipment snapshots</li>
+                    <li><strong>All Quality Orders</strong> &mdash; including materials, samples, readings, observations, and per-sample defects</li>
+                    <li><strong>All uploaded images and thumbnails</strong> &mdash; database records <em>and</em> the files under <code>wwwroot/uploads/</code></li>
+                    <li><strong>All status history, audit log entries, and generated PDF report records</strong></li>
+                </ul>
+                <strong>Sequence counters reset:</strong> the next Arrival, Internal Shipment, and Quality Order will start at <code>#1</code> again.
+                <hr class="my-2">
+                <strong>What is preserved:</strong>
+                <ul class="mb-0 mt-1">
+                    <li>Users, roles, AD configuration, email groups</li>
+                    <li>Defect catalog and reading-type definitions (per material group)</li>
+                    <li>Site Configuration (SMTP / SAP / branding / alert thresholds / mail templates)</li>
+                    <li>SAP material and vendor sync caches</li>
+                </ul>
+            </div>
+
+            <form asp-action="PurgeAll" method="post" id="purge-form" class="border border-danger rounded p-3 bg-light"
+                  onsubmit="return confirm('FINAL WARNING\n\nThis will delete EVERY Arrival, Quality Order, sample, defect, observation, reading, image, and audit log entry. Sequence numbers will reset to 1.\n\nThere is no undo. Continue?');">
+                @Html.AntiForgeryToken()
+                <label for="purgeConfirm" class="form-label">
+                    To enable the button, type <code>PURGE ALL</code> below (case-sensitive):
+                </label>
+                <input type="text" class="form-control mb-3" id="purgeConfirm" name="confirmation"
+                       autocomplete="off" placeholder="PURGE ALL" required />
+                <button type="submit" id="purgeBtn" class="btn btn-danger" disabled>
+                    <i class="bi bi-trash3-fill me-1"></i>Purge all operational data
+                </button>
+                <span class="text-muted small ms-2">This page will reload showing how many rows were deleted.</span>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+</div>

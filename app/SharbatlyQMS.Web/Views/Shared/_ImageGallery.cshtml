@@ -1,0 +1,86 @@
+@using SharbatlyQMS.Web.Services
+@using SharbatlyQMS.Web.ViewModels
+@model ImageGalleryVm
+@inject IImageService ImageSvc
+@inject ISettingsService SettingsSvc
+@{
+    var images = await ImageSvc.ListAsync(Model.OwnerType, Model.OwnerId);
+    var thumb  = await SettingsSvc.GetThumbnailConfigAsync();
+    var returnUrl = Context.Request.Path + Context.Request.QueryString;
+}
+
+@if (Model.Editable)
+{
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-cloud-upload me-1"></i>Upload images</div>
+        <div class="card-body">
+            <form asp-controller="Images" asp-action="Upload" method="post" enctype="multipart/form-data">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="ownerType" value="@Model.OwnerType" />
+                <input type="hidden" name="ownerId"   value="@Model.OwnerId" />
+                <input type="hidden" name="returnUrl" value="@returnUrl" />
+                <div class="row g-2 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label mb-1">Category</label>
+                        <select name="category" class="form-select" required>
+                            @foreach (var cat in Model.Categories)
+                            {
+                                <option value="@cat">@cat</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label mb-1">Files</label>
+                        <input type="file" name="files" class="form-control" multiple accept="image/*" required />
+                    </div>
+                    <div class="col-md-2">
+                        <button type="submit" class="btn btn-primary w-100">
+                            <i class="bi bi-cloud-upload me-1"></i>Upload
+                        </button>
+                    </div>
+                </div>
+                <small class="text-muted d-block mt-1">JPG / PNG / GIF / WEBP. Max 10 MB each.</small>
+            </form>
+        </div>
+    </div>
+}
+
+@if (images.Count == 0)
+{
+    <div class="alert alert-light text-center text-muted">
+        <i class="bi bi-images me-1"></i>No images uploaded yet.
+    </div>
+}
+else
+{
+    <div class="d-flex flex-wrap gap-3">
+        @foreach (var img in images)
+        {
+            <div class="card" style="width:@(thumb.ScreenWidth + 16)px">
+                <a href="@img.StorageUrl" target="_blank" class="text-decoration-none">
+                    <img src="@(img.ThumbnailUrl ?? img.StorageUrl)"
+                         class="card-img-top" loading="lazy"
+                         style="width:@(thumb.ScreenWidth)px;height:@(thumb.ScreenHeight)px;object-fit:@(thumb.FitMode.Equals("Cover", StringComparison.OrdinalIgnoreCase) ? "cover" : "contain")"
+                         alt="@img.OriginalName" />
+                </a>
+                <div class="card-body p-2">
+                    <div class="small fw-bold text-truncate" title="@img.OriginalName">@img.OriginalName</div>
+                    <div class="small text-muted">@img.Category</div>
+                    <div class="small text-muted">@img.UploadedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</div>
+                    @if (Model.Editable)
+                    {
+                        <form asp-controller="Images" asp-action="Delete" method="post"
+                              onsubmit="return confirm('Remove this image?');" class="mt-1">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="imageLinkId" value="@img.ImageLinkId" />
+                            <input type="hidden" name="returnUrl" value="@returnUrl" />
+                            <button type="submit" class="btn btn-sm btn-outline-danger w-100">
+                                <i class="bi bi-trash"></i>
+                            </button>
+                        </form>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+}

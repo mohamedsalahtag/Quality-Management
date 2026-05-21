@@ -1,0 +1,73 @@
+// Program.cs - DI + cookie auth + role policies + antiforgery for LAN access.
+// Add to your existing Program.cs (or Startup.cs).
+
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using HelpDesk.Services;
+
+// -- DI --
+builder.Services.AddScoped<IDbService, DbService>();
+builder.Services.AddScoped<IAdService, AdService>();
+builder.Services.AddMemoryCache();   // for AD browse cache
+
+// Role-impersonation ("View as: {role}") was here; it moved to
+// ../../view-as-pack/. Install that pack's Program.cs.snippet alongside
+// this one if you want SiteAdmins to test the site as lower roles.
+
+// -- Cookie authentication (30-day sliding) --
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(opt =>
+    {
+        opt.LoginPath           = "/Account/Login";
+        opt.LogoutPath          = "/Account/Logout";
+        opt.AccessDeniedPath    = "/Account/AccessDenied";
+        opt.ExpireTimeSpan      = TimeSpan.FromDays(30);
+        opt.SlidingExpiration   = true;
+        opt.Cookie.Name         = "HelpDesk.Auth";
+        opt.Cookie.SameSite     = SameSiteMode.Lax;
+        opt.Cookie.SecurePolicy = CookieSecurePolicy.None;   // HTTP intranet
+        opt.Cookie.MaxAge       = TimeSpan.FromDays(30);
+        opt.Cookie.HttpOnly     = true;
+    });
+
+// -- Role policies --
+builder.Services.AddAuthorization(opt =>
+{
+    opt.AddPolicy("TechOrAdmin",
+        p => p.RequireRole("Technician", "FirstLevelSupport", "SiteAdmin"));
+    opt.AddPolicy("AdminOnly",
+        p => p.RequireRole("SiteAdmin"));
+});
+
+// -- Session (30-day idle) --
+builder.Services.AddSession(opt =>
+{
+    opt.IdleTimeout         = TimeSpan.FromDays(30);
+    opt.Cookie.HttpOnly     = true;
+    opt.Cookie.IsEssential  = true;
+    opt.Cookie.SameSite     = SameSiteMode.Lax;
+    opt.Cookie.MaxAge       = TimeSpan.FromDays(30);
+});
+
+// -- Antiforgery for cross-host network access (HTTP intranet) --
+builder.Services.AddAntiforgery(opt =>
+{
+    opt.Cookie.SameSite     = SameSiteMode.Lax;
+    opt.Cookie.SecurePolicy = CookieSecurePolicy.None;
+    opt.HeaderName          = "X-CSRF-TOKEN";
+});
+
+// -- NuGet packages --
+//   <PackageReference Include="BCrypt.Net-Next"            Version="4.0.3" />
+//   <PackageReference Include="Dapper"                     Version="2.1.35" />
+//   <PackageReference Include="Microsoft.Data.SqlClient"   Version="5.2.2" />
+//   <PackageReference Include="System.DirectoryServices"   Version="9.0.0" />
+//   <PackageReference Include="System.DirectoryServices.AccountManagement" Version="9.0.0" />
+//   <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="9.0.0" />
+
+// -- After app.Build(): --
+// app.UseStaticFiles();
+// app.UseRouting();
+// app.UseSession();
+// app.UseAuthentication();
+// app.UseAuthorization();

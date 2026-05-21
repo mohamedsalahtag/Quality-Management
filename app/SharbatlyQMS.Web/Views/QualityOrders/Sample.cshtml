@@ -1,0 +1,94 @@
+@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.ViewModels
+@model Sample
+@{
+    var qo            = ViewBag.QualityOrder    as QualityOrder ?? new QualityOrder();
+    var qoMat         = ViewBag.QoMaterial      as QualityOrderMaterial;
+    var readingTypes  = ViewBag.ReadingTypes    as IReadOnlyList<ReadingTypeEntry>   ?? new List<ReadingTypeEntry>();
+    var defects       = ViewBag.Defects         as IReadOnlyList<DefectCatalogEntry> ?? new List<DefectCatalogEntry>();
+    var sectionMap    = ViewBag.SectionMap      as IReadOnlyDictionary<string,string> ?? new Dictionary<string,string>();
+    var existingReads = ViewBag.ExistingReadings as IReadOnlyList<SampleReading> ?? new List<SampleReading>();
+    var existingDefs  = ViewBag.ExistingDefects  as IReadOnlyList<SampleDefect>  ?? new List<SampleDefect>();
+    ViewData["Title"] = $"Sample #{Model.SampleNo}";
+    var editable = qo.StatusCode == "Open";
+
+    var vm = new SampleFormVm
+    {
+        Qo = qo,
+        Sample = Model,
+        QoMaterial = qoMat,
+        ReadingTypes = readingTypes,
+        Defects = defects,
+        SectionMap = sectionMap,
+        ExistingReadings = existingReads,
+        ExistingDefects = existingDefs,
+        Editable = editable
+    };
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h1 class="h3 mb-1"><i class="bi bi-clipboard me-1"></i>Sample #@Model.SampleNo</h1>
+        <div class="small text-muted">
+            QO <a asp-action="Details" asp-route-id="@Model.QualityOrderId">@qo.QualityOrderNo</a>
+            &mdash; Material <code>@qoMat?.MaterialNo</code> @qoMat?.MaterialDesc
+        </div>
+    </div>
+    <div class="d-flex gap-2">
+        <a asp-action="Details" asp-route-id="@Model.QualityOrderId" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Back to QO
+        </a>
+        @if (editable)
+        {
+            <form asp-action="DeleteSample" method="post" onsubmit="return confirm('Delete this sample?');">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="sampleId" value="@Model.SampleId" />
+                <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash me-1"></i>Delete sample</button>
+            </form>
+        }
+    </div>
+</div>
+
+<partial name="_SampleForm" model="vm" />
+
+@section Scripts {
+<script>
+    // Standalone page: deep-link / no-JS-Details access. Wire the same
+    // touch-friendly defect stepper used inside the QO Details drawer so
+    // the experience is consistent for direct visitors.
+    (function wireDefectSteppers(scope) {
+        scope.querySelectorAll('.defect-stepper').forEach(row => {
+            const input = row.querySelector('.defect-value');
+            const minus = row.querySelector('.defect-minus');
+            const plus  = row.querySelector('.defect-plus');
+            const updatePct = () => {
+                const form = row.closest('form');
+                const size = parseFloat(form?.querySelector('input[name="SampleSize"]')?.value);
+                const v = parseFloat(input.value);
+                const pctInput = form.querySelector('input[name="defect_' + input.dataset.id + '_pct"]');
+                const badge = row.querySelector('.defect-pct-badge');
+                if (!isNaN(v) && size > 0) {
+                    const pct = (v / size * 100);
+                    if (pctInput) pctInput.value = pct.toFixed(2);
+                    if (badge) {
+                        badge.textContent = pct.toFixed(1) + '%';
+                        badge.className = 'badge defect-pct-badge ' + (pct < 2 ? 'bg-success' : pct < 5 ? 'bg-warning text-dark' : 'bg-danger');
+                    }
+                } else if (badge) {
+                    badge.textContent = '';
+                    badge.className = 'badge defect-pct-badge bg-light text-muted';
+                }
+            };
+            const bump = delta => {
+                const cur = parseInt(input.value, 10);
+                input.value = Math.max(0, (isNaN(cur) ? 0 : cur) + delta);
+                updatePct();
+            };
+            minus?.addEventListener('click', () => bump(-1));
+            plus?.addEventListener('click',  () => bump(+1));
+            input?.addEventListener('input', updatePct);
+            updatePct();
+        });
+    })(document);
+</script>
+}

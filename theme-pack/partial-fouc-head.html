@@ -1,0 +1,12 @@
+<!-- ============================================================
+     theme-pack — FOUC-prevention. Paste this snippet inline in <head>
+     BEFORE any CSS so the saved theme is applied synchronously before
+     the first paint (no flash of light theme on page load).
+     ============================================================ -->
+<script>
+    (function () {
+        var t = localStorage.getItem("app-theme") || "light";
+        document.documentElement.setAttribute("data-theme", t);
+        document.documentElement.setAttribute("data-bs-theme", t === "dark" ? "dark" : "light");
+    })();
+</script>

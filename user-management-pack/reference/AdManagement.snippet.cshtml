@@ -1,0 +1,104 @@
+@*
+  /Admin/AdManagement - AD configuration form + Test Connection button.
+  Domain, LDAP path, service account, service password (write-only field).
+*@
+@{ ViewData["Title"] = "Active Directory Configuration"; }
+
+<div class="d-flex align-items-center mb-4 gap-3">
+    <a href="/Admin" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+    <h4 class="mb-0 fw-bold"><i class="bi bi-diagram-3 me-2 text-primary"></i>Active Directory</h4>
+</div>
+
+<div class="row g-4">
+    <div class="col-lg-7">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-transparent fw-semibold pt-3 border-0">
+                <i class="bi bi-gear me-2 text-primary"></i>Connection Settings
+            </div>
+            <div class="card-body">
+                <form method="post" asp-action="SaveAdConfig">
+                    @Html.AntiForgeryToken()
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Domain</label>
+                        <input name="adDomain" value="@ViewBag.AdDomain"
+                               class="form-control" placeholder="company.com" required />
+                        <div class="form-text">Used to build UPN bind format
+                            <code>user@@company.com</code>.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">LDAP Path</label>
+                        <input name="adLdapPath" value="@ViewBag.AdLdapPath"
+                               class="form-control"
+                               placeholder="LDAP://192.168.1.10/OU=Users,DC=company,DC=com" />
+                        <div class="form-text">
+                            Accepts: <code>LDAP://server/OU=...,DC=...</code> or
+                            just <code>LDAP://DC=...</code> (server derived from
+                            domain).
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Service Account Username</label>
+                        <input name="adServiceUser" value="@ViewBag.AdSvcUser"
+                               class="form-control" placeholder="svc-helpdesk" />
+                        <div class="form-text">Used for AD Browse + Mass Create
+                            (NOT for login auth).</div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold d-flex justify-content-between">
+                            <span>Service Account Password</span>
+                            @if (ViewBag.AdSvcPassSet == true)
+                            {
+                                <span class="text-success fw-normal small">
+                                    <i class="bi bi-check-circle-fill me-1"></i>Saved
+                                    -- leave blank to keep
+                                </span>
+                            }
+                        </label>
+                        <input name="adServicePassword" type="password"
+                               autocomplete="new-password"
+                               class="form-control"
+                               placeholder="@(ViewBag.AdSvcPassSet == true
+                                   ? "(saved -- leave blank to keep)" : "")" />
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save me-1"></i>Save AD Configuration
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-5">
+        <div class="card border-0 shadow-sm">
+            <div class="card-header bg-transparent fw-semibold pt-3 border-0">
+                <i class="bi bi-broadcast me-2 text-success"></i>Test Connection
+            </div>
+            <div class="card-body">
+                <p class="small text-muted mb-3">
+                    Verify your AD configuration before relying on it.
+                </p>
+                <form method="post" asp-action="TestAdConnection">
+                    @Html.AntiForgeryToken()
+                    <button type="submit" class="btn btn-outline-success w-100">
+                        <i class="bi bi-broadcast me-1"></i>Test Connection
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <div class="card border-0 shadow-sm mt-3">
+            <div class="card-header bg-transparent fw-semibold pt-3 border-0">
+                <i class="bi bi-search me-2 text-primary"></i>Browse AD Users
+            </div>
+            <div class="card-body">
+                <p class="small text-muted mb-3">
+                    See every enabled AD user and create system accounts in bulk
+                    or one at a time.
+                </p>
+                <a href="/Admin/AdUsers" class="btn btn-outline-primary w-100">
+                    <i class="bi bi-people me-1"></i>Open AD User Browser
+                </a>
+            </div>
+        </div>
+    </div>
+</div>

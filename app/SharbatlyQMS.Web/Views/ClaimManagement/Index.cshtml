@@ -1,0 +1,130 @@
+@using SharbatlyQMS.Web.Models
+@model IReadOnlyList<ClaimListRow>
+@{
+    ViewData["Title"] = "Claim Management";
+    var status = ViewBag.Status as string;
+    var search = ViewBag.Search as string;
+
+    // Fast filter chips: All + Pending + the four real claim statuses.
+    // Each button is its own submit so picking a chip posts the form
+    // (preserving the search text) without an extra click.
+    var chips = new (string Value, string Label, string OutlineCss)[]
+    {
+        ("",                                "All",                    "btn-outline-secondary"),
+        (ClaimStatus.Pending,               "Pending",                "btn-outline-secondary"),
+        (ClaimStatus.ClaimRequest,          "Claim Request",          "btn-outline-danger"),
+        (ClaimStatus.ClaimRequestApproved,  "Claim Request Approved", "btn-outline-dark"),
+        (ClaimStatus.HoldClaim,             "Hold Claim",             "btn-outline-warning"),
+        (ClaimStatus.PassedQC,              "Passed QC",              "btn-outline-success"),
+    };
+    string ActiveClass(string v, string baseCss) =>
+        (status ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
+}
+
+<style>
+    /* Unread row: subtle left border + slightly heavier font so a row with
+       new activity for THIS user pops out without screaming for attention. */
+    tr.has-unread td { font-weight: 600; }
+    tr.has-unread td:first-child { box-shadow: inset 3px 0 0 var(--bs-danger); }
+    .unread-pill {
+        background: var(--bs-danger); color: #fff;
+        border-radius: 1rem; padding: .05rem .45rem;
+        font-size: .72rem; font-weight: 700; margin-left: .25rem;
+    }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0"><i class="bi bi-shield-exclamation me-1 text-danger"></i>Claim Management</h1>
+</div>
+
+<form method="get" class="row g-2 mb-3 align-items-stretch">
+    <div class="col-md-4">
+        <input type="text" name="search" value="@search" class="form-control"
+               placeholder="Search by QO #, container, BOL, vendor, or closed by..." />
+    </div>
+    <div class="col-md-2">
+        <button type="submit" class="btn btn-outline-secondary w-100">
+            <i class="bi bi-funnel me-1"></i>Filter
+        </button>
+    </div>
+    <div class="col-md-6">
+        <div class="btn-group btn-group-sm w-100 flex-wrap" role="group" aria-label="Filter by claim status">
+            @foreach (var c in chips)
+            {
+                <button type="submit" name="status" value="@c.Value" class="btn @ActiveClass(c.Value, c.OutlineCss)">@c.Label</button>
+            }
+        </div>
+    </div>
+</form>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>QO Number</th>
+                    <th>Container</th>
+                    <th>BOL</th>
+                    <th>PO</th>
+                    <th>Supplier</th>
+                    <th>Closed</th>
+                    <th>Closed By</th>
+                    <th>Claim Status</th>
+                    <th>Notes</th>
+                    <th>Last activity</th>
+                    <th class="text-end">Open</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (!Model.Any())
+                {
+                    <tr><td colspan="11" class="text-center text-muted py-4">
+                        No closed Quality Orders match the current filter.
+                    </td></tr>
+                }
+                else
+                {
+                    foreach (var r in Model)
+                    {
+                        var badge = ClaimStatus.BadgeCss(r.ClaimStatus);
+                        var label = ClaimStatus.Label(r.ClaimStatus);
+                        var lastActivity = r.LastActivityAt ?? r.ClosedAt;
+                        var rowCss = r.UnreadCount > 0 ? "has-unread" : "";
+                        <tr class="@rowCss">
+                            <td><code>@r.QualityOrderNo</code></td>
+                            <td><code>@r.ContainerNo</code></td>
+                            <td>@r.BolNo</td>
+                            <td>@r.Ebeln</td>
+                            <td>@r.VendorName</td>
+                            <td>@(r.ClosedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                            <td>@r.ClosedBy</td>
+                            <td><span class="badge @badge">@label</span></td>
+                            <td>
+                                @if (r.NoteCount > 0)
+                                {
+                                    <span class="text-muted small"><i class="bi bi-chat-left-text me-1"></i>@r.NoteCount</span>
+                                    if (r.UnreadCount > 0)
+                                    {
+                                        <span class="unread-pill" title="@r.UnreadCount new note(s) you haven't seen yet">
+                                            @r.UnreadCount new
+                                        </span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="text-muted small">—</span>
+                                }
+                            </td>
+                            <td>@(lastActivity?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                            <td class="text-end">
+                                <a asp-action="Details" asp-route-id="@r.QualityOrderId" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

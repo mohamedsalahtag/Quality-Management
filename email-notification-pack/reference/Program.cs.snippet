@@ -1,0 +1,10 @@
+// DI registration. Add to Program.cs (or Startup.cs) of your ASP.NET Core app.
+// In other stacks (Node/Django/etc.) the equivalent is module-level export
+// or your IoC container registration.
+
+builder.Services.AddScoped<IDbService, DbService>();
+builder.Services.AddScoped<IEmailService, EmailService>();
+
+// MailKit/MimeKit are added via NuGet:
+//   <PackageReference Include="MailKit"  Version="4.12.0" />
+//   <PackageReference Include="MimeKit" Version="4.12.0" />

@@ -1,0 +1,10 @@
+// DI registration snippet — paste into Program.cs alongside your other
+// builder.Services.Add*** calls.
+
+builder.Services.AddScoped<IAlertService, AlertService>();
+builder.Services.AddScoped<IAlertDataSource, ProjectAlertDataSource>();   // <-- yours
+builder.Services.AddHostedService<AlertScheduler>();
+
+// AppSettings:AppDisplayName drives the eyebrow text in the email header.
+// Add to appsettings.json:
+//   "AppSettings": { "AppDisplayName": "Fleet Management" }

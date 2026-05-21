@@ -1,0 +1,731 @@
+@using SharbatlyQMS.Web.Models
+@model Arrival
+@{
+    ViewData["Title"] = "Arrival " + Model.ArrivalNo;
+    var items     = ViewBag.Items     as IReadOnlyList<ArrivalItem> ?? new List<ArrivalItem>();
+    var checklist = ViewBag.Checklist as ArrivalChecklist           ?? new ArrivalChecklist { ArrivalId = Model.ArrivalId };
+    var shipment  = ViewBag.Shipment  as ShipmentSnapshot;
+    var draft     = Model.StatusCode == ArrivalStatus.Draft;
+    var role      = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    var canEdit   = role == UserRoles.Operator || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
+    var canManage = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;
+    var isAdmin   = canManage;   // backward-compat alias for blocks that already use isAdmin
+    var hasQo     = Model.QualityOrderId.HasValue;
+    var (cls, label) = Model.StatusCode switch
+    {
+        "Draft"     => ("warning", "Draft"),
+        "Completed" => ("success", "Completed"),
+        "Cancelled" => ("secondary", "Cancelled"),
+        _           => ("secondary", Model.StatusCode)
+    };
+    string YN(bool? b) => b switch { true => "Yes", false => "No", _ => "—" };
+
+    // Tablet-friendly Yes/No toggle. The CSS in this view gives the SELECTED
+    // half a solid colored fill + bold weight + drop shadow, and renders the
+    // UNSELECTED half faded gray. The visual gap between the two states is
+    // intentionally large so an inspector glancing at the form can tell at
+    // 2 metres which answer is captured.
+    string YesNo(string name, bool? value)
+    {
+        var y = value == true  ? "checked" : "";
+        var n = value == false ? "checked" : "";
+        var unanswered = value == null ? "yn-unanswered" : "";
+        return $@"<div class='yn-toggle {unanswered}' role='group'>
+          <input type='radio' class='btn-check' name='{name}' id='{name}-y' value='true'  {y}>
+          <label class='yn-half yn-yes' for='{name}-y'><i class='bi bi-check-circle-fill'></i><span>YES</span></label>
+          <input type='radio' class='btn-check' name='{name}' id='{name}-n' value='false' {n}>
+          <label class='yn-half yn-no' for='{name}-n'><i class='bi bi-x-circle-fill'></i><span>NO</span></label>
+        </div>";
+    }
+
+    // Photo-flag: card-style tile with camera icon + label + toggle, always
+    // self-contained inside its column (no overflow).
+    string PhotoFlag(string name, bool? value, string label)
+    {
+        var checkedAttr = value == true ? "checked" : "";
+        var tileClass   = value == true ? "photo-tile photo-tile-on" : "photo-tile";
+        return $@"<label class='{tileClass}' for='{name}'>
+          <input type='checkbox' class='form-check-input' role='switch' name='{name}' value='true' id='{name}' {checkedAttr}>
+          <i class='bi bi-camera-fill photo-tile-icon'></i>
+          <span class='photo-tile-label'>{label}</span>
+        </label>";
+    }
+
+    // Legacy alias so existing call sites keep compiling.
+    string TriRadio(string name, bool? value) => YesNo(name, value);
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h1 class="h3 mb-1"><i class="bi bi-box-arrow-in-down me-1"></i>@Model.ArrivalNo</h1>
+        <span class="badge bg-@cls fs-6">@label</span>
+        <span class="text-muted small ms-2">created @Model.CreatedAt.ToLocalTime():g by @Model.CreatedBy</span>
+    </div>
+    <div class="d-flex gap-2">
+        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back</a>
+        <a asp-controller="Reports" asp-action="ArrivalChecklistPdf" asp-route-id="@Model.ArrivalId"
+           class="btn btn-outline-danger" target="_blank" title="Download Arrival Checklist PDF">
+            <i class="bi bi-file-earmark-pdf me-1"></i>Download checklist PDF
+        </a>
+        @if (draft && canEdit)
+        {
+            <form asp-action="Complete" asp-route-id="@Model.ArrivalId" method="post"
+                  onsubmit="return confirm('Complete this arrival? After completion the checklist becomes read-only and a Quality Order can be opened.');">
+                @Html.AntiForgeryToken()
+                <button type="submit" class="btn btn-success">
+                    <i class="bi bi-check-circle me-1"></i>Complete arrival
+                </button>
+            </form>
+        }
+        @if (Model.StatusCode == ArrivalStatus.Completed && !hasQo && canEdit)
+        {
+            <form asp-controller="QualityOrders" asp-action="CreateForArrival" method="post" class="d-inline">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="arrivalId" value="@Model.ArrivalId" />
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-clipboard-data me-1"></i>Create Quality Order
+                </button>
+            </form>
+        }
+        @if (hasQo)
+        {
+            <a asp-controller="QualityOrders" asp-action="Details" asp-route-id="@Model.QualityOrderId"
+               class="btn btn-primary">
+                <i class="bi bi-clipboard-data me-1"></i>View QO @Model.QualityOrderNo
+            </a>
+        }
+        @* ---- Admin-only: edit completed / delete arrival ---- *@
+        @if (isAdmin && Model.StatusCode == ArrivalStatus.Completed && !hasQo)
+        {
+            <button type="button" class="btn btn-outline-warning"
+                    data-bs-toggle="modal" data-bs-target="#reopenEditModal">
+                <i class="bi bi-pencil-square me-1"></i>Edit
+            </button>
+        }
+        @if (isAdmin && !hasQo)
+        {
+            <button type="button" class="btn btn-outline-danger"
+                    data-bs-toggle="modal" data-bs-target="#deleteArrivalModal">
+                <i class="bi bi-trash me-1"></i>Delete
+            </button>
+        }
+    </div>
+</div>
+
+@* ---- Admin modal: re-open completed arrival for edit ---- *@
+@if (isAdmin)
+{
+    <div class="modal fade" id="reopenEditModal" tabindex="-1">
+        <div class="modal-dialog">
+            <form asp-action="ReopenForEdit" asp-route-id="@Model.ArrivalId" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <div class="modal-header"><h5 class="modal-title">Re-open arrival for edit</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+                <div class="modal-body">
+                    <p class="small text-muted mb-2">
+                        The arrival will return to <strong>Draft</strong> so checklist and shipment
+                        details become editable. The action is logged in the status history. Complete
+                        the arrival again when you finish editing.
+                    </p>
+                    <label class="form-label">Reason</label>
+                    <textarea name="reason" class="form-control" rows="2" placeholder="Why is the arrival being re-opened?"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-warning"><i class="bi bi-pencil-square me-1"></i>Re-open for edit</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal fade" id="deleteArrivalModal" tabindex="-1">
+        <div class="modal-dialog">
+            <form asp-action="Delete" asp-route-id="@Model.ArrivalId" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title">Delete arrival @Model.ArrivalNo</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small">
+                        This permanently removes the arrival, its checklist, shipment snapshot, SAP snapshot,
+                        item rows, and image links. Quality Orders linked to this arrival would block the delete
+                        &mdash; cancel them first if there are any.
+                    </p>
+                    <div class="alert alert-warning small mb-0">
+                        <i class="bi bi-exclamation-triangle me-1"></i>This cannot be undone.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>Delete permanently</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+@if (!draft)
+{
+    <div class="alert alert-info">
+        <i class="bi bi-lock me-1"></i>
+        This arrival is <strong>@label</strong>. The checklist and shipment details are now read-only.
+    </div>
+}
+
+<ul class="nav nav-tabs mb-3" id="arrivalTabs" role="tablist">
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-checklist"><i class="bi bi-clipboard-check me-1"></i>Inspection Checklist</button></li>
+    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-shipment"><i class="bi bi-truck me-1"></i>Shipment</button></li>
+    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-summary"><i class="bi bi-info-circle me-1"></i>Summary</button></li>
+    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-materials"><i class="bi bi-list-ul me-1"></i>Materials (@items.Count)</button></li>
+    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-images"><i class="bi bi-images me-1"></i>Images</button></li>
+</ul>
+
+<div class="tab-content">
+
+@* ===== Summary ===== *@
+<div class="tab-pane fade" id="tab-summary">
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header"><i class="bi bi-truck me-1"></i>Shipment identity</div>
+                <div class="card-body">
+                    <dl class="row mb-0 small">
+                        <dt class="col-sm-4">Container</dt><dd class="col-sm-8"><code>@Model.ContainerNo</code></dd>
+                        <dt class="col-sm-4">BOL</dt><dd class="col-sm-8">@Model.BolNo</dd>
+                        <dt class="col-sm-4">PO (EBELN)</dt><dd class="col-sm-8">@Model.Ebeln</dd>
+                        <dt class="col-sm-4">Vendor</dt><dd class="col-sm-8">@Model.VendorName (@Model.VendorNo)</dd>
+                        <dt class="col-sm-4">Vessel / Voyage</dt><dd class="col-sm-8">@shipment?.VesselName / @shipment?.VoyageNumber</dd>
+                        <dt class="col-sm-4">Loading port</dt><dd class="col-sm-8">@shipment?.LoadingPort, @shipment?.LoadingCountry</dd>
+                        <dt class="col-sm-4">Arrival port</dt><dd class="col-sm-8">@shipment?.ArrivalPlace</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card h-100">
+                <div class="card-header"><i class="bi bi-clipboard-check me-1"></i>Inspection summary</div>
+                <div class="card-body">
+                    <dl class="row mb-0 small">
+                        <dt class="col-sm-5">Seal #</dt><dd class="col-sm-7">@checklist.SealNo</dd>
+                        <dt class="col-sm-5">Seal intact</dt><dd class="col-sm-7">@YN(checklist.SealIntact)</dd>
+                        <dt class="col-sm-5">External damage</dt><dd class="col-sm-7">@YN(checklist.ExternalDamageExists)</dd>
+                        <dt class="col-sm-5">Visual cargo OK</dt><dd class="col-sm-7">@YN(checklist.VisualCargoAcceptable)</dd>
+                        <dt class="col-sm-5">Set / Display temp</dt><dd class="col-sm-7">@checklist.SetTemperature / @checklist.DisplayTemperature °C</dd>
+                        <dt class="col-sm-5">Pulp F/M/B</dt><dd class="col-sm-7">@checklist.PulpTempFront / @checklist.PulpTempMiddle / @checklist.PulpTempBack °C</dd>
+                        <dt class="col-sm-5">Logger serial</dt><dd class="col-sm-7">@checklist.DataLoggerSerial</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ===== Shipment ===== *@
+<div class="tab-pane fade" id="tab-shipment">
+    <form asp-action="SaveShipment" method="post">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="ArrivalId" value="@Model.ArrivalId" />
+        @if (shipment != null)
+        {
+            <input type="hidden" name="ShipmentSnapshotId" value="@shipment.ShipmentSnapshotId" />
+            <input type="hidden" name="InternalShipmentNo" value="@shipment.InternalShipmentNo" />
+        }
+        <div class="card">
+            <div class="card-header bg-primary text-white"><i class="bi bi-truck me-1"></i>Shipment snapshot @(shipment != null ? "— " + shipment.InternalShipmentNo : "")</div>
+            <div class="card-body">
+                <fieldset @(draft ? "" : "disabled")>
+                    <div class="row g-3">
+                        <div class="col-md-3"><label class="form-label">Vessel name</label>
+                            <input name="VesselName" class="form-control" value="@shipment?.VesselName" /></div>
+                        <div class="col-md-3"><label class="form-label">Voyage number</label>
+                            <input name="VoyageNumber" class="form-control" value="@shipment?.VoyageNumber" /></div>
+                        <div class="col-md-3"><label class="form-label">Loading port</label>
+                            <input name="LoadingPort" class="form-control" value="@shipment?.LoadingPort" /></div>
+                        <div class="col-md-3"><label class="form-label">Country of origin</label>
+                            <input name="LoadingCountry" class="form-control" value="@shipment?.LoadingCountry" /></div>
+
+                        <div class="col-md-3"><label class="form-label">Loading date</label>
+                            <input name="LoadingDate" type="date" class="form-control" value="@shipment?.LoadingDate?.ToString("yyyy-MM-dd")" /></div>
+                        <div class="col-md-3"><label class="form-label">Sailing date</label>
+                            <input name="SailingDate" type="date" class="form-control" value="@shipment?.SailingDate?.ToString("yyyy-MM-dd")" /></div>
+                        <div class="col-md-3"><label class="form-label">Examination date</label>
+                            <input name="ExaminationDate" type="date" class="form-control" value="@shipment?.ExaminationDate?.ToString("yyyy-MM-dd")" /></div>
+                        <div class="col-md-3"><label class="form-label">Arrival date</label>
+                            <input name="ArrivalDate" type="date" class="form-control" value="@shipment?.ArrivalDate?.ToString("yyyy-MM-dd")" /></div>
+
+                        <div class="col-md-3"><label class="form-label">Unloading date</label>
+                            <input name="UnloadingDate" type="date" class="form-control" value="@shipment?.UnloadingDate?.ToString("yyyy-MM-dd")" /></div>
+                        <div class="col-md-3"><label class="form-label">Inspection date</label>
+                            <input name="InspectionDate" type="date" class="form-control" value="@shipment?.InspectionDate?.ToString("yyyy-MM-dd")" /></div>
+                        <div class="col-md-3"><label class="form-label">Pull-out date</label>
+                            <input name="PullOutDate" type="date" class="form-control" value="@shipment?.PullOutDate?.ToString("yyyy-MM-dd")" /></div>
+                        <div class="col-md-3"><label class="form-label">Receive date</label>
+                            <input name="ReceiveDate" type="date" class="form-control" value="@shipment?.ReceiveDate?.ToString("yyyy-MM-dd")" /></div>
+
+                        <div class="col-md-3"><label class="form-label">Transit days</label>
+                            <input name="TransitDays" type="number" class="form-control" value="@shipment?.TransitDays" /></div>
+                        <div class="col-md-3"><label class="form-label">Time bar (days)</label>
+                            <input name="TimeBar" type="number" class="form-control" value="@shipment?.TimeBar" /></div>
+                        <div class="col-md-3"><label class="form-label">Arrival port</label>
+                            <input name="ArrivalPlace" class="form-control" value="@shipment?.ArrivalPlace" /></div>
+                        <div class="col-md-3"><label class="form-label">Inspection point</label>
+                            <input name="InspectionPoint" class="form-control" value="@shipment?.InspectionPoint" /></div>
+
+                        <div class="col-md-4">
+                            <label class="form-label d-block">Joint Survey</label>
+                            @Html.Raw(TriRadio("JointSurvey", shipment?.JointSurvey))
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label d-block">Time Bar Exceeded</label>
+                            @Html.Raw(TriRadio("TimeBarExceeded", shipment?.TimeBarExceeded))
+                        </div>
+                    </div>
+                </fieldset>
+            </div>
+            @if (draft)
+            {
+                <div class="card-footer text-end">
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>Save shipment details</button>
+                </div>
+            }
+        </div>
+    </form>
+</div>
+
+@* ===== Checklist — tablet-first compact single-page layout (DEFAULT TAB) ===== *@
+<div class="tab-pane fade show active" id="tab-checklist">
+    <style>
+        /* =====================================================================
+           Yes / No toggle  (segmented switch, very clear selected state).
+           The two halves are color-tinted pills. The SELECTED half is solid +
+           bold + raised shadow + slightly larger; the UNSELECTED half is
+           faded gray. When neither is chosen, both sides are gray with a
+           dashed border to signal "not answered yet".
+           ===================================================================== */
+        .yn-toggle {
+            display: inline-flex;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 0 0 1px rgba(0,0,0,0.08);
+            min-width: 150px;
+        }
+        .yn-toggle.yn-unanswered { box-shadow: 0 0 0 1px rgba(108,117,125,0.35); }
+        .yn-toggle .yn-half {
+            flex: 1;
+            padding: 0.55rem 0.9rem;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            font-weight: 500;
+            font-size: 0.92rem;
+            letter-spacing: 0.5px;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.15s ease;
+            border: 0;
+            background: #f8f9fa;
+            color: #adb5bd;
+        }
+        .yn-toggle .yn-half i  { font-size: 1.05rem; }
+        .yn-toggle .yn-yes:hover { background: #e8f5ec; color: #198754; }
+        .yn-toggle .yn-no:hover  { background: #fae7e9; color: #dc3545; }
+
+        /* Selected state -- solid colored, white text, drop shadow, bold. */
+        .yn-toggle .btn-check:checked + .yn-yes {
+            background: linear-gradient(180deg, #198754 0%, #146c43 100%);
+            color: #fff;
+            font-weight: 700;
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25),
+                        0 2px 8px rgba(25,135,84,0.45);
+            text-shadow: 0 1px 0 rgba(0,0,0,0.18);
+        }
+        .yn-toggle .btn-check:checked + .yn-no {
+            background: linear-gradient(180deg, #dc3545 0%, #b02a37 100%);
+            color: #fff;
+            font-weight: 700;
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25),
+                        0 2px 8px rgba(220,53,69,0.45);
+            text-shadow: 0 1px 0 rgba(0,0,0,0.18);
+        }
+        /* When one side is selected the OTHER side fades further so contrast wins. */
+        .yn-toggle:not(.yn-unanswered) .yn-yes,
+        .yn-toggle:not(.yn-unanswered) .yn-no { background: #f1f3f5; color: #ced4da; }
+        .yn-toggle .btn-check:checked + .yn-yes,
+        .yn-toggle .btn-check:checked + .yn-no { /* override fade for selected */ }
+
+        /* Compact question/answer rows. */
+        .checklist-qa td { padding: 0.45rem 0.4rem; vertical-align: middle; border: none; }
+        .checklist-qa td:first-child { font-size: 0.92rem; }
+        .checklist-qa tr + tr td { border-top: 1px dashed var(--theme-border, #dee2e6); }
+
+        /* =====================================================================
+           Photo Attachments tiles.  Each tile is a self-contained card with a
+           camera icon, label, and integrated switch -- never overflows its
+           column. Tile lights up with a green border + tinted background when
+           "photo taken" is true.
+           ===================================================================== */
+        .photo-tile {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border: 2px solid #dee2e6;
+            border-radius: 10px;
+            background: #fafbfc;
+            cursor: pointer;
+            user-select: none;
+            transition: all 0.15s ease;
+            min-height: 56px;
+            margin: 0;
+        }
+        .photo-tile:hover { border-color: #adb5bd; }
+        .photo-tile .form-check-input {
+            flex: 0 0 auto;
+            width: 2.3em;
+            height: 1.15em;
+            margin: 0;
+            cursor: pointer;
+        }
+        .photo-tile-icon  { font-size: 1.15rem; color: #adb5bd; flex: 0 0 auto; }
+        .photo-tile-label {
+            flex: 1 1 auto;
+            font-size: 0.86rem;
+            line-height: 1.15;
+            color: #495057;
+            min-width: 0;          /* allow text to wrap */
+            word-break: break-word;
+        }
+        .photo-tile-on {
+            border-color: #198754;
+            background: #e8f5ec;
+        }
+        .photo-tile-on .photo-tile-icon  { color: #198754; }
+        .photo-tile-on .photo-tile-label { color: #146c43; font-weight: 600; }
+    </style>
+    <form asp-action="SaveChecklist" method="post" id="checklistForm">
+        @Html.AntiForgeryToken()
+        <input type="hidden" name="ChecklistId" value="@checklist.ChecklistId" />
+        <input type="hidden" name="ArrivalId"   value="@Model.ArrivalId" />
+        <fieldset @(draft ? "" : "disabled")>
+
+        @* ---- Identity strip (read-only context from arrival header) ---- *@
+        <div class="card mb-2 border-secondary">
+            <div class="card-body py-2">
+                <div class="row g-2 small">
+                    <div class="col-6 col-md-3"><span class="text-muted">Vendor</span><br /><strong>@Model.VendorName</strong></div>
+                    <div class="col-6 col-md-3"><span class="text-muted">BOL</span><br /><strong>@Model.BolNo</strong></div>
+                    <div class="col-6 col-md-3"><span class="text-muted">Container</span><br /><code>@Model.ContainerNo</code></div>
+                    <div class="col-6 col-md-3">
+                        <label class="text-muted small">Carrier Name</label>
+                        <input name="CarrierName" class="form-control form-control-sm" value="@checklist.CarrierName" />
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row g-2">
+
+            @* ===== Column 1: External + Temperature unit + Internal ===== *@
+            <div class="col-12 col-lg-6">
+
+                <div class="card mb-2 border-primary">
+                    <div class="card-header py-1 bg-primary text-white d-flex justify-content-between align-items-center">
+                        <span><i class="bi bi-shield-check me-1"></i><strong>1. External Inspection</strong></span>
+                    </div>
+                    <div class="card-body py-2">
+                        <div class="row g-2 align-items-center mb-2">
+                            <label class="col-4 col-md-3 col-form-label small">Seal No</label>
+                            <div class="col-8 col-md-9">
+                                <input name="SealNo" class="form-control form-control-sm" value="@checklist.SealNo" />
+                            </div>
+                        </div>
+                        <table class="table table-borderless table-sm align-middle mb-0 checklist-qa">
+                            <tbody>
+                                <tr>
+                                    <td>Seal Intact?</td>
+                                    <td class="text-end">@Html.Raw(YesNo("SealIntact", checklist.SealIntact))</td>
+                                </tr>
+                                <tr>
+                                    <td>Seal number matches documents?</td>
+                                    <td class="text-end">@Html.Raw(YesNo("SealMatchesDocuments", checklist.SealMatchesDocuments))</td>
+                                </tr>
+                                <tr>
+                                    <td>External damage to container / pallet?</td>
+                                    <td class="text-end">@Html.Raw(YesNo("ExternalDamageExists", checklist.ExternalDamageExists))</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <div class="card mb-2 border-info">
+                    <div class="card-header py-1 bg-info text-dark"><i class="bi bi-thermometer-half me-1"></i><strong>Temperature Unit Reading</strong></div>
+                    <div class="card-body py-2">
+                        <div class="row g-2 align-items-center mb-2">
+                            <label class="col-5 col-form-label small">Set Temp (°C)</label>
+                            <div class="col-7">
+                                <input name="SetTemperature" type="number" step="0.1" inputmode="decimal"
+                                       class="form-control form-control-sm text-end" value="@checklist.SetTemperature" />
+                            </div>
+                        </div>
+                        <div class="row g-2 align-items-center mb-2">
+                            <label class="col-5 col-form-label small">Display Temp (°C)</label>
+                            <div class="col-7">
+                                <input name="DisplayTemperature" type="number" step="0.1" inputmode="decimal"
+                                       class="form-control form-control-sm text-end" value="@checklist.DisplayTemperature" />
+                            </div>
+                        </div>
+                        <div class="border-top pt-2">
+                            @Html.Raw(PhotoFlag("DisplayTempPhotoTaken", checklist.DisplayTempPhotoTaken, "Photo of display taken"))
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-2 border-primary">
+                    <div class="card-header py-1 bg-primary text-white"><i class="bi bi-box-seam me-1"></i><strong>2. Internal Inspection</strong></div>
+                    <div class="card-body py-2">
+                        <table class="table table-borderless table-sm align-middle mb-2 checklist-qa">
+                            <tbody>
+                                <tr>
+                                    <td>Cargo smell normal?</td>
+                                    <td class="text-end">@Html.Raw(YesNo("CargoSmellNormal", checklist.CargoSmellNormal))</td>
+                                </tr>
+                                <tr>
+                                    <td>Visual cargo condition acceptable?</td>
+                                    <td class="text-end">@Html.Raw(YesNo("VisualCargoAcceptable", checklist.VisualCargoAcceptable))</td>
+                                </tr>
+                                <tr>
+                                    <td>Any cargo shifted / collapsed / water?</td>
+                                    <td class="text-end">@Html.Raw(YesNo("CargoShiftedCollapsedWater", checklist.CargoShiftedCollapsedWater))</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="border-top pt-2">
+                            @Html.Raw(PhotoFlag("InternalInspectionPhotoTaken", checklist.InternalInspectionPhotoTaken, "Photo taken"))
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            @* ===== Column 2: Pulp temp + Data logger ===== *@
+            <div class="col-12 col-lg-6">
+
+                <div class="card mb-2 border-info">
+                    <div class="card-header py-1 bg-info text-dark"><i class="bi bi-thermometer me-1"></i><strong>3. Pulp Temperature Check</strong></div>
+                    <div class="card-body py-2">
+                        <div class="row g-2 align-items-center mb-2">
+                            <label class="col-4 col-form-label small">Front (°C)</label>
+                            <div class="col-8">
+                                <input name="PulpTempFront" type="number" step="0.1" inputmode="decimal"
+                                       class="form-control form-control-sm text-end" value="@checklist.PulpTempFront" />
+                            </div>
+                        </div>
+                        <div class="row g-2 align-items-center mb-2">
+                            <label class="col-4 col-form-label small">Middle (°C)</label>
+                            <div class="col-8">
+                                <input name="PulpTempMiddle" type="number" step="0.1" inputmode="decimal"
+                                       class="form-control form-control-sm text-end" value="@checklist.PulpTempMiddle" />
+                            </div>
+                        </div>
+                        <div class="row g-2 align-items-center mb-2">
+                            <label class="col-4 col-form-label small">Back (°C)</label>
+                            <div class="col-8">
+                                <input name="PulpTempBack" type="number" step="0.1" inputmode="decimal"
+                                       class="form-control form-control-sm text-end" value="@checklist.PulpTempBack" />
+                            </div>
+                        </div>
+                        <div class="border-top pt-2">
+                            @Html.Raw(PhotoFlag("PulpTempPhotoTaken", checklist.PulpTempPhotoTaken, "Pulp temperature photos taken"))
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-2 border-primary">
+                    <div class="card-header py-1 bg-primary text-white"><i class="bi bi-broadcast me-1"></i><strong>4. Data Logger Inspection</strong></div>
+                    <div class="card-body py-2">
+                        <table class="table table-borderless table-sm align-middle mb-2 checklist-qa">
+                            <tbody>
+                                <tr>
+                                    <td>Locate and retrieve data logger?</td>
+                                    <td class="text-end">@Html.Raw(YesNo("DataLoggerLocated", checklist.DataLoggerLocated))</td>
+                                </tr>
+                                <tr>
+                                    <td>Hand over to Quality / Logistics?</td>
+                                    <td class="text-end">@Html.Raw(YesNo("LoggerHandedOver", checklist.LoggerHandedOver))</td>
+                                </tr>
+                                <tr>
+                                    <td>Logger active &amp; data available?</td>
+                                    <td class="text-end">@Html.Raw(YesNo("LoggerActiveDataAvailable", checklist.LoggerActiveDataAvailable))</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <div class="row g-2 align-items-center mb-2">
+                            <label class="col-5 col-form-label small">Logger serial</label>
+                            <div class="col-7">
+                                <input name="DataLoggerSerial" class="form-control form-control-sm" value="@checklist.DataLoggerSerial" />
+                            </div>
+                        </div>
+                        <div class="row g-2 align-items-center mb-2">
+                            <label class="col-5 col-form-label small">Logger temp (°C)</label>
+                            <div class="col-7">
+                                <input name="LoggerTemperature" type="number" step="0.1" inputmode="decimal"
+                                       class="form-control form-control-sm text-end" value="@checklist.LoggerTemperature" />
+                            </div>
+                        </div>
+                        <div class="border-top pt-2">
+                            @Html.Raw(PhotoFlag("DataLoggerPhotoTaken", checklist.DataLoggerPhotoTaken, "Data-logger photo taken"))
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        @* ===== Notes (full width) ===== *@
+        <div class="card mb-2 border-secondary">
+            <div class="card-header py-1 bg-light"><i class="bi bi-journal-text me-1"></i><strong>5. Notes / Observations</strong></div>
+            <div class="card-body py-2">
+                <textarea name="Notes" class="form-control" rows="2" placeholder="Anything the report should mention -- weather, paperwork, special handling, etc.">@checklist.Notes</textarea>
+            </div>
+        </div>
+
+        @* ===== Photo checklist (single flag bank) ===== *@
+        <div class="card mb-3 border-warning">
+            <div class="card-header py-1 bg-warning"><i class="bi bi-images me-1"></i><strong>6. Photo Attachments Checklist</strong>
+                <span class="small text-muted ms-2">Tick each photo as you capture it. Actual files are uploaded on the Images tab.</span>
+            </div>
+            <div class="card-body py-2">
+                <div class="row g-2 photo-grid">
+                    <div class="col-12 col-sm-6 col-lg-4 col-xxl-3">@Html.Raw(PhotoFlag("ContainerSealPhotoTaken",     checklist.ContainerSealPhotoTaken,     "Container Seal Photo"))</div>
+                    <div class="col-12 col-sm-6 col-lg-4 col-xxl-3">@Html.Raw(PhotoFlag("ExternalContainerPhotoTaken", checklist.ExternalContainerPhotoTaken, "External Container Photo"))</div>
+                    <div class="col-12 col-sm-6 col-lg-4 col-xxl-3">@Html.Raw(PhotoFlag("ExternalDamagePhotoTaken",    checklist.ExternalDamagePhotoTaken,    "External Damage Photo (if any)"))</div>
+                    <div class="col-12 col-sm-6 col-lg-4 col-xxl-3">@Html.Raw(PhotoFlag("DisplayTempPhotoTakenMirror", checklist.DisplayTempPhotoTaken,       "Temperature Display Photo (if reefer)"))</div>
+                    <div class="col-12 col-sm-6 col-lg-4 col-xxl-3">@Html.Raw(PhotoFlag("FirstViewCargoPhotoTaken",    checklist.FirstViewCargoPhotoTaken,    "First View of Cargo Inside Photo"))</div>
+                    <div class="col-12 col-sm-6 col-lg-4 col-xxl-3">@Html.Raw(PhotoFlag("InternalDamagePhotoTaken",    checklist.InternalDamagePhotoTaken,    "Internal Damage Photo (if any)"))</div>
+                    <div class="col-12 col-sm-6 col-lg-4 col-xxl-3">@Html.Raw(PhotoFlag("PulpTempPhotoTakenMirror",    checklist.PulpTempPhotoTaken,          "Pulp Temperature Photos"))</div>
+                    <div class="col-12 col-sm-6 col-lg-4 col-xxl-3">@Html.Raw(PhotoFlag("DataLoggerPhotoTakenMirror", checklist.DataLoggerPhotoTaken,         "Data Logger Photo"))</div>
+                </div>
+                <div class="small text-muted mt-2">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Display-temp / pulp-temp / data-logger flags here mirror the inline toggles in their own sections &mdash; ticking either one updates the same field.
+                </div>
+            </div>
+        </div>
+
+        </fieldset>
+
+        @if (draft)
+        {
+            <div class="d-flex gap-2 sticky-bottom bg-body py-2 border-top">
+                <button type="submit" class="btn btn-primary btn-lg flex-grow-1">
+                    <i class="bi bi-save me-1"></i>Save checklist
+                </button>
+            </div>
+        }
+    </form>
+</div>
+
+@section Scripts {
+<script>
+    // The checklist UI shows the same photo-taken flag in two places: inline in
+    // its own section AND as a tick in the section-6 "Photo Attachments
+    // Checklist" summary grid. The grid copies use a "Mirror" suffix on the
+    // input name (e.g. DisplayTempPhotoTakenMirror) so the server only receives
+    // the canonical field. This snippet keeps the UI state of each pair in sync
+    // so ticking either copy reflects in the other immediately.
+    document.querySelectorAll('input[name$="Mirror"]').forEach(function (mirror) {
+        var base = mirror.name.replace(/Mirror$/, '');
+        var primary = document.querySelector('input[name="' + base + '"]');
+        if (!primary) return;
+        function sync(from, to) {
+            if (to.checked !== from.checked) {
+                to.checked = from.checked;
+                to.dispatchEvent(new Event('change', { bubbles: false }));
+            }
+        }
+        mirror.addEventListener('change',  function () { sync(mirror, primary); });
+        primary.addEventListener('change', function () { sync(primary, mirror); });
+        // Mirror checkbox is purely UI -- strip its name on form submit so the
+        // server never receives a duplicate value that could confuse model binding.
+        var form = mirror.closest('form');
+        if (form) form.addEventListener('submit', function () { mirror.removeAttribute('name'); });
+    });
+
+    // Photo tiles light up green when their switch is on. Toggle the
+    // .photo-tile-on class live so the user gets immediate visual feedback.
+    document.querySelectorAll('.photo-tile .form-check-input').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+            cb.closest('.photo-tile').classList.toggle('photo-tile-on', cb.checked);
+        });
+    });
+
+    // Same lift on the Yes/No toggle: remove the "unanswered" hint as soon as
+    // the user picks an answer.
+    document.querySelectorAll('.yn-toggle .btn-check').forEach(function (rb) {
+        rb.addEventListener('change', function () {
+            rb.closest('.yn-toggle').classList.remove('yn-unanswered');
+        });
+    });
+</script>
+}
+
+@* ===== Materials ===== *@
+<div class="tab-pane fade" id="tab-materials">
+    <div class="card">
+        <div class="card-header"><i class="bi bi-list-ul me-1"></i>Materials in arrival (@items.Count)</div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>PO / Item</th>
+                        <th>Material</th>
+                        <th>Description</th>
+                        <th>Material group</th>
+                        <th>Major category</th>
+                        <th>Plant</th>
+                        <th>Storage</th>
+                        <th>Batch</th>
+                        <th class="text-end">Qty</th>
+                        <th>UoM</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var it in items)
+                    {
+                        <tr>
+                            <td>@it.Ebeln / @it.Ebelp</td>
+                            <td><code>@it.MaterialNo</code></td>
+                            <td>@it.MaterialDesc</td>
+                            <td>@it.MaterialGroup &mdash; @it.MaterialGroupDesc</td>
+                            <td>@it.MajorCategory</td>
+                            <td>@it.Plant</td>
+                            <td>@it.StorageLocation</td>
+                            <td>@it.BatchNo</td>
+                            <td class="text-end">@(it.Quantity?.ToString("N0"))</td>
+                            <td>@it.Uom</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+@* ===== Images ===== *@
+<div class="tab-pane fade" id="tab-images">
+    @{
+        var arrivalGalleryVm = new SharbatlyQMS.Web.ViewModels.ImageGalleryVm
+        {
+            OwnerType = "Arrival",
+            OwnerId   = Model.ArrivalId,
+            Editable  = draft,
+            Categories = new[] { "ArrivalExternal", "ArrivalInternal", "TemperatureDisplay", "DataLogger" }
+        };
+    }
+    <partial name="_ImageGallery" model="arrivalGalleryVm" />
+</div>
+
+</div>

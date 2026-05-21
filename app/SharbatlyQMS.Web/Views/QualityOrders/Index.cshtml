@@ -1,0 +1,107 @@
+@using SharbatlyQMS.Web.Models
+@model IReadOnlyList<QualityOrder>
+@{
+    ViewData["Title"] = "Quality Orders";
+    var status = ViewBag.Status as string;
+    var search = ViewBag.Search as string;
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0"><i class="bi bi-clipboard-data me-1"></i>Quality Orders</h1>
+</div>
+
+@{
+    // Status filter is now a button group placed after the Filter submit.
+    // Cancelled was dropped because Quality Orders aren't cancelled in
+    // practice -- only Initial / Open / Reopened / Closed are real states.
+    // Each toggle button is its own submit, so picking a status posts the
+    // form (preserving the search text) without an extra click.
+    var statuses = new (string Value, string Label, string OutlineCss)[]
+    {
+        ("",        "All",     "btn-outline-secondary"),
+        ("Initial", "Initial", "btn-outline-secondary"),
+        ("Open",    "Open",    "btn-outline-primary"),
+        ("Closed",  "Closed",  "btn-outline-success"),
+    };
+    string ActiveClass(string v, string baseCss) =>
+        (status ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
+}
+<form method="get" class="row g-2 mb-3 align-items-stretch">
+    <div class="col-md-5">
+        <input type="text" name="search" value="@search" class="form-control" placeholder="Search by QO #, container, BOL, vendor, or created by..." />
+    </div>
+    <div class="col-md-2"><button type="submit" class="btn btn-outline-secondary w-100"><i class="bi bi-funnel me-1"></i>Filter</button></div>
+    <div class="col-md-5">
+        <div class="btn-group w-100" role="group" aria-label="Filter by status">
+            @foreach (var s in statuses)
+            {
+                <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)">@s.Label</button>
+            }
+        </div>
+    </div>
+</form>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th>QO Number</th>
+                    <th>Container</th>
+                    <th>BOL</th>
+                    <th>PO</th>
+                    <th>Supplier</th>
+                    <th>Arrival</th>
+                    <th>Status</th>
+                    <th>Created</th>
+                    <th>Created By</th>
+                    <th>Closed</th>
+                    <th class="text-end">Open</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (!Model.Any())
+                {
+                    <tr><td colspan="11" class="text-center text-muted py-4">
+                        No Quality Orders yet. Complete an arrival, then click <em>Create Quality Order</em>.
+                    </td></tr>
+                }
+                else
+                {
+                    foreach (var q in Model)
+                    {
+                        var (cls, label) = q.StatusCode switch {
+                            "Initial"   => ("secondary", "Initial"),
+                            "Open"      => ("primary",   "Open"),
+                            "Closed"    => ("success",   "Closed"),
+                            "Cancelled" => ("dark",      "Cancelled"),
+                            _           => ("secondary", q.StatusCode)
+                        };
+                        <tr>
+                            <td><code>@q.QualityOrderNo</code></td>
+                            <td><code>@q.ContainerNo</code></td>
+                            <td>@q.BolNo</td>
+                            <td>@q.Ebeln</td>
+                            <td>@q.VendorName</td>
+                            <td>
+                                <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@q.ArrivalId"
+                                   title="@q.ArrivalNo">
+                                    <i class="bi bi-box-arrow-in-down me-1"></i>@q.ArrivalNo
+                                </a>
+                            </td>
+                            <td><span class="badge bg-@cls">@label</span></td>
+                            <td>@q.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                            <td>@q.CreatedBy</td>
+                            <td>@(q.ClosedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                            <td class="text-end">
+                                <a asp-action="Details" asp-route-id="@q.QualityOrderId" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>

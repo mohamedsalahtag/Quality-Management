@@ -1,0 +1,33 @@
+@using SharbatlyQMS.Web.ViewModels
+@model SampleRowVm
+@{
+    var s = Model.Sample;
+}
+<tr data-sample-id="@s.SampleId" data-qo-material-id="@s.QoMaterialId">
+    <td>
+        <button type="button" class="btn btn-link p-0 fw-semibold sample-open"
+                data-sample-id="@s.SampleId">
+            #@s.SampleNo
+        </button>
+    </td>
+    <td>@s.Grower</td>
+    <td>@s.PalletNo</td>
+    <td>@s.LotNo</td>
+    <td>@s.DateCode</td>
+    <td>@s.SampleScope</td>
+    <td class="text-end">@s.SampleSize</td>
+    <td class="text-end small text-muted">@s.CreatedAt.ToLocalTime():g<br />@s.CreatedBy</td>
+    <td class="text-end">
+        <button type="button" class="btn btn-sm btn-outline-primary sample-open"
+                data-sample-id="@s.SampleId" title="Open sample">
+            <i class="bi bi-pencil-square"></i>
+        </button>
+        @if (Model.Editable)
+        {
+            <button type="button" class="btn btn-sm btn-outline-danger sample-delete"
+                    data-sample-id="@s.SampleId" data-sample-no="@s.SampleNo" title="Delete sample">
+                <i class="bi bi-trash"></i>
+            </button>
+        }
+    </td>
+</tr>

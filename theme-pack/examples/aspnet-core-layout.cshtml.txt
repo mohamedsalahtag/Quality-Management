@@ -1,0 +1,71 @@
+@*
+   Example minimal _Layout.cshtml with theme-pack wired in.
+   Save as: Views/Shared/_Layout.cshtml in an ASP.NET Core MVC project.
+   Copy theme-pack.css to wwwroot/css/, theme-pack.js to wwwroot/js/.
+*@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>@(ViewData["Title"] ?? "My App")</title>
+
+    @* === theme-pack: FOUC-prevention. MUST be first <script> in <head>. === *@
+    <script>
+        (function () {
+            var t = localStorage.getItem("app-theme") || "light";
+            document.documentElement.setAttribute("data-theme", t);
+            document.documentElement.setAttribute("data-bs-theme", t === "dark" ? "dark" : "light");
+        })();
+    </script>
+
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap-icons/1.11.3/font/bootstrap-icons.min.css" rel="stylesheet" />
+
+    @* Host's own structural CSS (no hardcoded body bg/color in here). *@
+    <link rel="stylesheet" href="~/css/site.css" asp-append-version="true" />
+
+    @* === theme-pack: theme stylesheet. MUST be last in <head>. === *@
+    <link rel="stylesheet" href="~/css/theme-pack.css" asp-append-version="true" />
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="/">My App</a>
+
+            <ul class="navbar-nav me-auto">
+                <li class="nav-item"><a class="nav-link" href="/">Home</a></li>
+            </ul>
+
+            <ul class="navbar-nav">
+                @* === theme-pack: picker (paste contents of partial-theme-picker.html). === *@
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" title="Theme" aria-label="Theme picker">
+                        <i class="bi bi-palette"></i>
+                    </a>
+                    <ul class="dropdown-menu dropdown-menu-end">
+                        <li><h6 class="dropdown-header">Theme</h6></li>
+                        <li><a class="dropdown-item theme-pick" data-theme="light"  href="#"><i class="bi bi-sun me-2"></i>Light</a></li>
+                        <li><a class="dropdown-item theme-pick" data-theme="dark"   href="#"><i class="bi bi-moon-stars me-2"></i>Dark</a></li>
+                        <li><a class="dropdown-item theme-pick" data-theme="blue"   href="#"><i class="bi bi-droplet me-2"></i>Blue</a></li>
+                        <li><a class="dropdown-item theme-pick" data-theme="sepia"  href="#"><i class="bi bi-cup-hot me-2"></i>Sepia</a></li>
+                        <li><a class="dropdown-item theme-pick" data-theme="forest" href="#"><i class="bi bi-tree me-2"></i>Forest</a></li>
+                        <li><a class="dropdown-item theme-pick" data-theme="rose"   href="#"><i class="bi bi-flower1 me-2"></i>Rose</a></li>
+                    </ul>
+                </li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="container-fluid py-4">
+        @RenderBody()
+    </main>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.2/js/bootstrap.bundle.min.js"></script>
+
+    @* === theme-pack: controller. After Bootstrap JS. === *@
+    <script src="~/js/theme-pack.js" asp-append-version="true"></script>
+
+    @await RenderSectionAsync("Scripts", required: false)
+</body>
+</html>

@@ -1,0 +1,268 @@
+/* ============================================================
+   theme-pack v1.0 — drop-in theme system for Bootstrap 5.3 web apps.
+   Switch active theme via [data-theme="..."] on <html>.
+   For "dark", ALSO set data-bs-theme="dark" so Bootstrap 5.3's
+   built-in dark mode handles components we don't override.
+
+   Customize a theme by editing its [data-theme="<name>"] block.
+   Add a theme by appending another block + a <li> in the picker.
+   ============================================================ */
+
+html, html[data-theme="light"] {
+    --theme-bg:           #f8f9fa;
+    --theme-surface:      #ffffff;
+    --theme-surface-alt:  #f1f3f5;
+    --theme-text:         #212529;
+    --theme-text-muted:   #6c757d;
+    --theme-border:       #dee2e6;
+    --theme-navbar-bg:    #0d6efd;
+    --theme-navbar-text:  #ffffff;
+}
+
+html[data-theme="dark"] {
+    --theme-bg:           #15181c;
+    --theme-surface:      #1f2328;
+    --theme-surface-alt:  #2a2f35;
+    --theme-text:         #e9ecef;
+    --theme-text-muted:   #adb5bd;
+    --theme-border:       #3a3f45;
+    --theme-navbar-bg:    #0d2237;
+    --theme-navbar-text:  #ffffff;
+}
+
+html[data-theme="blue"] {
+    --theme-bg:           #e7eef9;
+    --theme-surface:      #ffffff;
+    --theme-surface-alt:  #d6e1f1;
+    --theme-text:         #0a2540;
+    --theme-text-muted:   #43618a;
+    --theme-border:       #b3c8e1;
+    --theme-navbar-bg:    #0a3a78;
+    --theme-navbar-text:  #ffffff;
+}
+
+html[data-theme="sepia"] {
+    --theme-bg:           #f4ecd8;
+    --theme-surface:      #fff8e7;
+    --theme-surface-alt:  #ebe1c8;
+    --theme-text:         #5b4636;
+    --theme-text-muted:   #8a7a5b;
+    --theme-border:       #d6c9a8;
+    --theme-navbar-bg:    #6b4319;
+    --theme-navbar-text:  #fff8e7;
+}
+
+html[data-theme="forest"] {
+    --theme-bg:           #eaf3eb;
+    --theme-surface:      #ffffff;
+    --theme-surface-alt:  #d6e7d8;
+    --theme-text:         #143821;
+    --theme-text-muted:   #4a6b54;
+    --theme-border:       #b9d3bd;
+    --theme-navbar-bg:    #1f5731;
+    --theme-navbar-text:  #ffffff;
+}
+
+html[data-theme="rose"] {
+    --theme-bg:           #fdeef0;
+    --theme-surface:      #ffffff;
+    --theme-surface-alt:  #f9d8de;
+    --theme-text:         #4a1c2a;
+    --theme-text-muted:   #7d4252;
+    --theme-border:       #e9b6c0;
+    --theme-navbar-bg:    #8c2a44;
+    --theme-navbar-text:  #ffffff;
+}
+
+/* ============================================================
+   Surfaces & text
+   ============================================================ */
+
+body {
+    background-color: var(--theme-bg);
+    color: var(--theme-text);
+}
+
+h1, h2, h3, h4, h5, h6,
+.h1, .h2, .h3, .h4, .h5, .h6 {
+    color: var(--theme-text);
+}
+
+label, .form-label, .form-check-label, .col-form-label {
+    color: var(--theme-text);
+}
+
+main a:not(.btn):not(.nav-link):not(.dropdown-item),
+.card-body a:not(.btn):not(.nav-link):not(.dropdown-item),
+.card-footer a:not(.btn):not(.nav-link):not(.dropdown-item) {
+    color: var(--theme-text);
+}
+
+.card {
+    background-color: var(--theme-surface);
+    color: var(--theme-text);
+    border-color: var(--theme-border);
+}
+.card-header { border-color: var(--theme-border); }
+.card-header.bg-light {
+    background-color: var(--theme-surface-alt) !important;
+    color: var(--theme-text);
+}
+/* Bootstrap accent card-headers (bg-primary / bg-info / bg-success / bg-secondary)
+   are intentional accent colors — left alone. */
+
+.text-muted, small.text-muted, .form-text, .text-white-50 {
+    color: var(--theme-text-muted) !important;
+}
+
+/* Higher-specificity carve-outs so muted text inside accent containers stays
+   readable (white-on-accent or dark-on-accent). */
+.card-header.text-white .text-muted,
+.card-header.text-white .text-white-50,
+.card-header.text-white small,
+.alert.text-white .text-muted,
+.alert.text-white .text-white-50,
+.modal-header.text-white .text-muted {
+    color: rgba(255, 255, 255, 0.78) !important;
+}
+.card-header.text-dark .text-muted,
+.card-header.text-dark .text-white-50,
+.card-header.text-dark small {
+    color: rgba(0, 0, 0, 0.6) !important;
+}
+
+/* Headings inside accent containers keep contrast. */
+.card-header.text-white h1, .card-header.text-white h2,
+.card-header.text-white h3, .card-header.text-white h4,
+.card-header.text-white h5, .card-header.text-white h6,
+.alert.text-white h1, .alert.text-white h2,
+.alert.text-white h3, .alert.text-white h4,
+.alert.text-white h5, .alert.text-white h6,
+.modal-header.text-white h1, .modal-header.text-white h2,
+.modal-header.text-white h3, .modal-header.text-white h4,
+.modal-header.text-white h5, .modal-header.text-white h6 {
+    color: #fff;
+}
+.card-header.text-dark h1, .card-header.text-dark h2,
+.card-header.text-dark h3, .card-header.text-dark h4,
+.card-header.text-dark h5, .card-header.text-dark h6 {
+    color: #212529;
+}
+
+/* ============================================================
+   Tables
+   ============================================================ */
+
+.table:not(.table-dark) {
+    --bs-table-bg: var(--theme-surface);
+    --bs-table-color: var(--theme-text);
+    color: var(--theme-text);
+    border-color: var(--theme-border);
+}
+.table thead.table-light th,
+.table tfoot.table-light td,
+.table > thead.table-light tr th,
+.table > tfoot.table-light tr td {
+    background-color: var(--theme-surface-alt) !important;
+    color: var(--theme-text) !important;
+    border-color: var(--theme-border) !important;
+}
+.table > :not(caption) > * > * { border-color: var(--theme-border); }
+.table-bordered > :not(caption) > * > * { border-color: var(--theme-border); }
+.table-hover > tbody > tr:hover > * {
+    --bs-table-hover-bg: var(--theme-surface-alt);
+    color: var(--theme-text);
+}
+
+/* ============================================================
+   Form controls
+   ============================================================ */
+
+.form-control, .form-select, textarea {
+    background-color: var(--theme-surface);
+    color: var(--theme-text);
+    border-color: var(--theme-border);
+}
+.form-control::placeholder { color: var(--theme-text-muted); opacity: 0.7; }
+.form-control:disabled, .form-select:disabled, textarea:disabled,
+input:disabled, select:disabled {
+    background-color: var(--theme-surface-alt) !important;
+    color: var(--theme-text-muted);
+}
+.input-group-text {
+    background-color: var(--theme-surface-alt);
+    color: var(--theme-text);
+    border-color: var(--theme-border);
+}
+
+/* ============================================================
+   Borders, dividers, utilities
+   ============================================================ */
+
+.border, .border-top, .border-bottom, .border-start, .border-end {
+    border-color: var(--theme-border) !important;
+}
+hr { border-color: var(--theme-border); }
+.bg-light {
+    background-color: var(--theme-surface-alt) !important;
+    color: var(--theme-text);
+}
+pre {
+    background-color: var(--theme-surface-alt) !important;
+    color: var(--theme-text);
+    border: 1px solid var(--theme-border);
+}
+
+/* ============================================================
+   Navbar (only restyles a navbar that uses bg-primary)
+   ============================================================ */
+
+.navbar.bg-primary { background-color: var(--theme-navbar-bg) !important; }
+.navbar.bg-primary .navbar-brand,
+.navbar.bg-primary .navbar-brand:hover,
+.navbar.bg-primary .navbar-brand:focus,
+.navbar.bg-primary .nav-link,
+.navbar.bg-primary .nav-link:hover,
+.navbar.bg-primary .nav-link:focus {
+    color: var(--theme-navbar-text) !important;
+}
+
+/* ============================================================
+   Dropdowns
+   ============================================================ */
+
+.dropdown-menu {
+    background-color: var(--theme-surface);
+    border-color: var(--theme-border);
+    color: var(--theme-text);
+}
+.dropdown-item { color: var(--theme-text); }
+.dropdown-item:hover, .dropdown-item:focus {
+    background-color: var(--theme-surface-alt);
+    color: var(--theme-text);
+}
+.dropdown-divider { border-color: var(--theme-border); }
+
+/* ============================================================
+   Modals
+   ============================================================ */
+
+.modal-content {
+    background-color: var(--theme-surface);
+    color: var(--theme-text);
+    border-color: var(--theme-border);
+}
+.modal-header, .modal-footer { border-color: var(--theme-border); }
+
+/* ============================================================
+   Theme picker — colour each icon to hint the theme.
+   ============================================================ */
+
+.dropdown-item.theme-pick[data-theme="light"]  .bi { color: #f59f00; }
+.dropdown-item.theme-pick[data-theme="dark"]   .bi { color: #5c6bc0; }
+.dropdown-item.theme-pick[data-theme="blue"]   .bi { color: #1e88e5; }
+.dropdown-item.theme-pick[data-theme="sepia"]  .bi { color: #a0522d; }
+.dropdown-item.theme-pick[data-theme="forest"] .bi { color: #2e7d32; }
+.dropdown-item.theme-pick[data-theme="rose"]   .bi { color: #e91e63; }
+.dropdown-item.theme-pick:hover .bi,
+.dropdown-item.theme-pick:focus .bi { filter: brightness(1.05); }

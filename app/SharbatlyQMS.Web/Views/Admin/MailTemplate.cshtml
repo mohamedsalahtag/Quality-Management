@@ -1,0 +1,37 @@
+@using SharbatlyQMS.Web.Services
+@model QoMailTemplate
+@{
+    ViewData["Title"] = "Mail Template";
+}
+
+<h1 class="h3 mb-3"><i class="bi bi-envelope-paper me-1"></i>Mail Template &mdash; Quality Order Report</h1>
+<p class="text-muted small">
+    Subject + body used when an operator clicks <strong>Send report to supplier</strong> on a Quality Order page.
+    The Send button is only visible on the QO page when <strong>Enabled</strong> is on below.
+    Placeholders <code>{QO_NO}</code>, <code>{CONTAINER}</code>, <code>{BOL}</code>, <code>{PO}</code>,
+    <code>{SUPPLIER}</code>, and <code>{TODAY}</code> are replaced when the operator opens the send dialog.
+    The operator can still edit the subject and body before sending.
+</p>
+
+<form asp-action="SaveMailTemplate" method="post" class="card">
+    @Html.AntiForgeryToken()
+    <div class="card-body">
+        <div class="form-check form-switch mb-3">
+            <input class="form-check-input" type="checkbox" name="Enabled" id="m-enabled" value="true" checked="@Model.Enabled" />
+            <label class="form-check-label" for="m-enabled">Show <strong>Send report to supplier</strong> button on Quality Order pages</label>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label" for="m-subject">Subject *</label>
+            <input name="Subject" id="m-subject" class="form-control" value="@Model.Subject" required />
+        </div>
+        <div class="mb-3">
+            <label class="form-label" for="m-body">Body *</label>
+            <textarea name="Body" id="m-body" class="form-control" rows="10" required>@Model.Body</textarea>
+            <div class="form-text">Plain text. Newlines preserved. HTML is not rendered to the supplier.</div>
+        </div>
+    </div>
+    <div class="card-footer text-end">
+        <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>Save template</button>
+    </div>
+</form>

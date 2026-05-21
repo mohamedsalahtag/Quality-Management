@@ -1,0 +1,484 @@
+@using SharbatlyQMS.Web.Models
+@model IReadOnlyList<User>
+@{
+    ViewData["Title"] = "Users";
+    var search = ViewBag.Search as string;
+    var roleFilter = ViewBag.Role as string;
+    var status = ViewBag.Status as string;
+    var adConfigured = (bool?)ViewBag.AdConfigured ?? false;
+    var currentUserId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h1 class="h3 mb-0"><i class="bi bi-people me-1"></i>Users</h1>
+    @if (adConfigured)
+    {
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#adPickerModal">
+            <i class="bi bi-person-plus me-1"></i>Add user from AD
+        </button>
+    }
+    else
+    {
+        <span>
+            <button type="button" class="btn btn-primary" disabled
+                    title="Configure Active Directory in Site Configuration first">
+                <i class="bi bi-person-plus me-1"></i>Add user from AD
+            </button>
+            <a asp-action="Settings" asp-route-activeTab="ad" class="small ms-2">
+                <i class="bi bi-gear me-1"></i>Configure AD
+            </a>
+        </span>
+    }
+</div>
+
+<form method="get" class="row g-2 mb-3">
+    <div class="col-md-4">
+        <input type="text" name="search" value="@search" class="form-control" placeholder="Search name, username, email..." />
+    </div>
+    <div class="col-md-3">
+        <select name="role" class="form-select">
+            <option value="">All roles</option>
+            @foreach (var r in UserRoles.All)
+            {
+                <option value="@r" selected="@(r == roleFilter)">@r</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-3">
+        <select name="status" class="form-select">
+            <option value="">All statuses</option>
+            <option value="active"   selected="@(status == "active")">Active</option>
+            <option value="disabled" selected="@(status == "disabled")">Disabled</option>
+        </select>
+    </div>
+    <div class="col-md-2">
+        <button type="submit" class="btn btn-outline-secondary w-100">Filter</button>
+    </div>
+</form>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover mb-0 align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:1%">
+                        <input type="checkbox" id="selectAll" class="form-check-input" title="Select all" />
+                    </th>
+                    <th>Full name</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Department</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (!Model.Any())
+                {
+                    <tr><td colspan="8" class="text-center text-muted py-4">No users match the filters.</td></tr>
+                }
+                else
+                {
+                    foreach (var u in Model)
+                    {
+                        <tr data-user-id="@u.UserId">
+                            <td>
+                                @if (u.UserId != currentUserId)
+                                {
+                                    <input type="checkbox" class="form-check-input row-select" value="@u.UserId" />
+                                }
+                            </td>
+                            <td>@u.FullName</td>
+                            <td><code>@u.Username</code></td>
+                            <td>@u.Email</td>
+                            <td>@u.Department</td>
+                            <td>
+                                @{
+                                    var roleBadge = u.Role switch
+                                    {
+                                        UserRoles.SiteAdmin    => "danger",
+                                        UserRoles.Manager      => "primary",
+                                        UserRoles.ClaimManager => "warning text-dark",
+                                        UserRoles.Operator     => "info",
+                                        UserRoles.Viewer       => "secondary",
+                                        _                      => "light text-dark"
+                                    };
+                                }
+                                <span class="badge bg-@roleBadge">@u.Role</span>
+                            </td>
+                            <td>
+                                @if (u.IsActive)
+                                {
+                                    <span class="badge bg-success">Active</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Disabled</span>
+                                }
+                            </td>
+                            <td class="text-end">
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        data-bs-toggle="modal" data-bs-target="#editUserModal"
+                                        data-user-id="@u.UserId" data-username="@u.Username"
+                                        data-fullname="@u.FullName" data-email="@u.Email"
+                                        data-department="@u.Department" data-employeeid="@u.EmployeeId"
+                                        data-role="@u.Role">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                @if (!string.IsNullOrEmpty(u.PasswordHash))
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-warning"
+                                            data-bs-toggle="modal" data-bs-target="#resetPasswordModal"
+                                            data-user-id="@u.UserId" data-username="@u.Username"
+                                            title="Reset local password">
+                                        <i class="bi bi-key"></i>
+                                    </button>
+                                }
+                                else
+                                {
+                                    <span class="btn btn-sm btn-outline-secondary disabled"
+                                          title="Passwords for AD users are managed in Active Directory">
+                                        <i class="bi bi-shield-lock"></i>
+                                    </span>
+                                }
+                                @if (u.UserId != currentUserId)
+                                {
+                                    <form asp-action="ToggleActive" method="post" class="d-inline">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="userId" value="@u.UserId" />
+                                        <button type="submit" class="btn btn-sm btn-outline-@(u.IsActive ? "secondary" : "success")"
+                                                title="@(u.IsActive ? "Disable" : "Enable")">
+                                            <i class="bi bi-@(u.IsActive ? "person-x" : "person-check")"></i>
+                                        </button>
+                                    </form>
+                                    <form asp-action="DeleteUser" method="post" class="d-inline"
+                                          onsubmit="return confirm('Delete @u.Username? This cannot be undone.');">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="userId" value="@u.UserId" />
+                                        <button type="submit" class="btn btn-sm btn-outline-danger">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@* ---- AD picker modal: search + per-row role select + Add ---- *@
+<div class="modal fade" id="adPickerModal" tabindex="-1">
+    <div class="modal-dialog modal-xl modal-fullscreen-lg-down modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">
+                    <i class="bi bi-person-plus me-1"></i>Add user from Active Directory
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="d-flex gap-2 mb-3 align-items-center">
+                    <div class="input-group input-group-sm" style="max-width:420px;">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input type="text" id="adFilter" class="form-control"
+                               placeholder="Search domain by name, username, or email…" autofocus />
+                    </div>
+                    <span id="adPickerStatus" class="text-muted small ms-auto"></span>
+                </div>
+                <div class="table-responsive ad-picker-scroll">
+                    <table class="table table-sm table-hover align-middle mb-0 ad-picker-table">
+                        <thead class="table-light sticky-top">
+                            <tr>
+                                <th>Username</th>
+                                <th>Full name</th>
+                                <th>Email</th>
+                                <th>Department</th>
+                                <th style="width:160px">Role</th>
+                                <th class="text-end ad-picker-action" style="width:140px"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="adPickerTbody">
+                            <tr><td colspan="6" class="text-center text-muted py-3">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+    .ad-picker-scroll { max-height: 60vh; overflow: auto; }
+    .ad-picker-table td, .ad-picker-table th { vertical-align: middle; }
+    .ad-picker-table td:nth-child(3), .ad-picker-table td:nth-child(4) {
+        max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .ad-picker-table td:last-child, .ad-picker-table th:last-child {
+        position: sticky; right: 0; background: var(--bs-body-bg, #fff); white-space: nowrap;
+        box-shadow: -6px 0 6px -6px rgba(0,0,0,.08);
+    }
+    .ad-picker-table thead th:last-child { z-index: 3; }
+</style>
+
+@* Per-row Add form lives outside the modal so a single antiforgery token
+   can be reused. The picker JS clones this hidden template for each row. *@
+<form id="adAddTemplate" asp-action="CreateUser" method="post" class="d-none">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="username" />
+    <input type="hidden" name="role" />
+</form>
+
+@* ---- Edit user modal ---- *@
+<div class="modal fade" id="editUserModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form asp-action="EditUser" method="post" class="modal-content">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="userId" id="edit-userId" />
+            <div class="modal-header"><h5 class="modal-title">Edit user <code id="edit-username"></code></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="row g-2">
+                    <div class="col-md-6"><label class="form-label">Employee ID</label>
+                        <input name="employeeId" id="edit-employeeId" class="form-control" /></div>
+                    <div class="col-md-6"><label class="form-label">Role</label>
+                        <select name="role" id="edit-role" class="form-select">
+                            @foreach (var r in UserRoles.All) { <option value="@r">@r</option> }
+                        </select></div>
+                    <div class="col-12"><label class="form-label">Full name</label>
+                        <input name="fullName" id="edit-fullName" class="form-control" required /></div>
+                    <div class="col-md-6"><label class="form-label">Email</label>
+                        <input name="email" id="edit-email" type="email" class="form-control" /></div>
+                    <div class="col-md-6"><label class="form-label">Department</label>
+                        <input name="department" id="edit-department" class="form-control" /></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@* ---- Bulk-delete floating action bar ---- *@
+<form asp-action="BulkDeleteUsers" method="post" id="bulkDeleteForm"
+      class="position-fixed bottom-0 end-0 m-3 shadow-lg rounded bg-white border p-3 d-none"
+      style="z-index:1080; min-width: 260px;"
+      onsubmit="return confirm('Delete the ' + (document.querySelectorAll('.row-select:checked').length) + ' selected user(s)? Disabled or system-referenced rows will be skipped automatically.');">
+    @Html.AntiForgeryToken()
+    <div class="d-flex align-items-center gap-2">
+        <i class="bi bi-check2-square text-primary fs-5"></i>
+        <span class="small"><strong id="bulkCount">0</strong> selected</span>
+        <button type="submit" class="btn btn-sm btn-danger ms-auto">
+            <i class="bi bi-trash me-1"></i>Delete selected
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="bulkClear" title="Clear selection">
+            <i class="bi bi-x"></i>
+        </button>
+    </div>
+    <div id="bulkHiddenInputs"></div>
+</form>
+
+@* ---- Reset password modal ---- *@
+<div class="modal fade" id="resetPasswordModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form asp-action="ResetPassword" method="post" class="modal-content">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="userId" id="rp-userId" />
+            <div class="modal-header"><h5 class="modal-title">Reset password for <code id="rp-username"></code></h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <label class="form-label">New password (min 6 chars)</label>
+                <input name="newPassword" type="text" class="form-control" required minlength="6" />
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-warning">Reset</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+    <script>
+        document.getElementById('editUserModal').addEventListener('show.bs.modal', function (e) {
+            var b = e.relatedTarget;
+            document.getElementById('edit-userId').value     = b.dataset.userId;
+            document.getElementById('edit-username').textContent = b.dataset.username;
+            document.getElementById('edit-fullName').value   = b.dataset.fullname;
+            document.getElementById('edit-email').value      = b.dataset.email || '';
+            document.getElementById('edit-department').value = b.dataset.department || '';
+            document.getElementById('edit-employeeId').value = b.dataset.employeeid || '';
+            document.getElementById('edit-role').value       = b.dataset.role;
+        });
+        document.getElementById('resetPasswordModal').addEventListener('show.bs.modal', function (e) {
+            var b = e.relatedTarget;
+            document.getElementById('rp-userId').value = b.dataset.userId;
+            document.getElementById('rp-username').textContent = b.dataset.username;
+        });
+
+        // Bulk-select wiring: row checkboxes drive the floating action bar.
+        (function () {
+            var rowBoxes  = document.querySelectorAll('.row-select');
+            var selectAll = document.getElementById('selectAll');
+            var bar       = document.getElementById('bulkDeleteForm');
+            var countEl   = document.getElementById('bulkCount');
+            var hidden    = document.getElementById('bulkHiddenInputs');
+            var clearBtn  = document.getElementById('bulkClear');
+
+            function refresh() {
+                var picked = Array.from(rowBoxes).filter(function (b) { return b.checked; });
+                countEl.textContent = picked.length;
+                if (picked.length === 0) { bar.classList.add('d-none'); return; }
+                bar.classList.remove('d-none');
+                // Rebuild hidden inputs each tick so the POST always matches the UI.
+                hidden.innerHTML = '';
+                picked.forEach(function (b) {
+                    var h = document.createElement('input');
+                    h.type = 'hidden'; h.name = 'userIds'; h.value = b.value;
+                    hidden.appendChild(h);
+                });
+            }
+            rowBoxes.forEach(function (b) { b.addEventListener('change', refresh); });
+            if (selectAll) {
+                selectAll.addEventListener('change', function () {
+                    rowBoxes.forEach(function (b) { b.checked = selectAll.checked; });
+                    refresh();
+                });
+            }
+            clearBtn.addEventListener('click', function () {
+                rowBoxes.forEach(function (b) { b.checked = false; });
+                if (selectAll) selectAll.checked = false;
+                refresh();
+            });
+        })();
+
+        // ---- AD picker: one server fetch on modal open, then filter client-side.
+        //       Each keystroke is just a JS filter -- no round-trip per keystroke.
+        (function () {
+            var modal   = document.getElementById('adPickerModal');
+            if (!modal) return;
+            var filter  = document.getElementById('adFilter');
+            var tbody   = document.getElementById('adPickerTbody');
+            var status  = document.getElementById('adPickerStatus');
+            var roleOpts = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(UserRoles.All));
+            var defaultRole = '@UserRoles.Viewer';
+            var allUsers = null;     // cached server response
+            var renderTimer = null;
+
+            function escapeHtml(s) {
+                return (s || '').replace(/[&<>"']/g, function (c) {
+                    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+                });
+            }
+
+            function applyFilter(q) {
+                if (!allUsers) return [];
+                if (!q) return allUsers;
+                var lc = q.toLowerCase();
+                return allUsers.filter(function (u) {
+                    return (u.username || '').toLowerCase().indexOf(lc) >= 0
+                        || (u.fullName || '').toLowerCase().indexOf(lc) >= 0
+                        || (u.email    || '').toLowerCase().indexOf(lc) >= 0
+                        || (u.department || '').toLowerCase().indexOf(lc) >= 0;
+                });
+            }
+
+            function render() {
+                var rows = applyFilter(filter.value.trim());
+                if (!rows || rows.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3">No AD users match.</td></tr>';
+                    status.textContent = allUsers ? (allUsers.length + ' total') : '';
+                    return;
+                }
+                var roleOptionsHtml = roleOpts.map(function (r) {
+                    return '<option value="' + r + '"' + (r === defaultRole ? ' selected' : '') + '>' + r + '</option>';
+                }).join('');
+                // Cap visible rows at 1000 so the DOM stays snappy on huge
+                // tenants. Status line surfaces total + capped count so users
+                // know to narrow with the search box if their target is beyond
+                // the cap.
+                var DOM_CAP = 1000;
+                var capped = rows.length > DOM_CAP;
+                var sliced = capped ? rows.slice(0, DOM_CAP) : rows;
+                tbody.innerHTML = sliced.map(function (u) {
+                    if (u.alreadyAdded) {
+                        return '<tr class="text-muted"><td><code>' + escapeHtml(u.username) + '</code></td>' +
+                            '<td>' + escapeHtml(u.fullName) + '</td>' +
+                            '<td>' + escapeHtml(u.email) + '</td>' +
+                            '<td>' + escapeHtml(u.department) + '</td>' +
+                            '<td colspan="2" class="text-end"><span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-check2 me-1"></i>Already added</span></td></tr>';
+                    }
+                    return '<tr>' +
+                        '<td><code>' + escapeHtml(u.username) + '</code></td>' +
+                        '<td>' + escapeHtml(u.fullName) + '</td>' +
+                        '<td>' + escapeHtml(u.email) + '</td>' +
+                        '<td>' + escapeHtml(u.department) + '</td>' +
+                        '<td><select class="form-select form-select-sm role-pick">' + roleOptionsHtml + '</select></td>' +
+                        '<td class="text-end">' +
+                            '<button type="button" class="btn btn-sm btn-success ad-add-btn" ' +
+                                    'data-username="' + escapeHtml(u.username) + '">' +
+                                '<i class="bi bi-plus-circle me-1"></i>Add' +
+                            '</button>' +
+                        '</td></tr>';
+                }).join('');
+                status.textContent = rows.length + ' match' + (rows.length === 1 ? '' : 'es')
+                    + (capped ? ' (showing first ' + DOM_CAP + ' — refine the search to see more)' : '')
+                    + ' of ' + (allUsers ? allUsers.length : 0);
+            }
+
+            async function loadOnce() {
+                if (allUsers !== null) { render(); return; }
+                status.textContent = 'Loading from Active Directory…';
+                tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm me-1"></span>Loading from Active Directory…</td></tr>';
+                try {
+                    var res = await fetch('@Url.Action("BrowseAdUsersAjax", "Admin")', {
+                        credentials: 'same-origin',
+                        headers: { 'Accept': 'application/json' }
+                    });
+                    var data = await res.json();
+                    if (!data.ok) {
+                        tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-3">' + escapeHtml(data.error || 'Failed to load AD users.') + '</td></tr>';
+                        status.textContent = '';
+                        return;
+                    }
+                    allUsers = data.users || [];
+                    render();
+                } catch (e) {
+                    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-danger py-3">Request failed: ' + escapeHtml(e.message) + '</td></tr>';
+                    status.textContent = '';
+                }
+            }
+
+            modal.addEventListener('show.bs.modal', function () { loadOnce(); });
+            filter.addEventListener('input', function () {
+                // No round-trip -- just re-render in memory. Tiny debounce keeps
+                // typing smooth on huge AD lists.
+                clearTimeout(renderTimer);
+                renderTimer = setTimeout(render, 60);
+            });
+
+            // Per-row Add: clone the hidden form, fill username + chosen role,
+            // submit. Server response carries a TempData flash on the redirect.
+            tbody.addEventListener('click', function (ev) {
+                var btn = ev.target.closest('.ad-add-btn');
+                if (!btn) return;
+                var row = btn.closest('tr');
+                var role = row.querySelector('.role-pick').value;
+                var tmpl = document.getElementById('adAddTemplate');
+                tmpl.querySelector('input[name="username"]').value = btn.dataset.username;
+                tmpl.querySelector('input[name="role"]').value     = role;
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Adding…';
+                tmpl.submit();
+            });
+        })();
+    </script>
+}

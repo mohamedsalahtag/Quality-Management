@@ -1,0 +1,32 @@
+@*
+    Renders either the user's profile picture (when ProfilePicture claim is
+    set) or a circular initials badge. Size (px) can be overridden via
+    ViewData["Size"]. Used by the nav and the profile page.
+*@
+@{
+    var size = (int?)ViewData["Size"] ?? 32;
+    var pic = User?.FindFirst("ProfilePicture")?.Value;
+    var name = User?.FindFirst(System.Security.Claims.ClaimTypes.GivenName)?.Value
+            ?? User?.Identity?.Name
+            ?? "?";
+    string initials;
+    var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+    if (parts.Length >= 2)
+        initials = $"{parts[0][0]}{parts[1][0]}".ToUpperInvariant();
+    else
+        initials = name.Length > 0 ? name[0].ToString().ToUpperInvariant() : "?";
+
+    var style = $"width:{size}px;height:{size}px;font-size:{Math.Max(10, size / 2)}px;";
+}
+@if (!string.IsNullOrWhiteSpace(pic))
+{
+    <img src="@pic" alt="@name"
+         class="rounded-circle border bg-light"
+         style="@style object-fit:cover;" />
+}
+else
+{
+    <span class="rounded-circle bg-light text-secondary border d-inline-flex align-items-center justify-content-center fw-semibold"
+          style="@style"
+          title="@name">@initials</span>
+}

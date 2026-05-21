@@ -1,0 +1,242 @@
+@using SharbatlyQMS.Web.Services.Sap
+@model IReadOnlyList<SapShipmentRow>
+@{
+    ViewData["Title"] = "Search SAP";
+    var container = ViewBag.Container as string;
+    var bol       = ViewBag.Bol as string;
+    var po        = ViewBag.Po as string;
+    var material  = ViewBag.Material as string;
+    var ambiguous = (bool)(ViewBag.Ambiguous ?? false);
+    var bolOptions = ViewBag.BolOptions as List<string> ?? new List<string>();
+    bool searched = !string.IsNullOrWhiteSpace(container) || !string.IsNullOrWhiteSpace(bol)
+                    || !string.IsNullOrWhiteSpace(po)     || !string.IsNullOrWhiteSpace(material);
+
+    // Group SAP rows by container + BOL -- each group is one container shipment
+    // and corresponds to exactly one arrival. The PO lines inside the group
+    // become arrival items automatically.
+    var shipments = Model
+        .GroupBy(r => new { r.ContainerNo, r.BolNo })
+        .Select(g => new {
+            g.Key.ContainerNo,
+            g.Key.BolNo,
+            Header = g.First(),
+            Lines  = g.ToList()
+        })
+        .ToList();
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0"><i class="bi bi-search me-1"></i>Search SAP shipment</h1>
+    <a asp-action="Index" class="btn btn-outline-secondary">
+        <i class="bi bi-arrow-left me-1"></i>Back to arrivals
+    </a>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="get" class="row g-2">
+            <div class="col-md-3">
+                <label class="form-label">Container number</label>
+                <input name="container" value="@container" class="form-control" placeholder="e.g. CMAU1234567" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">BOL number</label>
+                <input name="bol" value="@bol" class="form-control" placeholder="e.g. MSCUAB1234" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">PO (EBELN)</label>
+                <input name="po" value="@po" class="form-control" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label">Material</label>
+                <input name="material" value="@material" class="form-control" />
+            </div>
+            <div class="col-12 d-flex justify-content-end">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-search me-1"></i>Search SAP
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@{
+    var sapError = ViewBag.SapError as string;
+    // TempData round-trips primitives via cookies; we stashed the arrival id as
+    // a string in the controller because Int64 isn't a supported TempData type.
+    long? dupArrivalId = long.TryParse(TempData["DuplicateArrivalId"] as string, out var _dupId) ? _dupId : (long?)null;
+    var dupArrivalNo   = TempData["DuplicateArrivalNo"]   as string;
+    var dupContainerNo = TempData["DuplicateContainerNo"] as string;
+    var dupBolNo       = TempData["DuplicateBolNo"]       as string;
+    var dupStatus      = TempData["DuplicateStatus"]      as string;
+}
+
+@if (dupArrivalId.HasValue)
+{
+    <div class="modal fade" id="dupArrivalModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header bg-warning">
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Arrival already exists</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p>An arrival has already been created for this container shipment:</p>
+                    <dl class="row mb-3">
+                        <dt class="col-4">Container</dt><dd class="col-8"><code>@dupContainerNo</code></dd>
+                        <dt class="col-4">BOL</dt>      <dd class="col-8">@dupBolNo</dd>
+                        <dt class="col-4">Arrival #</dt><dd class="col-8"><strong>@dupArrivalNo</strong></dd>
+                        <dt class="col-4">Status</dt>   <dd class="col-8">
+                            @{ var (sc, sl) = dupStatus switch {
+                                "Draft"     => ("warning", "Draft"),
+                                "Completed" => ("success", "Completed"),
+                                "Cancelled" => ("secondary", "Cancelled"),
+                                _           => ("secondary", dupStatus ?? "—") }; }
+                            <span class="badge bg-@sc">@sl</span>
+                        </dd>
+                    </dl>
+                    <p class="small text-muted mb-0">
+                        Only one arrival is allowed per container &times; BOL pair. To create a different arrival,
+                        first delete the existing one (Admin only) or pick a different container/BOL combination.
+                    </p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <a asp-action="Details" asp-route-id="@dupArrivalId" class="btn btn-primary">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>Open existing arrival
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script>
+        // Auto-show the duplicate-arrival popup as soon as the page lands here.
+        document.addEventListener('DOMContentLoaded', function () {
+            new bootstrap.Modal(document.getElementById('dupArrivalModal')).show();
+        });
+    </script>
+}
+@if (!string.IsNullOrEmpty(sapError))
+{
+    <div class="alert alert-danger">
+        <i class="bi bi-x-circle me-1"></i>
+        <strong>SAP search failed.</strong>
+        <pre class="mb-0 small mt-2" style="white-space:pre-wrap">@sapError</pre>
+        <div class="small mt-2 text-muted">
+            Verify the Container Search URL, credentials, and entity-set name on the
+            <a asp-controller="Admin" asp-action="Settings" asp-route-activeTab="sap">Site Configuration</a> page.
+            Use the <em>Test</em> and <em>Preview</em> buttons on that page to validate connectivity.
+        </div>
+    </div>
+}
+
+@if (ambiguous)
+{
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        <strong>Container ambiguous.</strong> This container number appears under multiple BOLs.
+        Pick one to narrow the result and avoid inspecting the wrong shipment:
+        <div class="mt-2">
+            @foreach (var b in bolOptions)
+            {
+                <a class="btn btn-sm btn-outline-warning me-1"
+                   asp-action="Search" asp-route-container="@container" asp-route-bol="@b">@b</a>
+            }
+        </div>
+    </div>
+}
+
+@if (searched)
+{
+    @if (!shipments.Any())
+    {
+        <div class="alert alert-info">
+            <i class="bi bi-info-circle me-1"></i>
+            No matching SAP shipments. Adjust the filters and try again.
+        </div>
+    }
+    else
+    {
+        <p class="text-muted small mb-3">
+            <i class="bi bi-info-circle me-1"></i>@shipments.Count container shipment(s) found.
+            Click <em>Create arrival</em> on any one &mdash; all PO line items for that container will be included automatically.
+        </p>
+
+        @foreach (var s in shipments)
+        {
+            <div class="card mb-3">
+                <div class="card-header d-flex justify-content-between align-items-center bg-light">
+                    <div>
+                        <i class="bi bi-truck text-primary me-1"></i>
+                        Container <code class="ms-1">@s.ContainerNo</code>
+                        <span class="text-muted mx-2">|</span>
+                        BOL <strong>@s.BolNo</strong>
+                        <span class="text-muted mx-2">|</span>
+                        @s.Header.VendorName
+                    </div>
+                    <form asp-action="Create" method="post" class="m-0">
+                        @Html.AntiForgeryToken()
+                        <input type="hidden" name="containerNo" value="@s.ContainerNo" />
+                        <input type="hidden" name="bolNo"       value="@s.BolNo" />
+                        <button type="submit" class="btn btn-success btn-sm">
+                            <i class="bi bi-plus-circle me-1"></i>Create arrival
+                        </button>
+                    </form>
+                </div>
+                <div class="card-body py-2">
+                    <div class="row small">
+                        <div class="col-md-3"><span class="text-muted">Vessel:</span> @s.Header.VesselName</div>
+                        <div class="col-md-2"><span class="text-muted">Voyage:</span> @s.Header.VoyageNumber</div>
+                        <div class="col-md-3"><span class="text-muted">Loading:</span> @s.Header.LoadingPort, @s.Header.LoadingCountry</div>
+                        <div class="col-md-2"><span class="text-muted">Sailing:</span> @s.Header.SailingDate</div>
+                        <div class="col-md-2"><span class="text-muted">Arrival:</span> @s.Header.ArrivalDate</div>
+                    </div>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>PO / Item</th>
+                                <th>Material</th>
+                                <th>Description</th>
+                                <th>Origin</th>
+                                <th>Variety</th>
+                                <th>Material group</th>
+                                <th class="text-end">Qty</th>
+                                <th>UoM</th>
+                                <th>Plant / Storage</th>
+                                <th>Batch</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in s.Lines)
+                            {
+                                <tr>
+                                    <td>@r.Ebeln / @r.Ebelp</td>
+                                    <td><code>@r.MaterialNo</code></td>
+                                    <td>@r.MaterialDesc</td>
+                                    <td>@r.Origin</td>
+                                    <td>@r.Variety</td>
+                                    <td>@r.MaterialGroup &mdash; @r.MaterialGroupDesc</td>
+                                    <td class="text-end">@r.Quantity.ToString("N0")</td>
+                                    <td>@r.Uom</td>
+                                    <td>@r.Plant / @r.StorageLocation</td>
+                                    <td>@r.BatchNo</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+    }
+}
+else
+{
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle me-1"></i>
+        Enter a container, BOL, PO, or material number to query SAP.
+        The current implementation uses an in-memory stub with sample shipments &mdash;
+        try <code>CMAU1234567</code> to see container ambiguity in action.
+    </div>
+}

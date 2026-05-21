@@ -1,0 +1,88 @@
+@*
+  Site Configuration -- SMTP UI fragment.
+  Drop into your existing Site Configuration view (or use it as the basis
+  for an Email tab). Note the password field rules:
+   - Type=password, autocomplete=new-password (browser shouldn't fill).
+   - Placeholder shows "saved -- leave blank to keep" when ViewBag.SmtpPasswordSaved.
+   - Saved on the server only when the posted value is non-empty.
+*@
+@model SiteConfigViewModel
+
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-transparent fw-semibold pt-3 border-0">
+        <i class="bi bi-envelope me-2 text-primary"></i>SMTP Settings
+        <span class="badge bg-success ms-2 small">SendGrid Ready</span>
+    </div>
+    <div class="card-body">
+        <div class="alert alert-info border-0 small py-2 mb-3">
+            <i class="bi bi-info-circle me-1"></i>
+            <b>SendGrid:</b> Host <code>smtp.sendgrid.net</code> &middot;
+            Port <code>587</code> &middot;
+            User <code>apikey</code> &middot;
+            Password = your API key starting with <code>SG.</code>
+        </div>
+
+        <div class="row g-3 mb-3">
+            <div class="col-8">
+                <label class="form-label fw-semibold">SMTP Host</label>
+                <input asp-for="SmtpHost" class="form-control" placeholder="smtp.sendgrid.net" />
+            </div>
+            <div class="col-4">
+                <label class="form-label fw-semibold">Port</label>
+                <input asp-for="SmtpPort" class="form-control" placeholder="587" />
+            </div>
+        </div>
+
+        <div class="form-check mb-3">
+            <input asp-for="SmtpEnableSsl" class="form-check-input" type="checkbox" />
+            <label asp-for="SmtpEnableSsl" class="form-check-label">Enable SSL/TLS (StartTLS)</label>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-semibold">SMTP Username</label>
+            <input asp-for="SmtpUser" class="form-control" placeholder="apikey" autocomplete="off" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-semibold d-flex justify-content-between">
+                <span>SMTP Password / API Key</span>
+                @if (ViewBag.SmtpPasswordSaved == true)
+                {
+                    <span class="text-success fw-normal small">
+                        <i class="bi bi-check-circle-fill me-1"></i>Saved -- leave blank to keep
+                    </span>
+                }
+            </label>
+            <input asp-for="SmtpPassword" class="form-control" type="password"
+                   placeholder="@(ViewBag.SmtpPasswordSaved == true ? "(saved -- leave blank to keep)" : "SG.xxxx...")"
+                   autocomplete="new-password" />
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-semibold">From Email Address</label>
+            <input asp-for="SmtpFromEmail" class="form-control" placeholder="helpdesk@company.com" />
+            <div class="form-text">Must be a verified sender in SendGrid</div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-semibold">General Ticket Inbox</label>
+            <input asp-for="GeneralTicketEmail" class="form-control" placeholder="it-tickets@company.com" />
+            <div class="form-text">All new tickets are CC'd to this address (skipped if blank)</div>
+        </div>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-3">
+    <div class="card-header bg-transparent fw-semibold pt-3 border-0">
+        <i class="bi bi-send me-2 text-success"></i>Test Email
+    </div>
+    <div class="card-body">
+        <p class="small text-muted mb-3">
+            Send a test email to verify your SMTP settings are working correctly.
+        </p>
+        <a href="/Admin/TestEmail?to=@(ViewBag.TestEmailTo ?? "your@email.com")"
+           target="_blank" class="btn btn-outline-success w-100">
+            <i class="bi bi-envelope-check me-2"></i>Send Test Email
+        </a>
+    </div>
+</div>

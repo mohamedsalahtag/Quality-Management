@@ -1,0 +1,279 @@
+@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.ViewModels
+@model SampleFormVm
+@{
+    var s             = Model.Sample;
+    var qo            = Model.Qo;
+    var qoMat         = Model.QoMaterial;
+    var readingTypes  = Model.ReadingTypes;
+    var defects       = Model.Defects;
+    var sectionMap    = Model.SectionMap;
+    var existingReads = Model.ExistingReadings;
+    var existingDefs  = Model.ExistingDefects;
+    var editable      = Model.Editable;
+
+    decimal? RnumOf(string code) => existingReads.FirstOrDefault(x => x.ReadingTypeCode == code)?.NumericValue;
+    string   RtxOf(string code)  => existingReads.FirstOrDefault(x => x.ReadingTypeCode == code)?.TextValue ?? "";
+    decimal? DvalOf(int id) => existingDefs.FirstOrDefault(x => x.DefectId == id)?.DefectValue;
+    decimal? DpctOf(int id) => existingDefs.FirstOrDefault(x => x.DefectId == id)?.DefectPercentage;
+
+    // Major/Critical share the red "Major" panel; everything else lands in
+    // the warning Minor panel. The split is now driven by the defect's own
+    // category column on qms_defect_catalog (admins control it on the
+    // Defect Catalog page) -- no separate junction lookup.
+    bool IsMajor(DefectCatalogEntry d) =>
+        string.Equals(d.DefectCategory, "Major",    StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(d.DefectCategory, "Critical", StringComparison.OrdinalIgnoreCase);
+
+    var majorDefects = defects.Where(IsMajor).ToList();
+    var minorDefects = defects.Where(d => !IsMajor(d)).ToList();
+
+    var headerSubtitle = qoMat != null
+        ? $"#{(s.SampleId == 0 ? "new" : s.SampleNo.ToString())} — {qoMat.MaterialNo} {qoMat.MaterialDesc}"
+        : (s.SampleId == 0 ? "New sample" : $"Sample #{s.SampleNo}");
+}
+
+<style>
+    /* Compact, tablet-friendly sample form: tighter cards, smaller paddings,
+       4-col grid even on md so the form stays short. */
+    .sample-form .card-header { padding: .25rem .5rem; font-size: .85rem; }
+    .sample-form .card-body   { padding: .5rem; }
+    .sample-form .form-label  { margin-bottom: .15rem; font-size: .75rem; color: #6c757d; }
+    .sample-form .form-control-sm, .sample-form .form-select-sm { font-size: .82rem; padding: .2rem .4rem; }
+    .sample-form .section-label {
+        font-size: .7rem; letter-spacing: .06em; text-transform: uppercase;
+        font-weight: 600; color: #6c757d; margin: .4rem 0 .25rem;
+        border-left: 3px solid #6c757d; padding-left: .4rem;
+    }
+    .sample-form .section-label.major { color: #b02a37; border-left-color: #b02a37; }
+    .sample-form .section-label.minor { color: #997404; border-left-color: #ffc107; }
+    /* Defect stepper: chunky tap targets for tablet. */
+    .defect-stepper { display: flex; align-items: center; gap: .15rem; }
+    .defect-stepper .btn-step {
+        min-width: 36px; min-height: 36px;
+        padding: 0; font-size: 1.1rem; font-weight: 700;
+        line-height: 1;
+    }
+    /* On touch devices (tablets / phones) bump the stepper to the WCAG
+       recommended 44x44px minimum so warehouse staff don't mis-tap. */
+    @@media (hover: none) and (pointer: coarse) {
+        .defect-stepper .btn-step {
+            min-width: 44px; min-height: 44px;
+            font-size: 1.25rem;
+        }
+        .defect-stepper .defect-value {
+            min-height: 44px;
+        }
+    }
+    .defect-stepper .defect-value {
+        width: 60px; text-align: center;
+        font-size: .95rem; padding: .25rem;
+    }
+    .defect-row { padding: .2rem .35rem; border-bottom: 1px solid #f0f0f0; }
+    .defect-row:hover { background: #fafbfc; }
+    .defect-name { font-size: .82rem; }
+    .defect-pct-badge { min-width: 48px; text-align: center; font-variant-numeric: tabular-nums; }
+    /* Mandatory readings: highlight the input while empty so the operator
+       sees what's still to fill. Loses the highlight on first keystroke. */
+    .sample-form .is-mandatory-reading:invalid {
+        border-color: #dc3545;
+        background-color: #fff5f5;
+    }
+</style>
+
+@if (!editable)
+{
+    <div class="alert alert-info small mb-2 py-2"><i class="bi bi-lock me-1"></i>Read-only because the Quality Order is <strong>@qo.StatusCode</strong>.</div>
+}
+
+@* data-material-size carries the QO line size (which may include units like
+   "18 KG CF") so JS can attempt to auto-fill SampleSize on a brand-new
+   sample. data-is-new flags the create case so we only auto-fill on a new
+   sample, never overwriting a saved value. *@
+<form asp-action="SaveSample" method="post" class="sample-form"
+      data-material-size="@(qoMat?.MaterialSize ?? "")"
+      data-is-new="@(s.SampleId == 0 ? "true" : "false")">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="SampleId"       value="@s.SampleId" />
+    <input type="hidden" name="QualityOrderId" value="@s.QualityOrderId" />
+    <input type="hidden" name="QoMaterialId"   value="@s.QoMaterialId" />
+    <fieldset @(editable ? "" : "disabled")>
+
+        <div class="card mb-2">
+            <div class="card-header bg-primary text-white">Sample header</div>
+            <div class="card-body">
+                <div class="row g-1">
+                    <div class="col-6 col-md-3"><label class="form-label">Grower</label>
+                        <input name="Grower" value="@s.Grower" class="form-control form-control-sm" /></div>
+                    <div class="col-6 col-md-3"><label class="form-label">Pallet</label>
+                        <input name="PalletNo" value="@s.PalletNo" class="form-control form-control-sm" /></div>
+                    <div class="col-6 col-md-3"><label class="form-label">Grower pallet</label>
+                        <input name="GrowerPallet" value="@s.GrowerPallet" class="form-control form-control-sm" /></div>
+                    <div class="col-6 col-md-3"><label class="form-label">Date code</label>
+                        <input name="DateCode" value="@s.DateCode" class="form-control form-control-sm" /></div>
+                    <div class="col-6 col-md-3"><label class="form-label">Pack code</label>
+                        <input name="PackCode" value="@s.PackCode" class="form-control form-control-sm" /></div>
+                    <div class="col-6 col-md-3"><label class="form-label">Lot</label>
+                        <input name="LotNo" value="@s.LotNo" class="form-control form-control-sm" /></div>
+                    <div class="col-6 col-md-3"><label class="form-label">Label</label>
+                        <input name="LabelValue" value="@s.LabelValue" class="form-control form-control-sm" /></div>
+                    <div class="col-6 col-md-3"><label class="form-label">Packaging mat.</label>
+                        <input name="PackagingMaterial" value="@s.PackagingMaterial" class="form-control form-control-sm" /></div>
+                    <div class="col-6 col-md-3"><label class="form-label">Carton count</label>
+                        <input name="CartonCount" value="@s.CartonCount" type="number" class="form-control form-control-sm" /></div>
+                    <div class="col-6 col-md-3"><label class="form-label">Carton ID</label>
+                        <input name="CartonIdentifier" value="@s.CartonIdentifier" class="form-control form-control-sm" /></div>
+                    <div class="col-6 col-md-3"><label class="form-label">Sample size</label>
+                        <input name="SampleSize" value="@s.SampleSize" type="number" inputmode="numeric" class="form-control form-control-sm" /></div>
+                    <div class="col-6 col-md-3"><label class="form-label">Sample scope</label>
+                        <select name="SampleScope" class="form-select form-select-sm">
+                            @foreach (var opt in new[] { ("OneCarton","One carton"),("MultiCarton","Multi carton"),("Pallet","Pallet"),("Lot","Lot") })
+                            {
+                                <option value="@opt.Item1" selected="@(s.SampleScope == opt.Item1)">@opt.Item2</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @* Readings: section label + dense inputs, no card chrome.
+           For a NEW sample, the GROSS_WEIGHT reading is pre-filled from the
+           material's weight pulled from MARA (qoMat.NetWeight) so the
+           operator doesn't retype the same number. Existing samples keep
+           whatever value was saved. *@
+        @{
+            var isNewSampleForm = s.SampleId == 0;
+            decimal? maraWeight = qoMat?.NetWeight;
+        }
+        <div class="section-label">Readings</div>
+        <div class="row g-1">
+            @foreach (var rt in readingTypes)
+            {
+                var stored = RnumOf(rt.ReadingTypeCode);
+                // Auto-fill rule: code "GROSS_WEIGHT" (or just "GROSS") on a
+                // new sample defaults to the material weight when no operator
+                // entry exists yet. Cast to the typed input value.
+                decimal? autoFill = null;
+                if (isNewSampleForm && stored == null && maraWeight.HasValue && maraWeight.Value > 0 &&
+                    (string.Equals(rt.ReadingTypeCode, "GROSS_WEIGHT", StringComparison.OrdinalIgnoreCase) ||
+                     string.Equals(rt.ReadingTypeCode, "GROSS", StringComparison.OrdinalIgnoreCase)))
+                {
+                    autoFill = maraWeight.Value;
+                }
+                var numValue = stored ?? autoFill;
+                <div class="col-6 col-md-3">
+                    <label class="form-label">
+                        @rt.ReadingName <span class="text-muted">@rt.DefaultUnit</span>
+                        @if (rt.IsMandatory)
+                        {
+                            <span class="text-danger fw-bold"
+                                  title="Required — sample cannot be saved without this value">*</span>
+                        }
+                    </label>
+                    @if (rt.ValueKind == "Numeric")
+                    {
+                        <input name="reading_@(rt.ReadingTypeCode)_num" type="number" step="any" inputmode="decimal"
+                               class="form-control form-control-sm @(rt.IsMandatory ? "is-mandatory-reading" : "")"
+                               value="@numValue" required="@(rt.IsMandatory)" />
+                    }
+                    else
+                    {
+                        <input name="reading_@(rt.ReadingTypeCode)_text"
+                               class="form-control form-control-sm @(rt.IsMandatory ? "is-mandatory-reading" : "")"
+                               value="@RtxOf(rt.ReadingTypeCode)" required="@(rt.IsMandatory)" />
+                    }
+                </div>
+            }
+            @if (readingTypes.Count == 0)
+            {
+                <div class="col-12"><div class="text-muted small">No reading types configured for this material group.</div></div>
+            }
+        </div>
+
+        @* Defects: stepper widget per row with live %-badge. Two columns
+           side-by-side on wide screens, stacked on tablet/phone. *@
+        <div class="row g-2 mt-2">
+            <div class="col-12 col-xxl-6">
+                <div class="section-label major"><i class="bi bi-exclamation-triangle me-1"></i>Major / Critical defects</div>
+                @foreach (var d in majorDefects)
+                {
+                    var v = DvalOf(d.DefectId);
+                    var p = DpctOf(d.DefectId);
+                    var isDecimal = string.Equals(d.ValueType, "Decimal", StringComparison.OrdinalIgnoreCase);
+                    // Default to "0" instead of empty so downstream math (sums,
+                    // averages) never sees nulls. Operator can type over it.
+                    var valDisplay = v.HasValue
+                        ? (isDecimal ? v.Value.ToString("0.###") : ((int)Math.Round(v.Value)).ToString())
+                        : "0";
+                    var pctDisplay = (p ?? 0m).ToString("0.##");
+                    <div class="defect-row d-flex align-items-center gap-2 defect-stepper"
+                         data-defect-id="@d.DefectId" data-value-type="@d.ValueType">
+                        <div class="flex-grow-1 defect-name">@d.DefectName</div>
+                        @if (editable)
+                        {
+                            <button type="button" class="btn btn-outline-secondary btn-step defect-minus" tabindex="-1">−</button>
+                        }
+                        <input name="defect_@(d.DefectId)_value" type="number"
+                               inputmode="@(isDecimal ? "decimal" : "numeric")"
+                               min="0" step="@(isDecimal ? "any" : "1")"
+                               class="form-control form-control-sm defect-value" data-id="@d.DefectId"
+                               value="@valDisplay" />
+                        @if (editable)
+                        {
+                            <button type="button" class="btn btn-outline-secondary btn-step defect-plus" tabindex="-1">+</button>
+                        }
+                        <span class="badge defect-pct-badge bg-light text-muted">@((p ?? 0m).ToString("0.#"))%</span>
+                        <input name="defect_@(d.DefectId)_pct" type="hidden" value="@pctDisplay" />
+                    </div>
+                }
+                @if (majorDefects.Count == 0) { <div class="text-muted small">No Major defects configured for this material group.</div> }
+            </div>
+            <div class="col-12 col-xxl-6">
+                <div class="section-label minor"><i class="bi bi-exclamation-circle me-1"></i>Minor defects</div>
+                @foreach (var d in minorDefects)
+                {
+                    var v = DvalOf(d.DefectId);
+                    var p = DpctOf(d.DefectId);
+                    var isDecimal = string.Equals(d.ValueType, "Decimal", StringComparison.OrdinalIgnoreCase);
+                    // Default to "0" instead of empty so downstream math (sums,
+                    // averages) never sees nulls. Operator can type over it.
+                    var valDisplay = v.HasValue
+                        ? (isDecimal ? v.Value.ToString("0.###") : ((int)Math.Round(v.Value)).ToString())
+                        : "0";
+                    var pctDisplay = (p ?? 0m).ToString("0.##");
+                    <div class="defect-row d-flex align-items-center gap-2 defect-stepper"
+                         data-defect-id="@d.DefectId" data-value-type="@d.ValueType">
+                        <div class="flex-grow-1 defect-name">@d.DefectName</div>
+                        @if (editable)
+                        {
+                            <button type="button" class="btn btn-outline-secondary btn-step defect-minus" tabindex="-1">−</button>
+                        }
+                        <input name="defect_@(d.DefectId)_value" type="number"
+                               inputmode="@(isDecimal ? "decimal" : "numeric")"
+                               min="0" step="@(isDecimal ? "any" : "1")"
+                               class="form-control form-control-sm defect-value" data-id="@d.DefectId"
+                               value="@valDisplay" />
+                        @if (editable)
+                        {
+                            <button type="button" class="btn btn-outline-secondary btn-step defect-plus" tabindex="-1">+</button>
+                        }
+                        <span class="badge defect-pct-badge bg-light text-muted">@((p ?? 0m).ToString("0.#"))%</span>
+                        <input name="defect_@(d.DefectId)_pct" type="hidden" value="@pctDisplay" />
+                    </div>
+                }
+                @if (minorDefects.Count == 0) { <div class="text-muted small">No Minor defects configured for this material group.</div> }
+            </div>
+        </div>
+
+        @if (editable)
+        {
+            <div class="position-sticky bottom-0 bg-white border-top mt-2 py-2 px-2 text-end"
+                 style="z-index: 5; box-shadow: 0 -2px 6px rgba(0,0,0,.06); margin-left:-1rem; margin-right:-1rem; padding-left:1rem !important; padding-right:1rem !important;">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-save me-1"></i>Save sample
+                </button>
+            </div>
+        }
+    </fieldset>
+</form>

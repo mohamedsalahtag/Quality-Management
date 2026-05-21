@@ -1,0 +1,8 @@
+How to apply it in a new project (same workflow as the other packs)
+
+Copy view-as-pack/ into the new project's repo.
+Open a fresh AI session for that project.
+Paste INSTALL_PROMPT.md as your first message.
+The AI reads SPEC.md, inventories your stack (cookie auth + antiforgery + roles enum), produces a plan listing the namespace / cookie name / admin role to plug in plus any preconditions to add first, then implements after you approve.
+
+Recommended companion: user-management-pack/ (provides the roles enumeration + cookie auth that view-as-pack depends on). If the host project already has those, view-as-pack can be installed standalone.

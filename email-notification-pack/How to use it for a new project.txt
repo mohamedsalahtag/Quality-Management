@@ -1,0 +1,5 @@
+2. Open a fresh AI chat for the new project. Make sure the AI has access to the new project's source so it can inventory the stack.
+
+3. Paste this as your first message:
+
+Read the file email-notification-pack/INSTALL_PROMPT.md and follow it.

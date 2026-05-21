@@ -1,0 +1,26 @@
+In a fresh Claude conversation, attach the alert-pack/ folder and say:
+
+"Add the scheduled-alert and email-group system from this folder.
+ Read INSTALL_PROMPT.md."
+
+The AI will read INSTALL_PROMPT.md and SPEC.md, then ask you about your
+project's domain (what records to scan, what date columns mean "expiry") so
+it can write the IAlertDataSource implementation. Once you answer those,
+the pack handles everything else — schedule logic, today-rule, HTML email
+body, To/CC fan-out, admin UI fragments — without you having to re-explain
+any of it.
+
+Pre-requisites in the target project:
+
+  1. An IEmailService that can send HTML email through SMTP. The pack uses
+     a SendToEmailGroupAsync(groupId, subject, htmlBody) method on top of
+     it — if you already installed email-notification-pack, that interface
+     is right there. If not, the AI will install the SMTP plumbing first
+     from email-notification-pack.
+
+  2. A "groups" table to attach addresses to. Fleet Management reuses the
+     TechnicianGroups table from user-management-pack. Any (GroupId PK,
+     GroupName, ShortCode) shape works.
+
+  3. Cookie-auth + an "AdminOnly" authorization policy (or your stack's
+     equivalent role gate) so the admin pages aren't world-accessible.

@@ -1,0 +1,163 @@
+@*
+  /Admin/Users - User Management page (Bootstrap 5.3).
+  Includes the bulk-select pattern from SPEC.md §4.1:
+   - Master "Select All" checkbox in <th> with tri-state indeterminate.
+   - Per-row checkboxes with form="bulkDeleteForm" so they post to a
+     hidden top-level form WITHOUT being nested inside per-row action forms.
+   - Self-row shows a person icon, never a checkbox.
+   - Floating action bar appears as soon as anything is selected.
+*@
+@model UserManagementViewModel
+@using System.Security.Claims
+@{
+    ViewData["Title"] = "User Management";
+    int.TryParse(User.FindFirst(ClaimTypes.NameIdentifier)?.Value, out var currentUserId);
+}
+
+<div class="d-flex align-items-center mb-4 gap-3">
+    <a href="/Admin" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+    <h4 class="mb-0 fw-bold"><i class="bi bi-people me-2 text-primary"></i>User Management</h4>
+    <div class="ms-auto">
+        <a href="/Admin/AdUsers" class="btn btn-primary">
+            <i class="bi bi-person-plus me-2"></i>Create User
+        </a>
+    </div>
+</div>
+
+@*  Hidden bulk-delete form. Row checkboxes use form="bulkDeleteForm"
+    to post here without nesting inside the per-row forms. *@
+<form id="bulkDeleteForm" method="post" action="/Admin/BulkDeleteUsers" class="d-none">
+    @Html.AntiForgeryToken()
+</form>
+
+<!-- (Filters card omitted for brevity - see HelpDesk/Views/Admin/Users.cshtml) -->
+
+<!-- Bulk action toolbar -->
+<div id="bulkBar" class="card border-0 shadow-sm mb-3 d-none">
+    <div class="card-body py-2 d-flex align-items-center gap-3">
+        <span class="fw-semibold">
+            <i class="bi bi-check2-square me-2 text-primary"></i>
+            <span id="bulkCount">0</span> user(s) selected
+        </span>
+        <button type="button" id="bulkClearBtn" class="btn btn-sm btn-outline-secondary">
+            <i class="bi bi-x-lg me-1"></i>Clear selection
+        </button>
+        <button type="submit" form="bulkDeleteForm" id="bulkDeleteBtn"
+                class="btn btn-sm btn-danger ms-auto">
+            <i class="bi bi-trash me-1"></i>Delete Selected
+        </button>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        <table class="table table-hover mb-0 small align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:36px;">
+                        <input type="checkbox" id="selectAll" class="form-check-input"
+                               title="Select all on this page" />
+                    </th>
+                    <th>Full Name</th>
+                    <th>Username</th>
+                    <th>Email</th>
+                    <th>Department</th>
+                    <th>Role</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            @foreach (var u in Model.AllUsers.OrderBy(x => x.FullName))
+            {
+                var isSelf = u.UserId.HasValue && u.UserId.Value == currentUserId;
+                <tr>
+                    <td>
+                        @if (u.UserId.HasValue && !isSelf)
+                        {
+                            <input type="checkbox" form="bulkDeleteForm"
+                                   name="userIds" value="@u.UserId"
+                                   class="form-check-input user-check"
+                                   data-username="@u.FullName" />
+                        }
+                        else if (isSelf)
+                        {
+                            <i class="bi bi-person-fill-check text-muted" title="This is you"></i>
+                        }
+                    </td>
+                    <td class="fw-semibold">@u.FullName</td>
+                    <td class="text-muted">@u.Username</td>
+                    <td class="text-muted small">@u.Email</td>
+                    <td>@u.Department</td>
+                    <td><span class="badge bg-secondary">@u.SystemRole</span></td>
+                    <td>
+                        <span class="badge @(u.SystemIsActive ? "bg-success" : "bg-danger")">
+                            @(u.SystemIsActive ? "Enabled" : "Disabled")
+                        </span>
+                    </td>
+                    <td>
+                        @if (u.UserId.HasValue)
+                        {
+                            <div class="d-flex gap-1">
+                                <!-- per-row action forms here (Edit, Change Role, Toggle, Delete)
+                                     each is its OWN <form>; that's why the bulk checkbox uses
+                                     form="bulkDeleteForm" instead of being nested. -->
+                            </div>
+                        }
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+// -- Bulk select / delete (tri-state master checkbox) -----------------
+(function () {
+    const selectAll = document.getElementById('selectAll');
+    const bulkBar   = document.getElementById('bulkBar');
+    const bulkCount = document.getElementById('bulkCount');
+    const bulkForm  = document.getElementById('bulkDeleteForm');
+    const clearBtn  = document.getElementById('bulkClearBtn');
+    if (!selectAll || !bulkForm) return;
+
+    const checks  = () => document.querySelectorAll('.user-check');
+    const checked = () => document.querySelectorAll('.user-check:checked');
+
+    function refresh() {
+        const all = checks(), sel = checked();
+        bulkCount.textContent = sel.length;
+        bulkBar.classList.toggle('d-none', sel.length === 0);
+        if (all.length === 0) { selectAll.checked = false; selectAll.indeterminate = false; }
+        else if (sel.length === all.length) { selectAll.checked = true;  selectAll.indeterminate = false; }
+        else if (sel.length === 0)         { selectAll.checked = false; selectAll.indeterminate = false; }
+        else                                { selectAll.checked = false; selectAll.indeterminate = true;  }
+    }
+
+    selectAll.addEventListener('change', () => {
+        checks().forEach(c => c.checked = selectAll.checked);
+        refresh();
+    });
+    document.addEventListener('change', e => {
+        if (e.target.classList?.contains('user-check')) refresh();
+    });
+    clearBtn?.addEventListener('click', () => { checks().forEach(c => c.checked = false); refresh(); });
+
+    bulkForm.addEventListener('submit', e => {
+        const sel = checked();
+        if (sel.length === 0) { e.preventDefault(); return; }
+        const names = Array.from(sel).slice(0, 10)
+            .map(c => '• ' + c.getAttribute('data-username')).join('\n');
+        const more  = sel.length > 10 ? `\n...and ${sel.length - 10} more` : '';
+        if (!confirm(
+            `Delete ${sel.length} user(s) permanently?\n\n${names}${more}\n\n` +
+            `Users still referenced by tickets will be reported as blocked - disable them instead.`)) {
+            e.preventDefault();
+        }
+    });
+    refresh();
+})();
+</script>
+}

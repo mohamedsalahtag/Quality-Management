@@ -1,0 +1,151 @@
+// =====================================================================
+// End-to-end ASP.NET Core MVC wiring for view-as-pack
+// =====================================================================
+// Minimal Program.cs + a couple of supporting types showing exactly where
+// every piece of view-as-pack plugs into a fresh ASP.NET Core MVC app.
+// Rename "DemoApp" to your project name as you go.
+//
+// Maps to SPEC.md as follows:
+//   §1 Mechanism                 -> ViewAsClaimsTransformer (registered below)
+//   §2 Endpoint contract         -> AccountController.ViewAs action
+//   §3 UI                        -> _Layout.cshtml dropdown + banner
+//   §4 Security guarantees       -> realRole check in ViewAs action
+//   §5 Stack assumptions         -> the AddCookie / AddDataProtection /
+//                                   AddAntiforgery / AddHttpContextAccessor
+//                                   calls below
+//   §6 Hard rules                -> OriginalRoleClaim is the source-of-truth
+// =====================================================================
+
+// ---- Program.cs --------------------------------------------------------
+
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
+using DemoApp.Models;
+using DemoApp.Services;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Services.AddControllersWithViews();
+
+// Cookie auth (precondition).
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(opt =>
+    {
+        opt.LoginPath        = "/Account/Login";
+        opt.ExpireTimeSpan   = TimeSpan.FromDays(30);
+        opt.SlidingExpiration = true;
+        opt.Cookie.Name      = "DemoApp.Auth";
+        opt.Cookie.SameSite  = SameSiteMode.Lax;
+        opt.Cookie.HttpOnly  = true;
+    });
+
+builder.Services.AddAuthorization(opt =>
+{
+    opt.AddPolicy("AdminOnly",
+        p => p.RequireRole(UserRoles.SiteAdmin));
+    opt.AddPolicy("ManagerOrAdmin",
+        p => p.RequireRole(UserRoles.Manager, UserRoles.SiteAdmin));
+});
+
+// Persistent data-protection keys (precondition).
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(
+        Path.Combine(builder.Environment.ContentRootPath, "keys")))
+    .SetApplicationName("DemoApp");
+
+builder.Services.AddAntiforgery(); // precondition
+
+// ===== view-as-pack: DI =====
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IClaimsTransformation, ViewAsClaimsTransformer>();
+// ============================
+
+var app = builder.Build();
+app.UseStaticFiles();
+app.UseRouting();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllerRoute(
+    name: "default",
+    pattern: "{controller=Home}/{action=Index}/{id?}");
+app.Run();
+
+
+// ---- Models/User.cs (roles enumeration) --------------------------------
+
+namespace DemoApp.Models;
+
+public static class UserRoles
+{
+    public const string Viewer    = "Viewer";
+    public const string Operator  = "Operator";
+    public const string Manager   = "Manager";
+    public const string SiteAdmin = "SiteAdmin";
+
+    public static readonly string[] All = { Viewer, Operator, Manager, SiteAdmin };
+    public static bool IsValid(string role) => Array.IndexOf(All, role) >= 0;
+}
+
+
+// ---- Services/ViewAsClaimsTransformer.cs -------------------------------
+// (copy verbatim from reference/ViewAsClaimsTransformer.cs and rename
+//  the namespace + CookieName to DemoApp.* / "DemoApp.ViewAs".)
+
+
+// ---- Controllers/AccountController.cs ----------------------------------
+// Add the action from reference/AccountController.ViewAs.snippet.cs to
+// your existing AccountController. A skeleton is shown here for clarity:
+
+namespace DemoApp.Controllers;
+
+using System.Security.Claims;
+using Microsoft.AspNetCore.Mvc;
+using DemoApp.Models;
+using DemoApp.Services;
+
+public class AccountController : Controller
+{
+    // ... existing Login / Logout / etc. ...
+
+    [HttpPost, ValidateAntiForgeryToken]
+    public IActionResult ViewAs(string? role, string? returnUrl = null)
+    {
+        var realRole = User.FindFirst(ViewAsClaimsTransformer.OriginalRoleClaim)?.Value
+                    ?? User.FindFirst(ClaimTypes.Role)?.Value;
+        if (realRole != ViewAsClaimsTransformer.ImpersonatorRole) return Forbid();
+
+        if (string.IsNullOrWhiteSpace(role)
+            || role == ViewAsClaimsTransformer.ImpersonatorRole
+            || !UserRoles.IsValid(role))
+        {
+            Response.Cookies.Delete(ViewAsClaimsTransformer.CookieName);
+        }
+        else
+        {
+            Response.Cookies.Append(ViewAsClaimsTransformer.CookieName, role, new CookieOptions
+            {
+                HttpOnly = true,
+                SameSite = SameSiteMode.Lax,
+                Secure   = Request.IsHttps,
+                MaxAge   = TimeSpan.FromHours(8)
+            });
+        }
+
+        if (!string.IsNullOrEmpty(returnUrl) && Url.IsLocalUrl(returnUrl))
+            return Redirect(returnUrl);
+        return RedirectToAction("Index", "Home");
+    }
+}
+
+
+// ---- Views/Shared/_Layout.cshtml ---------------------------------------
+// Paste the contents of reference/_ViewAsDropdown.snippet.cshtml into
+// _Layout.cshtml in two places:
+//   1. The dropdown <li> goes inside the right-aligned <ul class="navbar-nav">
+//      (typically just before the user-avatar dropdown).
+//   2. The banner block goes immediately after the closing </nav> of the
+//      navbar (so it sits between the navbar and main content).
+//
+// The snippet computes its own gating variables from User.Claims; no
+// additional view-model wiring is required.

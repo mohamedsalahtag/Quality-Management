@@ -1,0 +1,3 @@
+In a fresh Claude conversation, attach the folder and say:
+
+"Add the theme system from this folder to the site you're building. Read INTEGRATION.md."

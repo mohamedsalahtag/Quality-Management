@@ -1,0 +1,56 @@
+@*
+  Login form (Bootstrap 5.3).
+  IMPORTANT: per SPEC.md §6, NO "sign up" or "register" link must appear on
+  this page. Self-registration is disabled.
+*@
+@model LoginViewModel
+@{ ViewData["Title"] = "Sign In"; Layout = null; }
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>@ViewData["Title"]</title>
+    <link href="~/lib/bootstrap/dist/css/bootstrap.min.css" rel="stylesheet" />
+    <link href="~/lib/bootstrap-icons/font/bootstrap-icons.css" rel="stylesheet" />
+</head>
+<body class="bg-light">
+    <div class="container" style="max-width:420px;margin-top:6rem">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body p-4">
+                <div class="text-center mb-4">
+                    <i class="bi bi-headset text-primary" style="font-size:3rem"></i>
+                    <h4 class="mt-2 mb-0 fw-bold">IT HelpDesk</h4>
+                    <p class="text-muted small">Sign in with your AD credentials</p>
+                </div>
+
+                <form method="post" asp-action="Login">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" asp-for="ReturnUrl" />
+
+                    <div asp-validation-summary="ModelOnly" class="alert alert-danger small mb-3"></div>
+
+                    <div class="mb-3">
+                        <label asp-for="Username" class="form-label fw-semibold small">Username</label>
+                        <input asp-for="Username" class="form-control" autofocus required />
+                    </div>
+                    <div class="mb-3">
+                        <label asp-for="Password" class="form-label fw-semibold small">Password</label>
+                        <input asp-for="Password" type="password" class="form-control" required />
+                    </div>
+                    <div class="form-check mb-3">
+                        <input asp-for="RememberMe" class="form-check-input" />
+                        <label asp-for="RememberMe" class="form-check-label small">Remember me on this device</label>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-box-arrow-in-right me-1"></i> Sign in
+                    </button>
+                </form>
+
+                @* DELIBERATELY NO "Don't have an account?" or "Sign up" link.
+                   Users are created by admins or auto-provisioned via toggle. *@
+            </div>
+        </div>
+    </div>
+</body>
+</html>

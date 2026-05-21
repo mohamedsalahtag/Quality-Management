@@ -1,0 +1,7 @@
+How to apply it in a new project (same workflow as the email pack)
+
+Copy user-management-pack/ into the new project's repo.
+Open a fresh AI session for that project.
+Paste INSTALL_PROMPT.md as your first message.
+The AI reads SPEC.md, inventories your stack, produces a plan listing schema + LDAP library + auth wiring + routes, then implements after you approve.
+MEMORY.md now lists this pack alongside theme-pack and email-notification-pack so I can recall it across future sessions.

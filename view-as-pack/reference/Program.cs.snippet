@@ -1,0 +1,47 @@
+// Program.cs additions for view-as-pack -- paste into the host project's
+// service-registration block, before `var app = builder.Build();`.
+//
+// The pack itself only contributes the last two lines. The other entries
+// in this file are PRECONDITIONS that must already be present in the host
+// project (or be added at install time). If any are missing, install
+// user-management-pack first or add them by hand. See SPEC.md §5.
+
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.DataProtection;
+using YourApp.Models;   // rename to your project's Models namespace
+using YourApp.Services; // rename to your project's Services namespace
+
+var builder = WebApplication.CreateBuilder(args);
+
+// ---- PRECONDITION: cookie authentication ----
+// view-as-pack hangs off an existing cookie principal. Add this if the
+// host project doesn't already have cookie auth.
+builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
+    .AddCookie(opt =>
+    {
+        opt.LoginPath           = "/Account/Login";
+        opt.ExpireTimeSpan      = TimeSpan.FromDays(30);
+        opt.SlidingExpiration   = true;
+        opt.Cookie.Name         = "YourApp.Auth"; // rename
+        opt.Cookie.SameSite     = SameSiteMode.Lax;
+        opt.Cookie.HttpOnly     = true;
+    });
+
+// ---- PRECONDITION: persistent data-protection keys ----
+// Without this the auth cookie is invalidated on every app restart -- the
+// admin gets logged out and would have to re-impersonate after each deploy.
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(
+        Path.Combine(builder.Environment.ContentRootPath, "keys")))
+    .SetApplicationName("YourApp"); // rename
+
+// ---- PRECONDITION: antiforgery ----
+// The ViewAs action is [ValidateAntiForgeryToken]; the dropdown / banner
+// forms include @Html.AntiForgeryToken().
+builder.Services.AddAntiforgery();
+
+// ===== view-as-pack: DI =====
+builder.Services.AddHttpContextAccessor();
+builder.Services.AddScoped<IClaimsTransformation, ViewAsClaimsTransformer>();
+// ============================
