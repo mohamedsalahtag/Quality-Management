@@ -57,3 +57,4 @@ C:\QualityManagemet\app\SharbatlyQMS.Migrate\obj\Debug\net9.0\refint\SharbatlyQM
 C:\QualityManagemet\app\SharbatlyQMS.Migrate\obj\Debug\net9.0\SharbatlyQMS.Migrate.pdb
 C:\QualityManagemet\app\SharbatlyQMS.Migrate\obj\Debug\net9.0\SharbatlyQMS.Migrate.genruntimeconfig.cache
 C:\QualityManagemet\app\SharbatlyQMS.Migrate\obj\Debug\net9.0\ref\SharbatlyQMS.Migrate.dll
+C:\QualityManagemet\app\SharbatlyQMS.Migrate\obj\Debug\net9.0\SharbatlyQMS.Migrate.sourcelink.json

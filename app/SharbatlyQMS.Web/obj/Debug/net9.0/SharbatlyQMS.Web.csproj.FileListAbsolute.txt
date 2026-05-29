@@ -112,7 +112,6 @@ C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\rjsmcshtml.dswa.cache.
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\scopedcss\Views\Shared\_Layout.cshtml.rz.scp.css
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\scopedcss\bundle\SharbatlyQMS.Web.styles.css
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\scopedcss\projectbundle\SharbatlyQMS.Web.bundle.scp.css
-C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\49k64jz2zf-{0}-b9sayid5wm-b9sayid5wm.gz
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\p83c47qlvv-{0}-61n19gt1b8-61n19gt1b8.gz
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\31twgwh6cc-{0}-bqjiyaj88i-bqjiyaj88i.gz
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\qogbdidpf8-{0}-c2jlpeoesf-c2jlpeoesf.gz
@@ -205,3 +204,5 @@ C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\RBush.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\SixLabors.Fonts.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\System.IO.Packaging.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\SharbatlyQMS.Web.sourcelink.json
+C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\49k64jz2zf-{0}-kygju26tev-kygju26tev.gz
+C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\21953o15qz-{0}-4vcd4djrgj-4vcd4djrgj.gz

@@ -28,6 +28,17 @@
     var impersonating = originalRole != null && originalRole != role;
     var canViewAs     = realRole == UserRoles.SiteAdmin;
     var returnUrl     = Context.Request.Path + Context.Request.QueryString;
+
+    // Navbar active-link highlighting. The Parameters and Admin menus both live
+    // on the Admin controller, so they're disambiguated by action set rather
+    // than controller alone.
+    var curCtl = ViewContext.RouteData.Values["controller"] as string ?? "";
+    var curAct = ViewContext.RouteData.Values["action"] as string ?? "";
+    bool NavOn(string ctl) => string.Equals(curCtl, ctl, StringComparison.OrdinalIgnoreCase);
+    bool ActOn(string act) => string.Equals(curAct, act, StringComparison.OrdinalIgnoreCase);
+    var paramActions = new[] { "DefectCatalog", "DefectCategories", "ReadingTypes", "SampleHeaders", "MailTemplate" };
+    var paramsOn     = NavOn("Admin") && paramActions.Contains(curAct, StringComparer.OrdinalIgnoreCase);
+    var adminOn      = (NavOn("Admin") && (ActOn("Settings") || ActOn("Users"))) || NavOn("Audit");
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -72,22 +83,22 @@
                 <div class="collapse navbar-collapse" id="mainNav">
                     <ul class="navbar-nav me-auto">
                         <li class="nav-item">
-                            <a class="nav-link" asp-controller="Home" asp-action="Index">
+                            <a class="nav-link @(NavOn("Home") ? "active" : "")" aria-current="@(NavOn("Home") ? "page" : null)" asp-controller="Home" asp-action="Index">
                                 <i class="bi bi-speedometer2 me-1"></i>Dashboard
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" asp-controller="Arrivals" asp-action="Index">
+                            <a class="nav-link @(NavOn("Arrivals") ? "active" : "")" aria-current="@(NavOn("Arrivals") ? "page" : null)" asp-controller="Arrivals" asp-action="Index">
                                 <i class="bi bi-box-arrow-in-down me-1"></i>Arrivals
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" asp-controller="QualityOrders" asp-action="Index">
+                            <a class="nav-link @(NavOn("QualityOrders") ? "active" : "")" aria-current="@(NavOn("QualityOrders") ? "page" : null)" asp-controller="QualityOrders" asp-action="Index">
                                 <i class="bi bi-clipboard-data me-1"></i>Quality Orders
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link" asp-controller="ClaimManagement" asp-action="Index">
+                            <a class="nav-link @(NavOn("ClaimManagement") ? "active" : "")" aria-current="@(NavOn("ClaimManagement") ? "page" : null)" asp-controller="ClaimManagement" asp-action="Index">
                                 <i class="bi bi-shield-exclamation me-1"></i>Claim Management
                             </a>
                         </li>
@@ -97,28 +108,28 @@
                                the sample form (defects + readings). Manager+
                                can access; Operator and Viewer cannot. *@
                             <li class="nav-item dropdown">
-                                <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                                <a class="nav-link dropdown-toggle @(paramsOn ? "active" : "")" aria-current="@(paramsOn ? "page" : null)" href="#" data-bs-toggle="dropdown">
                                     <i class="bi bi-sliders2 me-1"></i>Parameters
                                 </a>
                                 <ul class="dropdown-menu">
-                                    <li><a class="dropdown-item" asp-controller="Admin" asp-action="DefectCatalog"><i class="bi bi-list-check me-1"></i>Defect Catalog</a></li>
-                                    <li><a class="dropdown-item" asp-controller="Admin" asp-action="DefectCategories"><i class="bi bi-palette me-1"></i>Defect Categories</a></li>
-                                    <li><a class="dropdown-item" asp-controller="Admin" asp-action="ReadingTypes"><i class="bi bi-rulers me-1"></i>Reading Types</a></li>
-                                    <li><a class="dropdown-item" asp-controller="Admin" asp-action="SampleHeaders"><i class="bi bi-card-heading me-1"></i>Sample Headers</a></li>
-                                    <li><a class="dropdown-item" asp-controller="Admin" asp-action="MailTemplate"><i class="bi bi-envelope-paper me-1"></i>Mail Template</a></li>
+                                    <li><a class="dropdown-item @(ActOn("DefectCatalog") ? "active" : "")" asp-controller="Admin" asp-action="DefectCatalog"><i class="bi bi-list-check me-1"></i>Defect Catalog</a></li>
+                                    <li><a class="dropdown-item @(ActOn("DefectCategories") ? "active" : "")" asp-controller="Admin" asp-action="DefectCategories"><i class="bi bi-palette me-1"></i>Defect Categories</a></li>
+                                    <li><a class="dropdown-item @(ActOn("ReadingTypes") ? "active" : "")" asp-controller="Admin" asp-action="ReadingTypes"><i class="bi bi-rulers me-1"></i>Reading Types</a></li>
+                                    <li><a class="dropdown-item @(ActOn("SampleHeaders") ? "active" : "")" asp-controller="Admin" asp-action="SampleHeaders"><i class="bi bi-card-heading me-1"></i>Sample Headers</a></li>
+                                    <li><a class="dropdown-item @(ActOn("MailTemplate") ? "active" : "")" asp-controller="Admin" asp-action="MailTemplate"><i class="bi bi-envelope-paper me-1"></i>Mail Template</a></li>
                                 </ul>
                             </li>
                         }
                         @if (canSeeAdmin)
                         {
                             <li class="nav-item dropdown">
-                                <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown">
+                                <a class="nav-link dropdown-toggle @(adminOn ? "active" : "")" aria-current="@(adminOn ? "page" : null)" href="#" data-bs-toggle="dropdown">
                                     <i class="bi bi-gear me-1"></i>Admin
                                 </a>
                                 <ul class="dropdown-menu">
-                                    <li><a class="dropdown-item" asp-controller="Admin" asp-action="Settings"><i class="bi bi-sliders me-1"></i>Site Configuration</a></li>
-                                    <li><a class="dropdown-item" asp-controller="Admin" asp-action="Users"><i class="bi bi-people me-1"></i>Users</a></li>
-                                    <li><a class="dropdown-item" asp-controller="Audit" asp-action="Index"><i class="bi bi-shield-shaded me-1"></i>Audit Log</a></li>
+                                    <li><a class="dropdown-item @(ActOn("Settings") ? "active" : "")" asp-controller="Admin" asp-action="Settings"><i class="bi bi-sliders me-1"></i>Site Configuration</a></li>
+                                    <li><a class="dropdown-item @(ActOn("Users") ? "active" : "")" asp-controller="Admin" asp-action="Users"><i class="bi bi-people me-1"></i>Users</a></li>
+                                    <li><a class="dropdown-item @(NavOn("Audit") ? "active" : "")" asp-controller="Audit" asp-action="Index"><i class="bi bi-shield-shaded me-1"></i>Audit Log</a></li>
                                 </ul>
                             </li>
                         }
@@ -246,6 +257,7 @@
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/theme-pack.js" asp-append-version="true"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
+    <script src="~/js/tablekit.js" asp-append-version="true"></script>
     @* Auto-dismiss any alert tagged with `data-auto-dismiss="<ms>"`. Lives
        here, after Bootstrap loads, so the fade animation reliably runs. *@
     <script>

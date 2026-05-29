@@ -29,3 +29,25 @@ body {
 .form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
   text-align: start;
 }
+
+/* Navbar active-link highlight: a translucent pill that reads clearly on any
+   coloured (themed) navbar background. */
+.navbar-nav .nav-link.active {
+  font-weight: 600;
+  background-color: rgba(255, 255, 255, 0.18);
+  border-radius: 0.375rem;
+}
+
+/* tablekit: sortable headers + pager */
+.tk-sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.tk-caret {
+  font-size: 0.75em;
+  opacity: 0.55;
+}
+.tk-sortable:hover .tk-caret {
+  opacity: 0.9;
+}

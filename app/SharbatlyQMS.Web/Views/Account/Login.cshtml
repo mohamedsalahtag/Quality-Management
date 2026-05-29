@@ -55,18 +55,21 @@
                         </div>
                     }
 
-                    <form asp-action="Login" method="post" autocomplete="off">
+                    <form asp-action="Login" method="post">
                         @Html.AntiForgeryToken()
                         <input type="hidden" asp-for="ReturnUrl" value="@ViewBag.ReturnUrl" />
 
                         <div class="mb-3">
                             <label asp-for="Username" class="form-label">Username</label>
-                            <input asp-for="Username" class="form-control" autofocus required />
+                            <input asp-for="Username" class="form-control" autocomplete="username"
+                                   placeholder="e.g. mohamed.tag" autofocus required />
+                            <div class="form-text">Your domain username — with or without @@sharbatlyfruit.com.</div>
                         </div>
 
                         <div class="mb-3">
                             <label asp-for="Password" class="form-label">Password</label>
-                            <input asp-for="Password" type="password" class="form-control" required />
+                            <input asp-for="Password" type="password" class="form-control"
+                                   autocomplete="current-password" required />
                         </div>
 
                         <div class="form-check mb-3">
