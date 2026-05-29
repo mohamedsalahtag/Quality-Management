@@ -170,6 +170,13 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-05-29 (Sample-table rows show live header values, incl. material-scoped)
+- **What changed.** The per-material sample table on `/QualityOrders/Details` now renders its **Grower / Pallet / Lot / Date-code** columns from each sample's `qms_sample_header_value` (field codes `GROWER`, `PALLET_NO`, `LOT_NO`, `DATE_CODE`) — falling back to the frozen legacy `qms_sample.*` column only when no header value exists. Previously these columns read the frozen columns, which are NULL for post-V20 samples, so material details (e.g. grower, entered at material level and copied onto each sample) didn't show in the list.
+- **Why.** After removing the read-only recaps (prior entry), there was no on-screen place showing the material details on samples. Mohamed: "I added grower but it's not reflecting in the samples." Confirmed via AskUserQuestion: surface them in the **sample list rows** on the QO page.
+- **Implementation.** `SampleRowVm` gains `HeaderValues`; `_SampleRow.cshtml` formats them via a local `Hv(code, fallback)`; `Details` action batch-loads `GetSampleHeaderValuesBatchAsync` into `ViewBag.SampleHeaders` and passes per-sample into the row; `SaveSampleAjax` loads the saved sample's header values for the re-rendered row. Display-only — no migration (data already on samples via V23 + the material-save/create copy-down).
+- **Caveat.** The sample table only has columns for Grower/Pallet/Lot/Date-code. Other material-scoped fields (Grower Pallet, Pack Code, Label, Label Number, etc.) have no column here, so they show only on each sample's **PDF** card, not in the on-screen list.
+- **Verified.** `dotnet build` 0/0. **Republished to prod 2026-05-29 ~22:14Z.**
+
 ### 2026-05-29 (Material details copied onto each sample; read-only "inherited" recaps removed)
 - **What changed.** The Material-scoped header values + sample_size entered on the QO "Material details" panel are now **copied down onto every sample** (each sample owns its own `qms_sample_header_value` rows), instead of living only on the material and shown via read-only "inherited" recaps. Both recap displays are **removed**: the QO-page material-card "Material details (inherited by every sample)" block and the sample-form "From material" strip. Requested by Mohamed (screenshot).
 - **Why / decisions.** Confirmed via AskUserQuestion: remove **both** recaps; **copy onto each sample** (new + already-created). The data must reflect on each sample and in the PDF.

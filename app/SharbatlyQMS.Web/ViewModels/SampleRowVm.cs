@@ -7,4 +7,9 @@ public class SampleRowVm
 {
     public Sample Sample   { get; set; } = new();
     public bool   Editable { get; set; }
+    /// <summary>The sample's header values (joined to the catalog) so the row's
+    /// Grower / Pallet / Lot / Date-code columns show the live values
+    /// (including Material-scoped values copied down) rather than the frozen
+    /// legacy columns on qms_sample.</summary>
+    public IReadOnlyList<SampleHeaderValue> HeaderValues { get; set; } = Array.Empty<SampleHeaderValue>();
 }

@@ -2,6 +2,20 @@
 @model SampleRowVm
 @{
     var s = Model.Sample;
+    // Show the live header value for a field code (incl. Material-scoped values
+    // copied onto the sample); fall back to the frozen legacy column for very
+    // old rows that predate the dynamic header system.
+    string Hv(string code, string? fallback)
+    {
+        var v = Model.HeaderValues.FirstOrDefault(h => string.Equals(h.FieldCode, code, StringComparison.OrdinalIgnoreCase));
+        var val = v == null ? null : v.ValueKind switch
+        {
+            "Numeric" => v.NumericValue?.ToString("0.##"),
+            "Date"    => v.DateValue?.ToString("yyyy-MM-dd"),
+            _         => v.TextValue
+        };
+        return string.IsNullOrWhiteSpace(val) ? (fallback ?? "") : val!;
+    }
 }
 <tr data-sample-id="@s.SampleId" data-qo-material-id="@s.QoMaterialId">
     <td>
@@ -10,11 +24,10 @@
             #@s.SampleNo
         </button>
     </td>
-    <td>@s.Grower</td>
-    <td>@s.PalletNo</td>
-    <td>@s.LotNo</td>
-    <td>@s.DateCode</td>
-    <td>@s.SampleScope</td>
+    <td>@Hv("GROWER", s.Grower)</td>
+    <td>@Hv("PALLET_NO", s.PalletNo)</td>
+    <td>@Hv("LOT_NO", s.LotNo)</td>
+    <td>@Hv("DATE_CODE", s.DateCode)</td>
     <td class="text-end">@s.SampleSize</td>
     <td class="text-end small text-muted">@s.CreatedAt.ToLocalTime():g<br />@s.CreatedBy</td>
     <td class="text-end">

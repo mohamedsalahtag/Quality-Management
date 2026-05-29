@@ -8,6 +8,7 @@
     var materials   = ViewBag.Materials   as IReadOnlyList<QualityOrderMaterial> ?? new List<QualityOrderMaterial>();
     var samples     = ViewBag.Samples     as IReadOnlyList<Sample>               ?? new List<Sample>();
     var photoCounts = ViewBag.PhotoCounts as IReadOnlyDictionary<long, int>      ?? new Dictionary<long, int>();
+    var sampleHeaders = ViewBag.SampleHeaders as ILookup<long, SampleHeaderValue>;
     var editable    = (bool?)ViewBag.Editable ?? (Model.StatusCode == "Open");
     var role        = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     var canEdit     = role == UserRoles.Operator || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
@@ -233,7 +234,6 @@
                                 <th>Pallet</th>
                                 <th>Lot</th>
                                 <th>Date code</th>
-                                <th>Scope</th>
                                 <th class="text-end">Size</th>
                                 <th class="text-end">Created</th>
                                 <th class="text-end" style="min-width:110px;">Actions</th>
@@ -242,12 +242,15 @@
                         <tbody class="samples-tbody" data-qo-material-id="@m.QoMaterialId">
                             @foreach (var s in matSamples)
                             {
-                                var rowVm = new SampleRowVm { Sample = s, Editable = editable };
+                                var rowVm = new SampleRowVm {
+                                    Sample = s, Editable = editable,
+                                    HeaderValues = sampleHeaders?[s.SampleId].ToList() ?? new List<SampleHeaderValue>()
+                                };
                                 <partial name="~/Views/QualityOrders/_SampleRow.cshtml" model="rowVm" />
                             }
                             @if (matSamples.Count == 0)
                             {
-                                <tr class="empty-samples-row"><td colspan="9" class="text-center text-muted small py-2">No samples recorded yet for this material.</td></tr>
+                                <tr class="empty-samples-row"><td colspan="8" class="text-center text-muted small py-2">No samples recorded yet for this material.</td></tr>
                             }
                         </tbody>
                     </table>
@@ -661,7 +664,7 @@
                 // Restore the empty-row hint if all gone.
                 const tbody = document.querySelector('.samples-tbody[data-qo-material-id="' + data.qoMaterialId + '"]');
                 if (tbody && !tbody.querySelector('tr')) {
-                    tbody.innerHTML = '<tr class="empty-samples-row"><td colspan="9" class="text-center text-muted small py-2">No samples recorded yet for this material.</td></tr>';
+                    tbody.innerHTML = '<tr class="empty-samples-row"><td colspan="8" class="text-center text-muted small py-2">No samples recorded yet for this material.</td></tr>';
                 }
                 showToast('Sample #' + sno + ' deleted.');
             } catch (e) { showToast('Delete failed: ' + e.message, 'danger'); }

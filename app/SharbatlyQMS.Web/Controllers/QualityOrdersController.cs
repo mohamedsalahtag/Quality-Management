@@ -72,6 +72,10 @@ public class QualityOrdersController : Controller
         var photoCounts = await _images.CountByOwnersAsync(
             "QualityOrderMaterial", materials.Select(m => m.QoMaterialId));
 
+        // Per-sample header values (incl. Material-scoped values copied down)
+        // so the sample-table rows show live Grower/Pallet/Lot/Date-code.
+        var sampleHeaders = await _qos.GetSampleHeaderValuesBatchAsync(samples.Select(s => s.SampleId));
+
         var editable = qo.StatusCode == "Open";
 
         var mailTemplate = await _settings.GetQoMailTemplateAsync();
@@ -81,6 +85,7 @@ public class QualityOrdersController : Controller
         ViewBag.Materials           = materials;
         ViewBag.Samples             = samples;
         ViewBag.PhotoCounts         = photoCounts;
+        ViewBag.SampleHeaders       = sampleHeaders;
         ViewBag.Editable            = editable;
         ViewBag.SendMailEnabled     = mailTemplate.Enabled;
         return View(qo);
@@ -597,7 +602,12 @@ public class QualityOrdersController : Controller
 
         // Reload from DB so we have CreatedAt/CreatedBy/SampleNo populated.
         var fresh = await _qos.GetSampleAsync(saved.SampleId) ?? saved;
-        var rowVm = new SampleRowVm { Sample = fresh, Editable = true };
+        var rowVm = new SampleRowVm
+        {
+            Sample = fresh,
+            Editable = true,
+            HeaderValues = await _qos.GetSampleHeaderValuesAsync(saved.SampleId)
+        };
         var rowHtml = await this.RenderPartialToStringAsync("_SampleRow", rowVm);
         return Json(new
         {

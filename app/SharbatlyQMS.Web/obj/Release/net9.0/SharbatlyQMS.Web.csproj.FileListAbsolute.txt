@@ -204,3 +204,4 @@ C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Release\net9.0\ExcelNumberFormat.dl
 C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Release\net9.0\RBush.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Release\net9.0\SixLabors.Fonts.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Release\net9.0\System.IO.Packaging.dll
+C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\SharbatlyQMS.Web.sourcelink.json
