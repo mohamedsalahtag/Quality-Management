@@ -613,6 +613,7 @@ public class AdminController : Controller
         ViewBag.Groups        = groups;
         ViewBag.FilterGroup   = materialGroup;
         ViewBag.MaraEmpty     = maraGroups.Count == 0;
+        ViewBag.Categories    = await _catalogCache.GetActiveCategoriesAsync();
         return View(rows.ToList());
     }
 
@@ -628,6 +629,14 @@ public class AdminController : Controller
             return RedirectToAction(nameof(DefectCatalog));
         }
         if (valueType != "Number" && valueType != "Decimal") valueType = "Number";
+        // Category must be one of the active, admin-defined categories
+        // (the FK enforces it too, but this is a friendlier message).
+        var activeCats = await _catalogCache.GetActiveCategoriesAsync();
+        if (!activeCats.Any(x => string.Equals(x.CategoryName, defectCategory, StringComparison.OrdinalIgnoreCase)))
+        {
+            TempData["Error"] = $"Unknown defect category '{defectCategory}'. Define it first under Defect Categories.";
+            return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
+        }
 
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
             HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
@@ -686,6 +695,103 @@ public class AdminController : Controller
         return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
     }
 
+    // ---- Defect categories (V22+) -- global master list driving the
+    // dynamic per-category sections in the sample form + PDF. -------------
+    [HttpGet]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> DefectCategories()
+    {
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+        var rows = await c.QueryAsync<DefectCategory>(@"
+            SELECT c.category_id CategoryId, c.category_name CategoryName,
+                   c.sort_order SortOrder, c.color_hex ColorHex, c.is_active IsActive,
+                   CAST(CASE WHEN EXISTS (SELECT 1 FROM qms_defect_catalog d WHERE d.defect_category = c.category_name)
+                             THEN 1 ELSE 0 END AS BIT) IsInUse
+            FROM   qms_defect_category c
+            ORDER  BY c.sort_order, c.category_name");
+        return View(rows.ToList());
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> SaveDefectCategory(int categoryId, string categoryName,
+        int sortOrder, string? colorHex, bool isActive)
+    {
+        if (string.IsNullOrWhiteSpace(categoryName))
+        {
+            TempData["Error"] = "Category name is required.";
+            return RedirectToAction(nameof(DefectCategories));
+        }
+        categoryName = categoryName.Trim();
+        // Normalize / validate colour (#RRGGBB); null it out otherwise.
+        if (!string.IsNullOrWhiteSpace(colorHex) &&
+            !System.Text.RegularExpressions.Regex.IsMatch(colorHex, "^#[0-9A-Fa-f]{6}$"))
+            colorHex = null;
+
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        var conflict = await c.ExecuteScalarAsync<int?>(@"
+            SELECT TOP 1 category_id FROM qms_defect_category
+            WHERE category_name = @categoryName AND category_id <> @categoryId",
+            new { categoryName, categoryId });
+        if (conflict.HasValue)
+        {
+            TempData["Error"] = $"Another category already uses the name '{categoryName}'.";
+            return RedirectToAction(nameof(DefectCategories));
+        }
+
+        if (categoryId <= 0)
+        {
+            await c.ExecuteAsync(@"
+                INSERT INTO qms_defect_category (category_name, sort_order, color_hex, is_active)
+                VALUES (@categoryName, @sortOrder, @colorHex, @isActive)",
+                new { categoryName, sortOrder, colorHex, isActive });
+            TempData["Success"] = $"Category '{categoryName}' added.";
+        }
+        else
+        {
+            // category_name change cascades to qms_defect_catalog.defect_category
+            // via FK ON UPDATE CASCADE.
+            await c.ExecuteAsync(@"
+                UPDATE qms_defect_category SET
+                  category_name=@categoryName, sort_order=@sortOrder,
+                  color_hex=@colorHex, is_active=@isActive
+                WHERE category_id=@categoryId",
+                new { categoryId, categoryName, sortOrder, colorHex, isActive });
+            TempData["Success"] = "Category updated.";
+        }
+        _catalogCache.Invalidate();
+        return RedirectToAction(nameof(DefectCategories));
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> DeleteDefectCategory(int categoryId)
+    {
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+        var name = await c.ExecuteScalarAsync<string?>(
+            "SELECT category_name FROM qms_defect_category WHERE category_id = @categoryId", new { categoryId });
+        if (name == null)
+        {
+            TempData["Error"] = "Category not found.";
+            return RedirectToAction(nameof(DefectCategories));
+        }
+        var inUse = await c.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM qms_defect_catalog WHERE defect_category = @name", new { name });
+        if (inUse > 0)
+        {
+            TempData["Error"] = $"Category '{name}' is assigned to {inUse} defect(s) -- reassign or deactivate it instead of deleting.";
+            return RedirectToAction(nameof(DefectCategories));
+        }
+        await c.ExecuteAsync("DELETE FROM qms_defect_category WHERE category_id = @categoryId", new { categoryId });
+        TempData["Success"] = $"Category '{name}' deleted.";
+        _catalogCache.Invalidate();
+        return RedirectToAction(nameof(DefectCategories));
+    }
+
     [HttpGet]
     [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
     public async Task<IActionResult> ReadingTypes(string? materialGroup = null)
@@ -709,22 +815,32 @@ public class AdminController : Controller
         // IsInUse = a sample_reading exists with this catalog row's code on
         // a sample whose qo_material is in the same material group. (codes
         // can repeat across groups, so we scope the usage check by group.)
+        // Globals (material_group IS NULL) are returned alongside the
+        // filtered group so the admin can see they apply too -- the view
+        // tags them with a "Global" badge so they're visually distinct
+        // from per-group rows. IsInUse for a global row checks usage
+        // across every material_group, not just the row's own (which
+        // would always be NULL and produce a false negative).
         var rows = await c.QueryAsync<ReadingTypeEntry>(@"
             SELECT r.reading_type_id ReadingTypeId, r.reading_type_code ReadingTypeCode,
                    r.reading_name ReadingName, r.value_kind ValueKind,
                    r.default_unit DefaultUnit, r.is_active IsActive, r.sort_order SortOrder,
-                   r.material_group MaterialGroup, r.is_mandatory IsMandatory,
+                   ISNULL(r.material_group, '') MaterialGroup, r.is_mandatory IsMandatory,
+                   r.display_mode DisplayMode,
                    CAST(CASE WHEN EXISTS (
                             SELECT 1
                             FROM   qms_sample_reading sr
                             JOIN   qms_sample s ON s.sample_id = sr.sample_id
                             JOIN   qms_quality_order_material m ON m.qo_material_id = s.qo_material_id
                             WHERE  sr.reading_type_code = r.reading_type_code
-                              AND  m.material_group     = r.material_group)
+                              AND  (r.material_group IS NULL OR m.material_group = r.material_group))
                              THEN 1 ELSE 0 END AS BIT) IsInUse
             FROM   qms_reading_type r
-            WHERE  (@materialGroup IS NULL OR r.material_group = @materialGroup)
-            ORDER  BY r.material_group, r.sort_order, r.reading_name",
+            WHERE  (@materialGroup IS NULL
+                    OR r.material_group = @materialGroup
+                    OR r.material_group IS NULL)
+            ORDER  BY CASE WHEN r.material_group IS NULL THEN 0 ELSE 1 END,
+                      r.material_group, r.sort_order, r.reading_name",
             new { materialGroup });
 
         ViewBag.Groups      = groups;
@@ -735,39 +851,78 @@ public class AdminController : Controller
 
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
-    public async Task<IActionResult> SaveReadingType(int readingTypeId, string materialGroup,
+    public async Task<IActionResult> SaveReadingType(int readingTypeId, string? materialGroup,
         string readingTypeCode, string readingName, string valueKind, string? defaultUnit,
-        bool isActive, int sortOrder, bool isMandatory)
+        bool isActive, int sortOrder, bool isMandatory, string? displayMode)
     {
-        if (string.IsNullOrWhiteSpace(materialGroup))
-        {
-            TempData["Error"] = "Material group is required.";
-            return RedirectToAction(nameof(ReadingTypes));
-        }
+        // Empty / whitespace material group means "Global -- applies to every
+        // material group". Store as NULL so the filtered unique index in V19
+        // catches duplicate-global attempts at the DB level.
+        var groupOrGlobal = string.IsNullOrWhiteSpace(materialGroup) ? null : materialGroup.Trim();
         if (valueKind != "Numeric" && valueKind != "Text") valueKind = "Numeric";
+
+        // Whitelist the display_mode; matches the CK_qms_reading_type_display_mode
+        // CHECK constraint added in V18. Fall back to a sensible default if
+        // a stale form posts something unknown.
+        var allowedModes = new[] { "text", "count", "sum", "sum_over_size", "formula" };
+        if (string.IsNullOrWhiteSpace(displayMode) || !allowedModes.Contains(displayMode))
+            displayMode = valueKind == "Text" ? "text" : "sum";
 
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
             HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        // Conflict check: a code can exist either as global OR per-group,
+        // but the two namespaces must not overlap for the same effective
+        // material group. New globals collide with any existing row of
+        // that code; new per-group rows collide with the same group's row
+        // OR with a global of the same code. The filtered unique indexes
+        // in V19 cover same-namespace duplicates; this check covers the
+        // cross-namespace case the DB can't enforce alone.
+        var conflictRow = await c.QuerySingleOrDefaultAsync<(int Id, string? Group)?>(@"
+            SELECT TOP 1 reading_type_id AS Id, material_group AS [Group]
+            FROM   qms_reading_type
+            WHERE  reading_type_code = @code
+              AND  reading_type_id <> @selfId
+              AND  (
+                    @newIsGlobal = 1                                -- new global vs any existing
+                 OR material_group IS NULL                          -- new per-group vs existing global
+                 OR material_group = @group                         -- new per-group vs same-group existing
+              )",
+            new
+            {
+                code     = readingTypeCode,
+                selfId   = readingTypeId,
+                newIsGlobal = groupOrGlobal == null ? 1 : 0,
+                @group   = groupOrGlobal
+            });
+        if (conflictRow.HasValue)
+        {
+            var conflictLabel = conflictRow.Value.Group ?? "Global";
+            TempData["Error"] = $"Reading type code '{readingTypeCode}' already exists for '{conflictLabel}'. " +
+                                "A code can be defined either as Global OR for a specific material group, not both.";
+            return RedirectToAction(nameof(ReadingTypes), new { materialGroup });
+        }
+
         if (readingTypeId <= 0)
         {
             await c.ExecuteAsync(@"
                 INSERT INTO qms_reading_type
                     (material_group, reading_type_code, reading_name, value_kind,
-                     default_unit, is_active, sort_order, is_mandatory)
-                VALUES (@materialGroup, @readingTypeCode, @readingName, @valueKind,
-                        @defaultUnit, @isActive, @sortOrder, @isMandatory)",
-                new { materialGroup, readingTypeCode, readingName, valueKind, defaultUnit, isActive, sortOrder, isMandatory });
-            TempData["Success"] = $"Reading type '{readingName}' added to {materialGroup}.";
+                     default_unit, is_active, sort_order, is_mandatory, display_mode)
+                VALUES (@groupOrGlobal, @readingTypeCode, @readingName, @valueKind,
+                        @defaultUnit, @isActive, @sortOrder, @isMandatory, @displayMode)",
+                new { groupOrGlobal, readingTypeCode, readingName, valueKind, defaultUnit, isActive, sortOrder, isMandatory, displayMode });
+            TempData["Success"] = $"Reading type '{readingName}' added to {(groupOrGlobal ?? "Global")}.";
         }
         else
         {
             await c.ExecuteAsync(@"
                 UPDATE qms_reading_type SET
-                  material_group=@materialGroup, reading_type_code=@readingTypeCode, reading_name=@readingName,
+                  material_group=@groupOrGlobal, reading_type_code=@readingTypeCode, reading_name=@readingName,
                   value_kind=@valueKind, default_unit=@defaultUnit, is_active=@isActive, sort_order=@sortOrder,
-                  is_mandatory=@isMandatory
+                  is_mandatory=@isMandatory, display_mode=@displayMode
                 WHERE reading_type_id=@readingTypeId",
-                new { readingTypeId, materialGroup, readingTypeCode, readingName, valueKind, defaultUnit, isActive, sortOrder, isMandatory });
+                new { readingTypeId, groupOrGlobal, readingTypeCode, readingName, valueKind, defaultUnit, isActive, sortOrder, isMandatory, displayMode });
             TempData["Success"] = "Reading type updated.";
         }
         _catalogCache.Invalidate();
@@ -792,7 +947,7 @@ public class AdminController : Controller
             JOIN   qms_quality_order_material m ON m.qo_material_id = s.qo_material_id
             JOIN   qms_reading_type rt ON rt.reading_type_id = @readingTypeId
             WHERE  sr.reading_type_code = rt.reading_type_code
-              AND  m.material_group     = rt.material_group",
+              AND  (rt.material_group IS NULL OR m.material_group = rt.material_group)",
             new { readingTypeId });
         if (inUse > 0)
         {
@@ -806,6 +961,143 @@ public class AdminController : Controller
         TempData[n > 0 ? "Success" : "Error"] = n > 0 ? "Reading type deleted." : "Reading type not found.";
         _catalogCache.Invalidate();
         return RedirectToAction(nameof(ReadingTypes), new { materialGroup });
+    }
+
+    // ---- Sample Header Fields (V20+) -------------------------------------
+    //
+    // Configurable per-sample identification fields. Always global -- no
+    // material_group binding. The admin can add / rename / disable header
+    // fields from this screen; the sample form renders the active ones as
+    // dynamic inputs (replacing the hardcoded Grower / Pallet / Date Code /
+    // etc. columns on qms_sample). sample_size is intentionally NOT part
+    // of this catalog -- it stays a first-class column on qms_sample
+    // because every defect percentage divides by it.
+    [HttpGet]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> SampleHeaders()
+    {
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        // IsInUse = at least one sample has a value for this field.
+        // Blocks the Delete button so historical samples don't suddenly
+        // lose data; admin should mark inactive instead.
+        var rows = await c.QueryAsync<SampleHeaderField>(@"
+            SELECT f.field_id    AS FieldId,
+                   f.field_code  AS FieldCode,
+                   f.field_name  AS FieldName,
+                   f.value_kind  AS ValueKind,
+                   f.default_unit AS DefaultUnit,
+                   f.is_active   AS IsActive,
+                   f.is_mandatory AS IsMandatory,
+                   f.sort_order  AS SortOrder,
+                   f.scope       AS Scope,
+                   CAST(CASE WHEN EXISTS (
+                            SELECT 1 FROM qms_sample_header_value v
+                            WHERE v.field_id = f.field_id)
+                            THEN 1 ELSE 0 END AS BIT) IsInUse
+            FROM   qms_sample_header_field f
+            ORDER  BY f.sort_order, f.field_name");
+        return View(rows.ToList());
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> SaveSampleHeaderField(int fieldId, string fieldCode,
+        string fieldName, string valueKind, string? defaultUnit,
+        bool isActive, bool isMandatory, int sortOrder, string scope = "Sample")
+    {
+        if (string.IsNullOrWhiteSpace(fieldCode) || string.IsNullOrWhiteSpace(fieldName))
+        {
+            TempData["Error"] = "Field code and name are required.";
+            return RedirectToAction(nameof(SampleHeaders));
+        }
+        // Whitelist matches the CK constraint added in V20.
+        if (valueKind != "Text" && valueKind != "Numeric" && valueKind != "Date") valueKind = "Text";
+        // Whitelist matches the CK constraint added in V21.
+        if (scope != "Sample" && scope != "Material") scope = "Sample";
+
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        // Conflict check on field_code (UNIQUE in schema, but a clearer
+        // error message than a raw 2627 is friendlier).
+        var conflictId = await c.ExecuteScalarAsync<int?>(@"
+            SELECT TOP 1 field_id FROM qms_sample_header_field
+            WHERE field_code = @fieldCode AND field_id <> @fieldId",
+            new { fieldCode, fieldId });
+        if (conflictId.HasValue)
+        {
+            TempData["Error"] = $"Another sample header field already uses code '{fieldCode}'.";
+            return RedirectToAction(nameof(SampleHeaders));
+        }
+
+        if (fieldId <= 0)
+        {
+            await c.ExecuteAsync(@"
+                INSERT INTO qms_sample_header_field
+                    (field_code, field_name, value_kind, default_unit, is_active, is_mandatory, sort_order, scope)
+                VALUES (@fieldCode, @fieldName, @valueKind, @defaultUnit, @isActive, @isMandatory, @sortOrder, @scope)",
+                new { fieldCode, fieldName, valueKind, defaultUnit, isActive, isMandatory, sortOrder, scope });
+            TempData["Success"] = $"Sample header field '{fieldName}' added.";
+        }
+        else
+        {
+            await c.ExecuteAsync(@"
+                UPDATE qms_sample_header_field SET
+                    field_code=@fieldCode, field_name=@fieldName, value_kind=@valueKind,
+                    default_unit=@defaultUnit, is_active=@isActive, is_mandatory=@isMandatory,
+                    sort_order=@sortOrder, scope=@scope
+                WHERE field_id=@fieldId",
+                new { fieldId, fieldCode, fieldName, valueKind, defaultUnit, isActive, isMandatory, sortOrder, scope });
+            TempData["Success"] = "Sample header field updated.";
+        }
+        _catalogCache.Invalidate();
+        return RedirectToAction(nameof(SampleHeaders));
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> DeleteSampleHeaderField(int fieldId)
+    {
+        // Unlike Defect Catalog / Reading Types, sample-header deletion
+        // cascades to the stored values on every sample (the field FK in
+        // V20 has no ON DELETE CASCADE, so we do it explicitly). The
+        // confirmation dialog already warns the user when the field is in
+        // use, so by the time we get here the intent is clear.
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+
+        // Pre-count for the success message; same query happens once inside
+        // the transaction so the number we report matches what we deleted.
+        var wipedValues = await c.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM qms_sample_header_value WHERE field_id = @fieldId",
+            new { fieldId }, tx);
+
+        await c.ExecuteAsync(
+            "DELETE FROM qms_sample_header_value WHERE field_id = @fieldId",
+            new { fieldId }, tx);
+
+        var n = await c.ExecuteAsync(
+            "DELETE FROM qms_sample_header_field WHERE field_id = @fieldId",
+            new { fieldId }, tx);
+
+        tx.Commit();
+
+        if (n > 0)
+        {
+            TempData["Success"] = wipedValues > 0
+                ? $"Sample header field deleted (and {wipedValues} stored value(s) removed across samples)."
+                : "Sample header field deleted.";
+        }
+        else
+        {
+            TempData["Error"] = "Field not found.";
+        }
+        _catalogCache.Invalidate();
+        return RedirectToAction(nameof(SampleHeaders));
     }
 
     // ---- Mail template (Parameters menu) -----------------------------

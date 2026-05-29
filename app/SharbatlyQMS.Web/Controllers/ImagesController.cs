@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services;
+using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Controllers;
 
@@ -20,6 +21,7 @@ public class ImagesController : Controller
     {
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var saved = await _images.UploadAsync(ownerType, ownerId, category, files, user);
+        if (IsAjax) return GridPartial(ownerType, ownerId);
         TempData[saved > 0 ? "Success" : "Error"] = saved > 0
             ? $"Uploaded {saved} image(s)."
             : "No files were saved (check size and file type).";
@@ -28,13 +30,27 @@ public class ImagesController : Controller
 
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
-    public async Task<IActionResult> Delete(long imageLinkId, string? returnUrl)
+    public async Task<IActionResult> Delete(long imageLinkId, string? ownerType, long ownerId, string? returnUrl)
     {
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         await _images.SoftDeleteLinkAsync(imageLinkId, user);
+        if (IsAjax && !string.IsNullOrEmpty(ownerType)) return GridPartial(ownerType, ownerId);
         TempData["Success"] = "Image removed.";
         return SafeRedirect(returnUrl);
     }
+
+    private bool IsAjax => Request.Headers["X-Requested-With"] == "XMLHttpRequest";
+
+    // Re-renders just the gallery grid for AJAX add/remove. Editable is true
+    // because the upload/delete controls are only reachable from an editable
+    // (draft) gallery in the first place.
+    private PartialViewResult GridPartial(string ownerType, long ownerId) =>
+        PartialView("_ImageGalleryGrid", new ImageGalleryVm
+        {
+            OwnerType = ownerType,
+            OwnerId   = ownerId,
+            Editable  = true
+        });
 
     private IActionResult SafeRedirect(string? url)
     {

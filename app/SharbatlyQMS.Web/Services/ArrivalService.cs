@@ -11,11 +11,13 @@ namespace SharbatlyQMS.Web.Services;
 public class ArrivalService : IArrivalService
 {
     private readonly string _cs;
+    private readonly IAuditService _audit;
 
-    public ArrivalService(IConfiguration config)
+    public ArrivalService(IConfiguration config, IAuditService audit)
     {
         _cs = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
+        _audit = audit;
     }
 
     private SqlConnection Open() => new(_cs);
@@ -70,14 +72,24 @@ public class ArrivalService : IArrivalService
             ArrivalSelect + " WHERE a.arrival_id = @arrivalId", new { arrivalId });
     }
 
-    public async Task<Arrival?> FindByContainerAndBolAsync(string containerNo, string bolNo)
+    public async Task<Arrival?> FindByShipmentAsync(string containerNo, string bolNo, string? po)
     {
         if (string.IsNullOrWhiteSpace(containerNo) || string.IsNullOrWhiteSpace(bolNo)) return null;
         using var c = Open();
-        return await c.QuerySingleOrDefaultAsync<Arrival>(ArrivalSelect + @"
+        return await c.QueryFirstOrDefaultAsync<Arrival>(ArrivalSelect + @"
             WHERE a.container_no = @containerNo AND a.bol_no = @bolNo
+              AND (@po IS NULL OR a.ebeln = @po)
             ORDER BY a.created_at DESC",
-            new { containerNo, bolNo });
+            new { containerNo, bolNo, po });
+    }
+
+    public async Task<IReadOnlyList<Arrival>> FindByContainersAsync(IReadOnlyCollection<string> containers)
+    {
+        if (containers == null || containers.Count == 0) return Array.Empty<Arrival>();
+        using var c = Open();
+        var rows = await c.QueryAsync<Arrival>(ArrivalSelect + @"
+            WHERE a.container_no IN @containers", new { containers });
+        return rows.ToList();
     }
 
     public async Task<IReadOnlyList<ArrivalItem>> GetItemsAsync(long arrivalId)
@@ -157,10 +169,11 @@ public class ArrivalService : IArrivalService
 
         var first = rows[0];
         if (rows.Any(r => !string.Equals(r.ContainerNo, first.ContainerNo, StringComparison.OrdinalIgnoreCase) ||
-                          !string.Equals(r.BolNo,       first.BolNo,       StringComparison.OrdinalIgnoreCase)))
+                          !string.Equals(r.BolNo,       first.BolNo,       StringComparison.OrdinalIgnoreCase) ||
+                          !string.Equals(r.Ebeln,       first.Ebeln,       StringComparison.OrdinalIgnoreCase)))
         {
             throw new InvalidOperationException(
-                "All selected rows must share the same container and BOL (plan §5.3 disambiguation).");
+                "All selected rows must share the same container, BOL, and PO (one arrival = one container × BOL × PO).");
         }
 
         using var c = Open();
@@ -224,26 +237,29 @@ public class ArrivalService : IArrivalService
             "SELECT NEXT VALUE FOR seq_qms_shipment_no", transaction: tx);
         var internalShipmentNo = $"SHP-{DateTime.UtcNow:yyyy}-{shipmentSeq:D6}";
 
+        // inspection_date is the arrival/checklist creation date (read-only in the
+        // UI) -- CAST to date so it matches the DATE column and stays in step with
+        // created_at on the arrival row above.
         await c.ExecuteAsync(@"
             INSERT INTO qms_shipment_snapshot
-                (arrival_id, internal_shipment_no, loading_date, sailing_date,
-                 examination_date, arrival_date, unloading_date,
+                (arrival_id, internal_shipment_no, sailing_date,
+                 examination_date, arrival_date, unloading_date, receive_date, inspection_date,
                  transit_days, loading_port, loading_country, arrival_place,
                  vessel_name, voyage_number, status_code)
             VALUES
-                (@arrivalId, @internalShipmentNo, @loading, @sailing,
-                 @examination, @arrival, @unloading,
+                (@arrivalId, @internalShipmentNo, @sailing,
+                 @examination, @arrival, @unloading, @receive, CAST(SYSUTCDATETIME() AS date),
                  @transit, @loadingPort, @loadingCountry, @arrivalPlace,
                  @vessel, @voyage, 'Draft');",
             new
             {
                 arrivalId,
                 internalShipmentNo,
-                loading        = first.LoadingDate?.ToDateTime(TimeOnly.MinValue),
                 sailing        = first.SailingDate?.ToDateTime(TimeOnly.MinValue),
                 examination    = first.ExaminationDate?.ToDateTime(TimeOnly.MinValue),
                 arrival        = first.ArrivalDate?.ToDateTime(TimeOnly.MinValue),
                 unloading      = first.UnloadingDate?.ToDateTime(TimeOnly.MinValue),
+                receive        = first.ReceiveDate?.ToDateTime(TimeOnly.MinValue),
                 transit        = first.TransitDays,
                 loadingPort    = first.LoadingPort,
                 loadingCountry = first.LoadingCountry,
@@ -267,7 +283,7 @@ public class ArrivalService : IArrivalService
                 container_seal_photo_taken, external_container_photo_taken, external_damage_photo_taken,
                 first_view_cargo_photo_taken, internal_damage_photo_taken)
             VALUES (
-                @arrivalId, @sealNo, @vendor,
+                @arrivalId, @sealNo, @carrier,
                 0, 0, 0,
                 0, 0, 0,
                 0, 0, 0,
@@ -275,7 +291,7 @@ public class ArrivalService : IArrivalService
                 0, 0, 0,
                 0, 0, 0,
                 0, 0);",
-            new { arrivalId, sealNo = first.SealNo, vendor = first.VendorName }, tx);
+            new { arrivalId, sealNo = first.SealNo, carrier = first.Carrier }, tx);
 
         var json = JsonSerializer.Serialize(rows);
         var hash = Sha256(json);
@@ -294,16 +310,66 @@ public class ArrivalService : IArrivalService
                 ('Arrival', @arrivalId, NULL, 'Draft', SYSUTCDATETIME(), @createdBy);",
             new { arrivalId, createdBy }, tx);
 
+        // T022 (US1) -- Arrival created from a SAP shipment snapshot.
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Arrival, arrivalId, ActionCodes.Created,
+            oldValues: null,
+            newValues: new
+            {
+                arrival_no = arrivalNo,
+                container_no = first.ContainerNo,
+                bol_no = first.BolNo,
+                ebeln = first.Ebeln,
+                vendor_no = first.VendorNo,
+                vendor_name = first.VendorName,
+                item_count = rows.Count
+            },
+            actor: createdBy);
+
         tx.Commit();
         return arrivalId;
     }
 
     public async Task SaveChecklistAsync(ArrivalChecklist cl, string updatedBy)
     {
+        // PH-1.3 (2026-05-20): wrap in a transaction so a future audit
+        // INSERT here (Phase 3 instrumentation) lands atomically with the
+        // UPDATE. Single-statement today, but transaction-ready.
         using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+
+        // BUGFIX 2026-05-21: capture the row BEFORE the UPDATE so the audit
+        // diff only highlights fields that actually changed. The column
+        // aliases (PascalCase) match the keys in the newValues anonymous
+        // object below, so ParseDiffs at read-time pairs them correctly.
+        // carrier_name is sourced from the SAP CDS 'Carrier' field at creation and
+        // is read-only in the UI, so it is deliberately excluded from the
+        // SELECT/UPDATE/audit below -- saves must not null it or log a phantom diff.
+        var oldRow = await c.QuerySingleOrDefaultAsync(@"
+            SELECT seal_no                       AS SealNo,
+                   seal_intact                   AS SealIntact,
+                   seal_matches_documents        AS SealMatchesDocuments,
+                   external_damage_exists        AS ExternalDamageExists,
+                   set_temperature               AS SetTemperature,
+                   display_temperature           AS DisplayTemperature,
+                   cargo_smell_normal            AS CargoSmellNormal,
+                   visual_cargo_acceptable       AS VisualCargoAcceptable,
+                   cargo_shifted_collapsed_water AS CargoShiftedCollapsedWater,
+                   pulp_temp_front               AS PulpTempFront,
+                   pulp_temp_middle              AS PulpTempMiddle,
+                   pulp_temp_back                AS PulpTempBack,
+                   data_logger_located           AS DataLoggerLocated,
+                   data_logger_serial            AS DataLoggerSerial,
+                   logger_temperature            AS LoggerTemperature,
+                   notes                         AS Notes
+            FROM   qms_arrival_checklist
+            WHERE  arrival_id = @ArrivalId",
+            new { cl.ArrivalId }, tx);
+
         await c.ExecuteAsync(@"
             UPDATE qms_arrival_checklist SET
-              seal_no = @SealNo, carrier_name = @CarrierName,
+              seal_no = @SealNo,
               seal_intact = @SealIntact, seal_matches_documents = @SealMatchesDocuments,
               external_damage_exists = @ExternalDamageExists,
               set_temperature = @SetTemperature, display_temperature = @DisplayTemperature,
@@ -326,7 +392,7 @@ public class ArrivalService : IArrivalService
             WHERE arrival_id = @ArrivalId",
             new
             {
-                cl.ArrivalId, cl.SealNo, cl.CarrierName,
+                cl.ArrivalId, cl.SealNo,
                 cl.SealIntact, cl.SealMatchesDocuments, cl.ExternalDamageExists,
                 cl.SetTemperature, cl.DisplayTemperature, cl.CargoSmellNormal,
                 cl.VisualCargoAcceptable, cl.CargoShiftedCollapsedWater,
@@ -338,24 +404,78 @@ public class ArrivalService : IArrivalService
                 cl.ContainerSealPhotoTaken, cl.ExternalContainerPhotoTaken, cl.ExternalDamagePhotoTaken,
                 cl.FirstViewCargoPhotoTaken, cl.InternalDamagePhotoTaken,
                 updatedBy
-            });
+            },
+            transaction: tx);
+        // T022 (US1) -- record the checklist save as Updated under
+        // ArrivalChecklist. Field-level diff is computed at read-time by
+        // ParseDiffs in AuditService; only changed fields surface in the UI.
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.ArrivalChecklist, cl.ArrivalId, ActionCodes.Updated,
+            oldValues: oldRow,
+            newValues: new
+            {
+                cl.SealNo, cl.SealIntact, cl.SealMatchesDocuments,
+                cl.ExternalDamageExists, cl.SetTemperature, cl.DisplayTemperature,
+                cl.CargoSmellNormal, cl.VisualCargoAcceptable, cl.CargoShiftedCollapsedWater,
+                cl.PulpTempFront, cl.PulpTempMiddle, cl.PulpTempBack,
+                cl.DataLoggerLocated, cl.DataLoggerSerial, cl.LoggerTemperature,
+                cl.Notes
+            },
+            actor: updatedBy);
+        tx.Commit();
     }
 
     public async Task SaveShipmentAsync(ShipmentSnapshot ss, string updatedBy)
     {
+        // PH-1.4 (2026-05-20): wrap in a transaction so a future audit
+        // INSERT here lands atomically with the UPDATE.
         using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+
+        // BUGFIX 2026-05-21: capture the row BEFORE the UPDATE so the audit
+        // diff only highlights fields that actually changed. Column aliases
+        // match the newValues anonymous-object keys below.
+        // The SAP-sourced fields (loading/sailing/examination/arrival dates,
+        // transit days, loading port/country, vessel, voyage, carrier, receive
+        // and inspection dates) are read-only in the UI -- they are set once in
+        // CreateFromSapAsync and deliberately excluded from the SELECT/UPDATE/audit
+        // here so saves can't null them or log phantom diffs. Only the
+        // inspector-entered fields below are editable.
+        var oldRow = await c.QuerySingleOrDefaultAsync(@"
+            SELECT unloading_date    AS UnloadingDate,
+                   pullout_date      AS PullOutDate,
+                   time_bar          AS TimeBar,
+                   arrival_place     AS ArrivalPlace,
+                   inspection_point  AS InspectionPoint,
+                   time_bar_exceeded AS TimeBarExceeded,
+                   joint_survey      AS JointSurvey
+            FROM   qms_shipment_snapshot
+            WHERE  arrival_id = @ArrivalId",
+            new { ss.ArrivalId }, tx);
+
         await c.ExecuteAsync(@"
             UPDATE qms_shipment_snapshot SET
-              loading_date = @LoadingDate, sailing_date = @SailingDate,
-              examination_date = @ExaminationDate, arrival_date = @ArrivalDate,
-              unloading_date = @UnloadingDate, inspection_date = @InspectionDate,
-              transit_days = @TransitDays, time_bar = @TimeBar,
-              loading_port = @LoadingPort, loading_country = @LoadingCountry,
-              arrival_place = @ArrivalPlace, vessel_name = @VesselName, voyage_number = @VoyageNumber,
-              pullout_date = @PullOutDate, receive_date = @ReceiveDate,
+              unloading_date = @UnloadingDate, time_bar = @TimeBar,
+              arrival_place = @ArrivalPlace, pullout_date = @PullOutDate,
               time_bar_exceeded = @TimeBarExceeded, inspection_point = @InspectionPoint,
               joint_survey = @JointSurvey
-            WHERE arrival_id = @ArrivalId", ss);
+            WHERE arrival_id = @ArrivalId", ss, transaction: tx);
+        // T022 (US1) -- record the shipment-snapshot save under the parent arrival.
+        // BUGFIX 2026-05-21: pass the captured old row so only changed fields
+        // show up in the diff (dropped the synthetic "shipment_snapshot_updated"
+        // marker -- it forced every save to appear as a change even when the
+        // shipment fields were untouched).
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Arrival, ss.ArrivalId, ActionCodes.Updated,
+            oldValues: oldRow,
+            newValues: new
+            {
+                ss.UnloadingDate, ss.PullOutDate, ss.TimeBar, ss.ArrivalPlace,
+                ss.InspectionPoint, ss.TimeBarExceeded, ss.JointSurvey
+            },
+            actor: updatedBy);
+        tx.Commit();
     }
 
     public async Task<(bool ok, string? error)> CompleteAsync(long arrivalId, string user)
@@ -382,6 +502,14 @@ public class ArrivalService : IArrivalService
                 (entity_type, entity_id, old_status, new_status, changed_at, changed_by)
             VALUES ('Arrival', @arrivalId, 'Draft', 'Completed', SYSUTCDATETIME(), @user)",
             new { arrivalId, user }, tx);
+        // T022 (US1) -- record arrival completion. No specific domain action
+        // code defined for arrivals; using generic Updated with a clear field
+        // diff that shows status_code: Draft -> Completed.
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Arrival, arrivalId, ActionCodes.Updated,
+            oldValues: new { status_code = "Draft" },
+            newValues: new { status_code = "Completed" },
+            actor: user);
         tx.Commit();
         return (true, null);
     }
@@ -407,6 +535,12 @@ public class ArrivalService : IArrivalService
             INSERT INTO qms_status_history (entity_type, entity_id, old_status, new_status, reason, changed_at, changed_by)
             VALUES ('Arrival', @arrivalId, 'Completed', 'Draft', @reason, SYSUTCDATETIME(), @user)",
             new { arrivalId, reason, user }, tx);
+        // T022 (US1) -- arrival re-opened for editing.
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Arrival, arrivalId, ActionCodes.Reopened,
+            oldValues: new { status_code = "Completed" },
+            newValues: new { status_code = "Draft", reason },
+            actor: user);
         tx.Commit();
         return (true, null);
     }
@@ -450,6 +584,18 @@ public class ArrivalService : IArrivalService
             INSERT INTO qms_status_history (entity_type, entity_id, old_status, new_status, reason, changed_at, changed_by)
             VALUES ('Arrival', @arrivalId, @prev, 'Deleted', 'Admin hard-delete', SYSUTCDATETIME(), @user)",
             new { arrivalId, prev = a.StatusCode, user }, tx);
+
+        // T022 (US1) -- record hard-delete with full snapshot of the arrival
+        // before it disappears (FR-014: audit survives the deletion).
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Arrival, arrivalId, ActionCodes.Deleted,
+            oldValues: new
+            {
+                a.ArrivalNo, a.ContainerNo, a.BolNo, a.Ebeln,
+                a.VendorNo, a.VendorName, status_code = a.StatusCode
+            },
+            newValues: null,
+            actor: user);
 
         await c.ExecuteAsync("DELETE FROM qms_arrival WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
 

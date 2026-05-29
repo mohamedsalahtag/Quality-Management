@@ -196,3 +196,11 @@ C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\appsettings.Production
 C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\Microsoft.Extensions.Hosting.WindowsServices.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\System.ServiceProcess.ServiceController.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\runtimes\win\lib\net9.0\System.ServiceProcess.ServiceController.dll
+C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\ClosedXML.dll
+C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\ClosedXML.Parser.dll
+C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\DocumentFormat.OpenXml.dll
+C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\DocumentFormat.OpenXml.Framework.dll
+C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\ExcelNumberFormat.dll
+C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\RBush.dll
+C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\SixLabors.Fonts.dll
+C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\System.IO.Packaging.dll

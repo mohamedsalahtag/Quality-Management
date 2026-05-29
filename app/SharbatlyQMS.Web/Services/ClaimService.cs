@@ -7,11 +7,13 @@ namespace SharbatlyQMS.Web.Services;
 public class ClaimService : IClaimService
 {
     private readonly string _cs;
+    private readonly IAuditService _audit;
 
-    public ClaimService(IConfiguration config)
+    public ClaimService(IConfiguration config, IAuditService audit)
     {
         _cs = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
+        _audit = audit;
     }
 
     private SqlConnection Open() => new(_cs);
@@ -196,6 +198,18 @@ public class ClaimService : IClaimService
         }
 
         await InsertNoteAsync(c, tx, claimId, note, ClaimNoteKind.StatusChange, toStatus, user, authorRole);
+
+        // T021 (US1) -- domain action labels (ClaimRequest / PassedQC) preserved
+        // per FR-002 and the 2026-05-20 clarification.
+        var qmAction = toStatus == ClaimStatus.ClaimRequest
+            ? ActionCodes.ClaimRequest
+            : ActionCodes.PassedQC;
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Claim, claimId, qmAction,
+            oldValues: existing == null ? null : new { claim_status = existing.ClaimStatus },
+            newValues: new { claim_status = toStatus, note },
+            actor: user);
+
         tx.Commit();
         return (true, null);
     }
@@ -243,6 +257,17 @@ public class ClaimService : IClaimService
             new { claimId = existing.ClaimId, toStatus, user }, tx);
 
         await InsertNoteAsync(c, tx, existing.ClaimId, note, ClaimNoteKind.StatusChange, toStatus, user, authorRole);
+
+        // T021 (US1) -- domain action labels (Approved / Hold) preserved.
+        var cmAction = toStatus == ClaimStatus.ClaimRequestApproved
+            ? ActionCodes.Approved
+            : ActionCodes.Hold;
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Claim, existing.ClaimId, cmAction,
+            oldValues: new { claim_status = existing.ClaimStatus, decided_at = existing.DecidedAt, decided_by = existing.DecidedBy },
+            newValues: new { claim_status = toStatus, decided_by = user, note },
+            actor: user);
+
         tx.Commit();
         return (true, null);
     }
@@ -266,6 +291,14 @@ public class ClaimService : IClaimService
             return (false, "Cannot add a note before the Quality Manager has marked this QO.");
 
         await InsertNoteAsync(c, tx, existing.ClaimId, note, ClaimNoteKind.Comment, null, user, authorRole);
+
+        // T021 (US1) -- plain claim note recorded as a ClaimNote.Created entry.
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.ClaimNote, existing.ClaimId, ActionCodes.Created,
+            oldValues: null,
+            newValues: new { note },
+            actor: user);
+
         tx.Commit();
         return (true, null);
     }

@@ -27,7 +27,12 @@ C:\QualityManagemet\deploy\SharbatlyQMS\SharbatlyQMS.Web.runtimeconfig.json
 C:\QualityManagemet\deploy\SharbatlyQMS\SharbatlyQMS.Web.pdb
 C:\QualityManagemet\deploy\SharbatlyQMS\BCrypt.Net-Next.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\BouncyCastle.Cryptography.dll
+C:\QualityManagemet\deploy\SharbatlyQMS\ClosedXML.dll
+C:\QualityManagemet\deploy\SharbatlyQMS\ClosedXML.Parser.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\Dapper.dll
+C:\QualityManagemet\deploy\SharbatlyQMS\DocumentFormat.OpenXml.dll
+C:\QualityManagemet\deploy\SharbatlyQMS\DocumentFormat.OpenXml.Framework.dll
+C:\QualityManagemet\deploy\SharbatlyQMS\ExcelNumberFormat.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\MailKit.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\Microsoft.Bcl.Cryptography.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\Microsoft.Data.SqlClient.dll
@@ -49,11 +54,14 @@ C:\QualityManagemet\deploy\SharbatlyQMS\Microsoft.IdentityModel.Tokens.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\Microsoft.SqlServer.Server.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\MimeKit.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\QuestPDF.dll
+C:\QualityManagemet\deploy\SharbatlyQMS\RBush.dll
+C:\QualityManagemet\deploy\SharbatlyQMS\SixLabors.Fonts.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\SixLabors.ImageSharp.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\System.Configuration.ConfigurationManager.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\System.Diagnostics.EventLog.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\System.DirectoryServices.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\System.IdentityModel.Tokens.Jwt.dll
+C:\QualityManagemet\deploy\SharbatlyQMS\System.IO.Packaging.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\System.Security.Cryptography.Pkcs.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\System.Security.Cryptography.ProtectedData.dll
 C:\QualityManagemet\deploy\SharbatlyQMS\System.ServiceProcess.ServiceController.dll

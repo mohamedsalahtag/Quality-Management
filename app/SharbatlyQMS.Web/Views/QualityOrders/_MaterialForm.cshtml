@@ -1,0 +1,70 @@
+@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.ViewModels
+@model MaterialFormVm
+@{
+    var m        = Model.Material;
+    var editable = Model.Editable;
+    string HfName(string code) => $"header_{code}";
+    var byCode = Model.ExistingValues.ToDictionary(v => v.FieldCode);
+}
+
+@if (!editable)
+{
+    <div class="alert alert-info small mb-2 py-2"><i class="bi bi-lock me-1"></i>Read-only because the Quality Order is <strong>@Model.Qo.StatusCode</strong>.</div>
+}
+
+<form id="materialDetailsForm" asp-action="SaveMaterialHeaderAjax" method="post" class="material-form"
+      data-qo-material-id="@m.QoMaterialId">
+    @Html.AntiForgeryToken()
+    <input type="hidden" name="qoMaterialId"   value="@m.QoMaterialId" />
+    <input type="hidden" name="qualityOrderId" value="@Model.Qo.QualityOrderId" />
+    <fieldset @(editable ? "" : "disabled")>
+        <p class="small text-muted mb-2">
+            Entered once for <code>@m.MaterialNo</code> @m.MaterialDesc and inherited by every sample of this material.
+        </p>
+        <div class="row g-2">
+            @* Sample size -- material-level source of truth; propagated to every sample. *@
+            <div class="col-6 col-md-4">
+                <label class="form-label">Sample size <span class="text-danger fw-bold" title="Defect percentages divide by this">*</span></label>
+                <input name="sampleSize" type="number" inputmode="numeric" min="1"
+                       class="form-control form-control-sm" value="@Model.SampleSize" required />
+            </div>
+
+            @foreach (var f in Model.HeaderFields)
+            {
+                byCode.TryGetValue(f.FieldCode, out var existing);
+                <div class="col-6 col-md-4">
+                    <label class="form-label">
+                        @f.FieldName <span class="text-muted">@f.DefaultUnit</span>
+                        @if (f.IsMandatory)
+                        {
+                            <span class="text-danger fw-bold" title="Required">*</span>
+                        }
+                    </label>
+                    @if (f.ValueKind == "Numeric")
+                    {
+                        <input name="@(HfName(f.FieldCode))" type="number" step="any" inputmode="decimal"
+                               class="form-control form-control-sm" value="@(existing?.NumericValue)"
+                               required="@(f.IsMandatory)" />
+                    }
+                    else if (f.ValueKind == "Date")
+                    {
+                        <input name="@(HfName(f.FieldCode))" type="date"
+                               class="form-control form-control-sm" value="@(existing?.DateValue?.ToString("yyyy-MM-dd"))"
+                               required="@(f.IsMandatory)" />
+                    }
+                    else
+                    {
+                        <input name="@(HfName(f.FieldCode))" type="text"
+                               class="form-control form-control-sm" value="@(existing?.TextValue)"
+                               required="@(f.IsMandatory)" />
+                    }
+                </div>
+            }
+            @if (Model.HeaderFields.Count == 0)
+            {
+                <div class="col-12"><div class="text-muted small">No material-level header fields configured. Manage them (and their scope) in <a asp-controller="Admin" asp-action="SampleHeaders">Admin → Sample Headers</a>.</div></div>
+            }
+        </div>
+    </fieldset>
+</form>

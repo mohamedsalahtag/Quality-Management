@@ -1,0 +1,102 @@
+@*
+    Audit history host partial. Renders a COLLAPSED Bootstrap card; on
+    first expand it fetches /Audit/HistoryPanel and injects the rows.
+    Lazy-loaded as of 2026-05-25 so detail pages that include this
+    partial don't pay the AJAX round-trip until the user actually wants
+    to see the history.
+
+    The host view must set ViewBag.AuditEntityType + ViewBag.AuditEntityId
+    before including this partial:
+
+        @{ ViewBag.AuditEntityType = "QualityOrder";
+           ViewBag.AuditEntityId   = Model.QualityOrderId; }
+        @await Html.PartialAsync("~/Views/Audit/_AuditHistory.cshtml")
+
+    A unique DOM id (audit-history-<type>-<id>) lets a single page host
+    multiple panels safely (e.g. QO detail page in claim-context shows
+    both the QO and the Claim audit panels — T028).
+*@
+@{
+    var entityType = (string?)ViewBag.AuditEntityType ?? "";
+    var entityId   = ViewBag.AuditEntityId as long? ?? 0L;
+    var panelId    = $"audit-history-{entityType.ToLowerInvariant()}-{entityId}";
+}
+
+<div class="card mb-3 audit-history-card" id="@panelId" data-loaded="false">
+    @* Whole header is clickable; the chevron rotates on expand. The
+       refresh button hides while collapsed (only meaningful when there
+       are rows on screen). *@
+    <div class="card-header py-2 d-flex justify-content-between align-items-center audit-toggle"
+         role="button" aria-expanded="false" tabindex="0" style="cursor: pointer;">
+        <span>
+            <i class="bi bi-chevron-right me-1 audit-chevron" style="transition: transform .15s;"></i>
+            <i class="bi bi-shield-shaded me-1"></i>Audit history (@entityType)
+        </span>
+        <button type="button" class="btn btn-sm btn-outline-secondary audit-refresh d-none"
+                title="Refresh">
+            <i class="bi bi-arrow-clockwise"></i>
+        </button>
+    </div>
+    <div class="card-body p-2 audit-body d-none">
+        <div class="audit-rows">
+            <div class="text-muted small p-2">
+                <span class="spinner-border spinner-border-sm me-1"></span>
+                Loading audit history...
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        var panel    = document.getElementById('@panelId');
+        if (!panel) return;
+        var toggle   = panel.querySelector('.audit-toggle');
+        var chevron  = panel.querySelector('.audit-chevron');
+        var body     = panel.querySelector('.audit-body');
+        var rows     = panel.querySelector('.audit-rows');
+        var refresh  = panel.querySelector('.audit-refresh');
+
+        function load() {
+            rows.innerHTML = '<div class="text-muted small p-2">'
+                + '<span class="spinner-border spinner-border-sm me-1"></span>Loading audit history...</div>';
+            fetch('@Url.Action("HistoryPanel", "Audit")?entityType=@entityType&entityId=@entityId', {
+                credentials: 'same-origin'
+            })
+                .then(function (r) {
+                    if (!r.ok) throw new Error('HTTP ' + r.status);
+                    return r.text();
+                })
+                .then(function (html) { rows.innerHTML = html; panel.dataset.loaded = 'true'; })
+                .catch(function (err) {
+                    rows.innerHTML = '<div class="alert alert-danger m-2 small">'
+                        + 'Could not load audit history: ' + err.message + '</div>';
+                });
+        }
+
+        function setExpanded(expanded) {
+            toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+            chevron.style.transform = expanded ? 'rotate(90deg)' : 'rotate(0deg)';
+            body.classList.toggle('d-none', !expanded);
+            refresh.classList.toggle('d-none', !expanded);
+            // Lazy-load on first expand; later expands re-show the cached HTML.
+            if (expanded && panel.dataset.loaded !== 'true') load();
+        }
+
+        // stopPropagation so clicking refresh inside the header doesn't
+        // also collapse the panel.
+        refresh.addEventListener('click', function (e) {
+            e.stopPropagation();
+            load();
+        });
+        toggle.addEventListener('click', function () {
+            setExpanded(toggle.getAttribute('aria-expanded') !== 'true');
+        });
+        toggle.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                setExpanded(toggle.getAttribute('aria-expanded') !== 'true');
+            }
+        });
+    })();
+</script>

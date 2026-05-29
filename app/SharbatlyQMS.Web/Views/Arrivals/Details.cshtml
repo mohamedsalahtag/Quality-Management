@@ -10,6 +10,10 @@
     var canEdit   = role == UserRoles.Operator || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
     var canManage = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;
     var isAdmin   = canManage;   // backward-compat alias for blocks that already use isAdmin
+    // Audit-history panel visibility (FR-017): Manager or SiteAdmin only.
+    // (Auditor role retired 2026-05-21; matches the ManagerOrAdmin policy
+    // on the HistoryPanel endpoint.)
+    var canSeeAudit = role == UserRoles.Manager || role == UserRoles.SiteAdmin;
     var hasQo     = Model.QualityOrderId.HasValue;
     var (cls, label) = Model.StatusCode switch
     {
@@ -237,34 +241,36 @@
                 <fieldset @(draft ? "" : "disabled")>
                     <div class="row g-3">
                         <div class="col-md-3"><label class="form-label">Vessel name</label>
-                            <input name="VesselName" class="form-control" value="@shipment?.VesselName" /></div>
+                            <input class="form-control" value="@shipment?.VesselName" disabled /></div>
                         <div class="col-md-3"><label class="form-label">Voyage number</label>
-                            <input name="VoyageNumber" class="form-control" value="@shipment?.VoyageNumber" /></div>
+                            <input class="form-control" value="@shipment?.VoyageNumber" disabled /></div>
                         <div class="col-md-3"><label class="form-label">Loading port</label>
-                            <input name="LoadingPort" class="form-control" value="@shipment?.LoadingPort" /></div>
+                            <input class="form-control" value="@shipment?.LoadingPort" disabled /></div>
                         <div class="col-md-3"><label class="form-label">Country of origin</label>
-                            <input name="LoadingCountry" class="form-control" value="@shipment?.LoadingCountry" /></div>
+                            <input class="form-control" value="@shipment?.LoadingCountry" disabled /></div>
 
                         <div class="col-md-3"><label class="form-label">Loading date</label>
-                            <input name="LoadingDate" type="date" class="form-control" value="@shipment?.LoadingDate?.ToString("yyyy-MM-dd")" /></div>
-                        <div class="col-md-3"><label class="form-label">Sailing date</label>
-                            <input name="SailingDate" type="date" class="form-control" value="@shipment?.SailingDate?.ToString("yyyy-MM-dd")" /></div>
+                            <input type="date" class="form-control" value="@shipment?.SailingDate?.ToString("yyyy-MM-dd")" disabled /></div>
                         <div class="col-md-3"><label class="form-label">Examination date</label>
-                            <input name="ExaminationDate" type="date" class="form-control" value="@shipment?.ExaminationDate?.ToString("yyyy-MM-dd")" /></div>
+                            <input type="date" class="form-control" value="@shipment?.ExaminationDate?.ToString("yyyy-MM-dd")" disabled /></div>
                         <div class="col-md-3"><label class="form-label">Arrival date</label>
-                            <input name="ArrivalDate" type="date" class="form-control" value="@shipment?.ArrivalDate?.ToString("yyyy-MM-dd")" /></div>
+                            <input type="date" class="form-control" value="@shipment?.ArrivalDate?.ToString("yyyy-MM-dd")" disabled /></div>
 
                         <div class="col-md-3"><label class="form-label">Unloading date</label>
                             <input name="UnloadingDate" type="date" class="form-control" value="@shipment?.UnloadingDate?.ToString("yyyy-MM-dd")" /></div>
                         <div class="col-md-3"><label class="form-label">Inspection date</label>
-                            <input name="InspectionDate" type="date" class="form-control" value="@shipment?.InspectionDate?.ToString("yyyy-MM-dd")" /></div>
+                            <input type="date" class="form-control" disabled
+                                   value="@(shipment?.InspectionDate?.ToString("yyyy-MM-dd") ?? Model.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd"))" />
+                            <small class="text-muted">Auto — arrival creation date</small></div>
                         <div class="col-md-3"><label class="form-label">Pull-out date</label>
                             <input name="PullOutDate" type="date" class="form-control" value="@shipment?.PullOutDate?.ToString("yyyy-MM-dd")" /></div>
                         <div class="col-md-3"><label class="form-label">Receive date</label>
-                            <input name="ReceiveDate" type="date" class="form-control" value="@shipment?.ReceiveDate?.ToString("yyyy-MM-dd")" /></div>
+                            <input type="date" class="form-control" disabled
+                                   value="@shipment?.ReceiveDate?.ToString("yyyy-MM-dd")" />
+                            <small class="text-muted">From SAP (Receive_Date)</small></div>
 
                         <div class="col-md-3"><label class="form-label">Transit days</label>
-                            <input name="TransitDays" type="number" class="form-control" value="@shipment?.TransitDays" /></div>
+                            <input type="number" class="form-control" value="@shipment?.TransitDays" disabled /></div>
                         <div class="col-md-3"><label class="form-label">Time bar (days)</label>
                             <input name="TimeBar" type="number" class="form-control" value="@shipment?.TimeBar" /></div>
                         <div class="col-md-3"><label class="form-label">Arrival port</label>
@@ -419,7 +425,7 @@
                     <div class="col-6 col-md-3"><span class="text-muted">Container</span><br /><code>@Model.ContainerNo</code></div>
                     <div class="col-6 col-md-3">
                         <label class="text-muted small">Carrier Name</label>
-                        <input name="CarrierName" class="form-control form-control-sm" value="@checklist.CarrierName" />
+                        <input class="form-control form-control-sm" value="@checklist.CarrierName" disabled />
                     </div>
                 </div>
             </div>
@@ -628,6 +634,15 @@
     </form>
 </div>
 
+@* T027 (US1) -- Audit history panel for the Arrival. Visible to
+   Manager / Auditor / SiteAdmin only (FR-017). *@
+@if (canSeeAudit)
+{
+    ViewBag.AuditEntityType = "Arrival";
+    ViewBag.AuditEntityId   = Model.ArrivalId;
+    @await Html.PartialAsync("~/Views/Audit/_AuditHistory.cshtml")
+}
+
 @section Scripts {
 <script>
     // The checklist UI shows the same photo-taken flag in two places: inline in
@@ -683,6 +698,8 @@
                         <th>PO / Item</th>
                         <th>Material</th>
                         <th>Description</th>
+                        <th>Variety</th>
+                        <th>Class</th>
                         <th>Material group</th>
                         <th>Major category</th>
                         <th>Plant</th>
@@ -699,7 +716,9 @@
                             <td>@it.Ebeln / @it.Ebelp</td>
                             <td><code>@it.MaterialNo</code></td>
                             <td>@it.MaterialDesc</td>
-                            <td>@it.MaterialGroup &mdash; @it.MaterialGroupDesc</td>
+                            <td>@it.Variety</td>
+                            <td>@it.MaterialClass</td>
+                            <td>@it.MaterialGroup</td>
                             <td>@it.MajorCategory</td>
                             <td>@it.Plant</td>
                             <td>@it.StorageLocation</td>
@@ -722,6 +741,7 @@
             OwnerType = "Arrival",
             OwnerId   = Model.ArrivalId,
             Editable  = draft,
+            Ajax      = true,
             Categories = new[] { "ArrivalExternal", "ArrivalInternal", "TemperatureDisplay", "DataLogger" }
         };
     }

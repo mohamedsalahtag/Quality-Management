@@ -9,6 +9,9 @@
     var sectionMap    = ViewBag.SectionMap      as IReadOnlyDictionary<string,string> ?? new Dictionary<string,string>();
     var existingReads = ViewBag.ExistingReadings as IReadOnlyList<SampleReading> ?? new List<SampleReading>();
     var existingDefs  = ViewBag.ExistingDefects  as IReadOnlyList<SampleDefect>  ?? new List<SampleDefect>();
+    var headerFields  = ViewBag.HeaderFields     as IReadOnlyList<SampleHeaderField> ?? new List<SampleHeaderField>();
+    var existingHdr   = ViewBag.ExistingHeader   as IReadOnlyList<SampleHeaderValue> ?? new List<SampleHeaderValue>();
+    var categories    = ViewBag.Categories as IReadOnlyList<DefectCategory> ?? new List<DefectCategory>();
     ViewData["Title"] = $"Sample #{Model.SampleNo}";
     var editable = qo.StatusCode == "Open";
 
@@ -22,6 +25,9 @@
         SectionMap = sectionMap,
         ExistingReadings = existingReads,
         ExistingDefects = existingDefs,
+        HeaderFields = headerFields,
+        ExistingHeader = existingHdr,
+        Categories = categories,
         Editable = editable
     };
 }
@@ -63,7 +69,7 @@
             const plus  = row.querySelector('.defect-plus');
             const updatePct = () => {
                 const form = row.closest('form');
-                const size = parseFloat(form?.querySelector('input[name="SampleSize"]')?.value);
+                const size = parseFloat(form?.dataset.sampleSize);
                 const v = parseFloat(input.value);
                 const pctInput = form.querySelector('input[name="defect_' + input.dataset.id + '_pct"]');
                 const badge = row.querySelector('.defect-pct-badge');

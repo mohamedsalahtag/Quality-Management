@@ -99,5 +99,8 @@ This is how the next AI session (or human) picks up where you left off.
 
 <!-- SPECKIT START -->
 For additional context about technologies to be used, project structure,
-shell commands, and other important information, read the current plan
+shell commands, and other important information, read the current plan at
+`specs/001-audit-trail/plan.md` (with companion files `research.md`,
+`data-model.md`, `quickstart.md`, and `contracts/audit-endpoints.md` in the
+same directory).
 <!-- SPECKIT END -->

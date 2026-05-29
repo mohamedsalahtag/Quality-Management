@@ -29,11 +29,11 @@ public static class UserRoles
     public const string ClaimManager = "ClaimManager";
     public const string SiteAdmin    = "SiteAdmin";
 
-    // Ordered low-to-high so a future "rank" check can compare positions.
-    // ClaimManager sits between Manager and SiteAdmin in the array purely
-    // for cosmetic ordering -- it is NOT a hierarchical "more powerful
-    // than Manager" claim. The two are peer roles with disjoint authority
-    // (Manager = QC inspection; ClaimManager = commercial claim approval).
+    // The Auditor role was removed on 2026-05-21 (V16 migration) -- audit
+    // browsing is SiteAdmin-only; per-record audit panels reuse the existing
+    // ManagerOrAdmin policy. ClaimManager is a peer role to Manager (not
+    // hierarchically higher) -- it sits between Manager and SiteAdmin in
+    // the array purely for cosmetic ordering.
     public static readonly string[] All = { Viewer, Operator, Manager, ClaimManager, SiteAdmin };
 
     public static bool IsValid(string role) => Array.IndexOf(All, role) >= 0;
@@ -41,9 +41,9 @@ public static class UserRoles
 
 public static class AuthPolicies
 {
-    /// <summary>SiteAdmin only.</summary>
+    /// <summary>SiteAdmin only. Also gates the global Audit Log page + Excel export.</summary>
     public const string AdminOnly             = "AdminOnly";
-    /// <summary>Manager or SiteAdmin. Parameters pages + destructive ops.</summary>
+    /// <summary>Manager or SiteAdmin. Parameters pages, destructive ops, per-record audit panels.</summary>
     public const string ManagerOrAdmin        = "ManagerOrAdmin";
     /// <summary>Operator, Manager, or SiteAdmin. Operational mutations.</summary>
     public const string OperatorOrAbove       = "OperatorOrAbove";

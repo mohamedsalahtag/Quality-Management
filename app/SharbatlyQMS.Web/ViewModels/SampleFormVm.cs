@@ -19,4 +19,21 @@ public class SampleFormVm
     public IReadOnlyList<SampleReading>      ExistingReadings{ get; set; } = Array.Empty<SampleReading>();
     public IReadOnlyList<SampleDefect>       ExistingDefects { get; set; } = Array.Empty<SampleDefect>();
     public bool                              Editable        { get; set; }
+
+    // ---- Sample header fields (V20+) ----
+    // The active catalog drives the dynamic inputs at the top of the
+    // form; the existing values pre-fill them when editing. Sample Size
+    // stays hardcoded (denominator for defect percentages) so it is NOT
+    // part of this list.
+    public IReadOnlyList<SampleHeaderField>  HeaderFields    { get; set; } = Array.Empty<SampleHeaderField>();
+    public IReadOnlyList<SampleHeaderValue>  ExistingHeader  { get; set; } = Array.Empty<SampleHeaderValue>();
+
+    // Material-scoped header values inherited from the parent material
+    // (entered on the Material details panel). Shown read-only for context;
+    // not editable here. Sample Size is inherited too — see QoMaterial.SampleSize.
+    public IReadOnlyList<MaterialHeaderValue> MaterialHeaderValues { get; set; } = Array.Empty<MaterialHeaderValue>();
+
+    // Defect category master (V22+) — drives the dynamic per-category defect
+    // sections (order + colour). The defects themselves come from Defects.
+    public IReadOnlyList<DefectCategory> Categories { get; set; } = Array.Empty<DefectCategory>();
 }

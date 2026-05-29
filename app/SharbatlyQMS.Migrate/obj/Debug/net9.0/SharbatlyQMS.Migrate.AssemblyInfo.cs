@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SharbatlyQMS.Migrate")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+b4520b8fa9393ef846b61bbf0d42d2e7c07b6b40")]
 [assembly: System.Reflection.AssemblyProductAttribute("SharbatlyQMS.Migrate")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SharbatlyQMS.Migrate")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -41,6 +41,11 @@ public class ArrivalItem
     public string?  MaterialGroup     { get; set; }
     public string?  MaterialGroupDesc { get; set; }
     public string?  MajorCategory     { get; set; }
+
+    // Display-only, enriched from the MARA cache at view-time (not persisted on
+    // qms_arrival_item). Shown on the arrival Materials tab.
+    public string?  Variety           { get; set; }
+    public string?  MaterialClass     { get; set; }
 }
 
 public static class ArrivalStatus

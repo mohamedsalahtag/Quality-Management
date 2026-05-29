@@ -227,6 +227,27 @@ public class ReportsController : Controller
             if (mara.TryGetValue(m.MaterialNo, out var mm)) m.ApplyMara(mm);
         data.Materials = materials;
 
+        // Page-1 grouped summary (replaces the per-sample summary blocks).
+        // Materials are passed in already MARA-enriched so the grouping key
+        // (MaterialGroup, Brand, Variety, Grade) reflects the live cache.
+        data.GroupSummaries = await _qos.BuildGroupSummariesAsync(qo.QualityOrderId, materials);
+
+        // Active catalog per material_group, for the per-sample defect render
+        // (every sample card shows the FULL catalog with zeros for any defect
+        // not recorded -- same source of truth as the page-1 grouped summary).
+        var distinctGroups = materials
+            .Select(m => m.MaterialGroup ?? "")
+            .Where(g => g.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var defectsByGroup = new Dictionary<string, IReadOnlyList<SharbatlyQMS.Web.Models.DefectCatalogEntry>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var grp in distinctGroups)
+            defectsByGroup[grp] = await _qos.GetActiveDefectsForGroupAsync(grp);
+        data.DefectsByGroup = defectsByGroup;
+
+        // Defect category master (V22+) — drives the per-category sections + colours.
+        data.Categories = await _qos.GetActiveCategoriesAsync();
+
         // Same compact-inline pipeline as the arrival report: pre-resize +
         // JPEG-compress at PDF-generation time so the PDF is self-contained
         // (no URLs, no server references) and small enough to send to
@@ -245,6 +266,10 @@ public class ReportsController : Controller
         var sampleIds = samples.Select(x => x.SampleId).ToArray();
         var readingsBySample = await _qos.GetReadingsBatchAsync(sampleIds);
         var defectsBySample  = await _qos.GetDefectsBatchAsync(sampleIds);
+        // V20+ -- dynamic sample header values, batched.
+        // Material-scoped values are now copied onto each sample (V23+), so the
+        // per-sample header values already include them -- no separate fetch.
+        var headerBySample   = await _qos.GetSampleHeaderValuesBatchAsync(sampleIds);
 
         var distinctMatKeys = materials
             .Select(m => (Group: m.MaterialGroup, Category: m.MajorCategory))
@@ -263,12 +288,13 @@ public class ReportsController : Controller
                 : (IReadOnlyDictionary<string, string>)new Dictionary<string, string>();
             data.Samples.Add(new SampleBundle
             {
-                Sample     = s,
-                Material   = mat,
-                Readings   = readingsBySample[s.SampleId].ToList(),
-                Defects    = defectsBySample[s.SampleId].ToList(),
-                SectionMap = new Dictionary<string, string>(sectionMap),
-                Images     = new List<SharbatlyQMS.Web.Services.Pdf.ImageRef>()  // images live on the QO, not per-sample
+                Sample       = s,
+                Material     = mat,
+                Readings     = readingsBySample[s.SampleId].ToList(),
+                Defects      = defectsBySample[s.SampleId].ToList(),
+                SectionMap   = new Dictionary<string, string>(sectionMap),
+                HeaderValues = headerBySample[s.SampleId].ToList(),
+                Images       = new List<SharbatlyQMS.Web.Services.Pdf.ImageRef>()  // images live on the QO, not per-sample
             });
         }
 

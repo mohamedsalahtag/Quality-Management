@@ -17,6 +17,10 @@ builder.Services.AddControllersWithViews(opt =>
         .RequireAuthenticatedUser()
         .Build();
     opt.Filters.Add(new Microsoft.AspNetCore.Mvc.Authorization.AuthorizeFilter(policy));
+    // Audit-trail: capture request IP + user-agent into IAuditContext
+    // before each MVC action runs. Background hosted services never go
+    // through this filter, which matches FR-001 (user-initiated only).
+    opt.Filters.AddService<AuditContextActionFilter>();
 });
 
 builder.Services.AddScoped<IDbService, DbService>();
@@ -25,6 +29,9 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 builder.Services.AddScoped<IArrivalService, ArrivalService>();
 builder.Services.AddScoped<IQualityOrderService, QualityOrderService>();
 builder.Services.AddScoped<IClaimService, ClaimService>();
+builder.Services.AddScoped<IAuditContext, AuditContext>();
+builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<AuditContextActionFilter>();
 builder.Services.AddScoped<IImageService, ImageService>();
 builder.Services.AddScoped<IMaraService, MaraService>();
 builder.Services.AddScoped<IVendorService, VendorService>();
@@ -81,6 +88,10 @@ builder.Services.AddAuthorization(opt =>
     // actions in Claim Management. SiteAdmin still acts as both roles.
     opt.AddPolicy(AuthPolicies.ClaimManagerOrAdmin,
         p => p.RequireRole(UserRoles.ClaimManager, UserRoles.SiteAdmin));
+    // Audit-trail (2026-05-21): the global /Audit page + Excel export use
+    // AdminOnly (above). The per-record audit panel uses ManagerOrAdmin.
+    // The dedicated AuditViewer / AuditorOrAdmin policies were removed when
+    // the Auditor role was retired (V16 migration).
 });
 
 builder.Services.AddAntiforgery(opt =>

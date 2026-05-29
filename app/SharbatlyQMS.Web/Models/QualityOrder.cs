@@ -44,12 +44,22 @@ public class QualityOrderMaterial
     public string?  Brand               { get; set; }
     public string?  PackType            { get; set; }
     public string?  PackCode            { get; set; }   // enriched from MARA at view-time
+    // Joined from qms_arrival_item via arrival_item_id -- the GR/PO line
+    // quantity + UoM. Used by the QO PDF Material Table; surfaces the
+    // shipment quantity that previously rendered blank (2026-05-25 fix).
+    public decimal? Quantity            { get; set; }
+    public string?  Uom                 { get; set; }
     public bool     SizeOverridden      { get; set; }
     public string?  OriginalMaterialSize{ get; set; }
     public string?  OverrideMaterialSize{ get; set; }
     public string?  OverrideReason      { get; set; }
     public string?  OverrideApprovedBy  { get; set; }
     public DateTime?OverrideApprovedAt  { get; set; }
+    // Material-level sample size (source of truth). Samples inherit it; the
+    // per-sample qms_sample.sample_size is kept as an inherited cache that
+    // every defect-% calculation still divides by. Entered in the
+    // "Material details" panel on the QO Details page.
+    public short?   SampleSize          { get; set; }
 }
 
 public static class QualityOrderStatus
@@ -131,6 +141,85 @@ public class DefectCatalogEntry
     public bool   IsInUse        { get; set; }
 }
 
+// -------------- Defect category master (V22+) --------------------------
+// Admin-managed list of defect categories (Major, Minor, Critical,
+// Progressive, ...). Each defect references one by name; each renders as
+// its own coloured section in the sample form and PDF, ordered by
+// SortOrder. Replaces the old hardcoded Major/Minor two-bucket scheme.
+public class DefectCategory
+{
+    public int     CategoryId   { get; set; }
+    public string  CategoryName { get; set; } = "";
+    public int     SortOrder    { get; set; }
+    public string? ColorHex     { get; set; }   // '#RRGGBB'; null => neutral/fallback
+    public bool    IsActive     { get; set; }
+    /// <summary>True when at least one defect references this category -- delete is then blocked.</summary>
+    public bool    IsInUse      { get; set; }
+}
+
+// -------------- Sample header field catalog (V20+) ---------------------
+// User-input identification fields per sample. Always global (no
+// material_group binding) -- a field defined here applies to every
+// sample regardless of fruit. Replaces the hardcoded columns
+// CartonCount / Grower / PalletNo / DateCode / etc. on qms_sample.
+// sample_size stays on qms_sample (used as the denominator for defect
+// percentages) and is intentionally NOT part of this catalog.
+
+public class SampleHeaderField
+{
+    public int    FieldId      { get; set; }
+    public string FieldCode    { get; set; } = "";
+    public string FieldName    { get; set; } = "";
+    /// <summary>Text | Numeric | Date. Drives the form input type and
+    /// which column on qms_sample_header_value carries the value.</summary>
+    public string ValueKind    { get; set; } = "Text";
+    public string? DefaultUnit { get; set; }
+    public bool   IsActive     { get; set; }
+    public bool   IsMandatory  { get; set; }
+    public int    SortOrder    { get; set; }
+    /// <summary>Sample | Material. 'Material'-scoped fields are entered once
+    /// per qms_quality_order_material (on the Material details panel) and every
+    /// sample inherits them; 'Sample'-scoped fields are entered per sample.</summary>
+    public string Scope        { get; set; } = "Sample";
+    /// <summary>True when at least one qms_sample_header_value row
+    /// references this field -- blocks delete; admin should mark
+    /// inactive instead.</summary>
+    public bool   IsInUse      { get; set; }
+}
+
+public class SampleHeaderValue
+{
+    public long      SampleId     { get; set; }
+    public int       FieldId      { get; set; }
+    public string?   TextValue    { get; set; }
+    public decimal?  NumericValue { get; set; }
+    public DateTime? DateValue    { get; set; }
+    // Joined from qms_sample_header_field for convenience.
+    public string    FieldCode    { get; set; } = "";
+    public string    FieldName    { get; set; } = "";
+    public string    ValueKind    { get; set; } = "Text";
+    public string?   DefaultUnit  { get; set; }
+    public int       SortOrder    { get; set; }
+}
+
+/// <summary>Material-level header value (qms_qo_material_header_value), keyed by
+/// qo_material_id. Mirrors <see cref="SampleHeaderValue"/> for the fields that
+/// are entered once per material and inherited by every sample.</summary>
+public class MaterialHeaderValue
+{
+    public long      QoMaterialId { get; set; }
+    public int       FieldId      { get; set; }
+    public string?   TextValue    { get; set; }
+    public decimal?  NumericValue { get; set; }
+    public DateTime? DateValue    { get; set; }
+    // Joined from qms_sample_header_field for convenience.
+    public string    FieldCode    { get; set; } = "";
+    public string    FieldName    { get; set; } = "";
+    public string    ValueKind    { get; set; } = "Text";
+    public string?   DefaultUnit  { get; set; }
+    public int       SortOrder    { get; set; }
+}
+
 public class ReadingTypeEntry
 {
     public int    ReadingTypeId   { get; set; }
@@ -146,4 +235,69 @@ public class ReadingTypeEntry
     public bool   IsMandatory     { get; set; }
     /// <summary>True when at least one sample reading uses this code on a sample from this material group -- delete blocked.</summary>
     public bool   IsInUse         { get; set; }
+    /// <summary>How this reading is aggregated in the QO PDF grouped summary:
+    /// text | count | sum | sum_over_size | formula. Backfilled in V18 from value_kind.</summary>
+    public string DisplayMode     { get; set; } = "sum";
+}
+
+// ---------------- Quality Order grouped summary ------------------------
+// Used by the Quality Order PDF page 1 to roll up every material that
+// shares (MaterialGroup, Brand, Variety, Grade) into a single block:
+// totals across all the contributing samples, the full active defect
+// catalog (zeros included), and aggregated readings honoring each
+// reading-type's display_mode.
+
+public class MaterialGroupSummary
+{
+    public string  MaterialGroup    { get; set; } = "";   // e.g. "FRSH-APP"
+    public string? MaterialGroupDesc{ get; set; }
+    public string? Brand            { get; set; }
+    public string? Variety          { get; set; }
+    public string? Grade            { get; set; }          // = MaterialClass
+    public string? MajorCategory    { get; set; }
+    public int     SumSampleSize    { get; set; }          // Σ sample_size across all samples in group
+    public decimal SumGross         { get; set; }          // Σ (arrival_item.quantity × qoMaterial.NetWeight)
+    public decimal SumTara          { get; set; }          // Σ TARA reading.numeric_value across samples in group
+    public decimal Net              => SumGross - SumTara;
+
+    // One section per defect category (ordered by category sort_order),
+    // replacing the old fixed Major/Minor two-bucket scheme (V22+).
+    public List<DefectCategorySection> DefectSections { get; set; } = new();
+
+    public List<ReadingAggRow> Readings { get; set; } = new();
+
+    public int MaterialCount { get; set; }
+    public int SampleCount   { get; set; }
+}
+
+public class DefectAggRow
+{
+    public int     DefectId   { get; set; }
+    public string  Code       { get; set; } = "";
+    public string  Name       { get; set; } = "";
+    public string  Category   { get; set; } = "Minor";    // raw catalog category
+    public decimal SumValue   { get; set; }
+    public decimal Percentage { get; set; }                // SumValue / SumSampleSize × 100 (0 if denom=0)
+}
+
+// One defect category's section within a grouped summary / sample card.
+public class DefectCategorySection
+{
+    public string  CategoryName { get; set; } = "";
+    public string? ColorHex     { get; set; }
+    public int     SortOrder    { get; set; }
+    public List<DefectAggRow> Rows { get; set; } = new();
+    public decimal TotalPct => Rows.Sum(r => r.Percentage);
+}
+
+public class ReadingAggRow
+{
+    public string  Code        { get; set; } = "";
+    public string  Name        { get; set; } = "";
+    public string  DisplayMode { get; set; } = "";        // text|count|sum|sum_over_size|formula
+    public string? Unit        { get; set; }
+    /// <summary>Pre-rendered display string per DisplayMode -- the PDF prints
+    /// it verbatim. Empty string for 'formula' rows until the formula
+    /// language is designed.</summary>
+    public string  DisplayValue{ get; set; } = "";
 }

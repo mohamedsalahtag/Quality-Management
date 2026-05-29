@@ -3,7 +3,8 @@
 @model IReadOnlyList<DefectCatalogEntry>
 @{
     ViewData["Title"] = "Defect Catalog";
-    var categories  = new[] { "Major", "Minor", "Critical", "Other" };
+    var categories  = ViewBag.Categories as IReadOnlyList<DefectCategory> ?? new List<DefectCategory>();
+    var catColor    = categories.ToDictionary(c => c.CategoryName, c => c.ColorHex, StringComparer.OrdinalIgnoreCase);
     var valueTypes  = new[] { "Number", "Decimal" };
     var groups      = ViewBag.Groups      as IReadOnlyList<MaraGroup> ?? new List<MaraGroup>();
     var filterGroup = ViewBag.FilterGroup as string;
@@ -62,7 +63,7 @@
                         <td><code>@d.MaterialGroup</code></td>
                         <td><code>@d.DefectCode</code></td>
                         <td>@d.DefectName</td>
-                        <td><span class="badge bg-@(d.DefectCategory == "Critical" ? "danger" : d.DefectCategory == "Major" ? "warning text-dark" : "secondary")">@d.DefectCategory</span></td>
+                        <td><span class="badge" style="background:@(catColor.GetValueOrDefault(d.DefectCategory) ?? "#6c757d");color:#fff">@d.DefectCategory</span></td>
                         <td>@d.ValueType</td>
                         <td>@(d.IsActive ? "Yes" : "No")</td>
                         <td class="text-end text-nowrap">
@@ -144,8 +145,9 @@
                         <input name="defectName" id="d-name" class="form-control" required /></div>
                     <div class="col-md-6"><label class="form-label">Category *</label>
                         <select name="defectCategory" id="d-cat" class="form-select" required>
-                            @foreach (var c in categories) { <option>@c</option> }
-                        </select></div>
+                            @foreach (var c in categories) { <option value="@c.CategoryName">@c.CategoryName</option> }
+                        </select>
+                        <small class="text-muted">Manage the list on <a asp-action="DefectCategories">Defect Categories</a>.</small></div>
                     <div class="col-md-6"><label class="form-label">Value type *</label>
                         <select name="valueType" id="d-vtype" class="form-select" required>
                             @foreach (var v in valueTypes) { <option>@v</option> }
@@ -187,7 +189,7 @@
             });
             var def = b.dataset.defaultGroup || '';
             document.getElementById('d-group').value = def;
-            document.getElementById('d-cat').value   = 'Minor';
+            document.getElementById('d-cat').selectedIndex = 0;
             document.getElementById('d-vtype').value = 'Number';
             document.getElementById('d-sort').value  = '500';
             document.getElementById('d-active').checked = true;

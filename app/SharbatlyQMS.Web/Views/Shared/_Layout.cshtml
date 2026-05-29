@@ -14,6 +14,11 @@
     // Admin pages stay SiteAdmin-only.
     var canSeeParameters = role == UserRoles.Manager || role == UserRoles.SiteAdmin;
     var canSeeAdmin      = role == UserRoles.SiteAdmin;
+    // Audit Log nav moved under the Admin dropdown 2026-05-21 -- gated by
+    // canSeeAdmin (SiteAdmin only). Per-record audit panels on QO/Arrival/
+    // Claim detail pages are STILL visible to Manager + SiteAdmin via their
+    // own local `canSeeAudit` variable in those views. The Auditor role
+    // itself was retired on 2026-05-21 (V16 migration).
     var userIdClaim      = User?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
     // View-as impersonation: the real SiteAdmin role lands in OriginalRole
     // while the swapped role lands in Role. realRole drives the dropdown
@@ -97,7 +102,9 @@
                                 </a>
                                 <ul class="dropdown-menu">
                                     <li><a class="dropdown-item" asp-controller="Admin" asp-action="DefectCatalog"><i class="bi bi-list-check me-1"></i>Defect Catalog</a></li>
+                                    <li><a class="dropdown-item" asp-controller="Admin" asp-action="DefectCategories"><i class="bi bi-palette me-1"></i>Defect Categories</a></li>
                                     <li><a class="dropdown-item" asp-controller="Admin" asp-action="ReadingTypes"><i class="bi bi-rulers me-1"></i>Reading Types</a></li>
+                                    <li><a class="dropdown-item" asp-controller="Admin" asp-action="SampleHeaders"><i class="bi bi-card-heading me-1"></i>Sample Headers</a></li>
                                     <li><a class="dropdown-item" asp-controller="Admin" asp-action="MailTemplate"><i class="bi bi-envelope-paper me-1"></i>Mail Template</a></li>
                                 </ul>
                             </li>
@@ -111,6 +118,7 @@
                                 <ul class="dropdown-menu">
                                     <li><a class="dropdown-item" asp-controller="Admin" asp-action="Settings"><i class="bi bi-sliders me-1"></i>Site Configuration</a></li>
                                     <li><a class="dropdown-item" asp-controller="Admin" asp-action="Users"><i class="bi bi-people me-1"></i>Users</a></li>
+                                    <li><a class="dropdown-item" asp-controller="Audit" asp-action="Index"><i class="bi bi-shield-shaded me-1"></i>Audit Log</a></li>
                                 </ul>
                             </li>
                         }

@@ -7,6 +7,8 @@ public class CatalogCache : ICatalogCache
 {
     private const string KeyReadingTypes = "cat:readingTypes";
     private const string KeyDefects      = "cat:defects";
+    private const string KeyHeaderFields = "cat:headerFields";
+    private const string KeyCategories   = "cat:defectCategories";
     private static string KeySectionMap(string? mg, string? mc)
         => $"cat:sectionMap:{mg ?? "_"}|{mc ?? "_"}";
 
@@ -33,8 +35,18 @@ public class CatalogCache : ICatalogCache
     public async Task<IReadOnlyList<ReadingTypeEntry>> GetActiveReadingTypesForGroupAsync(string? materialGroup)
     {
         if (string.IsNullOrWhiteSpace(materialGroup)) return Array.Empty<ReadingTypeEntry>();
+        // V19+: include Global rows (MaterialGroup == "") so a single
+        // BRIX / TARA / etc. defined once shows up on every fruit's
+        // sample form. Per-group rows listed first (preserving sort),
+        // then globals.
         var all = await GetActiveReadingTypesAsync();
-        return all.Where(rt => string.Equals(rt.MaterialGroup, materialGroup, StringComparison.OrdinalIgnoreCase)).ToList();
+        return all
+            .Where(rt => string.Equals(rt.MaterialGroup, materialGroup, StringComparison.OrdinalIgnoreCase)
+                         || string.IsNullOrEmpty(rt.MaterialGroup))
+            .OrderBy(rt => string.IsNullOrEmpty(rt.MaterialGroup) ? 1 : 0)
+            .ThenBy(rt => rt.SortOrder)
+            .ThenBy(rt => rt.ReadingName)
+            .ToList();
     }
 
     public async Task<IReadOnlyList<DefectCatalogEntry>> GetActiveDefectsAsync()
@@ -65,10 +77,30 @@ public class CatalogCache : ICatalogCache
         return data;
     }
 
+    public async Task<IReadOnlyList<SampleHeaderField>> GetActiveSampleHeaderFieldsAsync()
+    {
+        if (_cache.TryGetValue<IReadOnlyList<SampleHeaderField>>(KeyHeaderFields, out var hit) && hit != null)
+            return hit;
+        var data = await _qos.GetActiveSampleHeaderFieldsAsync();
+        _cache.Set(KeyHeaderFields, data, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TtL });
+        return data;
+    }
+
+    public async Task<IReadOnlyList<DefectCategory>> GetActiveCategoriesAsync()
+    {
+        if (_cache.TryGetValue<IReadOnlyList<DefectCategory>>(KeyCategories, out var hit) && hit != null)
+            return hit;
+        var data = await _qos.GetActiveCategoriesAsync();
+        _cache.Set(KeyCategories, data, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TtL });
+        return data;
+    }
+
     public void Invalidate()
     {
         _cache.Remove(KeyReadingTypes);
         _cache.Remove(KeyDefects);
+        _cache.Remove(KeyHeaderFields);
+        _cache.Remove(KeyCategories);
         // Section-map keys are dynamic; cheapest approach is to compact the
         // entire IMemoryCache for our prefix. There's no public API for
         // prefix removal, so we just rely on absolute expiry for those --

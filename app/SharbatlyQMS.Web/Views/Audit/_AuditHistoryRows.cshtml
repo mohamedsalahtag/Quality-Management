@@ -1,0 +1,151 @@
+@using SharbatlyQMS.Web.Models
+@model IReadOnlyList<AuditEntryListRow>
+@*
+    Audit history rows. Rendered as the body of /Audit/HistoryPanel
+    and inside the global audit log page (Phase 4). Implements FR-022:
+    git-diff style coloured rendering of old/new field values.
+*@
+
+@if (Model.Count == 0)
+{
+    <div class="text-muted small p-2 fst-italic">No audit history for this record or its children yet.</div>
+}
+else
+{
+    <style>
+        .audit-entry { border-bottom: 1px solid var(--bs-border-color); padding: .55rem .35rem; }
+        .audit-entry:last-child { border-bottom: none; }
+        .audit-meta { font-size: .75rem; color: var(--bs-secondary-color); }
+        .audit-meta code { background: transparent; padding: 0; }
+        .audit-action-pill {
+            display: inline-block; padding: .1rem .45rem; border-radius: .85rem;
+            font-size: .7rem; font-weight: 600; text-transform: uppercase;
+            letter-spacing: .02em;
+        }
+        .audit-action-Created  { background: var(--bs-success-bg-subtle, #d1e7dd); color: #0a3622; }
+        .audit-action-Updated  { background: var(--bs-info-bg-subtle,   #cff4fc); color: #055160; }
+        .audit-action-Deleted  { background: var(--bs-danger-bg-subtle, #f8d7da); color: #58151c; }
+        .audit-action-Opened, .audit-action-Closed, .audit-action-Reopened, .audit-action-Cancelled,
+        .audit-action-Approved, .audit-action-Hold, .audit-action-PassedQC, .audit-action-ClaimRequest,
+        .audit-action-Override, .audit-action-OverrideCleared {
+            background: var(--bs-warning-bg-subtle, #fff3cd); color: #5c3c00;
+        }
+        .audit-target-pill {
+            display: inline-block; padding: .08rem .4rem; border-radius: .25rem;
+            font-size: .7rem; font-weight: 500;
+            background: var(--bs-tertiary-bg, #f1f3f5); color: var(--bs-secondary-color);
+            border: 1px solid var(--bs-border-color);
+        }
+        .audit-diff-table { font-size: .82rem; margin-top: .3rem; }
+        .audit-diff-table td { padding: .15rem .4rem; vertical-align: top; }
+        .audit-diff-field { font-weight: 600; color: var(--bs-secondary-color); width: 25%; }
+        .audit-diff-old {
+            background: var(--bs-danger-bg-subtle, #f8d7da);
+            color: #58151c;
+            text-decoration: line-through;
+            text-decoration-color: rgba(88,21,28,.55);
+        }
+        .audit-diff-new {
+            background: var(--bs-success-bg-subtle, #d1e7dd);
+            color: #0a3622;
+        }
+        .audit-diff-empty {
+            color: var(--bs-secondary-color);
+            font-style: italic;
+        }
+        .audit-diff-value {
+            font-family: var(--bs-font-monospace, monospace);
+            font-size: .8em;
+            word-break: break-word;
+        }
+        .audit-diff-truncated .audit-diff-value-full { display: none; }
+        .audit-diff-truncated.expanded .audit-diff-value-short { display: none; }
+        .audit-diff-truncated.expanded .audit-diff-value-full  { display: inline; }
+        .audit-show-more { font-size: .7rem; cursor: pointer; }
+    </style>
+
+    @foreach (var e in Model)
+    {
+        // 240 chars per side is roughly one short paragraph -- anything
+        // longer collapses to a "show more" toggle per FR-022.
+        const int InlineMax = 240;
+        var actionCss = "audit-action-" + e.ActionCode;
+        <div class="audit-entry">
+            <div class="d-flex align-items-center flex-wrap gap-2 mb-1">
+                <span class="audit-action-pill @actionCss">@e.ActionCode</span>
+                @* Aggregated panels show child entries alongside the parent --
+                   each row carries an entity pill so the reader knows whether
+                   the change touched the QO itself or one of its samples /
+                   readings / etc. *@
+                <span class="audit-target-pill">@e.EntityType #@e.EntityId</span>
+                <span class="audit-meta">
+                    <strong>@e.ChangedBy</strong>
+                    @if (!string.IsNullOrEmpty(e.SourceIp) || !string.IsNullOrEmpty(e.SourceUserAgent))
+                    {
+                        <span class="ms-1 text-muted small">
+                            (@(string.IsNullOrEmpty(e.SourceIp) ? "unknown IP" : e.SourceIp))
+                        </span>
+                    }
+                    <span class="ms-2">@e.ChangedAt.ToLocalTime():g</span>
+                </span>
+            </div>
+            @if (e.DiffRows.Count > 0)
+            {
+                <table class="audit-diff-table w-100">
+                    @foreach (var d in e.DiffRows)
+                    {
+                        var truncOld = !string.IsNullOrEmpty(d.OldValue) && d.OldValue!.Length > InlineMax;
+                        var truncNew = !string.IsNullOrEmpty(d.NewValue) && d.NewValue!.Length > InlineMax;
+                        var truncCls = truncOld || truncNew ? " audit-diff-truncated" : "";
+                        var oldShort = truncOld ? d.OldValue!.Substring(0, InlineMax) + "…" : (d.OldValue ?? "");
+                        var newShort = truncNew ? d.NewValue!.Substring(0, InlineMax) + "…" : (d.NewValue ?? "");
+                        <tr class="@truncCls">
+                            <td class="audit-diff-field">@d.FieldName</td>
+                            <td class="audit-diff-old">
+                                @if (string.IsNullOrEmpty(d.OldValue))
+                                {
+                                    <span class="audit-diff-empty">(empty)</span>
+                                }
+                                else
+                                {
+                                    <span class="audit-diff-value audit-diff-value-short">@oldShort</span>
+                                    if (truncOld)
+                                    {
+                                        <span class="audit-diff-value audit-diff-value-full">@d.OldValue</span>
+                                    }
+                                }
+                            </td>
+                            <td class="audit-diff-new">
+                                @if (string.IsNullOrEmpty(d.NewValue))
+                                {
+                                    <span class="audit-diff-empty">(empty)</span>
+                                }
+                                else
+                                {
+                                    <span class="audit-diff-value audit-diff-value-short">@newShort</span>
+                                    if (truncNew)
+                                    {
+                                        <span class="audit-diff-value audit-diff-value-full">@d.NewValue</span>
+                                    }
+                                }
+                            </td>
+                            @if (truncOld || truncNew)
+                            {
+                                <td>
+                                    <a href="#" class="audit-show-more"
+                                       onclick="this.closest('tr').classList.toggle('expanded'); event.preventDefault();">
+                                        show more / less
+                                    </a>
+                                </td>
+                            }
+                            else
+                            {
+                                <td></td>
+                            }
+                        </tr>
+                    }
+                </table>
+            }
+        </div>
+    }
+}

@@ -1,0 +1,155 @@
+@using SharbatlyQMS.Web.Models
+@model IReadOnlyList<DefectCategory>
+@{
+    ViewData["Title"] = "Defect Categories";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h1 class="h3 mb-0"><i class="bi bi-palette me-1"></i>Defect Categories</h1>
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#dcModal"
+            data-mode="create">
+        <i class="bi bi-plus-circle me-1"></i>Add category
+    </button>
+</div>
+
+<p class="text-muted small">
+    Global list of defect categories (Major, Minor, Critical, …). Assign each defect to a category on the
+    <a asp-action="DefectCatalog">Defect Catalog</a> page. Each category renders as its own coloured section
+    — in the order below — in the sample form and the Quality Order PDF. Renaming a category here updates every
+    defect that uses it.
+</p>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:1%">Order</th>
+                    <th>Name</th>
+                    <th>Colour</th>
+                    <th>Active</th>
+                    <th class="text-end" style="width: 120px">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var c in Model)
+                {
+                    <tr>
+                        <td class="text-muted small">@c.SortOrder</td>
+                        <td>@c.CategoryName</td>
+                        <td>
+                            <span class="d-inline-block border rounded" style="width:1.2rem;height:1.2rem;vertical-align:middle;background:@(c.ColorHex ?? "#6c757d")"></span>
+                            <code class="ms-1">@(c.ColorHex ?? "—")</code>
+                        </td>
+                        <td>@(c.IsActive ? "Yes" : "No")</td>
+                        <td class="text-end text-nowrap">
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    data-bs-toggle="modal" data-bs-target="#dcModal"
+                                    data-mode="edit"
+                                    data-id="@c.CategoryId"
+                                    data-name="@c.CategoryName"
+                                    data-sort="@c.SortOrder"
+                                    data-color="@c.ColorHex"
+                                    data-active="@c.IsActive.ToString().ToLower()"
+                                    title="Edit">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            @if (c.IsInUse)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-danger" disabled
+                                        title="In use by one or more defects — reassign or deactivate instead">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            }
+                            else
+                            {
+                                <form asp-action="DeleteDefectCategory" method="post" class="d-inline"
+                                      onsubmit="return confirm('Delete category @c.CategoryName? This cannot be undone.');">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="categoryId" value="@c.CategoryId" />
+                                    <button type="submit" class="btn btn-sm btn-outline-danger" title="Delete">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                            }
+                        </td>
+                    </tr>
+                }
+                @if (Model.Count == 0)
+                {
+                    <tr><td colspan="5" class="text-center text-muted small py-3">No categories yet. Click <strong>Add category</strong> to create one.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal fade" id="dcModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form asp-action="SaveDefectCategory" method="post" class="modal-content">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="categoryId" id="dc-id" value="0" />
+            <div class="modal-header"><h5 class="modal-title" id="dc-title">Add category</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="row g-2">
+                    <div class="col-md-8"><label class="form-label">Name *</label>
+                        <input name="categoryName" id="dc-name" class="form-control" required maxlength="20" />
+                        <small class="text-muted">e.g. Major, Minor, Critical, Progressive.</small>
+                    </div>
+                    <div class="col-md-4"><label class="form-label">Sort order</label>
+                        <input name="sortOrder" id="dc-sort" type="number" class="form-control" value="500" /></div>
+                    <div class="col-md-6"><label class="form-label">Colour</label>
+                        <div class="d-flex gap-2 align-items-center">
+                            <input type="color" id="dc-color-picker" class="form-control form-control-color" value="#6c757d" title="Section colour" />
+                            <input name="colorHex" id="dc-color" class="form-control" placeholder="#RRGGBB"
+                                   pattern="#[0-9A-Fa-f]{6}" title="Hex colour like #b02a37" />
+                        </div>
+                        <small class="text-muted">Used for the section banner in the form and PDF.</small>
+                    </div>
+                    <div class="col-12"><div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="isActive" id="dc-active" value="true" checked />
+                        <label class="form-check-label" for="dc-active">Active</label>
+                    </div></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    // Keep the colour picker and the hex text input in sync (both ways).
+    document.getElementById('dc-color-picker').addEventListener('input', function () {
+        document.getElementById('dc-color').value = this.value;
+    });
+    document.getElementById('dc-color').addEventListener('input', function () {
+        if (/^#[0-9A-Fa-f]{6}$/.test(this.value)) document.getElementById('dc-color-picker').value = this.value;
+    });
+
+    document.getElementById('dcModal').addEventListener('show.bs.modal', function (e) {
+        var b = e.relatedTarget;
+        if (b.dataset.mode === 'edit') {
+            document.getElementById('dc-title').textContent = 'Edit category';
+            document.getElementById('dc-id').value   = b.dataset.id;
+            document.getElementById('dc-name').value  = b.dataset.name;
+            document.getElementById('dc-sort').value  = b.dataset.sort;
+            document.getElementById('dc-color').value = b.dataset.color || '';
+            document.getElementById('dc-color-picker').value = /^#[0-9A-Fa-f]{6}$/.test(b.dataset.color) ? b.dataset.color : '#6c757d';
+            document.getElementById('dc-active').checked = b.dataset.active === 'true';
+        } else {
+            document.getElementById('dc-title').textContent = 'Add category';
+            document.getElementById('dc-id').value = 0;
+            document.getElementById('dc-name').value = '';
+            document.getElementById('dc-sort').value = '500';
+            document.getElementById('dc-color').value = '';
+            document.getElementById('dc-color-picker').value = '#6c757d';
+            document.getElementById('dc-active').checked = true;
+        }
+    });
+</script>
+}

@@ -1,0 +1,376 @@
+@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.Services
+@using SharbatlyQMS.Web.ViewModels
+@model AuditListVm
+@{
+    ViewData["Title"] = "Audit Log";
+    var f = Model.Filter;
+    var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    // Page is now SiteAdmin-only (2026-05-21 change). Anyone who reaches
+    // this view is SiteAdmin per the controller's AdminOnly policy.
+    var canExport = role == UserRoles.SiteAdmin;
+
+    string DateStr(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
+
+    // Helpers for filter-chip "is selected" state.
+    bool TypeOn(string t) => f.EntityTypes != null && f.EntityTypes.Contains(t);
+    bool ActOn (string a) => f.ActionCodes != null && f.ActionCodes.Contains(a);
+
+    var entityChips = EntityTypes.All;
+    var actionChips = ActionCodes.CrudOnly;
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0"><i class="bi bi-shield-shaded me-1 text-primary"></i>Audit Log</h1>
+    @if (canExport)
+    {
+        <a class="btn btn-outline-success" asp-action="Export"
+           asp-route-fromUtc="@(f.FromUtc?.ToString("o"))"
+           asp-route-toUtc="@(f.ToUtc?.ToString("o"))">
+            <i class="bi bi-file-earmark-excel me-1"></i>Export to Excel
+        </a>
+    }
+</div>
+
+<form method="get" class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2">
+            <div class="col-md-4">
+                <label class="form-label small mb-0">User(s) <span class="text-muted">(comma-separated)</span></label>
+                <input name="users" class="form-control" value="@(f.Users == null ? "" : string.Join(",", f.Users))"
+                       placeholder="e.g. mohamed.tag, ahmed.x" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small mb-0">From (UTC)</label>
+                <input name="fromUtc" type="date" class="form-control" value="@DateStr(f.FromUtc)" />
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small mb-0">To (UTC)</label>
+                <input name="toUtc" type="date" class="form-control" value="@DateStr(f.ToUtc)" />
+            </div>
+            <div class="col-md-2 d-flex align-items-end gap-2">
+                <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-funnel me-1"></i>Filter</button>
+                <a class="btn btn-outline-secondary" asp-action="Index" title="Reset"><i class="bi bi-x-lg"></i></a>
+            </div>
+        </div>
+
+        <div class="mt-2 small text-muted fw-semibold">Record type</div>
+        <div class="d-flex flex-wrap gap-1">
+            @foreach (var t in entityChips)
+            {
+                var on = TypeOn(t);
+                var inputId = "et-" + t;
+                <input type="checkbox" class="btn-check" name="entityTypes" value="@t"
+                       id="@inputId" autocomplete="off" checked="@on" />
+                <label class="btn btn-sm btn-outline-primary mb-0" for="@inputId">@t</label>
+            }
+        </div>
+
+        <div class="mt-2 small text-muted fw-semibold">Action</div>
+        <div class="d-flex flex-wrap gap-1">
+            @foreach (var a in actionChips)
+            {
+                var on = ActOn(a);
+                var inputId = "ac-" + a;
+                <input type="checkbox" class="btn-check" name="actionCodes" value="@a"
+                       id="@inputId" autocomplete="off" checked="@on" />
+                <label class="btn btn-sm btn-outline-secondary mb-0" for="@inputId">@a</label>
+            }
+        </div>
+        <div class="mt-1 small text-muted">
+            <em>Tip:</em> click chips to toggle, then press <strong>Filter</strong> to apply.
+        </div>
+    </div>
+</form>
+
+<style>
+    /* --------- Column layout ---------
+       Fixed widths so a noisy "Changes" cell can never push the rest of
+       the row off-screen. Width budget (default desktop): 8 + 8 + 9 + 5 +
+       9 + 8 = 47rem of fixed columns; everything else goes to Changes. */
+    .audit-list-table { table-layout: fixed; font-size: .88rem; }
+    .audit-list-table thead th {
+        position: sticky; top: 0;
+        background: var(--bs-tertiary-bg, #f8f9fa);
+        z-index: 2;
+        font-size: .75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .02em;
+        color: var(--bs-secondary-color);
+        border-bottom: 2px solid var(--bs-border-color);
+    }
+    .audit-list-table th, .audit-list-table td { vertical-align: middle; padding: .45rem .55rem; }
+    .audit-list-table tbody tr:hover { background: var(--bs-tertiary-bg, #f8f9fa); }
+
+    .audit-list-table .col-when    { width: 8rem; }
+    .audit-list-table .col-actor   { width: 8rem; }
+    .audit-list-table .col-type    { width: 12rem; }  /* fits "QualityOrderMaterial" (20 chars) without wrapping */
+    .audit-list-table .col-id      { width: 5rem; }
+    .audit-list-table .col-action  { width: 9rem; }
+    .audit-list-table .col-source  { width: 8rem; }
+    .audit-list-table .col-device  { width: 9rem; }
+    .audit-list-table .col-changes { width: auto; }   /* takes the rest */
+
+    /* --------- Per-cell rendering ---------- */
+    .audit-list-table td.col-when {
+        font-size: .78rem; line-height: 1.25; color: var(--bs-body-color);
+    }
+    .audit-list-table td.col-when .audit-time { color: var(--bs-secondary-color); }
+    .audit-list-table td.col-actor strong { word-break: break-word; }
+    .audit-list-table td.col-type {
+        font-weight: 600;
+        color: var(--bs-emphasis-color, #212529);
+        white-space: nowrap;          /* never wrap entity-type names */
+    }
+    .audit-list-table td.col-id   { font-family: var(--bs-font-monospace, monospace); color: var(--bs-secondary-color); }
+    .audit-list-table td.col-source { font-size: .78rem; color: var(--bs-secondary-color); word-break: break-all; }
+    .audit-list-table td.col-device {
+        font-size: .78rem;
+        color: var(--bs-body-color);
+        white-space: nowrap;
+        cursor: help;                /* hint that the cell has a hover-revealed FQDN + UA */
+        font-family: var(--bs-font-monospace, monospace);
+    }
+    .audit-list-table td.changes-cell { white-space: normal; word-break: break-word; }
+    .audit-list-table .changes-fields { font-size: .82rem; }
+    .audit-list-table .changes-more   { cursor: pointer; font-size: .78rem; margin-left: .25rem; white-space: nowrap; }
+
+    /* Per-row diff mini-table. One row per changed field; each row shows
+       the field name, old value (red strikethrough) and new value (green).
+       Long values are truncated to ~80 chars inline with the full string
+       in the title tooltip. */
+    .audit-diff-inline { width: 100%; font-size: .78rem; }
+    .audit-diff-inline td { padding: .12rem .35rem; vertical-align: top; }
+    .audit-diff-inline .d-field   { font-weight: 600; color: var(--bs-secondary-color); width: 22%; white-space: nowrap; }
+    .audit-diff-inline .d-old, .audit-diff-inline .d-new {
+        width: 39%;
+        font-family: var(--bs-font-monospace, monospace);
+        word-break: break-word;
+    }
+    .audit-diff-inline .d-old {
+        background: var(--bs-danger-bg-subtle, #f8d7da);
+        color: #58151c;
+        text-decoration: line-through;
+        text-decoration-color: rgba(88,21,28,.55);
+    }
+    .audit-diff-inline .d-new {
+        background: var(--bs-success-bg-subtle, #d1e7dd);
+        color: #0a3622;
+    }
+    .audit-diff-inline .d-empty { color: var(--bs-secondary-color); font-style: italic; }
+    .audit-diff-inline tr.row-extra { display: none; }
+    .audit-diff-inline.expanded tr.row-extra { display: table-row; }
+    .audit-deleted-banner {
+        display: inline-block; padding: .05rem .35rem; border-radius: .2rem;
+        font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .02em;
+        background: var(--bs-danger-bg-subtle, #f8d7da); color: #58151c;
+        margin-bottom: .15rem;
+    }
+    .audit-noop { color: var(--bs-secondary-color); font-style: italic; }
+
+    /* --------- Action badges (colour-coded by category) ---------- */
+    .audit-action {
+        display: inline-block; padding: .15rem .55rem;
+        border-radius: 1rem; font-size: .72rem; font-weight: 600;
+        text-transform: uppercase; letter-spacing: .03em;
+        border: 1px solid transparent;
+    }
+    .audit-action-Created           { background: #d1e7dd; color: #0a3622; border-color: #a3cfbb; }
+    .audit-action-Updated           { background: #cff4fc; color: #055160; border-color: #9eeaf9; }
+    .audit-action-Deleted           { background: #f8d7da; color: #58151c; border-color: #f1aeb5; }
+    .audit-action-Opened            { background: #cfe2ff; color: #052c65; border-color: #9ec5fe; }
+    .audit-action-Closed            { background: #e2e3e5; color: #2b2f32; border-color: #c3c6c8; }
+    .audit-action-Reopened          { background: #fff3cd; color: #5c3c00; border-color: #ffe69c; }
+    .audit-action-Cancelled         { background: #f8d7da; color: #58151c; border-color: #f1aeb5; }
+    .audit-action-ClaimRequest      { background: #f8d7da; color: #58151c; border-color: #f1aeb5; }
+    .audit-action-Approved          { background: #d1e7dd; color: #0a3622; border-color: #a3cfbb; }
+    .audit-action-Hold              { background: #fff3cd; color: #5c3c00; border-color: #ffe69c; }
+    .audit-action-PassedQC          { background: #d1e7dd; color: #0a3622; border-color: #a3cfbb; }
+    .audit-action-Override          { background: #ffe2b3; color: #7a3e00; border-color: #ffcd80; }
+    .audit-action-OverrideCleared   { background: #e2e3e5; color: #2b2f32; border-color: #c3c6c8; }
+
+    /* --------- Responsive: narrower at <1200px ---------- */
+    @@media (max-width: 1199.98px) {
+        .audit-list-table .col-source,
+        .audit-list-table .col-device { display: none; }
+        .audit-list-table .col-when   { width: 7rem; }
+    }
+</style>
+
+<div class="card">
+    <div class="card-header py-2"><small>@Model.Rows.Count entries shown</small></div>
+    <div class="card-body p-2">
+        @if (Model.Rows.Count == 0)
+        {
+            <div class="text-muted small p-3 text-center fst-italic">
+                No audit entries match the current filter.
+                <a asp-action="Index" class="ms-1">Reset filters</a>
+            </div>
+        }
+        else
+        {
+            <table class="table table-sm table-striped align-middle mb-0 audit-list-table">
+                <thead class="table-light">
+                    <tr>
+                        <th class="col-when">When (local)</th>
+                        <th class="col-actor">Actor</th>
+                        <th class="col-type">Record type</th>
+                        <th class="col-id">Record ID</th>
+                        <th class="col-action">Action</th>
+                        <th class="col-source">Source</th>
+                        <th class="col-device">Device</th>
+                        <th class="col-changes">Changes</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in Model.Rows)
+                    {
+                        var local = e.ChangedAt.ToLocalTime();
+                        <tr>
+                            <td class="col-when">
+                                <div>@local.ToString("yyyy-MM-dd")</div>
+                                <div class="audit-time">@local.ToString("HH:mm:ss")</div>
+                            </td>
+                            <td class="col-actor"><strong>@e.ChangedBy</strong></td>
+                            <td class="col-type">@e.EntityType</td>
+                            <td class="col-id">#@e.EntityId</td>
+                            <td class="col-action">
+                                <span class="audit-action audit-action-@e.ActionCode">@e.ActionCode</span>
+                            </td>
+                            <td class="col-source">
+                                @(string.IsNullOrEmpty(e.SourceIp) ? "unknown" : e.SourceIp)
+                            </td>
+                            @{
+                                // Prefer the captured reverse-DNS hostname (qms_audit_log.source_device_name).
+                                // Show just the short machine name in the cell -- strip everything after
+                                // the first dot so "KSAJEDLTICT031.sharbatlyfruit.com" displays as
+                                // "KSAJEDLTICT031". The full FQDN + User-Agent stay in the hover tooltip
+                                // for forensics. For pre-V17 rows (or rows where DNS couldn't resolve),
+                                // fall back to the parsed "Browser / OS" label so the cell is never blank.
+                                string? deviceLabel;
+                                string  deviceTooltip;
+                                if (!string.IsNullOrEmpty(e.SourceDeviceName))
+                                {
+                                    var dot = e.SourceDeviceName.IndexOf('.');
+                                    deviceLabel   = dot > 0 ? e.SourceDeviceName.Substring(0, dot) : e.SourceDeviceName;
+                                    deviceTooltip = $"{e.SourceDeviceName}\n{e.SourceUserAgent ?? "no User-Agent captured"}";
+                                }
+                                else
+                                {
+                                    deviceLabel   = AuditService.DeviceLabel(e.SourceUserAgent);
+                                    deviceTooltip = e.SourceUserAgent ?? "no User-Agent captured";
+                                }
+                            }
+                            <td class="col-device" title="@deviceTooltip">
+                                @deviceLabel
+                            </td>
+                            <td class="small changes-cell col-changes">
+                                @{
+                                    // Inline diff renderer: one mini-table per audit row showing
+                                    // FIELD / OLD / NEW. For Created actions only the new column
+                                    // matters; for Deleted only the old (which IS the deleted
+                                    // snapshot). The same DiffRows the per-record panel uses are
+                                    // reused here so behaviour is consistent.
+                                    const int MaxValueChars = 80;
+                                    const int InlineRows    = 3;   // show first N field-rows; rest collapse to "+N more"
+
+                                    bool isDeleted = string.Equals(e.ActionCode, "Deleted", System.StringComparison.OrdinalIgnoreCase);
+                                    bool isCreated = string.Equals(e.ActionCode, "Created", System.StringComparison.OrdinalIgnoreCase);
+
+                                    string Trunc(string? v) =>
+                                        string.IsNullOrEmpty(v) ? "" :
+                                        v.Length <= MaxValueChars ? v : v.Substring(0, MaxValueChars) + "…";
+                                }
+                                @if (e.DiffRows.Count == 0)
+                                {
+                                    <span class="audit-noop">no field changes</span>
+                                }
+                                else
+                                {
+                                    if (isDeleted)
+                                    {
+                                        <div class="audit-deleted-banner" title="The Old column below is the snapshot of the record as it existed immediately before deletion.">Deleted snapshot</div>
+                                    }
+                                    var hidden = System.Math.Max(0, e.DiffRows.Count - InlineRows);
+                                    <table class="audit-diff-inline">
+                                        <thead>
+                                            <tr>
+                                                <td class="d-field text-muted">Field</td>
+                                                <td class="d-old text-muted" style="background:transparent; color:var(--bs-secondary-color); text-decoration:none;">Old</td>
+                                                <td class="d-new text-muted" style="background:transparent; color:var(--bs-secondary-color);">New</td>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @for (int i = 0; i < e.DiffRows.Count; i++)
+                                            {
+                                                var d = e.DiffRows[i];
+                                                var extra = i >= InlineRows ? " row-extra" : "";
+                                                var oldShort = Trunc(d.OldValue);
+                                                var newShort = Trunc(d.NewValue);
+                                                <tr class="@extra">
+                                                    <td class="d-field">@d.FieldName</td>
+                                                    <td class="d-old" title="@(d.OldValue ?? "")">
+                                                        @if (isCreated)
+                                                        {
+                                                            <span class="d-empty">(new record)</span>
+                                                        }
+                                                        else if (string.IsNullOrEmpty(d.OldValue))
+                                                        {
+                                                            <span class="d-empty">(empty)</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            @oldShort
+                                                        }
+                                                    </td>
+                                                    <td class="d-new" title="@(d.NewValue ?? "")">
+                                                        @if (isDeleted)
+                                                        {
+                                                            <span class="d-empty">(deleted)</span>
+                                                        }
+                                                        else if (string.IsNullOrEmpty(d.NewValue))
+                                                        {
+                                                            <span class="d-empty">(empty)</span>
+                                                        }
+                                                        else
+                                                        {
+                                                            @newShort
+                                                        }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        </tbody>
+                                    </table>
+                                    @if (hidden > 0)
+                                    {
+                                        <a href="#" class="changes-more text-primary"
+                                           onclick="var t = this.previousElementSibling; t.classList.add('expanded'); this.style.display='none'; event.preventDefault();">
+                                            … and @hidden more field(s)
+                                        </a>
+                                    }
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        }
+    </div>
+    @if (Model.HasMore)
+    {
+        <div class="card-footer text-center py-2">
+            <a class="btn btn-sm btn-outline-primary"
+               asp-action="Index"
+               asp-all-route-data="@(new Dictionary<string,string?> {
+                   { "users",        f.Users != null ? string.Join(",", f.Users) : null },
+                   { "fromUtc",      f.FromUtc?.ToString("o") },
+                   { "toUtc",        f.ToUtc?.ToString("o") },
+                   { "cursorTime",   Model.NextCursorTime?.ToString("o") },
+                   { "cursorId",     Model.NextCursorId?.ToString() }
+               })">
+                Load more <i class="bi bi-chevron-down ms-1"></i>
+            </a>
+        </div>
+    }
+</div>

@@ -12,6 +12,10 @@
     var role        = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     var canEdit     = role == UserRoles.Operator || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
     var canManage   = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;
+    // Audit-history panel visibility (FR-017): Manager or SiteAdmin only.
+    // (Auditor role retired 2026-05-21; FR-017 visibility now matches the
+    // ManagerOrAdmin policy on the HistoryPanel endpoint.)
+    var canSeeAudit = role == UserRoles.Manager || role == UserRoles.SiteAdmin;
     // When this view is rendered by ClaimManagementController.Details, every
     // QO mutation surface is suppressed -- the only interactive area is the
     // claim chat panel rendered at the bottom of the page. Forcing all three
@@ -166,6 +170,11 @@
                         <i class="bi bi-plus-circle me-1"></i>Add sample
                     </button>
                 }
+                <button type="button" class="btn btn-sm btn-outline-info material-details-btn"
+                        data-bs-toggle="modal" data-bs-target="#materialDetailsModal"
+                        data-qo-material-id="@m.QoMaterialId">
+                    <i class="bi bi-card-list me-1"></i>Material details
+                </button>
                 <button type="button"
                         class="btn btn-sm @(photoCount > 0 ? "btn-outline-primary" : "btn-outline-secondary")"
                         data-bs-toggle="offcanvas" data-bs-target="#@photoDrawerId" aria-controls="@photoDrawerId">
@@ -435,6 +444,43 @@
     </div>
 </div>
 
+@* Material details: per-material header fields + sample size, entered once
+   and inherited by every sample. Body is loaded over AJAX from MaterialPanel. *@
+<div class="modal fade" id="materialDetailsModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header"><h5 class="modal-title"><i class="bi bi-card-list me-1"></i>Material details</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body" id="materialDetailsBody">
+                <div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-primary" id="mdm-save"><i class="bi bi-save me-1"></i>Save material details</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* T026 (US1) -- Audit history panel for the Quality Order itself.
+   Visible to Manager / Auditor / SiteAdmin only (FR-017). *@
+@if (canSeeAudit)
+{
+    ViewBag.AuditEntityType = "QualityOrder";
+    ViewBag.AuditEntityId   = Model.QualityOrderId;
+    @await Html.PartialAsync("~/Views/Audit/_AuditHistory.cshtml")
+}
+
+@* T028 (US1) -- When this view is rendered via ClaimManagementController.Details
+   (IsClaimContext == true), ALSO show the audit history for the underlying Claim
+   so the auditor can see the claim's lifecycle alongside the QO's. *@
+@if (isClaimContext && canSeeAudit && ViewBag.Claim is SharbatlyQMS.Web.Models.QualityClaim claimForAudit)
+{
+    ViewBag.AuditEntityType = "Claim";
+    ViewBag.AuditEntityId   = claimForAudit.ClaimId;
+    @await Html.PartialAsync("~/Views/Audit/_AuditHistory.cshtml")
+}
+
 @* Claim chat panel -- only rendered when this view is invoked from
    ClaimManagementController.Details. In that context every other
    mutation surface has been suppressed (canEdit/canManage/canAct all
@@ -548,42 +594,10 @@
         const form = drawerBody.querySelector('form.sample-form');
         if (!form) return;
 
-        // Auto-fill Sample size from the material size when the drawer
-        // opens a NEW sample. If the material size isn't a clean number
-        // (e.g. "18 KG CF"), show a soft warning so the user types it.
-        const isNew = form.dataset.isNew === 'true';
-        const matSize = (form.dataset.materialSize || '').trim();
-        const ssInput = form.querySelector('input[name="SampleSize"]');
-        if (isNew && ssInput && !ssInput.value) {
-            // Treat the material size as numeric only if it's set and parses
-            // as a plain number. Empty / missing material size is treated
-            // exactly the same as non-numeric so the operator always gets a
-            // warning + yellow highlight when the size cannot be copied in.
-            const asNum = Number(matSize);
-            const numeric = matSize.length > 0 && !isNaN(asNum) && /^-?\d+(\.\d+)?$/.test(matSize);
-            if (numeric) {
-                ssInput.value = asNum;
-            } else {
-                ssInput.classList.add('bg-warning-subtle');
-                ssInput.style.borderColor = '#ffc107';
-                // Force the operator to type a value before saving. Browser
-                // validation displays the standard tooltip; the sticky toast
-                // below also explains the situation.
-                ssInput.required = true;
-                ssInput.addEventListener('input', () => {
-                    ssInput.classList.remove('bg-warning-subtle');
-                    ssInput.style.borderColor = '';
-                }, { once: true });
-                const reason = matSize.length === 0
-                    ? 'Material size is not set in SAP'
-                    : 'Material size <strong>"' + matSize + '"</strong> isn\'t a plain number';
-                showToast(
-                    reason + ' — please enter the sample size manually (highlighted in yellow).',
-                    'warning',
-                    { sticky: true }
-                );
-            }
-        }
+        // Sample size is inherited from the material (form.dataset.sampleSize)
+        // and is no longer entered per sample, so there's nothing to auto-fill
+        // here. If it's missing, the operator sets it on the Material details
+        // panel; the defect-% stepper falls back to 0 until then.
 
         form.addEventListener('submit', async ev => {
             ev.preventDefault();
@@ -694,6 +708,32 @@
         } catch (e) { showToast('Override failed: ' + e.message, 'danger'); }
     });
 
+    // ---- Material details modal: lazy-load the form, save via AJAX --------
+    const mdModalEl = document.getElementById('materialDetailsModal');
+    const mdBody    = document.getElementById('materialDetailsBody');
+    let mdCurrentMatId = null;
+    mdModalEl?.addEventListener('show.bs.modal', async e => {
+        const qoMatId = e.relatedTarget?.dataset.qoMaterialId;
+        mdCurrentMatId = qoMatId;
+        mdBody.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>';
+        const res = await fetch('@Url.Action("MaterialPanel", "QualityOrders")?qoMaterialId=' + qoMatId, { headers: { 'Accept': 'text/html' } });
+        mdBody.innerHTML = res.ok ? await res.text() : '<div class="alert alert-danger m-2">Could not load material details.</div>';
+    });
+    document.getElementById('mdm-save')?.addEventListener('click', async () => {
+        const form = mdBody.querySelector('#materialDetailsForm');
+        if (!form) return;
+        if (!form.reportValidity()) return;          // honour required fields
+        const fd = new FormData(form);
+        try {
+            const data = await postForm('@Url.Action("SaveMaterialHeaderAjax", "QualityOrders")', fd);
+            if (!data.ok) { showToast(data.error || 'Save failed.', 'danger'); return; }
+            bootstrap.Modal.getInstance(mdModalEl)?.hide();
+            // Values are copied onto every sample server-side (and show in the
+            // PDF); there's no on-page recap to refresh.
+            showToast('Material details saved and applied to all samples.');
+        } catch (e) { showToast('Save failed: ' + e.message, 'danger'); }
+    });
+
     // ---- Defect steppers (delegated; works for any drawer instance) ------
     function wireDefectSteppers(scope) {
         scope.querySelectorAll('.defect-stepper').forEach(row => {
@@ -703,7 +743,7 @@
             const isDecimal = (row.dataset.valueType || 'Number').toLowerCase() === 'decimal';
             const updatePct = () => {
                 const form = row.closest('form');
-                const size = parseFloat(form?.querySelector('input[name="SampleSize"]')?.value);
+                const size = parseFloat(form?.dataset.sampleSize);
                 const v = parseFloat(input.value);
                 const pctInput = form.querySelector('input[name="defect_' + input.dataset.id + '_pct"]');
                 const badge = row.querySelector('.defect-pct-badge');

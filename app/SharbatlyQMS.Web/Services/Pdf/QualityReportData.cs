@@ -15,6 +15,26 @@ public class QualityReportData
     public List<QualityOrderMaterial> Materials { get; set; } = new();
     public List<SampleBundle>   Samples         { get; set; } = new();
 
+    /// <summary>
+    /// Page 1 grouped summaries keyed by (MaterialGroup, Brand, Variety,
+    /// Grade). Built by <see cref="QualityOrderService.BuildGroupSummariesAsync"/>.
+    /// Replaces the per-sample summary blocks that used to render on page 1.
+    /// </summary>
+    public IReadOnlyList<MaterialGroupSummary> GroupSummaries { get; set; } = Array.Empty<MaterialGroupSummary>();
+
+    /// <summary>
+    /// Active defect catalog keyed by `material_group`, used by the
+    /// per-sample defect render so every sample card lists the FULL catalog
+    /// for its material group (zeros for unrecorded defects) and buckets it
+    /// Major / Minor exactly like the grouped summary on page 1.
+    /// </summary>
+    public IReadOnlyDictionary<string, IReadOnlyList<DefectCatalogEntry>> DefectsByGroup { get; set; }
+        = new Dictionary<string, IReadOnlyList<DefectCatalogEntry>>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Active defect categories (ordered by sort_order) — drive the
+    /// per-category defect sections + their colours on every sample card.</summary>
+    public IReadOnlyList<DefectCategory> Categories { get; set; } = Array.Empty<DefectCategory>();
+
     // Settings
     public string SiteName     { get; set; } = "Sharbatly Quality Management";
     public string CompanyName  { get; set; } = "Mohamed Abdullah Sharbatly CO. LTD";
@@ -51,11 +71,10 @@ public class SampleBundle
     public QualityOrderMaterial?        Material    { get; set; }
     public List<SampleReading>          Readings    { get; set; } = new();
     public List<SampleDefect>           Defects     { get; set; } = new();
-    public Dictionary<string, string>   SectionMap  { get; set; } = new();   // defect code -> Major/Minor
+    public Dictionary<string, string>   SectionMap  { get; set; } = new();   // defect code -> category name (V22+)
+    public List<SampleHeaderValue>      HeaderValues{ get; set; } = new();   // V20+ dynamic sample header (Sample-scoped)
+    public List<MaterialHeaderValue>    MaterialHeaderValues { get; set; } = new();  // V21+ Material-scoped, inherited
     public List<ImageRef>               Images      { get; set; } = new();
-
-    public decimal MajorDefectTotal => Defects.Where(d => SectionMap.GetValueOrDefault(d.DefectCode) == "Major").Sum(d => d.DefectPercentage ?? 0);
-    public decimal MinorDefectTotal => Defects.Where(d => SectionMap.GetValueOrDefault(d.DefectCode) != "Major").Sum(d => d.DefectPercentage ?? 0);
 
     public decimal? ReadingNum(string code) => Readings.FirstOrDefault(r => r.ReadingTypeCode == code)?.NumericValue;
     public string?  ReadingTxt(string code) => Readings.FirstOrDefault(r => r.ReadingTypeCode == code)?.TextValue;

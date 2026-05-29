@@ -1,20 +1,19 @@
 @using SharbatlyQMS.Web.Services
 @using SharbatlyQMS.Web.ViewModels
 @model ImageGalleryVm
-@inject IImageService ImageSvc
-@inject ISettingsService SettingsSvc
 @{
-    var images = await ImageSvc.ListAsync(Model.OwnerType, Model.OwnerId);
-    var thumb  = await SettingsSvc.GetThumbnailConfigAsync();
     var returnUrl = Context.Request.Path + Context.Request.QueryString;
 }
+
+<div class="image-gallery" data-ajax="@(Model.Ajax ? "true" : "false")"
+     data-owner-type="@Model.OwnerType" data-owner-id="@Model.OwnerId">
 
 @if (Model.Editable)
 {
     <div class="card mb-3">
         <div class="card-header"><i class="bi bi-cloud-upload me-1"></i>Upload images</div>
         <div class="card-body">
-            <form asp-controller="Images" asp-action="Upload" method="post" enctype="multipart/form-data">
+            <form asp-controller="Images" asp-action="Upload" method="post" enctype="multipart/form-data" class="ig-upload-form">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="ownerType" value="@Model.OwnerType" />
                 <input type="hidden" name="ownerId"   value="@Model.OwnerId" />
@@ -45,42 +44,58 @@
     </div>
 }
 
-@if (images.Count == 0)
+<div class="ig-grid">
+    <partial name="_ImageGalleryGrid" model="Model" />
+</div>
+
+</div>
+
+@if (Model.Ajax)
 {
-    <div class="alert alert-light text-center text-muted">
-        <i class="bi bi-images me-1"></i>No images uploaded yet.
-    </div>
-}
-else
-{
-    <div class="d-flex flex-wrap gap-3">
-        @foreach (var img in images)
-        {
-            <div class="card" style="width:@(thumb.ScreenWidth + 16)px">
-                <a href="@img.StorageUrl" target="_blank" class="text-decoration-none">
-                    <img src="@(img.ThumbnailUrl ?? img.StorageUrl)"
-                         class="card-img-top" loading="lazy"
-                         style="width:@(thumb.ScreenWidth)px;height:@(thumb.ScreenHeight)px;object-fit:@(thumb.FitMode.Equals("Cover", StringComparison.OrdinalIgnoreCase) ? "cover" : "contain")"
-                         alt="@img.OriginalName" />
-                </a>
-                <div class="card-body p-2">
-                    <div class="small fw-bold text-truncate" title="@img.OriginalName">@img.OriginalName</div>
-                    <div class="small text-muted">@img.Category</div>
-                    <div class="small text-muted">@img.UploadedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</div>
-                    @if (Model.Editable)
-                    {
-                        <form asp-controller="Images" asp-action="Delete" method="post"
-                              onsubmit="return confirm('Remove this image?');" class="mt-1">
-                            @Html.AntiForgeryToken()
-                            <input type="hidden" name="imageLinkId" value="@img.ImageLinkId" />
-                            <input type="hidden" name="returnUrl" value="@returnUrl" />
-                            <button type="submit" class="btn btn-sm btn-outline-danger w-100">
-                                <i class="bi bi-trash"></i>
-                            </button>
-                        </form>
-                    }
-                </div>
-            </div>
+    <script>
+    // Add/remove images without a full-page reload so the surrounding tab stays
+    // active. Delegated on document and registered once; only acts on galleries
+    // flagged data-ajax="true". Other galleries keep their normal POST+redirect.
+    (function () {
+        if (window.__igAjaxInit) return;
+        window.__igAjaxInit = true;
+
+        function ajaxGalleryOf(el) {
+            var g = el.closest('.image-gallery');
+            return (g && g.getAttribute('data-ajax') === 'true') ? g : null;
         }
-    </div>
+
+        document.addEventListener('submit', function (e) {
+            if (e.defaultPrevented) return;          // e.g. delete confirm() was cancelled
+            var form = e.target;
+            var gallery = ajaxGalleryOf(form);
+            if (!gallery) return;
+            var grid = gallery.querySelector('.ig-grid');
+
+            var isUpload = form.classList.contains('ig-upload-form');
+            var isDelete = !isUpload && grid && grid.contains(form);
+            if (!isUpload && !isDelete) return;
+
+            e.preventDefault();
+            var btn = form.querySelector('button[type="submit"]');
+            if (btn) btn.disabled = true;
+
+            fetch(form.action, {
+                method: 'POST',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                body: new FormData(form)
+            })
+            .then(function (r) { if (!r.ok) throw new Error('Request failed'); return r.text(); })
+            .then(function (html) {
+                grid.innerHTML = html;
+                if (isUpload) {
+                    var file = form.querySelector('input[type="file"]');
+                    if (file) file.value = '';
+                }
+            })
+            .catch(function () { alert(isUpload ? 'Upload failed. Please try again.' : 'Could not remove the image.'); })
+            .finally(function () { if (btn) btn.disabled = false; });
+        });
+    })();
+    </script>
 }

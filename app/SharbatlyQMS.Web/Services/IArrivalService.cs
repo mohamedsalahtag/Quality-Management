@@ -10,11 +10,19 @@ public interface IArrivalService
     Task<IReadOnlyList<ArrivalItem>> GetItemsAsync(long arrivalId);
 
     /// <summary>
-    /// Find an existing arrival matching the given (container, BOL) pair --
+    /// Find an existing arrival matching the given (container, BOL, PO) triple --
     /// case-insensitive. Used by the Create flow to block duplicate arrivals.
-    /// Returns the most recent one if any (any status).
+    /// The same container number can legitimately recur under a different BOL or
+    /// PO, so all three must match. Returns the most recent one if any (any status).
     /// </summary>
-    Task<Arrival?> FindByContainerAndBolAsync(string containerNo, string bolNo);
+    Task<Arrival?> FindByShipmentAsync(string containerNo, string bolNo, string? po);
+
+    /// <summary>
+    /// Bulk lookup of existing arrivals for a set of container numbers, so the
+    /// SAP search grid can pre-flag (disable) shipments that already have an
+    /// arrival. Caller matches the (container, BOL, PO) triple in memory.
+    /// </summary>
+    Task<IReadOnlyList<Arrival>> FindByContainersAsync(IReadOnlyCollection<string> containers);
     Task<ArrivalChecklist?> GetChecklistAsync(long arrivalId);
     Task<ShipmentSnapshot?> GetShipmentAsync(long arrivalId);
 

@@ -17,16 +17,19 @@
     decimal? DvalOf(int id) => existingDefs.FirstOrDefault(x => x.DefectId == id)?.DefectValue;
     decimal? DpctOf(int id) => existingDefs.FirstOrDefault(x => x.DefectId == id)?.DefectPercentage;
 
-    // Major/Critical share the red "Major" panel; everything else lands in
-    // the warning Minor panel. The split is now driven by the defect's own
-    // category column on qms_defect_catalog (admins control it on the
-    // Defect Catalog page) -- no separate junction lookup.
-    bool IsMajor(DefectCatalogEntry d) =>
-        string.Equals(d.DefectCategory, "Major",    StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(d.DefectCategory, "Critical", StringComparison.OrdinalIgnoreCase);
-
-    var majorDefects = defects.Where(IsMajor).ToList();
-    var minorDefects = defects.Where(d => !IsMajor(d)).ToList();
+    // Defects are grouped into one section per category (V22+), ordered by
+    // the category's sort_order and coloured by its colour. Categories come
+    // from the admin-managed master list (Admin -> Defect Categories);
+    // unknown/inactive categories fall to the end with a neutral colour so a
+    // defect is never silently hidden.
+    var catMeta = Model.Categories.ToDictionary(c => c.CategoryName, StringComparer.OrdinalIgnoreCase);
+    int CatSort(string name) => catMeta.TryGetValue(name, out var m) ? m.SortOrder : 999;
+    string CatColor(string name) =>
+        (catMeta.TryGetValue(name, out var m) && !string.IsNullOrWhiteSpace(m.ColorHex)) ? m.ColorHex! : "#6c757d";
+    var defectGroups = defects
+        .GroupBy(d => d.DefectCategory ?? "", StringComparer.OrdinalIgnoreCase)
+        .OrderBy(g => CatSort(g.Key)).ThenBy(g => g.Key)
+        .ToList();
 
     var headerSubtitle = qoMat != null
         ? $"#{(s.SampleId == 0 ? "new" : s.SampleNo.ToString())} — {qoMat.MaterialNo} {qoMat.MaterialDesc}"
@@ -45,8 +48,8 @@
         font-weight: 600; color: #6c757d; margin: .4rem 0 .25rem;
         border-left: 3px solid #6c757d; padding-left: .4rem;
     }
-    .sample-form .section-label.major { color: #b02a37; border-left-color: #b02a37; }
-    .sample-form .section-label.minor { color: #997404; border-left-color: #ffc107; }
+    /* Section colour now comes from the category (inline style); the base
+       .section-label rule above supplies layout. */
     /* Defect stepper: chunky tap targets for tablet. */
     .defect-stepper { display: flex; align-items: center; gap: .15rem; }
     .defect-stepper .btn-step {
@@ -86,53 +89,69 @@
     <div class="alert alert-info small mb-2 py-2"><i class="bi bi-lock me-1"></i>Read-only because the Quality Order is <strong>@qo.StatusCode</strong>.</div>
 }
 
-@* data-material-size carries the QO line size (which may include units like
-   "18 KG CF") so JS can attempt to auto-fill SampleSize on a brand-new
-   sample. data-is-new flags the create case so we only auto-fill on a new
-   sample, never overwriting a saved value. *@
+@* data-sample-size carries the MATERIAL's sample size (inherited by every
+   sample); the live defect-% JS uses it as the denominator since the form no
+   longer has a Sample Size input. *@
 <form asp-action="SaveSample" method="post" class="sample-form"
-      data-material-size="@(qoMat?.MaterialSize ?? "")"
-      data-is-new="@(s.SampleId == 0 ? "true" : "false")">
+      data-sample-size="@(qoMat?.SampleSize)">
     @Html.AntiForgeryToken()
     <input type="hidden" name="SampleId"       value="@s.SampleId" />
     <input type="hidden" name="QualityOrderId" value="@s.QualityOrderId" />
     <input type="hidden" name="QoMaterialId"   value="@s.QoMaterialId" />
     <fieldset @(editable ? "" : "disabled")>
 
+        @* Sample header section: only Sample-scoped fields are entered here.
+           Sample Size and the Material-scoped fields (grower pallet, pack code,
+           date code, label, label number) are entered once per material on the
+           "Material details" panel and inherited -- shown read-only below. *@
+        @{
+            string HfName(string code) => $"header_{code}";
+            var hfByCode = Model.ExistingHeader.ToDictionary(h => h.FieldCode);
+        }
+
         <div class="card mb-2">
             <div class="card-header bg-primary text-white">Sample header</div>
             <div class="card-body">
                 <div class="row g-1">
-                    <div class="col-6 col-md-3"><label class="form-label">Grower</label>
-                        <input name="Grower" value="@s.Grower" class="form-control form-control-sm" /></div>
-                    <div class="col-6 col-md-3"><label class="form-label">Pallet</label>
-                        <input name="PalletNo" value="@s.PalletNo" class="form-control form-control-sm" /></div>
-                    <div class="col-6 col-md-3"><label class="form-label">Grower pallet</label>
-                        <input name="GrowerPallet" value="@s.GrowerPallet" class="form-control form-control-sm" /></div>
-                    <div class="col-6 col-md-3"><label class="form-label">Date code</label>
-                        <input name="DateCode" value="@s.DateCode" class="form-control form-control-sm" /></div>
-                    <div class="col-6 col-md-3"><label class="form-label">Pack code</label>
-                        <input name="PackCode" value="@s.PackCode" class="form-control form-control-sm" /></div>
-                    <div class="col-6 col-md-3"><label class="form-label">Lot</label>
-                        <input name="LotNo" value="@s.LotNo" class="form-control form-control-sm" /></div>
-                    <div class="col-6 col-md-3"><label class="form-label">Label</label>
-                        <input name="LabelValue" value="@s.LabelValue" class="form-control form-control-sm" /></div>
-                    <div class="col-6 col-md-3"><label class="form-label">Packaging mat.</label>
-                        <input name="PackagingMaterial" value="@s.PackagingMaterial" class="form-control form-control-sm" /></div>
-                    <div class="col-6 col-md-3"><label class="form-label">Carton count</label>
-                        <input name="CartonCount" value="@s.CartonCount" type="number" class="form-control form-control-sm" /></div>
-                    <div class="col-6 col-md-3"><label class="form-label">Carton ID</label>
-                        <input name="CartonIdentifier" value="@s.CartonIdentifier" class="form-control form-control-sm" /></div>
-                    <div class="col-6 col-md-3"><label class="form-label">Sample size</label>
-                        <input name="SampleSize" value="@s.SampleSize" type="number" inputmode="numeric" class="form-control form-control-sm" /></div>
-                    <div class="col-6 col-md-3"><label class="form-label">Sample scope</label>
-                        <select name="SampleScope" class="form-select form-select-sm">
-                            @foreach (var opt in new[] { ("OneCarton","One carton"),("MultiCarton","Multi carton"),("Pallet","Pallet"),("Lot","Lot") })
+                    @* Dynamic Sample-scoped header fields from qms_sample_header_field. *@
+                    @foreach (var f in Model.HeaderFields)
+                    {
+                        hfByCode.TryGetValue(f.FieldCode, out var existing);
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">
+                                @f.FieldName <span class="text-muted">@f.DefaultUnit</span>
+                                @if (f.IsMandatory)
+                                {
+                                    <span class="text-danger fw-bold" title="Required — sample cannot be saved without this value">*</span>
+                                }
+                            </label>
+                            @if (f.ValueKind == "Numeric")
                             {
-                                <option value="@opt.Item1" selected="@(s.SampleScope == opt.Item1)">@opt.Item2</option>
+                                <input name="@(HfName(f.FieldCode))" type="number" step="any" inputmode="decimal"
+                                       class="form-control form-control-sm"
+                                       value="@(existing?.NumericValue)"
+                                       required="@(f.IsMandatory)" />
                             }
-                        </select>
-                    </div>
+                            else if (f.ValueKind == "Date")
+                            {
+                                <input name="@(HfName(f.FieldCode))" type="date"
+                                       class="form-control form-control-sm"
+                                       value="@(existing?.DateValue?.ToString("yyyy-MM-dd"))"
+                                       required="@(f.IsMandatory)" />
+                            }
+                            else
+                            {
+                                <input name="@(HfName(f.FieldCode))" type="text"
+                                       class="form-control form-control-sm"
+                                       value="@(existing?.TextValue)"
+                                       required="@(f.IsMandatory)" />
+                            }
+                        </div>
+                    }
+                    @if (Model.HeaderFields.Count == 0)
+                    {
+                        <div class="col-12"><div class="text-muted small">No sample-level header fields configured. Manage them (and their scope) in <a asp-controller="Admin" asp-action="SampleHeaders">Admin → Sample Headers</a>.</div></div>
+                    }
                 </div>
             </div>
         </div>
@@ -191,79 +210,54 @@
             }
         </div>
 
-        @* Defects: stepper widget per row with live %-badge. Two columns
-           side-by-side on wide screens, stacked on tablet/phone. *@
+        @* Defects: one section per category (ordered + coloured by the
+           category master). Two sections side-by-side on wide screens,
+           stacked on tablet/phone. *@
         <div class="row g-2 mt-2">
-            <div class="col-12 col-xxl-6">
-                <div class="section-label major"><i class="bi bi-exclamation-triangle me-1"></i>Major / Critical defects</div>
-                @foreach (var d in majorDefects)
-                {
-                    var v = DvalOf(d.DefectId);
-                    var p = DpctOf(d.DefectId);
-                    var isDecimal = string.Equals(d.ValueType, "Decimal", StringComparison.OrdinalIgnoreCase);
-                    // Default to "0" instead of empty so downstream math (sums,
-                    // averages) never sees nulls. Operator can type over it.
-                    var valDisplay = v.HasValue
-                        ? (isDecimal ? v.Value.ToString("0.###") : ((int)Math.Round(v.Value)).ToString())
-                        : "0";
-                    var pctDisplay = (p ?? 0m).ToString("0.##");
-                    <div class="defect-row d-flex align-items-center gap-2 defect-stepper"
-                         data-defect-id="@d.DefectId" data-value-type="@d.ValueType">
-                        <div class="flex-grow-1 defect-name">@d.DefectName</div>
-                        @if (editable)
-                        {
-                            <button type="button" class="btn btn-outline-secondary btn-step defect-minus" tabindex="-1">−</button>
-                        }
-                        <input name="defect_@(d.DefectId)_value" type="number"
-                               inputmode="@(isDecimal ? "decimal" : "numeric")"
-                               min="0" step="@(isDecimal ? "any" : "1")"
-                               class="form-control form-control-sm defect-value" data-id="@d.DefectId"
-                               value="@valDisplay" />
-                        @if (editable)
-                        {
-                            <button type="button" class="btn btn-outline-secondary btn-step defect-plus" tabindex="-1">+</button>
-                        }
-                        <span class="badge defect-pct-badge bg-light text-muted">@((p ?? 0m).ToString("0.#"))%</span>
-                        <input name="defect_@(d.DefectId)_pct" type="hidden" value="@pctDisplay" />
+            @if (defectGroups.Count == 0)
+            {
+                <div class="col-12"><div class="text-muted small">No defects configured for this material group.</div></div>
+            }
+            @foreach (var grp in defectGroups)
+            {
+                var color = CatColor(grp.Key);
+                <div class="col-12 col-xxl-6">
+                    <div class="section-label" style="color:@color;border-left-color:@color">
+                        <i class="bi bi-exclamation-triangle me-1"></i>@grp.Key defects
                     </div>
-                }
-                @if (majorDefects.Count == 0) { <div class="text-muted small">No Major defects configured for this material group.</div> }
-            </div>
-            <div class="col-12 col-xxl-6">
-                <div class="section-label minor"><i class="bi bi-exclamation-circle me-1"></i>Minor defects</div>
-                @foreach (var d in minorDefects)
-                {
-                    var v = DvalOf(d.DefectId);
-                    var p = DpctOf(d.DefectId);
-                    var isDecimal = string.Equals(d.ValueType, "Decimal", StringComparison.OrdinalIgnoreCase);
-                    // Default to "0" instead of empty so downstream math (sums,
-                    // averages) never sees nulls. Operator can type over it.
-                    var valDisplay = v.HasValue
-                        ? (isDecimal ? v.Value.ToString("0.###") : ((int)Math.Round(v.Value)).ToString())
-                        : "0";
-                    var pctDisplay = (p ?? 0m).ToString("0.##");
-                    <div class="defect-row d-flex align-items-center gap-2 defect-stepper"
-                         data-defect-id="@d.DefectId" data-value-type="@d.ValueType">
-                        <div class="flex-grow-1 defect-name">@d.DefectName</div>
-                        @if (editable)
-                        {
-                            <button type="button" class="btn btn-outline-secondary btn-step defect-minus" tabindex="-1">−</button>
-                        }
-                        <input name="defect_@(d.DefectId)_value" type="number"
-                               inputmode="@(isDecimal ? "decimal" : "numeric")"
-                               min="0" step="@(isDecimal ? "any" : "1")"
-                               class="form-control form-control-sm defect-value" data-id="@d.DefectId"
-                               value="@valDisplay" />
-                        @if (editable)
-                        {
-                            <button type="button" class="btn btn-outline-secondary btn-step defect-plus" tabindex="-1">+</button>
-                        }
-                        <span class="badge defect-pct-badge bg-light text-muted">@((p ?? 0m).ToString("0.#"))%</span>
-                        <input name="defect_@(d.DefectId)_pct" type="hidden" value="@pctDisplay" />
-                    </div>
-                }
-                @if (minorDefects.Count == 0) { <div class="text-muted small">No Minor defects configured for this material group.</div> }
-            </div>
+                    @foreach (var d in grp.OrderBy(x => x.SortOrder).ThenBy(x => x.DefectName))
+                    {
+                        var v = DvalOf(d.DefectId);
+                        var p = DpctOf(d.DefectId);
+                        var isDecimal = string.Equals(d.ValueType, "Decimal", StringComparison.OrdinalIgnoreCase);
+                        // Default to "0" instead of empty so downstream math (sums,
+                        // averages) never sees nulls. Operator can type over it.
+                        var valDisplay = v.HasValue
+                            ? (isDecimal ? v.Value.ToString("0.###") : ((int)Math.Round(v.Value)).ToString())
+                            : "0";
+                        var pctDisplay = (p ?? 0m).ToString("0.##");
+                        <div class="defect-row d-flex align-items-center gap-2 defect-stepper"
+                             data-defect-id="@d.DefectId" data-value-type="@d.ValueType">
+                            <div class="flex-grow-1 defect-name">@d.DefectName</div>
+                            @if (editable)
+                            {
+                                <button type="button" class="btn btn-outline-secondary btn-step defect-minus" tabindex="-1">−</button>
+                            }
+                            <input name="defect_@(d.DefectId)_value" type="number"
+                                   inputmode="@(isDecimal ? "decimal" : "numeric")"
+                                   min="0" step="@(isDecimal ? "any" : "1")"
+                                   class="form-control form-control-sm defect-value" data-id="@d.DefectId"
+                                   value="@valDisplay" />
+                            @if (editable)
+                            {
+                                <button type="button" class="btn btn-outline-secondary btn-step defect-plus" tabindex="-1">+</button>
+                            }
+                            <span class="badge defect-pct-badge bg-light text-muted">@((p ?? 0m).ToString("0.#"))%</span>
+                            <input name="defect_@(d.DefectId)_pct" type="hidden" value="@pctDisplay" />
+                        </div>
+                    }
+                </div>
+            }
         </div>
 
         @if (editable)

@@ -17,6 +17,15 @@ public interface ICatalogCache
     Task<IReadOnlyList<DefectCatalogEntry>> GetActiveDefectsForGroupAsync(string? materialGroup);
     Task<IReadOnlyDictionary<string,string>> GetDisplaySectionMapAsync(string? materialGroup, string? majorCategory);
 
+    /// <summary>Sample header field catalog (V20+). Always global -- no
+    /// per-group filter -- so the sample form renders the same set for
+    /// every fruit.</summary>
+    Task<IReadOnlyList<SampleHeaderField>>  GetActiveSampleHeaderFieldsAsync();
+
+    /// <summary>Defect category master (V22+) — ordered list driving the
+    /// dynamic per-category sections + their colours.</summary>
+    Task<IReadOnlyList<DefectCategory>>     GetActiveCategoriesAsync();
+
     /// <summary>Drops every cached catalog. Call after admin-side catalog edits.</summary>
     void Invalidate();
 }

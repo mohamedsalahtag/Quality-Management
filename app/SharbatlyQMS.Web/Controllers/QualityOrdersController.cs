@@ -76,13 +76,13 @@ public class QualityOrdersController : Controller
 
         var mailTemplate = await _settings.GetQoMailTemplateAsync();
 
-        ViewBag.Arrival         = arrival;
-        ViewBag.Shipment        = shipment;
-        ViewBag.Materials       = materials;
-        ViewBag.Samples         = samples;
-        ViewBag.PhotoCounts     = photoCounts;
-        ViewBag.Editable        = editable;
-        ViewBag.SendMailEnabled = mailTemplate.Enabled;
+        ViewBag.Arrival             = arrival;
+        ViewBag.Shipment            = shipment;
+        ViewBag.Materials           = materials;
+        ViewBag.Samples             = samples;
+        ViewBag.PhotoCounts         = photoCounts;
+        ViewBag.Editable            = editable;
+        ViewBag.SendMailEnabled     = mailTemplate.Enabled;
         return View(qo);
     }
 
@@ -152,9 +152,120 @@ public class QualityOrdersController : Controller
             SectionMap       = new Dictionary<string,string>(),
             ExistingReadings = readings,
             ExistingDefects  = defects,
+            // V20+: dynamic sample header fields. Only Sample-scoped fields are
+            // entered per sample; Material-scoped fields live on the material
+            // (Material details panel) and are inherited. The existing values
+            // join the catalog so the form pre-fills the inputs in edit mode.
+            HeaderFields     = (await _cat.GetActiveSampleHeaderFieldsAsync())
+                                  .Where(f => f.Scope == "Sample").ToList(),
+            ExistingHeader   = sample.SampleId > 0
+                                  ? await _qos.GetSampleHeaderValuesAsync(sample.SampleId)
+                                  : Array.Empty<SampleHeaderValue>(),
+            Categories       = await _cat.GetActiveCategoriesAsync(),
             Editable         = qo.StatusCode == "Open"
         };
         return PartialView("_SampleForm", vm);
+    }
+
+    /// <summary>
+    /// Returns the <c>_MaterialForm</c> partial for the per-material "Material
+    /// details" panel: the Material-scoped header fields + the material's
+    /// Sample Size, entered once and inherited by every sample. Loaded over
+    /// AJAX when the user opens the material's modal.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> MaterialPanel(long qoMaterialId)
+    {
+        // GetMaterialsAsync is keyed by QO, so resolve the parent QO first.
+        var qoId = await _qos.GetQoIdForMaterialAsync(qoMaterialId);
+        if (qoId == null) return NotFound();
+        var qo = await _qos.GetAsync(qoId.Value);
+        if (qo == null) return NotFound();
+        var mats = await _qos.GetMaterialsAsync(qo.QualityOrderId);
+        var mat = mats.FirstOrDefault(m => m.QoMaterialId == qoMaterialId);
+        if (mat == null) return NotFound();
+
+        var maraDict = await _mara.LookupAsync(new[] { mat.MaterialNo });
+        if (maraDict.TryGetValue(mat.MaterialNo, out var mm)) mat.ApplyMara(mm);
+
+        var vm = new MaterialFormVm
+        {
+            Qo           = qo,
+            Material     = mat,
+            HeaderFields = (await _cat.GetActiveSampleHeaderFieldsAsync())
+                              .Where(f => f.Scope == "Material").ToList(),
+            ExistingValues = await _qos.GetMaterialHeaderValuesAsync(qoMaterialId),
+            SampleSize   = mat.SampleSize,
+            Editable     = qo.StatusCode == "Open"
+        };
+        return PartialView("_MaterialForm", vm);
+    }
+
+    /// <summary>Saves the per-material Sample Size + Material-scoped header
+    /// values, and propagates the size to every sample. Returns JSON for
+    /// in-place DOM update of the material card.</summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    public async Task<IActionResult> SaveMaterialHeaderAjax(long qoMaterialId, short? sampleSize, IFormCollection form)
+    {
+        try
+        {
+            var qoId = await _qos.GetQoIdForMaterialAsync(qoMaterialId);
+            if (qoId == null) return Json(new { ok = false, error = "Material not found." });
+            var qo = await _qos.GetAsync(qoId.Value);
+            if (qo == null || qo.StatusCode != QualityOrderStatus.Open)
+                return Json(new { ok = false, error = "Quality Order is not editable." });
+
+            var fields = (await _cat.GetActiveSampleHeaderFieldsAsync())
+                            .Where(f => f.Scope == "Material").ToList();
+
+            // Authoritative mandatory check (browser `required` is convenience).
+            var missing = new List<string>();
+            foreach (var hf in fields.Where(f => f.IsMandatory))
+            {
+                var v = form[$"header_{hf.FieldCode}"].ToString();
+                bool ok = hf.ValueKind switch
+                {
+                    "Numeric" => decimal.TryParse(v, out _),
+                    "Date"    => DateTime.TryParse(v, out _),
+                    _         => !string.IsNullOrWhiteSpace(v)
+                };
+                if (!ok) missing.Add(hf.FieldName);
+            }
+            if (missing.Count > 0)
+                return Json(new { ok = false, error = $"These mandatory fields have no value: {string.Join(", ", missing)}." });
+
+            var values = new List<MaterialHeaderValue>();
+            foreach (var hf in fields)
+            {
+                var raw = form[$"header_{hf.FieldCode}"].ToString();
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var hv = new MaterialHeaderValue { QoMaterialId = qoMaterialId, FieldId = hf.FieldId };
+                switch (hf.ValueKind)
+                {
+                    case "Numeric": if (decimal.TryParse(raw, out var dec)) hv.NumericValue = dec; break;
+                    case "Date":    if (DateTime.TryParse(raw, out var dt)) hv.DateValue = dt.Date; break;
+                    default:        hv.TextValue = raw.Trim(); break;
+                }
+                if (hv.NumericValue.HasValue || hv.DateValue.HasValue || !string.IsNullOrEmpty(hv.TextValue))
+                    values.Add(hv);
+            }
+
+            var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+            await _qos.SaveMaterialHeaderValuesAndSizeAsync(qoMaterialId, sampleSize, values, user);
+
+            // Echo back a display summary so the card can update without reload.
+            var summary = values
+                .OrderBy(v => v.SortOrder)
+                .Select(v => new { v.FieldName, value = v.TextValue ?? v.NumericValue?.ToString() ?? v.DateValue?.ToString("yyyy-MM-dd") })
+                .ToList();
+            return Json(new { ok = true, qoMaterialId, sampleSize, values = summary });
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "SaveMaterialHeaderAjax failed for QoMaterialId={Id}", qoMaterialId);
+            return Json(new { ok = false, error = ex.Message });
+        }
     }
 
     [HttpPost, ValidateAntiForgeryToken]
@@ -256,6 +367,12 @@ public class QualityOrdersController : Controller
         var sectionMap   = await _qos.GetDisplaySectionMapAsync(qoMaterial?.MaterialGroup, qoMaterial?.MajorCategory);
         var existingReadings = await _qos.GetReadingsAsync(id);
         var existingDefects  = await _qos.GetDefectsAsync(id);
+        // V20+ dynamic sample header fields, for the standalone Sample page
+        // (uses the same partial as the QO Details drawer). Only Sample-scoped
+        // fields are entered per sample; Material-scoped values are inherited.
+        var headerFields   = (await _cat.GetActiveSampleHeaderFieldsAsync())
+                                .Where(f => f.Scope == "Sample").ToList();
+        var existingHeader = await _qos.GetSampleHeaderValuesAsync(id);
 
         ViewBag.QualityOrder    = qo;
         ViewBag.QoMaterial      = qoMaterial;
@@ -264,6 +381,9 @@ public class QualityOrdersController : Controller
         ViewBag.SectionMap      = sectionMap;
         ViewBag.ExistingReadings = existingReadings;
         ViewBag.ExistingDefects  = existingDefects;
+        ViewBag.HeaderFields     = headerFields;
+        ViewBag.ExistingHeader   = existingHeader;
+        ViewBag.Categories       = await _cat.GetActiveCategoriesAsync();
         return View(sample);
     }
 
@@ -323,9 +443,24 @@ public class QualityOrdersController : Controller
             else if (rt.ValueKind != "Numeric" && !hasText)
                 missingMandatory.Add(rt.ReadingName);
         }
+        // Same up-front check for the V20+ sample header fields -- but only
+        // Sample-scoped ones; Material-scoped fields are entered on the material
+        // panel, not here. Mandatory header inputs use `header_<CODE>` naming.
+        var headerFields = await _cat.GetActiveSampleHeaderFieldsAsync();
+        foreach (var hf in headerFields.Where(f => f.IsMandatory && f.Scope == "Sample"))
+        {
+            var v = form[$"header_{hf.FieldCode}"].ToString();
+            bool hasVal = hf.ValueKind switch
+            {
+                "Numeric" => decimal.TryParse(v, out _),
+                "Date"    => DateTime.TryParse(v, out _),
+                _         => !string.IsNullOrWhiteSpace(v)
+            };
+            if (!hasVal) missingMandatory.Add(hf.FieldName);
+        }
         if (missingMandatory.Count > 0)
             return (null, false, 0,
-                $"Sample cannot be saved — these mandatory readings have no value: {string.Join(", ", missingMandatory)}.");
+                $"Sample cannot be saved — these mandatory fields have no value: {string.Join(", ", missingMandatory)}.");
 
         bool isNew;
         if (existing == null)
@@ -371,7 +506,9 @@ public class QualityOrdersController : Controller
         // the operator left it blank -- downstream sums / averages assume
         // zero rather than NULL, per business rule.
         var defectsCatalog = await _cat.GetActiveDefectsForGroupAsync(matForReadings?.MaterialGroup);
-        var sampleSize = sample.SampleSize ?? 0;
+        // Denominator is the MATERIAL's sample size (inherited by every sample);
+        // the per-sample form no longer collects it.
+        var sampleSize = matForReadings?.SampleSize ?? 0;
         var defects = new List<SampleDefect>();
         foreach (var dc in defectsCatalog)
         {
@@ -391,6 +528,33 @@ public class QualityOrdersController : Controller
             });
         }
         await _qos.SaveDefectsAsync(sample.SampleId, defects, user);
+
+        // V20+: persist the dynamic sample header values. One row per
+        // configured field that has a value; SaveSampleHeaderValuesAsync
+        // does DELETE+INSERT atomically so blanking a previously-saved
+        // field clears it from storage.
+        var headerValues = new List<SampleHeaderValue>();
+        foreach (var hf in headerFields.Where(f => f.Scope == "Sample"))
+        {
+            var raw = form[$"header_{hf.FieldCode}"].ToString();
+            if (string.IsNullOrWhiteSpace(raw)) continue;
+            var hv = new SampleHeaderValue { SampleId = sample.SampleId, FieldId = hf.FieldId };
+            switch (hf.ValueKind)
+            {
+                case "Numeric":
+                    if (decimal.TryParse(raw, out var dec)) hv.NumericValue = dec;
+                    break;
+                case "Date":
+                    if (DateTime.TryParse(raw, out var dt)) hv.DateValue = dt.Date;
+                    break;
+                default:
+                    hv.TextValue = raw.Trim();
+                    break;
+            }
+            if (hv.NumericValue.HasValue || hv.DateValue.HasValue || !string.IsNullOrEmpty(hv.TextValue))
+                headerValues.Add(hv);
+        }
+        await _qos.SaveSampleHeaderValuesAsync(sample.SampleId, headerValues, user);
 
         // Count of active samples on the parent material -- used by the AJAX
         // response so the client can update the card-header badge in place.

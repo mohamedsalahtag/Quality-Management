@@ -9,6 +9,9 @@ public interface IQualityOrderService
     Task<QualityOrder?> GetByArrivalAsync(long arrivalId);
     Task<IReadOnlyList<QualityOrderMaterial>> GetMaterialsAsync(long qualityOrderId);
 
+    /// <summary>The parent quality_order_id for a QO material, or null if not found.</summary>
+    Task<long?> GetQoIdForMaterialAsync(long qoMaterialId);
+
     /// <summary>
     /// Creates a Quality Order in Initial state, copying every arrival item
     /// onto the QO as a qo_material row (the inspector samples per material).
@@ -45,4 +48,54 @@ public interface IQualityOrderService
     Task<IReadOnlyList<DefectCatalogEntry>> GetActiveDefectsAsync();
     Task<IReadOnlyList<DefectCatalogEntry>> GetActiveDefectsForGroupAsync(string? materialGroup);
     Task<IReadOnlyDictionary<string, string>> GetDisplaySectionMapAsync(string? materialGroup, string? majorCategory);
+    /// <summary>Active defect categories (V22+), ordered by sort_order; drives the dynamic per-category sections + colours.</summary>
+    Task<IReadOnlyList<DefectCategory>> GetActiveCategoriesAsync();
+
+    // ----- Sample header fields (configurable, global, V20+) -----
+    /// <summary>Active sample header field catalog (everything except
+    /// `sample_size` -- that's still a first-class column on qms_sample).
+    /// Used by the sample form to render dynamic inputs.</summary>
+    Task<IReadOnlyList<SampleHeaderField>> GetActiveSampleHeaderFieldsAsync();
+
+    /// <summary>Saved header values for one sample, joined with the
+    /// catalog so the caller has field_code / field_name / value_kind.</summary>
+    Task<IReadOnlyList<SampleHeaderValue>> GetSampleHeaderValuesAsync(long sampleId);
+
+    /// <summary>Batch variant for the PDF builder -- one query for the
+    /// whole QO so per-sample cards don't issue N round-trips.</summary>
+    Task<ILookup<long, SampleHeaderValue>> GetSampleHeaderValuesBatchAsync(IEnumerable<long> sampleIds);
+
+    /// <summary>Replace the entire header-value set for one sample.
+    /// Atomic (DELETE + bulk INSERT in a single transaction). Empty/null
+    /// values are dropped -- no need to keep blank rows around.</summary>
+    Task SaveSampleHeaderValuesAsync(long sampleId, IEnumerable<SampleHeaderValue> values, string user);
+
+    /// <summary>Material-scoped header values for one QO material (joined with
+    /// the catalog). Entered once per material and inherited by every sample.</summary>
+    Task<IReadOnlyList<MaterialHeaderValue>> GetMaterialHeaderValuesAsync(long qoMaterialId);
+
+    /// <summary>Batch variant keyed by qo_material_id for the Details page /
+    /// PDF builder.</summary>
+    Task<ILookup<long, MaterialHeaderValue>> GetMaterialHeaderValuesBatchAsync(IEnumerable<long> qoMaterialIds);
+
+    /// <summary>Save a material's sample_size (source of truth, propagated to
+    /// every sample) plus its Material-scoped header values, atomically.</summary>
+    Task SaveMaterialHeaderValuesAndSizeAsync(long qoMaterialId, short? sampleSize,
+        IEnumerable<MaterialHeaderValue> values, string user);
+
+    // ----- Quality Order PDF: grouped summary -----
+    /// <summary>
+    /// Rolls every material in the QO up into (MaterialGroup, Brand, Variety,
+    /// Grade) groups for the PDF's page-1 summary. Each group carries:
+    /// Σ sample_size, Σ gross (qty × MARA weight) and Σ tara (TARA readings)
+    /// → derived Net; the FULL active defect catalog for the group's
+    /// material_group with per-defect Σ value / Σ size × 100 percentages
+    /// bucketed Major (Major+Critical) / Minor (everything else); and one
+    /// pre-rendered display value per active reading type honoring its
+    /// display_mode (text|count|sum|sum_over_size|formula). Brand / Variety
+    /// / Grade / MARA weight come live from <see cref="IMaraService"/> via
+    /// the supplied materials enriched with ApplyMara.
+    /// </summary>
+    Task<IReadOnlyList<MaterialGroupSummary>> BuildGroupSummariesAsync(
+        long qualityOrderId, IReadOnlyList<QualityOrderMaterial> materials);
 }

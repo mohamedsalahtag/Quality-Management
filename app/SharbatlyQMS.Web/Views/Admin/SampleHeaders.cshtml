@@ -1,0 +1,199 @@
+@using SharbatlyQMS.Web.Models
+@model IReadOnlyList<SampleHeaderField>
+@{
+    ViewData["Title"] = "Sample Header Fields";
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h1 class="h3 mb-0"><i class="bi bi-card-heading me-1"></i>Sample Header Fields</h1>
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#shModal"
+            data-mode="create">
+        <i class="bi bi-plus-circle me-1"></i>Add header field
+    </button>
+</div>
+
+<p class="text-muted small">
+    Identification fields (Grower, Pallet No, Date Code, etc.), global across all fruit.
+    Each field has a <strong>scope</strong>: <span class="badge bg-secondary">Sample</span> fields are entered on every sample;
+    <span class="badge bg-info text-dark">Material</span> fields are entered once per material (on the QO “Material details” panel) and inherited by every sample of that material.
+    <strong>Sample Size</strong> is intentionally not here — it is a built-in numeric entered per material (defect percentages divide by it) and inherited by every sample.
+</p>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:1%"></th>
+                    <th>Code</th>
+                    <th>Name</th>
+                    <th>Kind</th>
+                    <th>Scope</th>
+                    <th>Unit</th>
+                    <th>Mandatory</th>
+                    <th>Active</th>
+                    <th class="text-end" style="width: 120px">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var f in Model)
+                {
+                    <tr>
+                        <td class="text-muted small">@f.SortOrder</td>
+                        <td><code>@f.FieldCode</code></td>
+                        <td>@f.FieldName</td>
+                        <td>@f.ValueKind</td>
+                        <td>
+                            @if (f.Scope == "Material")
+                            {
+                                <span class="badge bg-info text-dark">Material</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Sample</span>
+                            }
+                        </td>
+                        <td>@f.DefaultUnit</td>
+                        <td>
+                            @if (f.IsMandatory)
+                            {
+                                <span class="badge bg-danger"><i class="bi bi-exclamation-circle me-1"></i>Required</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted small">Optional</span>
+                            }
+                        </td>
+                        <td>@(f.IsActive ? "Yes" : "No")</td>
+                        <td class="text-end text-nowrap">
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    data-bs-toggle="modal" data-bs-target="#shModal"
+                                    data-mode="edit"
+                                    data-id="@f.FieldId"
+                                    data-code="@f.FieldCode" data-name="@f.FieldName"
+                                    data-kind="@f.ValueKind" data-unit="@f.DefaultUnit"
+                                    data-active="@f.IsActive.ToString().ToLower()"
+                                    data-mandatory="@f.IsMandatory.ToString().ToLower()"
+                                    data-sort="@f.SortOrder"
+                                    data-scope="@f.Scope"
+                                    title="Edit">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            @{
+                                // Delete is always available -- when the field is in use the
+                                // confirmation explicitly warns that the stored values will be
+                                // wiped. Server cascades the qms_sample_header_value rows in the
+                                // same transaction as the field delete (V20 has no ON DELETE
+                                // CASCADE on the field FK).
+                                var confirmMsg = f.IsInUse
+                                    ? $"'{f.FieldName}' has stored values on at least one sample. Deleting it will permanently REMOVE those values from every sample. This cannot be undone. Continue?"
+                                    : $"Delete sample header field {f.FieldCode} ({f.FieldName})? This cannot be undone.";
+                            }
+                            <form asp-action="DeleteSampleHeaderField" method="post" class="d-inline"
+                                  onsubmit="return confirm('@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(confirmMsg))');">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="fieldId" value="@f.FieldId" />
+                                <button type="submit"
+                                        class="btn btn-sm @(f.IsInUse ? "btn-danger" : "btn-outline-danger")"
+                                        title="@(f.IsInUse ? "Delete (will wipe stored values on all samples)" : "Delete")">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                @if (Model.Count == 0)
+                {
+                    <tr><td colspan="9" class="text-center text-muted small py-3">No sample header fields yet. Click <strong>Add header field</strong> to create one.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal fade" id="shModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form asp-action="SaveSampleHeaderField" method="post" class="modal-content">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="fieldId" id="sh-id" value="0" />
+            <div class="modal-header"><h5 class="modal-title" id="sh-title">Add header field</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="row g-2">
+                    <div class="col-md-6"><label class="form-label">Code *</label>
+                        <input name="fieldCode" id="sh-code" class="form-control" required
+                               pattern="[A-Z0-9_]+" title="Uppercase letters, digits and underscore only" />
+                        <small class="text-muted">Stable identifier (e.g. <code>GROWER</code>). Cannot be changed by saving — use Delete + Add if you need a different code.</small>
+                    </div>
+                    <div class="col-md-6"><label class="form-label">Sort order</label>
+                        <input name="sortOrder" id="sh-sort" type="number" class="form-control" value="500" /></div>
+                    <div class="col-md-6"><label class="form-label">Name *</label>
+                        <input name="fieldName" id="sh-name" class="form-control" required />
+                    </div>
+                    <div class="col-md-6"><label class="form-label">Value kind *</label>
+                        <select name="valueKind" id="sh-kind" class="form-select" required>
+                            <option value="Text">Text — free text input</option>
+                            <option value="Numeric">Numeric — number input</option>
+                            <option value="Date">Date — date picker</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6"><label class="form-label">Default unit</label>
+                        <input name="defaultUnit" id="sh-unit" class="form-control" placeholder="kg, °C, …" />
+                    </div>
+                    <div class="col-md-6"><label class="form-label">Scope *</label>
+                        <select name="scope" id="sh-scope" class="form-select" required>
+                            <option value="Sample">Sample — entered on every sample</option>
+                            <option value="Material">Material — entered once per material, inherited by every sample</option>
+                        </select>
+                    </div>
+                    <div class="col-12"><div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="isActive" id="sh-active" value="true" checked />
+                        <label class="form-check-label" for="sh-active">Active</label>
+                    </div></div>
+                    <div class="col-12"><div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="isMandatory" id="sh-mandatory" value="true" />
+                        <label class="form-check-label" for="sh-mandatory">
+                            Mandatory <span class="text-muted small">— sample cannot be saved unless this field has a value</span>
+                        </label>
+                    </div></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    document.getElementById('shModal').addEventListener('show.bs.modal', function (e) {
+        var b = e.relatedTarget;
+        if (b.dataset.mode === 'edit') {
+            document.getElementById('sh-title').textContent = 'Edit header field';
+            document.getElementById('sh-id').value     = b.dataset.id;
+            document.getElementById('sh-code').value   = b.dataset.code;
+            document.getElementById('sh-name').value   = b.dataset.name;
+            document.getElementById('sh-kind').value   = b.dataset.kind;
+            document.getElementById('sh-unit').value   = b.dataset.unit;
+            document.getElementById('sh-sort').value   = b.dataset.sort;
+            document.getElementById('sh-active').checked    = b.dataset.active === 'true';
+            document.getElementById('sh-mandatory').checked = b.dataset.mandatory === 'true';
+            document.getElementById('sh-scope').value  = b.dataset.scope || 'Sample';
+        } else {
+            document.getElementById('sh-title').textContent = 'Add header field';
+            document.getElementById('sh-id').value = 0;
+            ['sh-code','sh-name','sh-unit'].forEach(id => {
+                var el = document.getElementById(id);
+                if (el) el.value = '';
+            });
+            document.getElementById('sh-kind').value = 'Text';
+            document.getElementById('sh-sort').value = '500';
+            document.getElementById('sh-active').checked = true;
+            document.getElementById('sh-mandatory').checked = false;
+            document.getElementById('sh-scope').value = 'Sample';
+        }
+    });
+</script>
+}

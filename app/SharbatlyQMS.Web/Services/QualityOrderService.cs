@@ -8,10 +8,12 @@ namespace SharbatlyQMS.Web.Services;
 public class QualityOrderService : IQualityOrderService
 {
     private readonly string _cs;
-    public QualityOrderService(IConfiguration config)
+    private readonly IAuditService _audit;
+    public QualityOrderService(IConfiguration config, IAuditService audit)
     {
         _cs = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
+        _audit = audit;
     }
     private SqlConnection Open() => new(_cs);
 
@@ -70,32 +72,49 @@ public class QualityOrderService : IQualityOrderService
     public async Task<IReadOnlyList<QualityOrderMaterial>> GetMaterialsAsync(long qualityOrderId)
     {
         using var c = Open();
+        // Joined to qms_arrival_item to surface ai.quantity + ai.uom on the
+        // QO material -- previously the QO PDF Material Table rendered these
+        // columns as empty strings because the QO model didn't carry the
+        // values. ai.arrival_item_id is the parent FK already on the QO
+        // material, so this is a single-row INNER JOIN per material.
         var rows = await c.QueryAsync<QualityOrderMaterial>(@"
-            SELECT qo_material_id          QoMaterialId,
-                   quality_order_id        QualityOrderId,
-                   arrival_item_id         ArrivalItemId,
-                   material_no             MaterialNo,
-                   material_desc           MaterialDesc,
-                   origin                  Origin,
-                   variety                 Variety,
-                   material_class          MaterialClass,
-                   net_weight              NetWeight,
-                   material_size           MaterialSize,
-                   material_group          MaterialGroup,
-                   material_group_desc     MaterialGroupDesc,
-                   major_category          MajorCategory,
-                   brand                   Brand,
-                   pack_type               PackType,
-                   size_overridden         SizeOverridden,
-                   original_material_size  OriginalMaterialSize,
-                   override_material_size  OverrideMaterialSize,
-                   override_reason         OverrideReason,
-                   override_approved_by    OverrideApprovedBy,
-                   override_approved_at    OverrideApprovedAt
-            FROM   qms_quality_order_material
-            WHERE  quality_order_id = @qualityOrderId
-            ORDER  BY qo_material_id", new { qualityOrderId });
+            SELECT m.qo_material_id          QoMaterialId,
+                   m.quality_order_id        QualityOrderId,
+                   m.arrival_item_id         ArrivalItemId,
+                   m.material_no             MaterialNo,
+                   m.material_desc           MaterialDesc,
+                   m.origin                  Origin,
+                   m.variety                 Variety,
+                   m.material_class          MaterialClass,
+                   m.net_weight              NetWeight,
+                   m.material_size           MaterialSize,
+                   m.material_group          MaterialGroup,
+                   m.material_group_desc     MaterialGroupDesc,
+                   m.major_category          MajorCategory,
+                   m.brand                   Brand,
+                   m.pack_type               PackType,
+                   ai.quantity               Quantity,
+                   ai.uom                    Uom,
+                   m.size_overridden         SizeOverridden,
+                   m.original_material_size  OriginalMaterialSize,
+                   m.override_material_size  OverrideMaterialSize,
+                   m.override_reason         OverrideReason,
+                   m.override_approved_by    OverrideApprovedBy,
+                   m.override_approved_at    OverrideApprovedAt,
+                   m.sample_size             SampleSize
+            FROM   qms_quality_order_material m
+            JOIN   qms_arrival_item ai ON ai.arrival_item_id = m.arrival_item_id
+            WHERE  m.quality_order_id = @qualityOrderId
+            ORDER  BY m.qo_material_id", new { qualityOrderId });
         return rows.ToList();
+    }
+
+    public async Task<long?> GetQoIdForMaterialAsync(long qoMaterialId)
+    {
+        using var c = Open();
+        return await c.ExecuteScalarAsync<long?>(
+            "SELECT quality_order_id FROM qms_quality_order_material WHERE qo_material_id = @qoMaterialId",
+            new { qoMaterialId });
     }
 
     public async Task<long> CreateForArrivalAsync(long arrivalId, string user)
@@ -142,6 +161,15 @@ public class QualityOrderService : IQualityOrderService
             INSERT INTO qms_status_history (entity_type, entity_id, old_status, new_status, changed_at, changed_by)
             VALUES ('QualityOrder', @qoId, NULL, 'Initial', SYSUTCDATETIME(), @user)",
             new { qoId, user }, tx);
+
+        // T019 (US1) -- Audit trail: record the QO creation, including the
+        // generated QO number + arrival pointer so the audit entry survives
+        // a future arrival delete (FR-014).
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.QualityOrder, qoId, ActionCodes.Created,
+            oldValues: null,
+            newValues: new { quality_order_no = qoNo, arrival_id = arrivalId, status_code = "Initial" },
+            actor: user);
 
         tx.Commit();
         return qoId;
@@ -190,13 +218,38 @@ public class QualityOrderService : IQualityOrderService
             INSERT INTO qms_status_history (entity_type, entity_id, old_status, new_status, reason, changed_at, changed_by)
             VALUES ('QualityOrder', @qoId, @current, @toStatus, @reason, SYSUTCDATETIME(), @user)",
             new { qoId, current, toStatus, reason, user }, tx);
+
+        // T018 (US1) -- Audit trail: capture the status transition as one
+        // domain action (Opened / Closed / Reopened / Cancelled) rather than
+        // a generic Updated, per FR-002 and the 2026-05-20 clarification on
+        // domain action label preservation.
+        var auditAction = toStatus switch
+        {
+            "Open"      => ActionCodes.Opened,
+            "Closed"    => ActionCodes.Closed,
+            "Reopened"  => ActionCodes.Reopened,
+            "Cancelled" => ActionCodes.Cancelled,
+            _           => ActionCodes.Updated
+        };
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.QualityOrder, qoId, auditAction,
+            oldValues: new { status_code = current },
+            newValues: new { status_code = toStatus == "Reopened" ? "Open" : toStatus, reason },
+            actor: user);
+
         tx.Commit();
         return (true, null);
     }
 
     public async Task SaveOverrideAsync(long qoMaterialId, string newSize, string? reason, string user)
     {
+        // PH-1.1 + PH-2.1 (2026-05-20): wrap UPDATE + audit-write in a single
+        // transaction so a failure of either rolls both back. Replaces the
+        // previous inline INSERT INTO qms_audit_log with the unified
+        // IAuditService write path.
         using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
         await c.ExecuteAsync(@"
             UPDATE qms_quality_order_material SET
               size_overridden        = 1,
@@ -207,25 +260,25 @@ public class QualityOrderService : IQualityOrderService
               override_approved_by   = @user,
               override_approved_at   = SYSUTCDATETIME()
             WHERE qo_material_id = @qoMaterialId",
-            new { qoMaterialId, newSize, reason = (object?)reason ?? DBNull.Value, user });
-        // Build the audit JSON in C# so quotes / backslashes / newlines in
-        // newSize or reason are escaped properly. The previous CONCAT in SQL
-        // produced malformed JSON whenever the user's reason contained a `"`.
-        var auditJson = JsonSerializer.Serialize(new { newSize, reason = reason ?? "" });
-        await c.ExecuteAsync(@"
-            INSERT INTO qms_audit_log (entity_type, entity_id, action_code, new_values_json, changed_at, changed_by)
-            VALUES ('QualityOrderMaterial', @qoMaterialId, 'Override',
-                    @auditJson,
-                    SYSUTCDATETIME(), @user)",
-            new { qoMaterialId, auditJson, user });
+            new { qoMaterialId, newSize, reason = (object?)reason ?? DBNull.Value, user },
+            transaction: tx);
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.QualityOrderMaterial, qoMaterialId, ActionCodes.Override,
+            oldValues: null,
+            newValues: new { newSize, reason = reason ?? "" },
+            actor: user);
+        tx.Commit();
     }
 
     public async Task ClearOverrideAsync(long qoMaterialId, string user)
     {
+        // PH-1.2 + PH-2.2 (2026-05-20): wrap UPDATE + audit-write in one
+        // transaction. Restore the original size (if one was captured) and
+        // clear all override metadata so the material line looks like it
+        // never had one. Audit log keeps a trail for compliance.
         using var c = Open();
-        // Restore the original size (if one was captured) and clear all
-        // override metadata so the material line looks like it never had
-        // one. Audit log keeps a trail for compliance.
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
         await c.ExecuteAsync(@"
             UPDATE qms_quality_order_material SET
               material_size          = ISNULL(original_material_size, material_size),
@@ -236,11 +289,12 @@ public class QualityOrderService : IQualityOrderService
               override_approved_by   = NULL,
               override_approved_at   = NULL
             WHERE qo_material_id = @qoMaterialId",
-            new { qoMaterialId });
-        await c.ExecuteAsync(@"
-            INSERT INTO qms_audit_log (entity_type, entity_id, action_code, changed_at, changed_by)
-            VALUES ('QualityOrderMaterial', @qoMaterialId, 'OverrideCleared', SYSUTCDATETIME(), @user)",
-            new { qoMaterialId, user });
+            new { qoMaterialId },
+            transaction: tx);
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.QualityOrderMaterial, qoMaterialId, ActionCodes.OverrideCleared,
+            oldValues: null, newValues: null, actor: user);
+        tx.Commit();
     }
 
     // ---- Samples ----
@@ -283,13 +337,23 @@ public class QualityOrderService : IQualityOrderService
 
     public async Task<long> CreateSampleAsync(Sample s)
     {
+        // T020 (US1) -- wrap in tx so the audit INSERT lands atomically.
         using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
         // Auto-number per material.
         var nextNo = await c.ExecuteScalarAsync<int>(
             "SELECT ISNULL(MAX(sample_no), 0) + 1 FROM qms_sample WHERE qo_material_id = @QoMaterialId AND is_deleted = 0",
-            new { s.QoMaterialId });
+            new { s.QoMaterialId }, tx);
         s.SampleNo = nextNo;
-        return await c.ExecuteScalarAsync<long>(@"
+        // Inherit sample_size from the material (source of truth). The sample
+        // form no longer collects it, so s.SampleSize arrives null and we copy
+        // the material's value into the per-sample inherited cache.
+        if (!s.SampleSize.HasValue)
+            s.SampleSize = await c.ExecuteScalarAsync<short?>(
+                "SELECT sample_size FROM qms_quality_order_material WHERE qo_material_id = @QoMaterialId",
+                new { s.QoMaterialId }, tx);
+        var sampleId = await c.ExecuteScalarAsync<long>(@"
             INSERT INTO qms_sample
                 (quality_order_id, qo_material_id, sample_no, carton_count, carton_identifier,
                  sample_scope, sample_size, grower, pallet_no, grower_pallet, pack_code,
@@ -300,29 +364,79 @@ public class QualityOrderService : IQualityOrderService
                  @SampleScope, @SampleSize, @Grower, @PalletNo, @GrowerPallet, @PackCode,
                  @DateCode, @LabelValue, @LotNo, @PackagingMaterial,
                  SYSUTCDATETIME(), @CreatedBy);
-            SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", s);
+            SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", s, tx);
+        s.SampleId = sampleId;
+        // Copy the material-scoped header values down onto the new sample so it
+        // owns its own copy (same model as the material-save propagation).
+        await c.ExecuteAsync(@"
+            INSERT INTO qms_sample_header_value (sample_id, field_id, text_value, numeric_value, date_value)
+            SELECT @sampleId, v.field_id, v.text_value, v.numeric_value, v.date_value
+            FROM   qms_qo_material_header_value v
+            WHERE  v.qo_material_id = @QoMaterialId", new { sampleId, s.QoMaterialId }, tx);
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Sample, sampleId, ActionCodes.Created,
+            oldValues: null,
+            newValues: new
+            {
+                s.QualityOrderId, s.QoMaterialId, s.SampleNo, s.CartonCount, s.CartonIdentifier,
+                s.SampleScope, s.SampleSize, s.Grower, s.PalletNo, s.GrowerPallet, s.PackCode,
+                s.DateCode, s.LabelValue, s.LotNo, s.PackagingMaterial
+            },
+            actor: s.CreatedBy);
+        tx.Commit();
+        return sampleId;
     }
 
     public async Task UpdateSampleAsync(Sample s)
     {
+        // T020 (US1) -- read row before update, write field-level audit diff.
+        //
+        // 2026-05-25 bugfix: the sample form (after V20) no longer renders
+        // inputs for grower / pallet_no / date_code / etc. -- those moved
+        // to the dynamic qms_sample_header_value system. Model-binding
+        // therefore arrives with NULL for every legacy column.
+        //
+        // 2026-05-29: sample_size also moved up to the material level (it is
+        // entered once per material and propagated to every sample). The
+        // sample form no longer posts it either, so this UPDATE must NOT touch
+        // sample_size -- it would blank the inherited cache. Only the audit
+        // timestamp / user are updated here; header-field values + sample_size
+        // are owned by SaveSampleHeaderValuesAsync and the material path.
         using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
         await c.ExecuteAsync(@"
             UPDATE qms_sample SET
-              carton_count = @CartonCount, carton_identifier = @CartonIdentifier,
-              sample_scope = @SampleScope, sample_size = @SampleSize,
-              grower = @Grower, pallet_no = @PalletNo, grower_pallet = @GrowerPallet,
-              pack_code = @PackCode, date_code = @DateCode, label_value = @LabelValue,
-              lot_no = @LotNo, packaging_material = @PackagingMaterial,
-              updated_at = SYSUTCDATETIME(), updated_by = @UpdatedBy
-            WHERE sample_id = @SampleId", s);
+              updated_at  = SYSUTCDATETIME(),
+              updated_by  = @UpdatedBy
+            WHERE sample_id = @SampleId", s, tx);
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Sample, s.SampleId, ActionCodes.Updated,
+            oldValues: null,
+            newValues: new { touched = true },
+            actor: s.UpdatedBy ?? "system");
+        tx.Commit();
     }
 
     public async Task SoftDeleteSampleAsync(long sampleId, string user)
     {
+        // T020 (US1) -- soft-delete logged as Deleted in the audit trail.
         using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+        var oldRow = await c.QuerySingleOrDefaultAsync(@"
+            SELECT sample_no, qo_material_id, carton_identifier, is_deleted
+            FROM   qms_sample WHERE sample_id = @sampleId",
+            new { sampleId }, tx);
         await c.ExecuteAsync(@"
             UPDATE qms_sample SET is_deleted = 1, deleted_at = SYSUTCDATETIME(), deleted_by = @user
-            WHERE sample_id = @sampleId", new { sampleId, user });
+            WHERE sample_id = @sampleId", new { sampleId, user }, tx);
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Sample, sampleId, ActionCodes.Deleted,
+            oldValues: oldRow,
+            newValues: null,
+            actor: user);
+        tx.Commit();
     }
 
     // ---- Readings ----
@@ -391,6 +505,14 @@ public class QualityOrderService : IQualityOrderService
         using var c = Open();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
+        // T020 (US1) -- capture the OLD reading set as JSON for the audit diff,
+        // then DELETE + INSERT, then write one Updated entry for the sample's
+        // readings collection.
+        var oldReadings = (await c.QueryAsync(@"
+            SELECT reading_type_code, numeric_value, text_value, unit_code, is_within_spec
+            FROM   qms_sample_reading WHERE sample_id = @sampleId
+            ORDER  BY reading_sequence",
+            new { sampleId }, tx)).ToList();
         await c.ExecuteAsync("DELETE FROM qms_sample_reading WHERE sample_id = @sampleId",
             new { sampleId }, tx);
         if (rows.Length > 0)
@@ -404,6 +526,12 @@ public class QualityOrderService : IQualityOrderService
                      @UnitCode, @IsWithinSpec, @ReadingSequence, SYSUTCDATETIME(), @user)",
                 rows, tx);
         }
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.SampleReading, sampleId, ActionCodes.Updated,
+            oldValues: new { count = oldReadings.Count, readings = oldReadings },
+            newValues: new { count = rows.Length,
+                              readings = rows.Select(r => new { r.ReadingTypeCode, r.NumericValue, r.TextValue, r.UnitCode, r.IsWithinSpec }) },
+            actor: user);
         tx.Commit();
     }
 
@@ -473,6 +601,11 @@ public class QualityOrderService : IQualityOrderService
         using var c = Open();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
+        // T020 (US1) -- same batched-diff pattern as SaveReadingsAsync.
+        var oldDefects = (await c.QueryAsync(@"
+            SELECT defect_id, defect_value, defect_percentage, severity_code, comment, is_within_tolerance
+            FROM   qms_sample_defect WHERE sample_id = @sampleId",
+            new { sampleId }, tx)).ToList();
         await c.ExecuteAsync("DELETE FROM qms_sample_defect WHERE sample_id = @sampleId",
             new { sampleId }, tx);
         if (rows.Length > 0)
@@ -486,6 +619,12 @@ public class QualityOrderService : IQualityOrderService
                      @SeverityCode, @Comment, @IsWithinTolerance, SYSUTCDATETIME(), @user)",
                 rows, tx);
         }
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.SampleDefect, sampleId, ActionCodes.Updated,
+            oldValues: new { count = oldDefects.Count, defects = oldDefects },
+            newValues: new { count = rows.Length,
+                              defects = rows.Select(d => new { d.DefectId, d.DefectValue, d.DefectPercentage, d.SeverityCode, d.Comment, d.IsWithinTolerance }) },
+            actor: user);
         tx.Commit();
     }
 
@@ -497,16 +636,19 @@ public class QualityOrderService : IQualityOrderService
             SELECT reading_type_id ReadingTypeId, reading_type_code ReadingTypeCode,
                    reading_name ReadingName, value_kind ValueKind,
                    default_unit DefaultUnit, is_active IsActive, sort_order SortOrder,
-                   material_group MaterialGroup, is_mandatory IsMandatory
+                   ISNULL(material_group, '') MaterialGroup, is_mandatory IsMandatory,
+                   display_mode DisplayMode
             FROM   qms_reading_type WHERE is_active = 1
-            ORDER  BY material_group, sort_order, reading_name");
+            ORDER  BY CASE WHEN material_group IS NULL THEN 0 ELSE 1 END,
+                      material_group, sort_order, reading_name");
         return rows.ToList();
     }
 
     /// <summary>
-    /// Reading types scoped to one material group. Mirrors
-    /// <see cref="GetActiveDefectsForGroupAsync"/> so the sample form shows
-    /// only the readings defined for the QO material line's group.
+    /// Reading types applicable to one material group: per-group rows
+    /// plus globals (`material_group IS NULL`, V19+). The sample form
+    /// uses this so a global reading like TARA defined once shows up on
+    /// every fruit's sample form without duplicating the catalog row.
     /// </summary>
     public async Task<IReadOnlyList<ReadingTypeEntry>> GetActiveReadingTypesForGroupAsync(string? materialGroup)
     {
@@ -517,10 +659,13 @@ public class QualityOrderService : IQualityOrderService
             SELECT reading_type_id ReadingTypeId, reading_type_code ReadingTypeCode,
                    reading_name ReadingName, value_kind ValueKind,
                    default_unit DefaultUnit, is_active IsActive, sort_order SortOrder,
-                   material_group MaterialGroup, is_mandatory IsMandatory
+                   ISNULL(material_group, '') MaterialGroup, is_mandatory IsMandatory,
+                   display_mode DisplayMode
             FROM   qms_reading_type
-            WHERE  is_active = 1 AND material_group = @materialGroup
-            ORDER  BY sort_order, reading_name", new { materialGroup });
+            WHERE  is_active = 1
+              AND  (material_group = @materialGroup OR material_group IS NULL)
+            ORDER  BY CASE WHEN material_group IS NULL THEN 0 ELSE 1 END,
+                      sort_order, reading_name", new { materialGroup });
         return rows.ToList();
     }
 
@@ -557,18 +702,580 @@ public class QualityOrderService : IQualityOrderService
         return rows.ToList();
     }
 
-    public async Task<IReadOnlyDictionary<string, string>> GetDisplaySectionMapAsync(string? materialGroup, string? majorCategory)
+    /// <summary>Active defect categories (the master list), ordered for
+    /// display. Drives the dynamic per-category sections + their colours.</summary>
+    public async Task<IReadOnlyList<DefectCategory>> GetActiveCategoriesAsync()
     {
         using var c = Open();
-        var rows = await c.QueryAsync<(string DefectCode, string DisplaySection)>(@"
-            SELECT dc.defect_code, mgd.display_section
-            FROM   qms_material_group_defect mgd
-            JOIN   qms_defect_catalog dc ON dc.defect_id = mgd.defect_id
-            WHERE  mgd.is_active = 1
-              AND  (@materialGroup IS NULL OR mgd.material_group = @materialGroup)
-              AND  (@majorCategory IS NULL OR mgd.major_category = @majorCategory OR mgd.major_category IS NULL)",
-            new { materialGroup, majorCategory });
+        var rows = await c.QueryAsync<DefectCategory>(@"
+            SELECT category_id   CategoryId,
+                   category_name CategoryName,
+                   sort_order    SortOrder,
+                   color_hex     ColorHex,
+                   is_active     IsActive
+            FROM   qms_defect_category
+            WHERE  is_active = 1
+            ORDER  BY sort_order, category_name");
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyDictionary<string, string>> GetDisplaySectionMapAsync(string? materialGroup, string? majorCategory)
+    {
+        // Returns defect_code -> its REAL category name (V22+). Source of
+        // truth is qms_defect_catalog.defect_category. Categories are now
+        // dynamic (see qms_defect_category), so this no longer collapses to
+        // the old Major/Minor two buckets -- consumers group by the actual
+        // category. The major_category parameter is preserved for call-site
+        // compatibility but unused (catalog rows are already per material_group).
+        _ = majorCategory;
+        using var c = Open();
+        var rows = await c.QueryAsync<(string DefectCode, string Category)>(@"
+            SELECT defect_code, defect_category
+            FROM   qms_defect_catalog
+            WHERE  is_active = 1
+              AND  (@materialGroup IS NULL OR material_group = @materialGroup)",
+            new { materialGroup });
         return rows.GroupBy(r => r.DefectCode)
-            .ToDictionary(g => g.Key, g => g.First().DisplaySection);
+            .ToDictionary(g => g.Key, g => g.First().Category);
+    }
+
+    // ===================================================================
+    // Sample header fields (V20+) -- configurable per-sample identification
+    // fields. Always global (no material_group binding). Replaces the
+    // hardcoded CartonCount / Grower / PalletNo / DateCode / etc. columns
+    // on qms_sample. sample_size stays on qms_sample (denominator for
+    // defect percentages).
+    // ===================================================================
+    public async Task<IReadOnlyList<SampleHeaderField>> GetActiveSampleHeaderFieldsAsync()
+    {
+        using var c = Open();
+        var rows = await c.QueryAsync<SampleHeaderField>(@"
+            SELECT field_id    AS FieldId,
+                   field_code  AS FieldCode,
+                   field_name  AS FieldName,
+                   value_kind  AS ValueKind,
+                   default_unit AS DefaultUnit,
+                   is_active   AS IsActive,
+                   is_mandatory AS IsMandatory,
+                   sort_order  AS SortOrder,
+                   scope       AS Scope
+            FROM   qms_sample_header_field
+            WHERE  is_active = 1
+            ORDER  BY sort_order, field_name");
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyList<SampleHeaderValue>> GetSampleHeaderValuesAsync(long sampleId)
+    {
+        using var c = Open();
+        var rows = await c.QueryAsync<SampleHeaderValue>(@"
+            SELECT v.sample_id     AS SampleId,
+                   v.field_id      AS FieldId,
+                   v.text_value    AS TextValue,
+                   v.numeric_value AS NumericValue,
+                   v.date_value    AS DateValue,
+                   f.field_code    AS FieldCode,
+                   f.field_name    AS FieldName,
+                   f.value_kind    AS ValueKind,
+                   f.default_unit  AS DefaultUnit,
+                   f.sort_order    AS SortOrder
+            FROM   qms_sample_header_value v
+            JOIN   qms_sample_header_field f ON f.field_id = v.field_id
+            WHERE  v.sample_id = @sampleId
+            ORDER  BY f.sort_order, f.field_name", new { sampleId });
+        return rows.ToList();
+    }
+
+    public async Task<ILookup<long, SampleHeaderValue>> GetSampleHeaderValuesBatchAsync(IEnumerable<long> sampleIds)
+    {
+        var ids = sampleIds.Distinct().ToArray();
+        if (ids.Length == 0) return Array.Empty<SampleHeaderValue>().ToLookup(v => v.SampleId);
+        using var c = Open();
+        var rows = await c.QueryAsync<SampleHeaderValue>(@"
+            SELECT v.sample_id     AS SampleId,
+                   v.field_id      AS FieldId,
+                   v.text_value    AS TextValue,
+                   v.numeric_value AS NumericValue,
+                   v.date_value    AS DateValue,
+                   f.field_code    AS FieldCode,
+                   f.field_name    AS FieldName,
+                   f.value_kind    AS ValueKind,
+                   f.default_unit  AS DefaultUnit,
+                   f.sort_order    AS SortOrder
+            FROM   qms_sample_header_value v
+            JOIN   qms_sample_header_field f ON f.field_id = v.field_id
+            WHERE  v.sample_id IN @ids
+            ORDER  BY v.sample_id, f.sort_order, f.field_name", new { ids });
+        return rows.ToLookup(r => r.SampleId);
+    }
+
+    public async Task SaveSampleHeaderValuesAsync(long sampleId, IEnumerable<SampleHeaderValue> values, string user)
+    {
+        // Replace the whole header-value set for the sample in one
+        // transaction. Drop empty rows -- a Text field with blank
+        // text_value AND no numeric or date value is the operator
+        // saying "this field is not applicable to this sample".
+        var keep = values
+            .Where(v => !string.IsNullOrWhiteSpace(v.TextValue)
+                        || v.NumericValue.HasValue
+                        || v.DateValue.HasValue)
+            .Select(v => new
+            {
+                sampleId,
+                v.FieldId,
+                v.TextValue,
+                v.NumericValue,
+                v.DateValue
+            })
+            .ToArray();
+
+        using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+        // Only replace the SAMPLE-scoped rows. Material-scoped values are
+        // copied down from the material (SaveMaterialHeaderValuesAndSizeAsync /
+        // CreateSampleAsync) and must survive a per-sample save.
+        await c.ExecuteAsync(@"
+            DELETE v FROM qms_sample_header_value v
+            JOIN   qms_sample_header_field f ON f.field_id = v.field_id
+            WHERE  v.sample_id = @sampleId AND f.scope = 'Sample'",
+            new { sampleId }, tx);
+        if (keep.Length > 0)
+        {
+            await c.ExecuteAsync(@"
+                INSERT INTO qms_sample_header_value
+                    (sample_id, field_id, text_value, numeric_value, date_value)
+                VALUES
+                    (@sampleId, @FieldId, @TextValue, @NumericValue, @DateValue)",
+                keep, tx);
+        }
+        // Audit (single batched entry per sample save, same pattern as
+        // SaveReadings / SaveDefects).
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Sample, sampleId, ActionCodes.Updated,
+            oldValues: null,
+            newValues: new { header_fields = keep.Length, values = keep.Select(k => new { k.FieldId, k.TextValue, k.NumericValue, k.DateValue }) },
+            actor: user);
+        tx.Commit();
+    }
+
+    // ===================================================================
+    // Material-level header values (Material-scoped fields + sample_size).
+    // Entered once per qms_quality_order_material; every sample inherits.
+    // ===================================================================
+    public async Task<IReadOnlyList<MaterialHeaderValue>> GetMaterialHeaderValuesAsync(long qoMaterialId)
+    {
+        using var c = Open();
+        var rows = await c.QueryAsync<MaterialHeaderValue>(@"
+            SELECT v.qo_material_id AS QoMaterialId,
+                   v.field_id       AS FieldId,
+                   v.text_value     AS TextValue,
+                   v.numeric_value  AS NumericValue,
+                   v.date_value     AS DateValue,
+                   f.field_code     AS FieldCode,
+                   f.field_name     AS FieldName,
+                   f.value_kind     AS ValueKind,
+                   f.default_unit   AS DefaultUnit,
+                   f.sort_order     AS SortOrder
+            FROM   qms_qo_material_header_value v
+            JOIN   qms_sample_header_field f ON f.field_id = v.field_id
+            WHERE  v.qo_material_id = @qoMaterialId
+            ORDER  BY f.sort_order, f.field_name", new { qoMaterialId });
+        return rows.ToList();
+    }
+
+    public async Task<ILookup<long, MaterialHeaderValue>> GetMaterialHeaderValuesBatchAsync(IEnumerable<long> qoMaterialIds)
+    {
+        var ids = qoMaterialIds.Distinct().ToArray();
+        if (ids.Length == 0) return Array.Empty<MaterialHeaderValue>().ToLookup(v => v.QoMaterialId);
+        using var c = Open();
+        var rows = await c.QueryAsync<MaterialHeaderValue>(@"
+            SELECT v.qo_material_id AS QoMaterialId,
+                   v.field_id       AS FieldId,
+                   v.text_value     AS TextValue,
+                   v.numeric_value  AS NumericValue,
+                   v.date_value     AS DateValue,
+                   f.field_code     AS FieldCode,
+                   f.field_name     AS FieldName,
+                   f.value_kind     AS ValueKind,
+                   f.default_unit   AS DefaultUnit,
+                   f.sort_order     AS SortOrder
+            FROM   qms_qo_material_header_value v
+            JOIN   qms_sample_header_field f ON f.field_id = v.field_id
+            WHERE  v.qo_material_id IN @ids
+            ORDER  BY v.qo_material_id, f.sort_order, f.field_name", new { ids });
+        return rows.ToLookup(r => r.QoMaterialId);
+    }
+
+    public async Task SaveMaterialHeaderValuesAndSizeAsync(long qoMaterialId, short? sampleSize,
+        IEnumerable<MaterialHeaderValue> values, string user)
+    {
+        // Drop empty rows -- same "not applicable" convention as the sample path.
+        var keep = values
+            .Where(v => !string.IsNullOrWhiteSpace(v.TextValue)
+                        || v.NumericValue.HasValue
+                        || v.DateValue.HasValue)
+            .Select(v => new { qoMaterialId, v.FieldId, v.TextValue, v.NumericValue, v.DateValue })
+            .ToArray();
+
+        using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+
+        var oldSize = await c.ExecuteScalarAsync<short?>(
+            "SELECT sample_size FROM qms_quality_order_material WHERE qo_material_id = @qoMaterialId",
+            new { qoMaterialId }, tx);
+
+        // Source-of-truth sample size on the material...
+        await c.ExecuteAsync(
+            "UPDATE qms_quality_order_material SET sample_size = @sampleSize WHERE qo_material_id = @qoMaterialId",
+            new { qoMaterialId, sampleSize }, tx);
+
+        // ...propagated to every (non-deleted) sample of this material so the
+        // per-sample inherited cache that every defect-% calc divides by stays
+        // in step. Only writes when a size is set, to avoid blanking samples
+        // when the material size is cleared.
+        if (sampleSize.HasValue)
+            await c.ExecuteAsync(@"
+                UPDATE qms_sample SET sample_size = @sampleSize,
+                       updated_at = SYSUTCDATETIME(), updated_by = @user
+                WHERE qo_material_id = @qoMaterialId AND is_deleted = 0",
+                new { qoMaterialId, sampleSize, user }, tx);
+
+        // Replace the whole material header-value set.
+        await c.ExecuteAsync(
+            "DELETE FROM qms_qo_material_header_value WHERE qo_material_id = @qoMaterialId",
+            new { qoMaterialId }, tx);
+        if (keep.Length > 0)
+            await c.ExecuteAsync(@"
+                INSERT INTO qms_qo_material_header_value
+                    (qo_material_id, field_id, text_value, numeric_value, date_value)
+                VALUES
+                    (@qoMaterialId, @FieldId, @TextValue, @NumericValue, @DateValue)",
+                keep, tx);
+
+        // Copy the material-scoped values DOWN onto every sample of this
+        // material (new + existing) so each sample owns its own copy -- the
+        // sample form / sample row / PDF all read the sample's own header
+        // values, with no separate "inherited" recap. Material-scoped rows are
+        // wiped then re-inserted from the just-saved material values.
+        await c.ExecuteAsync(@"
+            DELETE shv FROM qms_sample_header_value shv
+            JOIN   qms_sample s ON s.sample_id = shv.sample_id
+            JOIN   qms_sample_header_field f ON f.field_id = shv.field_id
+            WHERE  s.qo_material_id = @qoMaterialId AND s.is_deleted = 0 AND f.scope = 'Material'",
+            new { qoMaterialId }, tx);
+        await c.ExecuteAsync(@"
+            INSERT INTO qms_sample_header_value (sample_id, field_id, text_value, numeric_value, date_value)
+            SELECT s.sample_id, v.field_id, v.text_value, v.numeric_value, v.date_value
+            FROM   qms_sample s
+            JOIN   qms_qo_material_header_value v ON v.qo_material_id = s.qo_material_id
+            WHERE  s.qo_material_id = @qoMaterialId AND s.is_deleted = 0",
+            new { qoMaterialId }, tx);
+
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.QualityOrderMaterial, qoMaterialId, ActionCodes.Updated,
+            oldValues: new { sample_size = oldSize },
+            newValues: new { sample_size = sampleSize, header_fields = keep.Length,
+                             values = keep.Select(k => new { k.FieldId, k.TextValue, k.NumericValue, k.DateValue }) },
+            actor: user);
+        tx.Commit();
+    }
+
+    // ===================================================================
+    // Quality Order PDF -- grouped summary
+    // ===================================================================
+    //
+    // Rolls every material in the QO into (MaterialGroup, Brand, Variety,
+    // Grade) groups. The caller (ReportsController.BuildDataAsync) has
+    // already enriched `materials` with ApplyMara, so Brand / Variety /
+    // MaterialClass / NetWeight reflect the current MARA snapshot rather
+    // than a stale copy on qms_quality_order_material. Six queries up
+    // front, then everything else is in-memory aggregation -- no per-group
+    // round trip, no per-defect round trip.
+    //
+    // Major/Minor bucketing matches the existing _SampleForm.cshtml rule:
+    // "Major" + "Critical" -> Major bucket; everything else -> Minor.
+    public async Task<IReadOnlyList<MaterialGroupSummary>> BuildGroupSummariesAsync(
+        long qualityOrderId, IReadOnlyList<QualityOrderMaterial> materials)
+    {
+        if (materials == null || materials.Count == 0)
+            return Array.Empty<MaterialGroupSummary>();
+
+        using var c = Open();
+
+        // 1) Samples (non-deleted) for the QO, with size + their parent material.
+        var samples = (await c.QueryAsync<(long SampleId, long QoMaterialId, int? SampleSize)>(@"
+            SELECT sample_id      AS SampleId,
+                   qo_material_id AS QoMaterialId,
+                   sample_size    AS SampleSize
+            FROM   qms_sample
+            WHERE  quality_order_id = @qualityOrderId AND is_deleted = 0",
+            new { qualityOrderId })).ToList();
+
+        // 2) arrival_item.quantity per QO material -- needed for the gross
+        //    weight calculation (Σ qty × MARA.weight). Joining at the QO
+        //    material rather than reloading arrival items keeps this single
+        //    table-scan.
+        var qoMaterialIds = materials.Select(m => m.QoMaterialId).ToArray();
+        var qtyByMaterial = (await c.QueryAsync<(long QoMaterialId, decimal? Quantity)>(@"
+            SELECT m.qo_material_id AS QoMaterialId, ai.quantity AS Quantity
+            FROM   qms_quality_order_material m
+            JOIN   qms_arrival_item ai ON ai.arrival_item_id = m.arrival_item_id
+            WHERE  m.qo_material_id IN @ids",
+            new { ids = qoMaterialIds })).ToDictionary(r => r.QoMaterialId, r => r.Quantity);
+
+        var sampleIds = samples.Select(s => s.SampleId).ToArray();
+
+        // 3) Defects across every sample in the QO, with defect_code/name/category
+        //    so we can aggregate per defect_id and also know how to bucket it.
+        var sampleDefects = sampleIds.Length == 0
+            ? new List<(long SampleId, int DefectId, decimal? DefectValue)>()
+            : (await c.QueryAsync<(long SampleId, int DefectId, decimal? DefectValue)>(@"
+                SELECT sample_id    AS SampleId,
+                       defect_id    AS DefectId,
+                       defect_value AS DefectValue
+                FROM   qms_sample_defect
+                WHERE  sample_id IN @ids",
+                new { ids = sampleIds })).ToList();
+
+        // 4) Sample readings -- TARA + the per-display_mode aggregations.
+        var sampleReadings = sampleIds.Length == 0
+            ? new List<(long SampleId, string ReadingTypeCode, decimal? NumericValue, string? TextValue)>()
+            : (await c.QueryAsync<(long SampleId, string ReadingTypeCode, decimal? NumericValue, string? TextValue)>(@"
+                SELECT sr.sample_id        AS SampleId,
+                       sr.reading_type_code AS ReadingTypeCode,
+                       sr.numeric_value    AS NumericValue,
+                       sr.text_value       AS TextValue
+                FROM   qms_sample_reading sr
+                WHERE  sr.sample_id IN @ids",
+                new { ids = sampleIds })).ToList();
+
+        // 5) Active defect catalog for every distinct material_group in the QO.
+        //    Pre-loaded so each group can render its FULL catalog (zeros
+        //    included) without an N+1 pattern. Codes can repeat across
+        //    groups, so we key by (material_group, defect_id).
+        var distinctGroups = materials
+            .Select(m => m.MaterialGroup ?? "")
+            .Where(g => g.Length > 0)
+            .Distinct()
+            .ToArray();
+
+        var defectCatalog = distinctGroups.Length == 0
+            ? new List<DefectCatalogEntry>()
+            : (await c.QueryAsync<DefectCatalogEntry>(@"
+                SELECT defect_id      AS DefectId,
+                       defect_code    AS DefectCode,
+                       defect_name    AS DefectName,
+                       defect_category AS DefectCategory,
+                       is_active      AS IsActive,
+                       sort_order     AS SortOrder,
+                       material_group AS MaterialGroup
+                FROM   qms_defect_catalog
+                WHERE  is_active = 1 AND material_group IN @groups
+                ORDER  BY material_group, sort_order, defect_name",
+                new { groups = distinctGroups })).ToList();
+
+        // 5b) Defect category master (V22+) -- drives the per-category
+        //     sections and their order/colour. Keyed by name (case-insensitive).
+        var categoryByName = (await c.QueryAsync<DefectCategory>(@"
+                SELECT category_id CategoryId, category_name CategoryName,
+                       sort_order SortOrder, color_hex ColorHex, is_active IsActive
+                FROM   qms_defect_category WHERE is_active = 1"))
+            .ToDictionary(x => x.CategoryName, StringComparer.OrdinalIgnoreCase);
+
+        // 6) Active reading types: per-group rows AND globals (V19+,
+        //    material_group IS NULL). A global reading type applies to
+        //    every group's summary; the in-memory bucketing below ORs the
+        //    group filter against an empty MaterialGroup to pick them up.
+        var readingCatalog = distinctGroups.Length == 0
+            ? new List<ReadingTypeEntry>()
+            : (await c.QueryAsync<ReadingTypeEntry>(@"
+                SELECT reading_type_id            AS ReadingTypeId,
+                       reading_type_code          AS ReadingTypeCode,
+                       reading_name               AS ReadingName,
+                       value_kind                 AS ValueKind,
+                       default_unit               AS DefaultUnit,
+                       is_active                  AS IsActive,
+                       sort_order                 AS SortOrder,
+                       ISNULL(material_group, '') AS MaterialGroup,
+                       is_mandatory               AS IsMandatory,
+                       display_mode               AS DisplayMode
+                FROM   qms_reading_type
+                WHERE  is_active = 1
+                  AND  (material_group IN @groups OR material_group IS NULL)
+                ORDER  BY CASE WHEN material_group IS NULL THEN 0 ELSE 1 END,
+                          material_group, sort_order, reading_name",
+                new { groups = distinctGroups })).ToList();
+
+        // ---------- Aggregate in memory ----------
+        // (MaterialGroup, Brand, Variety, Grade) -> list of materials.
+        // Null-safe: empty-string keys collapse so two materials missing
+        // the same field still end up in the same group.
+        static string Norm(string? s) => (s ?? "").Trim();
+
+        var bySample = samples.ToLookup(s => s.QoMaterialId);
+        var defectsBySample = sampleDefects.ToLookup(d => d.SampleId);
+        var readingsBySample = sampleReadings.ToLookup(r => r.SampleId);
+
+        var groups = materials
+            .GroupBy(m => (
+                MaterialGroup: Norm(m.MaterialGroup),
+                Brand:         Norm(m.Brand),
+                Variety:       Norm(m.Variety),
+                Grade:         Norm(m.MaterialClass)))
+            .OrderBy(g => g.Key.MaterialGroup)
+            .ThenBy(g => g.Key.Brand)
+            .ThenBy(g => g.Key.Variety)
+            .ThenBy(g => g.Key.Grade)
+            .ToList();
+
+        var result = new List<MaterialGroupSummary>(groups.Count);
+
+        foreach (var g in groups)
+        {
+            var mats         = g.ToList();
+            var matIds       = mats.Select(m => m.QoMaterialId).ToHashSet();
+            var groupSamples = samples.Where(s => matIds.Contains(s.QoMaterialId)).ToList();
+            var groupSampleIds = groupSamples.Select(s => s.SampleId).ToHashSet();
+            var sumSize      = groupSamples.Sum(s => s.SampleSize ?? 0);
+
+            // Gross = Σ (arrival_item.quantity × qoMaterial.NetWeight).
+            // Both halves can be null (legacy rows) -- treat as 0.
+            decimal sumGross = 0m;
+            foreach (var m in mats)
+            {
+                var qty = qtyByMaterial.TryGetValue(m.QoMaterialId, out var q) ? (q ?? 0m) : 0m;
+                var w   = m.NetWeight ?? 0m;
+                sumGross += qty * w;
+            }
+
+            // Tara = Σ TARA reading.numeric_value for samples in this group.
+            decimal sumTara = sampleReadings
+                .Where(r => groupSampleIds.Contains(r.SampleId)
+                            && string.Equals(r.ReadingTypeCode, "TARA", StringComparison.OrdinalIgnoreCase)
+                            && r.NumericValue.HasValue)
+                .Sum(r => r.NumericValue!.Value);
+
+            var summary = new MaterialGroupSummary
+            {
+                MaterialGroup     = g.Key.MaterialGroup,
+                MaterialGroupDesc = mats.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.MaterialGroupDesc))?.MaterialGroupDesc,
+                Brand             = string.IsNullOrEmpty(g.Key.Brand)   ? null : g.Key.Brand,
+                Variety           = string.IsNullOrEmpty(g.Key.Variety) ? null : g.Key.Variety,
+                Grade             = string.IsNullOrEmpty(g.Key.Grade)   ? null : g.Key.Grade,
+                MajorCategory     = mats.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.MajorCategory))?.MajorCategory,
+                SumSampleSize     = sumSize,
+                SumGross          = sumGross,
+                SumTara           = sumTara,
+                MaterialCount     = mats.Count,
+                SampleCount       = groupSamples.Count
+            };
+
+            // ---- Defects: iterate the FULL active catalog for this group's
+            // material_group (zeros included). Σ defect_value comes from the
+            // sample_defect rows belonging to this group's samples.
+            var groupDefectCatalog = defectCatalog
+                .Where(d => string.Equals(d.MaterialGroup, g.Key.MaterialGroup, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(d => d.SortOrder)
+                .ThenBy(d => d.DefectName)
+                .ToList();
+
+            var sumValueByDefectId = sampleDefects
+                .Where(d => groupSampleIds.Contains(d.SampleId) && d.DefectValue.HasValue)
+                .GroupBy(d => d.DefectId)
+                .ToDictionary(gr => gr.Key, gr => gr.Sum(x => x.DefectValue!.Value));
+
+            // Build one section per defect category (V22+), ordered by the
+            // master sort_order. A defect whose category isn't in the master
+            // (shouldn't happen with the FK, but be safe) gets its own
+            // trailing section with no colour.
+            var sectionsByCat = new Dictionary<string, DefectCategorySection>(StringComparer.OrdinalIgnoreCase);
+            foreach (var d in groupDefectCatalog)
+            {
+                var sumVal = sumValueByDefectId.TryGetValue(d.DefectId, out var sv) ? sv : 0m;
+                var pct    = sumSize > 0 ? (sumVal / sumSize) * 100m : 0m;
+                var row = new DefectAggRow
+                {
+                    DefectId   = d.DefectId,
+                    Code       = d.DefectCode,
+                    Name       = d.DefectName,
+                    Category   = d.DefectCategory,
+                    SumValue   = sumVal,
+                    Percentage = pct
+                };
+                if (!sectionsByCat.TryGetValue(d.DefectCategory, out var sec))
+                {
+                    categoryByName.TryGetValue(d.DefectCategory, out var cat);
+                    sec = new DefectCategorySection
+                    {
+                        CategoryName = d.DefectCategory,
+                        ColorHex     = cat?.ColorHex,
+                        SortOrder    = cat?.SortOrder ?? 999
+                    };
+                    sectionsByCat[d.DefectCategory] = sec;
+                }
+                sec.Rows.Add(row);
+            }
+            summary.DefectSections = sectionsByCat.Values
+                .OrderBy(s => s.SortOrder).ThenBy(s => s.CategoryName).ToList();
+
+            // ---- Readings: one row per active reading type for this
+            // group's material_group, PLUS every global reading type
+            // (MaterialGroup == ""). Per-group rows are listed first
+            // (preserving SortOrder) so a fruit-specific reading appears
+            // before a global one in the rendered table.
+            var groupReadingCatalog = readingCatalog
+                .Where(r => string.Equals(r.MaterialGroup, g.Key.MaterialGroup, StringComparison.OrdinalIgnoreCase)
+                            || string.IsNullOrEmpty(r.MaterialGroup))
+                .OrderBy(r => string.IsNullOrEmpty(r.MaterialGroup) ? 1 : 0)
+                .ThenBy(r => r.SortOrder)
+                .ThenBy(r => r.ReadingName)
+                .ToList();
+
+            foreach (var rt in groupReadingCatalog)
+            {
+                var rowsForType = sampleReadings
+                    .Where(r => groupSampleIds.Contains(r.SampleId)
+                                && string.Equals(r.ReadingTypeCode, rt.ReadingTypeCode, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+
+                string display = rt.DisplayMode switch
+                {
+                    "text" => string.Join(", ", rowsForType
+                                .Select(r => (r.TextValue ?? "").Trim())
+                                .Where(s => s.Length > 0)
+                                .Distinct(StringComparer.OrdinalIgnoreCase)),
+                    "count" => rowsForType
+                                .Count(r => r.NumericValue.HasValue
+                                            || !string.IsNullOrWhiteSpace(r.TextValue))
+                                .ToString(),
+                    "sum" => rowsForType
+                                .Where(r => r.NumericValue.HasValue)
+                                .Sum(r => r.NumericValue!.Value)
+                                .ToString("0.##"),
+                    "sum_over_size" => sumSize > 0
+                                ? ((rowsForType.Where(r => r.NumericValue.HasValue)
+                                                .Sum(r => r.NumericValue!.Value) / sumSize) * 100m)
+                                    .ToString("0.##") + "%"
+                                : "",
+                    "formula" => "",
+                    _ => ""
+                };
+
+                summary.Readings.Add(new ReadingAggRow
+                {
+                    Code        = rt.ReadingTypeCode,
+                    Name        = rt.ReadingName,
+                    DisplayMode = rt.DisplayMode,
+                    Unit        = rt.DefaultUnit,
+                    DisplayValue= display
+                });
+            }
+
+            result.Add(summary);
+        }
+
+        return result;
     }
 }

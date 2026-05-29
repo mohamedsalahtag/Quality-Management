@@ -38,12 +38,20 @@ build_metadata.AdditionalFiles.CssScope =
 build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQWRtaW5cRGVmZWN0Q2F0YWxvZy5jc2h0bWw=
 build_metadata.AdditionalFiles.CssScope = 
 
+[C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Admin/DefectCategories.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQWRtaW5cRGVmZWN0Q2F0ZWdvcmllcy5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
 [C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Admin/MailTemplate.cshtml]
 build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQWRtaW5cTWFpbFRlbXBsYXRlLmNzaHRtbA==
 build_metadata.AdditionalFiles.CssScope = 
 
 [C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Admin/ReadingTypes.cshtml]
 build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQWRtaW5cUmVhZGluZ1R5cGVzLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Admin/SampleHeaders.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQWRtaW5cU2FtcGxlSGVhZGVycy5jc2h0bWw=
 build_metadata.AdditionalFiles.CssScope = 
 
 [C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Admin/Settings.cshtml]
@@ -64,6 +72,18 @@ build_metadata.AdditionalFiles.CssScope =
 
 [C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Arrivals/Search.cshtml]
 build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQXJyaXZhbHNcU2VhcmNoLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Audit/Index.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQXVkaXRcSW5kZXguY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Audit/_AuditHistory.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQXVkaXRcX0F1ZGl0SGlzdG9yeS5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Audit/_AuditHistoryRows.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQXVkaXRcX0F1ZGl0SGlzdG9yeVJvd3MuY3NodG1s
 build_metadata.AdditionalFiles.CssScope = 
 
 [C:/QualityManagemet/app/SharbatlyQMS.Web/Views/ClaimManagement/Index.cshtml]
@@ -90,6 +110,10 @@ build_metadata.AdditionalFiles.CssScope =
 build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUXVhbGl0eU9yZGVyc1xTYW1wbGUuY3NodG1s
 build_metadata.AdditionalFiles.CssScope = 
 
+[C:/QualityManagemet/app/SharbatlyQMS.Web/Views/QualityOrders/_MaterialForm.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUXVhbGl0eU9yZGVyc1xfTWF0ZXJpYWxGb3JtLmNzaHRtbA==
+build_metadata.AdditionalFiles.CssScope = 
+
 [C:/QualityManagemet/app/SharbatlyQMS.Web/Views/QualityOrders/_SampleForm.cshtml]
 build_metadata.AdditionalFiles.TargetPath = Vmlld3NcUXVhbGl0eU9yZGVyc1xfU2FtcGxlRm9ybS5jc2h0bWw=
 build_metadata.AdditionalFiles.CssScope = 
@@ -104,6 +128,10 @@ build_metadata.AdditionalFiles.CssScope =
 
 [C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Shared/_ImageGallery.cshtml]
 build_metadata.AdditionalFiles.TargetPath = Vmlld3NcU2hhcmVkXF9JbWFnZUdhbGxlcnkuY3NodG1s
+build_metadata.AdditionalFiles.CssScope = 
+
+[C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Shared/_ImageGalleryGrid.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcU2hhcmVkXF9JbWFnZUdhbGxlcnlHcmlkLmNzaHRtbA==
 build_metadata.AdditionalFiles.CssScope = 
 
 [C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Shared/_UserAvatar.cshtml]

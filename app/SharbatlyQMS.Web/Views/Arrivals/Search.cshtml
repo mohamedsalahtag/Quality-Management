@@ -1,4 +1,6 @@
 @using SharbatlyQMS.Web.Services.Sap
+@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.Controllers
 @model IReadOnlyList<SapShipmentRow>
 @{
     ViewData["Title"] = "Search SAP";
@@ -8,17 +10,20 @@
     var material  = ViewBag.Material as string;
     var ambiguous = (bool)(ViewBag.Ambiguous ?? false);
     var bolOptions = ViewBag.BolOptions as List<string> ?? new List<string>();
+    var existingByShipment = ViewBag.ExistingByShipment as Dictionary<string, Arrival> ?? new();
     bool searched = !string.IsNullOrWhiteSpace(container) || !string.IsNullOrWhiteSpace(bol)
                     || !string.IsNullOrWhiteSpace(po)     || !string.IsNullOrWhiteSpace(material);
 
-    // Group SAP rows by container + BOL -- each group is one container shipment
-    // and corresponds to exactly one arrival. The PO lines inside the group
-    // become arrival items automatically.
+    // Group SAP rows by container + BOL + PO -- each group is one shipment line
+    // and corresponds to exactly one arrival. The item lines inside the group
+    // become arrival items automatically. The same container can recur under a
+    // different BOL or PO, so all three define the shipment identity.
     var shipments = Model
-        .GroupBy(r => new { r.ContainerNo, r.BolNo })
+        .GroupBy(r => new { r.ContainerNo, r.BolNo, r.Ebeln })
         .Select(g => new {
             g.Key.ContainerNo,
             g.Key.BolNo,
+            g.Key.Ebeln,
             Header = g.First(),
             Lines  = g.ToList()
         })
@@ -68,6 +73,7 @@
     var dupArrivalNo   = TempData["DuplicateArrivalNo"]   as string;
     var dupContainerNo = TempData["DuplicateContainerNo"] as string;
     var dupBolNo       = TempData["DuplicateBolNo"]       as string;
+    var dupPo          = TempData["DuplicatePo"]          as string;
     var dupStatus      = TempData["DuplicateStatus"]      as string;
 }
 
@@ -85,6 +91,7 @@
                     <dl class="row mb-3">
                         <dt class="col-4">Container</dt><dd class="col-8"><code>@dupContainerNo</code></dd>
                         <dt class="col-4">BOL</dt>      <dd class="col-8">@dupBolNo</dd>
+                        <dt class="col-4">PO</dt>       <dd class="col-8">@dupPo</dd>
                         <dt class="col-4">Arrival #</dt><dd class="col-8"><strong>@dupArrivalNo</strong></dd>
                         <dt class="col-4">Status</dt>   <dd class="col-8">
                             @{ var (sc, sl) = dupStatus switch {
@@ -96,8 +103,8 @@
                         </dd>
                     </dl>
                     <p class="small text-muted mb-0">
-                        Only one arrival is allowed per container &times; BOL pair. To create a different arrival,
-                        first delete the existing one (Admin only) or pick a different container/BOL combination.
+                        Only one arrival is allowed per container &times; BOL &times; PO. To create a different arrival,
+                        first delete the existing one (Admin only) or pick a different container / BOL / PO combination.
                     </p>
                 </div>
                 <div class="modal-footer">
@@ -158,12 +165,13 @@
     else
     {
         <p class="text-muted small mb-3">
-            <i class="bi bi-info-circle me-1"></i>@shipments.Count container shipment(s) found.
-            Click <em>Create arrival</em> on any one &mdash; all PO line items for that container will be included automatically.
+            <i class="bi bi-info-circle me-1"></i>@shipments.Count shipment line(s) found (one per container / BOL / PO).
+            Click <em>Create arrival</em> on any one &mdash; all item lines for that container / BOL / PO are included automatically.
         </p>
 
         @foreach (var s in shipments)
         {
+            existingByShipment.TryGetValue(ArrivalsController.ShipmentKey(s.ContainerNo, s.BolNo, s.Ebeln), out var dup);
             <div class="card mb-3">
                 <div class="card-header d-flex justify-content-between align-items-center bg-light">
                     <div>
@@ -172,16 +180,33 @@
                         <span class="text-muted mx-2">|</span>
                         BOL <strong>@s.BolNo</strong>
                         <span class="text-muted mx-2">|</span>
+                        PO <strong>@s.Ebeln</strong>
+                        <span class="text-muted mx-2">|</span>
                         @s.Header.VendorName
                     </div>
-                    <form asp-action="Create" method="post" class="m-0">
-                        @Html.AntiForgeryToken()
-                        <input type="hidden" name="containerNo" value="@s.ContainerNo" />
-                        <input type="hidden" name="bolNo"       value="@s.BolNo" />
-                        <button type="submit" class="btn btn-success btn-sm">
-                            <i class="bi bi-plus-circle me-1"></i>Create arrival
-                        </button>
-                    </form>
+                    @if (dup != null)
+                    {
+                        <div class="d-flex align-items-center gap-2">
+                            <button type="button" class="btn btn-success btn-sm" disabled>
+                                <i class="bi bi-plus-circle me-1"></i>Create arrival
+                            </button>
+                            <a asp-action="Details" asp-route-id="@dup.ArrivalId" class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-check-circle me-1"></i>Already created &mdash; open @dup.ArrivalNo
+                            </a>
+                        </div>
+                    }
+                    else
+                    {
+                        <form asp-action="Create" method="post" class="m-0">
+                            @Html.AntiForgeryToken()
+                            <input type="hidden" name="containerNo" value="@s.ContainerNo" />
+                            <input type="hidden" name="bolNo"       value="@s.BolNo" />
+                            <input type="hidden" name="po"          value="@s.Ebeln" />
+                            <button type="submit" class="btn btn-success btn-sm">
+                                <i class="bi bi-plus-circle me-1"></i>Create arrival
+                            </button>
+                        </form>
+                    }
                 </div>
                 <div class="card-body py-2">
                     <div class="row small">

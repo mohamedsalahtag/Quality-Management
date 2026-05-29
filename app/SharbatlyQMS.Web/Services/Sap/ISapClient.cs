@@ -57,6 +57,7 @@ public class SapShipmentRow
     // Vendor
     public string  VendorNo          { get; set; } = "";
     public string  VendorName        { get; set; } = "";
+    public string  Carrier           { get; set; } = "";   // shipping line / carrier name
 
     // Material
     public string  MaterialNo        { get; set; } = "";
@@ -85,6 +86,7 @@ public class SapShipmentRow
     public DateOnly? ExaminationDate { get; set; }
     public DateOnly? ArrivalDate     { get; set; }
     public DateOnly? UnloadingDate   { get; set; }
+    public DateOnly? ReceiveDate     { get; set; }
     public short?    TransitDays     { get; set; }
     public string    LoadingPort     { get; set; } = "";
     public string    LoadingCountry  { get; set; } = "";

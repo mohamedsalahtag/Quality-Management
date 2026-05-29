@@ -1,0 +1,21 @@
+# .NET build output
+bin/
+obj/
+
+# Data-protection keys (sensitive — auth cookies break if leaked)
+keys/
+
+# Visual Studio / VS Code user-specific cruft
+.vs/
+.vscode/
+*.user
+*.suo
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+
+# Runtime / smoke artefacts (already tracked items not retroactively ignored)
+runtime.log
+smoketest.log

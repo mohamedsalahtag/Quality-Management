@@ -84,8 +84,9 @@ public class MaraService : IMaraService
                     origin_name           AS Origin,
                     variety_name          AS Variety,
                     class_name            AS MaterialClass,
-                    -- MARA gives both Size_Name (descriptive) and Material_Weight_Name; prefer size if present.
-                    COALESCE(NULLIF(size_name,''), NULLIF(material_weight_name,'')) AS MaterialSize,
+                    -- MaterialSize reads the Size ID (SizeID code) rather than Size_Name
+                    -- (descriptive); falls back to Material_Weight_Name when there is no size id.
+                    COALESCE(NULLIF(size_id,''), NULLIF(material_weight_name,'')) AS MaterialSize,
                     material_group        AS MaterialGroup,
                     material_group_desc   AS MaterialGroupDesc,
                     COALESCE(NULLIF(major_category_desc,''), NULLIF(major_category,'')) AS MajorCategory,

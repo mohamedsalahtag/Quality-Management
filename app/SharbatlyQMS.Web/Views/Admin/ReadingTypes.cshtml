@@ -7,6 +7,19 @@
     var filterGroup = ViewBag.FilterGroup as string;
     var maraEmpty   = (bool?)ViewBag.MaraEmpty ?? false;
     string GroupLabel(MaraGroup g) => string.IsNullOrWhiteSpace(g.Name) ? g.Code : $"{g.Code} — {g.Name}";
+
+    // How the Quality Order PDF grouped-summary block aggregates each
+    // reading. Mirrored verbatim by the modal dropdown + the
+    // BuildGroupSummariesAsync renderer on the server. Keep the labels
+    // short so the row fits comfortably alongside Kind / Unit / etc.
+    string DisplayModeLabel(string m) => m switch {
+        "text"          => "Text join",
+        "count"         => "Count",
+        "sum"           => "Sum",
+        "sum_over_size" => "% of Σ size",
+        "formula"       => "Formula",
+        _               => m
+    };
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -35,7 +48,7 @@
         </button>
     </div>
 </div>
-<p class="text-muted small">Measurement types captured per sample (Brix, Firmness, Net Weight, Sticker, Colour, etc.). Each reading type belongs to one material group. The same code can repeat across groups (e.g. <code>TARA</code> for APPLE and BANANA). Numeric kinds get a number input on the sample form; Text kinds get a text input.</p>
+<p class="text-muted small">Measurement types captured per sample (Brix, Firmness, Net Weight, Sticker, Colour, etc.). Each reading type either belongs to one material group OR is <span class="badge bg-info text-dark">Global</span> -- a global reading type applies to every material group, so common readings like <code>TARA</code> or <code>BRIX</code> only need to be defined once. The same code can repeat across groups (e.g. <code>SIZE</code> for APPLE and BANANA), but cannot be defined as both Global AND for a specific group. Numeric kinds get a number input on the sample form; Text kinds get a text input.</p>
 
 <div class="card">
     <div class="table-responsive">
@@ -48,6 +61,7 @@
                     <th>Name</th>
                     <th>Kind</th>
                     <th>Unit</th>
+                    <th title="How this reading is aggregated in the Quality Order PDF grouped summary">PDF summary</th>
                     <th>Mandatory</th>
                     <th>Active</th>
                     <th class="text-end" style="width: 120px">Actions</th>
@@ -58,11 +72,21 @@
                 {
                     <tr>
                         <td class="text-muted small">@r.SortOrder</td>
-                        <td><code>@r.MaterialGroup</code></td>
+                        <td>
+                            @if (string.IsNullOrEmpty(r.MaterialGroup))
+                            {
+                                <span class="badge bg-info text-dark" title="Applies to every material group">Global</span>
+                            }
+                            else
+                            {
+                                <code>@r.MaterialGroup</code>
+                            }
+                        </td>
                         <td><code>@r.ReadingTypeCode</code></td>
                         <td>@r.ReadingName</td>
                         <td>@r.ValueKind</td>
                         <td>@r.DefaultUnit</td>
+                        <td><span class="badge bg-light text-dark border">@DisplayModeLabel(r.DisplayMode)</span></td>
                         <td>
                             @if (r.IsMandatory)
                             {
@@ -84,6 +108,7 @@
                                     data-active="@r.IsActive.ToString().ToLower()"
                                     data-mandatory="@r.IsMandatory.ToString().ToLower()"
                                     data-sort="@r.SortOrder"
+                                    data-display="@r.DisplayMode"
                                     title="Edit">
                                 <i class="bi bi-pencil"></i>
                             </button>
@@ -112,7 +137,7 @@
                 }
                 @if (Model.Count == 0)
                 {
-                    <tr><td colspan="9" class="text-center text-muted small py-3">No reading types @(string.IsNullOrEmpty(filterGroup) ? "yet." : "for " + filterGroup + ".")</td></tr>
+                    <tr><td colspan="10" class="text-center text-muted small py-3">No reading types @(string.IsNullOrEmpty(filterGroup) ? "yet." : "for " + filterGroup + ".")</td></tr>
                 }
             </tbody>
         </table>
@@ -129,11 +154,12 @@
             <div class="modal-body">
                 <div class="row g-2">
                     <div class="col-md-6"><label class="form-label">Material group *</label>
-                        @* Sourced from the SAP MARA cache. If the page filter is
-                           active, the matching option is server-side selected so
-                           a new reading type lands in the same group. *@
-                        <select name="materialGroup" id="r-group" class="form-select" required>
-                            <option value="" disabled selected="@(string.IsNullOrEmpty(filterGroup))">-- choose a material group --</option>
+                        @* "Global" maps to NULL material_group at the DB layer.
+                           Sourced from the SAP MARA cache otherwise. If the page
+                           filter is active, the matching option is server-side
+                           selected so a new reading type lands in the same group. *@
+                        <select name="materialGroup" id="r-group" class="form-select">
+                            <option value="" selected="@(string.IsNullOrEmpty(filterGroup))">🌐 Global — applies to every material group</option>
                             @foreach (var g in groups)
                             {
                                 <option value="@g.Code" selected="@(g.Code == filterGroup)">@GroupLabel(g)</option>
@@ -157,6 +183,16 @@
                         </select></div>
                     <div class="col-md-6"><label class="form-label">Default unit</label>
                         <input name="defaultUnit" id="r-unit" class="form-control" /></div>
+                    <div class="col-md-6"><label class="form-label">PDF summary mode</label>
+                        <select name="displayMode" id="r-display" class="form-select">
+                            <option value="text">Text join — distinct values, comma-separated</option>
+                            <option value="count">Count — number of samples with a value</option>
+                            <option value="sum">Sum — total of numeric values</option>
+                            <option value="sum_over_size">% of Σ size — (Σ value ÷ Σ sample size) × 100</option>
+                            <option value="formula">Formula — placeholder, renders as “—” for now</option>
+                        </select>
+                        <small class="text-muted">Controls how the Quality Order PDF grouped summary renders this reading.</small>
+                    </div>
                     <div class="col-12"><div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" name="isActive" id="r-active" value="true" checked />
                         <label class="form-check-label" for="r-active">Active</label>
@@ -192,6 +228,7 @@
             document.getElementById('r-sort').value   = b.dataset.sort;
             document.getElementById('r-active').checked    = b.dataset.active === 'true';
             document.getElementById('r-mandatory').checked = b.dataset.mandatory === 'true';
+            document.getElementById('r-display').value     = b.dataset.display || 'sum';
         } else {
             document.getElementById('r-title').textContent = 'Add reading type';
             document.getElementById('r-id').value = 0;
@@ -204,6 +241,22 @@
             document.getElementById('r-sort').value  = '500';
             document.getElementById('r-active').checked    = true;
             document.getElementById('r-mandatory').checked = false;
+            // Default the new-reading display_mode to 'sum' to match the
+            // Numeric kind default; the user can switch to 'text' when they
+            // pick the Text kind below.
+            document.getElementById('r-display').value = 'sum';
+        }
+        // Keep display_mode aligned with value_kind by default: switching kind
+        // to Text auto-picks 'text', switching back to Numeric auto-picks 'sum'.
+        // Users can still override afterwards -- this is a hint, not a lock.
+        var kindEl = document.getElementById('r-kind');
+        if (kindEl && !kindEl._displaySyncHooked) {
+            kindEl._displaySyncHooked = true;
+            kindEl.addEventListener('change', function () {
+                var d = document.getElementById('r-display');
+                if (!d) return;
+                d.value = this.value === 'Text' ? 'text' : 'sum';
+            });
         }
     });
 </script>
