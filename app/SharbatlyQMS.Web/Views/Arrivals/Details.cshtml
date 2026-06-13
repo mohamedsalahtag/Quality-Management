@@ -10,10 +10,6 @@
     var canEdit   = role == UserRoles.Operator || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
     var canManage = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;
     var isAdmin   = canManage;   // backward-compat alias for blocks that already use isAdmin
-    // Audit-history panel visibility (FR-017): Manager or SiteAdmin only.
-    // (Auditor role retired 2026-05-21; matches the ManagerOrAdmin policy
-    // on the HistoryPanel endpoint.)
-    var canSeeAudit = role == UserRoles.Manager || role == UserRoles.SiteAdmin;
     var hasQo     = Model.QualityOrderId.HasValue;
     var (cls, label) = Model.StatusCode switch
     {
@@ -634,14 +630,8 @@
     </form>
 </div>
 
-@* T027 (US1) -- Audit history panel for the Arrival. Visible to
-   Manager / Auditor / SiteAdmin only (FR-017). *@
-@if (canSeeAudit)
-{
-    ViewBag.AuditEntityType = "Arrival";
-    ViewBag.AuditEntityId   = Model.ArrivalId;
-    @await Html.PartialAsync("~/Views/Audit/_AuditHistory.cshtml")
-}
+@* Per-entity audit panel removed 2026-06-13. Filter the master audit log
+   at /Audit (Admin menu) by entity type + id to see this Arrival's history. *@
 
 @section Scripts {
 <script>
@@ -740,7 +730,11 @@
         {
             OwnerType = "Arrival",
             OwnerId   = Model.ArrivalId,
-            Editable  = draft,
+            // Photos can be added/removed after the arrival is closed too
+            // (e.g. quality manager attaches an evidence shot once the
+            // checklist is signed off). All other Arrival edits remain
+            // gated by `draft` -- this gate is the only one relaxed.
+            Editable  = canEdit,
             Ajax      = true,
             Categories = new[] { "ArrivalExternal", "ArrivalInternal", "TemperatureDisplay", "DataLogger" }
         };

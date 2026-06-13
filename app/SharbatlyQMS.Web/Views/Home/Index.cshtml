@@ -14,6 +14,15 @@
         ArrivalStatus.Cancelled => "bg-secondary",
         _ => "bg-light text-dark"
     };
+    string QoBadge(string s) => s switch
+    {
+        "Initial"  => "bg-secondary",
+        "Open"     => "bg-primary",
+        "Reopened" => "bg-warning text-dark",
+        "Closed"   => "bg-success",
+        "Cancelled"=> "bg-danger",
+        _          => "bg-light text-dark"
+    };
 
     var avgDefect = Model.AvgDefectPctLast30;
     string DefectTone() => avgDefect == null
@@ -23,13 +32,17 @@
         :  "text-success"));
 
     // JSON payload consumed by dashboard.js. Camel-cased so the JS reads
-    // `trend`, `qoByStatus`, `avgDefectPct`, `thresholds`.
+    // `trend`, `qoByStatus`, `avgDefectPct`, `thresholds`,
+    // `throughput`, `openQoAge`, `defectByGroup`.
     var payload = new
     {
         trend         = Model.ArrivalsTrend,
         qoByStatus    = Model.QoByStatus,
         avgDefectPct  = Model.AvgDefectPctLast30,
-        thresholds    = Model.Thresholds
+        thresholds    = Model.Thresholds,
+        throughput    = Model.ThroughputTrend,
+        openQoAge     = Model.OpenQoAgeBuckets,
+        defectByGroup = Model.DefectByGroup
     };
     var payloadJson = JsonSerializer.Serialize(payload);
 }
@@ -56,15 +69,19 @@
         </div>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card border-0 shadow-sm h-100">
+        <a asp-controller="Arrivals" asp-action="Pending" class="text-decoration-none">
+        <div class="card border-0 shadow-sm h-100 @(Model.Counts.PendingContainers > 0 ? "border-start border-4 border-danger" : "")">
             <div class="card-body py-3">
                 <div class="text-muted small text-uppercase fw-semibold mb-1">
-                    <i class="bi bi-check2-circle text-success me-1"></i>Completed (30 d)
+                    <i class="bi bi-inbox text-danger me-1"></i>Containers without Arrival
                 </div>
-                <div class="fs-2 fw-semibold lh-1">@Model.Counts.ArrivalsCompletedLast30</div>
-                <div class="text-muted small mt-1">Arrivals signed off</div>
+                <div class="fs-2 fw-semibold lh-1 @(Model.Counts.PendingContainers > 0 ? "text-danger" : "")">
+                    @Model.Counts.PendingContainers
+                </div>
+                <div class="text-muted small mt-1">Click to review pending</div>
             </div>
         </div>
+        </a>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card border-0 shadow-sm h-100">
@@ -114,7 +131,7 @@
     </div>
 </div>
 
-@* ---- Charts row ---- *@
+@* ---- Charts row 1 (existing) ---- *@
 <div class="row g-3 mb-3">
     <div class="col-lg-5">
         <div class="card border-0 shadow-sm h-100">
@@ -158,13 +175,56 @@
     </div>
 </div>
 
-@* ---- Bottom row: Recent activity + Online users ---- *@
+@* ---- Charts row 2 (new innovative) ---- *@
 <div class="row g-3 mb-3">
-    <div class="col-lg-8">
+    <div class="col-lg-5">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
-                <span class="fw-semibold"><i class="bi bi-clock-history me-1"></i>Recent Arrivals</span>
-                <a asp-controller="Arrivals" asp-action="Index" class="small text-decoration-none">
+                <span class="fw-semibold"><i class="bi bi-bar-chart-steps me-1"></i>Throughput vs QC pace</span>
+                <span class="text-muted small">Arrivals received vs QOs closed (12 wk)</span>
+            </div>
+            <div class="card-body pt-0">
+                <div style="position: relative; height: 240px;">
+                    <canvas id="chartThroughput"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-3">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
+                <span class="fw-semibold"><i class="bi bi-bar-chart me-1"></i>Open QO Age</span>
+                <span class="text-muted small">Days since opened</span>
+            </div>
+            <div class="card-body pt-0">
+                <div style="position: relative; height: 240px;">
+                    <canvas id="chartOpenQoAge"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
+                <span class="fw-semibold"><i class="bi bi-bar-chart-line me-1"></i>Defect % by Material Group</span>
+                <span class="text-muted small">Top 8 (30 d)</span>
+            </div>
+            <div class="card-body pt-0">
+                <div style="position: relative; height: 240px;">
+                    <canvas id="chartDefectByGroup"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ---- Bottom row: Open Arrivals (left) + Open Quality Orders (right) 50/50 ---- *@
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
+                <span class="fw-semibold"><i class="bi bi-box-arrow-in-down me-1"></i>Open Arrivals</span>
+                <a asp-controller="Arrivals" asp-action="Index" asp-route-status="Draft" class="small text-decoration-none">
                     View all <i class="bi bi-arrow-right-short"></i>
                 </a>
             </div>
@@ -180,7 +240,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var a in Model.RecentArrivals)
+                        @foreach (var a in Model.OpenArrivals)
                         {
                             <tr>
                                 <td>
@@ -193,38 +253,56 @@
                                 <td class="text-end small text-muted">@a.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
                             </tr>
                         }
-                        @if (Model.RecentArrivals.Count == 0)
+                        @if (Model.OpenArrivals.Count == 0)
                         {
-                            <tr><td colspan="5" class="text-center text-muted small py-3">No arrivals yet.</td></tr>
+                            <tr><td colspan="5" class="text-center text-muted small py-3">No open arrivals.</td></tr>
                         }
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
-    <div class="col-lg-4">
+    <div class="col-lg-6">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
-                <span class="fw-semibold"><i class="bi bi-people-fill me-1"></i>Online Users</span>
-                <span class="badge bg-success-subtle text-success-emphasis">@Model.OnlineUserCount online</span>
+                <span class="fw-semibold"><i class="bi bi-clipboard-data me-1"></i>Open Quality Orders</span>
+                <a asp-controller="QualityOrders" asp-action="Index" class="small text-decoration-none">
+                    View all <i class="bi bi-arrow-right-short"></i>
+                </a>
             </div>
-            <ul class="list-group list-group-flush">
-                @foreach (var u in Model.OnlineUsers)
-                {
-                    <li class="list-group-item d-flex justify-content-between align-items-center py-2">
-                        <div>
-                            <span class="d-inline-block rounded-circle bg-success me-2" style="width:.5rem;height:.5rem;"></span>
-                            <span class="fw-semibold">@u.FullName</span>
-                            <div class="text-muted small ms-3">@u.Department</div>
-                        </div>
-                        <span class="badge bg-light text-dark">@u.Role</span>
-                    </li>
-                }
-                @if (Model.OnlineUserCount == 0)
-                {
-                    <li class="list-group-item text-center text-muted small py-3">No one is online.</li>
-                }
-            </ul>
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>QO</th>
+                            <th>Container</th>
+                            <th>Vendor</th>
+                            <th>Status</th>
+                            <th class="text-end">Opened</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var qo in Model.OpenQos)
+                        {
+                            var opened = qo.OpenedAt ?? qo.CreatedAt;
+                            <tr>
+                                <td>
+                                    <a asp-controller="QualityOrders" asp-action="Details" asp-route-id="@qo.QualityOrderId"
+                                       class="text-decoration-none">@qo.QualityOrderNo</a>
+                                </td>
+                                <td><code>@qo.ContainerNo</code></td>
+                                <td>@qo.VendorName</td>
+                                <td><span class="badge @QoBadge(qo.StatusCode)">@qo.StatusCode</span></td>
+                                <td class="text-end small text-muted">@opened.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                            </tr>
+                        }
+                        @if (Model.OpenQos.Count == 0)
+                        {
+                            <tr><td colspan="5" class="text-center text-muted small py-3">No open quality orders.</td></tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
         </div>
     </div>
 </div>

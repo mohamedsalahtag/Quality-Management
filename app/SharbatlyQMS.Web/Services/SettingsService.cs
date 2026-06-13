@@ -177,6 +177,32 @@ public class SettingsService : ISettingsService
         await _db.SetConfigAsync(SettingKeys.AlertDefectPctYellow,  cfg.DefectPctYellow.ToString(CultureInfo.InvariantCulture),  updatedBy);
     }
 
+    // ---- SAP Container polling ----
+    public async Task<ContainerPollConfig> GetContainerPollConfigAsync()
+    {
+        var c = await _db.GetConfigManyAsync(new[] {
+            SettingKeys.ContainerStartDate, SettingKeys.ContainerPollMinutes
+        });
+        DateOnly? startDate = null;
+        var raw = c.GetValueOrDefault(SettingKeys.ContainerStartDate);
+        if (!string.IsNullOrWhiteSpace(raw) &&
+            DateOnly.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.None, out var d))
+            startDate = d;
+        return new ContainerPollConfig
+        {
+            StartDate      = startDate,
+            PollingMinutes = ParseInt(c.GetValueOrDefault(SettingKeys.ContainerPollMinutes), 60)
+        };
+    }
+
+    public async Task SaveContainerPollConfigAsync(ContainerPollConfig cfg, int? updatedBy)
+    {
+        await _db.SetConfigAsync(SettingKeys.ContainerStartDate,
+            cfg.StartDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "", updatedBy);
+        await _db.SetConfigAsync(SettingKeys.ContainerPollMinutes,
+            cfg.PollingMinutes.ToString(CultureInfo.InvariantCulture), updatedBy);
+    }
+
     // ---- Auto sync ----
     public async Task<AutoSyncConfig> GetAutoSyncConfigAsync()
     {

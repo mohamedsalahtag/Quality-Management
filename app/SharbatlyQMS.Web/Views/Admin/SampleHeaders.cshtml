@@ -5,19 +5,15 @@
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h1 class="h3 mb-0"><i class="bi bi-card-heading me-1"></i>Sample Header Fields</h1>
+    <h1 class="h3 mb-0">
+        <i class="bi bi-card-heading me-1"></i>Sample Header Fields
+        <small class="text-muted fs-6 fw-normal ms-2">Identification fields entered per sample or per material.</small>
+    </h1>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#shModal"
             data-mode="create">
         <i class="bi bi-plus-circle me-1"></i>Add header field
     </button>
 </div>
-
-<p class="text-muted small">
-    Identification fields (Grower, Pallet No, Date Code, etc.), global across all fruit.
-    Each field has a <strong>scope</strong>: <span class="badge bg-secondary">Sample</span> fields are entered on every sample;
-    <span class="badge bg-info text-dark">Material</span> fields are entered once per material (on the QO “Material details” panel) and inherited by every sample of that material.
-    <strong>Sample Size</strong> is intentionally not here — it is a built-in numeric entered per material (defect percentages divide by it) and inherited by every sample.
-</p>
 
 <div class="card">
     <div class="table-responsive">

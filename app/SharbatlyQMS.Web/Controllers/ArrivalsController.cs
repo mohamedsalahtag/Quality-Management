@@ -13,11 +13,24 @@ public class ArrivalsController : Controller
     private readonly IArrivalService _arrivals;
     private readonly ISapClient _sap;
     private readonly IMaraService _mara;
+    private readonly IContainerCacheService _cache;
     private readonly ILogger<ArrivalsController> _logger;
 
-    public ArrivalsController(IArrivalService arrivals, ISapClient sap, IMaraService mara, ILogger<ArrivalsController> logger)
+    public ArrivalsController(IArrivalService arrivals, ISapClient sap, IMaraService mara,
+        IContainerCacheService cache, ILogger<ArrivalsController> logger)
     {
-        _arrivals = arrivals; _sap = sap; _mara = mara; _logger = logger;
+        _arrivals = arrivals; _sap = sap; _mara = mara; _cache = cache; _logger = logger;
+    }
+
+    [HttpGet]
+    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    public async Task<IActionResult> Pending(string? container, string? bol, string? po)
+    {
+        var rows = await _cache.ListPendingAsync(container, bol, po);
+        ViewBag.Container = container;
+        ViewBag.Bol       = bol;
+        ViewBag.Po        = po;
+        return View(rows);
     }
 
     public async Task<IActionResult> Index(string? status, string? search)
@@ -121,16 +134,24 @@ public class ArrivalsController : Controller
                 new { container = containerNo, bol = bolNo, po });
         }
 
-        var rows = await _sap.SearchAsync(new SapSearchQuery
+        // Cache-first: the polling service has likely already pulled this
+        // triplet, so we can build the Arrival without a live SAP round-trip.
+        // Falls back to SAP when the cache is empty for the triplet (e.g.
+        // entry via /Arrivals/Search for a row SAP just added).
+        var matched = (await _cache.GetTripletRowsAsync(containerNo, bolNo, po)).ToList();
+        if (matched.Count == 0)
         {
-            ContainerNo = containerNo,
-            BolNo       = bolNo,
-            Ebeln       = po
-        });
-        var matched = rows.Where(r =>
-            string.Equals(r.ContainerNo, containerNo, StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(r.BolNo,       bolNo,       StringComparison.OrdinalIgnoreCase) &&
-            string.Equals(r.Ebeln,       po,          StringComparison.OrdinalIgnoreCase)).ToList();
+            var rows = await _sap.SearchAsync(new SapSearchQuery
+            {
+                ContainerNo = containerNo,
+                BolNo       = bolNo,
+                Ebeln       = po
+            });
+            matched = rows.Where(r =>
+                string.Equals(r.ContainerNo, containerNo, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(r.BolNo,       bolNo,       StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(r.Ebeln,       po,          StringComparison.OrdinalIgnoreCase)).ToList();
+        }
 
         if (matched.Count == 0)
         {
@@ -142,6 +163,7 @@ public class ArrivalsController : Controller
         {
             var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
             var arrivalId = await _arrivals.CreateFromSapAsync(matched, user);
+            await _cache.MarkArrivedAsync(containerNo, bolNo, po, arrivalId);
             TempData["Success"] = $"Arrival created from container {containerNo} / BOL {bolNo} / PO {po} ({matched.Count} material line(s)).";
             return RedirectToAction(nameof(Details), new { id = arrivalId });
         }

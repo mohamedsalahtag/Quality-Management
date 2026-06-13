@@ -5,19 +5,15 @@
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h1 class="h3 mb-0"><i class="bi bi-palette me-1"></i>Defect Categories</h1>
+    <h1 class="h3 mb-0">
+        <i class="bi bi-palette me-1"></i>Defect Categories
+        <small class="text-muted fs-6 fw-normal ms-2">Major, Minor, Critical, … with display order and colour.</small>
+    </h1>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#dcModal"
             data-mode="create">
         <i class="bi bi-plus-circle me-1"></i>Add category
     </button>
 </div>
-
-<p class="text-muted small">
-    Global list of defect categories (Major, Minor, Critical, …). Assign each defect to a category on the
-    <a asp-action="DefectCatalog">Defect Catalog</a> page. Each category renders as its own coloured section
-    — in the order below — in the sample form and the Quality Order PDF. Renaming a category here updates every
-    defect that uses it.
-</p>
 
 <div class="card">
     <div class="table-responsive">

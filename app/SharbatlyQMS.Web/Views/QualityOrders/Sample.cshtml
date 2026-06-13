@@ -60,17 +60,29 @@
 @section Scripts {
 <script>
     // Standalone page: deep-link / no-JS-Details access. Wire the same
-    // touch-friendly defect stepper used inside the QO Details drawer so
-    // the experience is consistent for direct visitors.
+    // touch-friendly defect stepper + auto-net weight compute used inside
+    // the QO Details drawer so direct visitors get the same experience.
     (function wireDefectSteppers(scope) {
         scope.querySelectorAll('.defect-stepper').forEach(row => {
             const input = row.querySelector('.defect-value');
             const minus = row.querySelector('.defect-minus');
             const plus  = row.querySelector('.defect-plus');
+            const clampToSampleSize = (v) => {
+                const form = row.closest('form');
+                const size = parseFloat(form?.dataset.sampleSize);
+                if (size > 0 && v > size) return size;
+                return v;
+            };
             const updatePct = () => {
                 const form = row.closest('form');
                 const size = parseFloat(form?.dataset.sampleSize);
-                const v = parseFloat(input.value);
+                let v = parseFloat(input.value);
+                if (!isNaN(v)) {
+                    // Cap the displayed value at the sample size so the
+                    // operator can't push it above 100%.
+                    const capped = clampToSampleSize(v);
+                    if (capped !== v) { input.value = capped; v = capped; }
+                }
                 const pctInput = form.querySelector('input[name="defect_' + input.dataset.id + '_pct"]');
                 const badge = row.querySelector('.defect-pct-badge');
                 if (!isNaN(v) && size > 0) {
@@ -87,13 +99,38 @@
             };
             const bump = delta => {
                 const cur = parseInt(input.value, 10);
-                input.value = Math.max(0, (isNaN(cur) ? 0 : cur) + delta);
+                let next = Math.max(0, (isNaN(cur) ? 0 : cur) + delta);
+                next = clampToSampleSize(next);
+                input.value = next;
                 updatePct();
             };
             minus?.addEventListener('click', () => bump(-1));
             plus?.addEventListener('click',  () => bump(+1));
             input?.addEventListener('input', updatePct);
             updatePct();
+        });
+    })(document);
+
+    // NET_WEIGHT = GROSS - TARA. The Net input is rendered read-only by the
+    // partial; this script keeps it in sync as the operator types Gross or
+    // Tara. The server also recomputes Net on save (authoritative).
+    (function wireWeightCompute(scope) {
+        scope.querySelectorAll('form.sample-form').forEach(form => {
+            const gross = form.querySelector('[data-weight-role="gross"]');
+            const tara  = form.querySelector('[data-weight-role="tara"]');
+            const net   = form.querySelector('[data-weight-role="net"]');
+            if (!net || (!gross && !tara)) return;
+            const recompute = () => {
+                const g = parseFloat(gross?.value);
+                const t = parseFloat(tara?.value);
+                if (!isNaN(g) && !isNaN(t)) {
+                    net.value = (Math.round((g - t) * 100) / 100).toString();
+                } else {
+                    net.value = '';
+                }
+            };
+            gross?.addEventListener('input', recompute);
+            tara?.addEventListener('input', recompute);
         });
     })(document);
 </script>

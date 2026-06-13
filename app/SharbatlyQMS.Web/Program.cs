@@ -47,8 +47,10 @@ builder.Services.AddScoped<SharbatlyQMS.Web.Services.Sap.ISapODataClient,
                            SharbatlyQMS.Web.Services.Sap.SapODataClient>();
 builder.Services.AddScoped<SharbatlyQMS.Web.Services.Sap.ISapSyncService,
                            SharbatlyQMS.Web.Services.Sap.SapSyncService>();
+builder.Services.AddScoped<IContainerCacheService, ContainerCacheService>();
 builder.Services.AddHostedService<AutoSyncService>();
 builder.Services.AddHostedService<AdCachePrimingService>();
+builder.Services.AddHostedService<ContainerPollingService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IClaimsTransformation, ViewAsClaimsTransformer>();

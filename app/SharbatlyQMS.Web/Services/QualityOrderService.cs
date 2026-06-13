@@ -307,6 +307,7 @@ public class QualityOrderService : IQualityOrderService
                carton_identifier  CartonIdentifier,
                sample_scope       SampleScope,
                sample_size        SampleSize,
+               size_overridden    SizeOverridden,
                grower             Grower,
                pallet_no          PalletNo,
                grower_pallet      GrowerPallet,
@@ -356,12 +357,14 @@ public class QualityOrderService : IQualityOrderService
         var sampleId = await c.ExecuteScalarAsync<long>(@"
             INSERT INTO qms_sample
                 (quality_order_id, qo_material_id, sample_no, carton_count, carton_identifier,
-                 sample_scope, sample_size, grower, pallet_no, grower_pallet, pack_code,
+                 sample_scope, sample_size, size_overridden,
+                 grower, pallet_no, grower_pallet, pack_code,
                  date_code, label_value, lot_no, packaging_material,
                  created_at, created_by)
             VALUES
                 (@QualityOrderId, @QoMaterialId, @SampleNo, @CartonCount, @CartonIdentifier,
-                 @SampleScope, @SampleSize, @Grower, @PalletNo, @GrowerPallet, @PackCode,
+                 @SampleScope, @SampleSize, @SizeOverridden,
+                 @Grower, @PalletNo, @GrowerPallet, @PackCode,
                  @DateCode, @LabelValue, @LotNo, @PackagingMaterial,
                  SYSUTCDATETIME(), @CreatedBy);
             SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", s, tx);
@@ -389,26 +392,20 @@ public class QualityOrderService : IQualityOrderService
 
     public async Task UpdateSampleAsync(Sample s)
     {
-        // T020 (US1) -- read row before update, write field-level audit diff.
-        //
-        // 2026-05-25 bugfix: the sample form (after V20) no longer renders
-        // inputs for grower / pallet_no / date_code / etc. -- those moved
-        // to the dynamic qms_sample_header_value system. Model-binding
-        // therefore arrives with NULL for every legacy column.
-        //
-        // 2026-05-29: sample_size also moved up to the material level (it is
-        // entered once per material and propagated to every sample). The
-        // sample form no longer posts it either, so this UPDATE must NOT touch
-        // sample_size -- it would blank the inherited cache. Only the audit
-        // timestamp / user are updated here; header-field values + sample_size
-        // are owned by SaveSampleHeaderValuesAsync and the material path.
+        // 2026-06-13: sample_size is now editable per-sample (V24). The form
+        // posts the user's value and SizeOverridden flag; if SizeOverridden=1
+        // the material-level propagation UPDATE skips this row. Legacy text
+        // columns (grower/pallet/date_code/...) are still owned by the
+        // qms_sample_header_value path -- we don't touch them here.
         using var c = Open();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
         await c.ExecuteAsync(@"
             UPDATE qms_sample SET
-              updated_at  = SYSUTCDATETIME(),
-              updated_by  = @UpdatedBy
+              sample_size     = @SampleSize,
+              size_overridden = @SizeOverridden,
+              updated_at      = SYSUTCDATETIME(),
+              updated_by      = @UpdatedBy
             WHERE sample_id = @SampleId", s, tx);
         await _audit.WriteAsync(c, tx,
             EntityTypes.Sample, s.SampleId, ActionCodes.Updated,
@@ -931,15 +928,18 @@ public class QualityOrderService : IQualityOrderService
             "UPDATE qms_quality_order_material SET sample_size = @sampleSize WHERE qo_material_id = @qoMaterialId",
             new { qoMaterialId, sampleSize }, tx);
 
-        // ...propagated to every (non-deleted) sample of this material so the
-        // per-sample inherited cache that every defect-% calc divides by stays
-        // in step. Only writes when a size is set, to avoid blanking samples
-        // when the material size is cleared.
+        // ...propagated to every (non-deleted, non-overridden) sample of this
+        // material so the per-sample inherited cache that every defect-% calc
+        // divides by stays in step. Samples flagged size_overridden=1 keep
+        // their user-entered value (V24+). Only writes when a size is set, to
+        // avoid blanking samples when the material size is cleared.
         if (sampleSize.HasValue)
             await c.ExecuteAsync(@"
                 UPDATE qms_sample SET sample_size = @sampleSize,
                        updated_at = SYSUTCDATETIME(), updated_by = @user
-                WHERE qo_material_id = @qoMaterialId AND is_deleted = 0",
+                WHERE qo_material_id = @qoMaterialId
+                  AND is_deleted = 0
+                  AND size_overridden = 0",
                 new { qoMaterialId, sampleSize, user }, tx);
 
         // Replace the whole material header-value set.

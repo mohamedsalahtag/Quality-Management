@@ -50,6 +50,43 @@ public class HybridSapClient : ISapClient
         return new SapHealth { IsReachable = ok, Source = "odata", Message = msg };
     }
 
+    public async Task<int> FetchSinceAsync(
+        DateOnly sinceDocDate,
+        Func<IReadOnlyList<SapShipmentRow>, CancellationToken, Task> onPage,
+        CancellationToken ct = default)
+    {
+        var sap = await _settings.GetSapConfigAsync();
+        if (string.IsNullOrWhiteSpace(sap.ContainerSearchUrl))
+            return await _stub.FetchSinceAsync(sinceDocDate, onPage, ct);
+
+        // OData $filter: bulk fetch only PO lines that actually have a
+        // container number. The CDS view LEFT JOINs ekes (purchase order
+        // confirmations), so a PO header with no EKES record produces a
+        // row with Container = '' -- those carry no QC value and would
+        // flood the cache. Doc_Date filters the start cutoff (v4 form for
+        // Edm.Date; v2 `datetime'...'` is rejected by SRVD_A2X with
+        // /IWCOR/CX_OD_EXPR_PARSER_ERROR).
+        var filter = $"Doc_Date ge {sinceDocDate:yyyy-MM-dd} and Container ne ''";
+        var url = sap.ContainerSearchUrl + (sap.ContainerSearchUrl.Contains('?') ? "&" : "?")
+                  + "$filter=" + Uri.EscapeDataString(filter);
+
+        var (user, password) = sap.ResolveCredentials("ContainerSearch");
+        int total = 0;
+        var (ok, _, message) = await _odata.FetchAllAsync(url, pageSize: 200, async batch =>
+        {
+            var rows = batch.Select(MapRow).ToList();
+            await EnrichWithMaterialMasterAsync(rows, ct);
+            total += rows.Count;
+            if (rows.Count > 0) await onPage(rows, ct);
+        }, user, password, ct);
+
+        if (!ok)
+            throw new InvalidOperationException("SAP container fetch-since failed: " + message);
+
+        _log.LogInformation("SAP container fetch-since(>= {Date}) returned {Count} row(s)", sinceDocDate, total);
+        return total;
+    }
+
     public async Task<IReadOnlyList<SapShipmentRow>> SearchAsync(SapSearchQuery q, CancellationToken ct = default)
     {
         var sap = await _settings.GetSapConfigAsync();
@@ -179,6 +216,8 @@ public class HybridSapClient : ISapClient
         BolNo             = Get(d, "BOL") ?? "",
         Ebeln             = Get(d, "PO_Number") ?? "",
         Ebelp             = Get(d, "Line_No") ?? "",
+        PoType            = Get(d, "PO_Type") ?? "",
+        DocDate           = ParseDate(Get(d, "Doc_Date")),
         Bukrs             = Get(d, "Company") ?? "",
         VendorNo          = Get(d, "Supplier") ?? "",
         VendorName        = Get(d, "Supplier_Name") ?? "",

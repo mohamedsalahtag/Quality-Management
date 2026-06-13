@@ -467,6 +467,22 @@ public class QualityOrdersController : Controller
             return (null, false, 0,
                 $"Sample cannot be saved — these mandatory fields have no value: {string.Join(", ", missingMandatory)}.");
 
+        // V24: decide whether the posted sample size is an override of the
+        // material's default. A blank input falls back to the material default
+        // (inherited). Any non-null value that differs from the material's
+        // current sample_size is treated as a manual override and protected
+        // from the material-level propagation UPDATE.
+        var materialDefaultSize = matForReadings?.SampleSize;
+        if (!sample.SampleSize.HasValue)
+        {
+            sample.SampleSize     = materialDefaultSize;
+            sample.SizeOverridden = false;
+        }
+        else
+        {
+            sample.SizeOverridden = sample.SampleSize != materialDefaultSize;
+        }
+
         bool isNew;
         if (existing == null)
         {
@@ -486,6 +502,31 @@ public class QualityOrdersController : Controller
             isNew = false;
         }
 
+        // NET_WEIGHT is reserved + computed = GROSS - TARA. The form renders
+        // it read-only and JS keeps it in sync; we recompute here as the
+        // authoritative source so a tampered POST or stale page can't store
+        // an inconsistent value. Skip NET when either side is missing.
+        bool IsGrossReading(string c) =>
+            string.Equals(c, "GROSS_WEIGHT", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c, "GROSS",        StringComparison.OrdinalIgnoreCase);
+        bool IsTaraReading(string c) =>
+            string.Equals(c, "TARA",         StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c, "TARA_WEIGHT",  StringComparison.OrdinalIgnoreCase);
+        bool IsNetReading(string c) =>
+            string.Equals(c, "NET_WEIGHT",   StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c, "NET",          StringComparison.OrdinalIgnoreCase);
+        decimal? grossPosted = null, taraPosted = null;
+        foreach (var rt in readingTypes)
+        {
+            var numStr = form[$"reading_{rt.ReadingTypeCode}_num"].ToString();
+            if (!decimal.TryParse(numStr, out var dval)) continue;
+            if (IsGrossReading(rt.ReadingTypeCode)) grossPosted = dval;
+            else if (IsTaraReading(rt.ReadingTypeCode)) taraPosted = dval;
+        }
+        decimal? netComputed = (grossPosted.HasValue && taraPosted.HasValue)
+            ? decimal.Round(grossPosted.Value - taraPosted.Value, 2)
+            : (decimal?)null;
+
         var readings = new List<SampleReading>();
         int seq = 0;
         foreach (var rt in readingTypes)
@@ -493,6 +534,14 @@ public class QualityOrdersController : Controller
             var num  = form[$"reading_{rt.ReadingTypeCode}_num"].ToString();
             var text = form[$"reading_{rt.ReadingTypeCode}_text"].ToString();
             decimal? n = decimal.TryParse(num, out var dec) ? dec : null;
+            // Server-side NET_WEIGHT recomputation: ignore the posted value
+            // and use Gross - Tara. If either side is missing, drop the
+            // reading entirely so blanks don't masquerade as zero.
+            if (IsNetReading(rt.ReadingTypeCode))
+            {
+                if (!netComputed.HasValue) continue;
+                n = netComputed;
+            }
             if (n == null && string.IsNullOrWhiteSpace(text)) continue;
             readings.Add(new SampleReading
             {
@@ -511,18 +560,21 @@ public class QualityOrdersController : Controller
         // the operator left it blank -- downstream sums / averages assume
         // zero rather than NULL, per business rule.
         var defectsCatalog = await _cat.GetActiveDefectsForGroupAsync(matForReadings?.MaterialGroup);
-        // Denominator is the MATERIAL's sample size (inherited by every sample);
-        // the per-sample form no longer collects it.
-        var sampleSize = matForReadings?.SampleSize ?? 0;
+        // Denominator is the SAMPLE's own size (V24-aware) falling back to
+        // the material's default. Defect values posted above the sample size
+        // are silently clamped so percentages can never exceed 100 -- this
+        // mirrors the client-side max-attr + JS clamp.
+        var sampleSize = sample.SampleSize ?? matForReadings?.SampleSize ?? 0;
         var defects = new List<SampleDefect>();
         foreach (var dc in defectsCatalog)
         {
             var v = form[$"defect_{dc.DefectId}_value"].ToString();
             var p = form[$"defect_{dc.DefectId}_pct"].ToString();
             decimal value = decimal.TryParse(v, out var dv) ? dv : 0m;
+            if (sampleSize > 0 && value > sampleSize) value = sampleSize;
             decimal pct;
-            if (decimal.TryParse(p, out var dp)) pct = dp;
-            else if (sampleSize > 0)             pct = Math.Round(value / sampleSize * 100m, 4);
+            if (sampleSize > 0)                  pct = Math.Round(value / sampleSize * 100m, 4);
+            else if (decimal.TryParse(p, out var dp)) pct = dp;
             else                                 pct = 0m;
             defects.Add(new SampleDefect
             {

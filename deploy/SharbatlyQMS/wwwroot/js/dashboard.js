@@ -108,6 +108,110 @@
         }
     }
 
+    // ---- Throughput vs QC pace (line, 12 weeks) ----
+    var throughputEl = document.getElementById('chartThroughput');
+    if (throughputEl && data.throughput && data.throughput.length) {
+        var tColors = themeColors();
+        var tLabels = data.throughput.map(function (p) {
+            var d = new Date(p.WeekStart);
+            return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        });
+        var tChart = new Chart(throughputEl, {
+            type: 'line',
+            data: {
+                labels: tLabels,
+                datasets: [
+                    { label: 'Arrivals received', data: data.throughput.map(function(p){return p.ArrivalsRecv;}),
+                      borderColor: tColors.primary, backgroundColor: tColors.primary + '22',
+                      tension: 0.3, fill: false, pointRadius: 3 },
+                    { label: 'QOs closed',        data: data.throughput.map(function(p){return p.QosClosed;}),
+                      borderColor: tColors.success, backgroundColor: tColors.success + '22',
+                      tension: 0.3, fill: false, pointRadius: 3, borderDash: [4,4] }
+                ]
+            },
+            options: {
+                plugins: { legend: { position: 'bottom', labels: { color: tColors.body } } },
+                scales: {
+                    x: { ticks: { color: tColors.muted }, grid: { color: tColors.border } },
+                    y: { ticks: { color: tColors.muted, precision: 0 }, grid: { color: tColors.border }, beginAtZero: true }
+                }
+            }
+        });
+        registry.push({ chart: tChart, kind: 'throughput' });
+    } else if (throughputEl) {
+        renderEmpty(throughputEl, 'No throughput data yet.');
+    }
+
+    // ---- Open QO age distribution (bar histogram) ----
+    var ageEl = document.getElementById('chartOpenQoAge');
+    if (ageEl && data.openQoAge && data.openQoAge.length === 4) {
+        var aColors = themeColors();
+        var ageData = data.openQoAge.map(function (n) { return n; });
+        var hasAge = ageData.some(function (n) { return n > 0; });
+        if (hasAge) {
+            var bandColors = [aColors.success, aColors.success, aColors.warning, aColors.danger];
+            var ageChart = new Chart(ageEl, {
+                type: 'bar',
+                data: {
+                    labels: ['0-3 d', '3-7 d', '7-14 d', '14+ d'],
+                    datasets: [{
+                        data: ageData,
+                        backgroundColor: bandColors,
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: { ticks: { color: aColors.muted }, grid: { display: false } },
+                        y: { ticks: { color: aColors.muted, precision: 0 }, grid: { color: aColors.border }, beginAtZero: true }
+                    }
+                }
+            });
+            registry.push({ chart: ageChart, kind: 'qoAge' });
+        } else {
+            renderEmpty(ageEl, 'No open quality orders.');
+        }
+    }
+
+    // ---- Defect % by Material Group (horizontal bar, top 8) ----
+    var dbgEl = document.getElementById('chartDefectByGroup');
+    if (dbgEl && data.defectByGroup && data.defectByGroup.length) {
+        var dColors = themeColors();
+        var redAtD    = data.thresholds && data.thresholds.DefectPctRed    != null ? data.thresholds.DefectPctRed    : 10;
+        var yellowAtD = data.thresholds && data.thresholds.DefectPctYellow != null ? data.thresholds.DefectPctYellow : 5;
+        var labelsD = data.defectByGroup.map(function (g) {
+            return g.MaterialGroupDesc && g.MaterialGroupDesc.length ? g.MaterialGroupDesc : g.MaterialGroup;
+        });
+        var valuesD = data.defectByGroup.map(function (g) { return Number(g.AvgDefectPct || 0); });
+        var bgD = valuesD.map(function (v) {
+            return v > redAtD ? dColors.danger : (v > yellowAtD ? dColors.warning : dColors.success);
+        });
+        var dgChart = new Chart(dbgEl, {
+            type: 'bar',
+            data: {
+                labels: labelsD,
+                datasets: [{
+                    data: valuesD,
+                    backgroundColor: bgD,
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                plugins: { legend: { display: false } },
+                scales: {
+                    x: { ticks: { color: dColors.muted, callback: function (v) { return v + '%'; } },
+                         grid: { color: dColors.border }, beginAtZero: true },
+                    y: { ticks: { color: dColors.muted }, grid: { display: false } }
+                }
+            }
+        });
+        registry.push({ chart: dgChart, kind: 'defectByGroup' });
+    } else if (dbgEl) {
+        renderEmpty(dbgEl, 'No closed QOs with defect data in the last 30 days.');
+    }
+
     // ---- Defect rate gauge (half-doughnut) ----
     var gaugeEl = document.getElementById('chartDefectGauge');
     if (gaugeEl) {

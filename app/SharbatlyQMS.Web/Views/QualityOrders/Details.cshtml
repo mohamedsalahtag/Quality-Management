@@ -13,10 +13,6 @@
     var role        = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     var canEdit     = role == UserRoles.Operator || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
     var canManage   = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;
-    // Audit-history panel visibility (FR-017): Manager or SiteAdmin only.
-    // (Auditor role retired 2026-05-21; FR-017 visibility now matches the
-    // ManagerOrAdmin policy on the HistoryPanel endpoint.)
-    var canSeeAudit = role == UserRoles.Manager || role == UserRoles.SiteAdmin;
     // When this view is rendered by ClaimManagementController.Details, every
     // QO mutation surface is suppressed -- the only interactive area is the
     // claim chat panel rendered at the bottom of the page. Forcing all three
@@ -105,12 +101,11 @@
            class="btn btn-danger" target="_blank">
             <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF report
         </a>
-        @if ((bool?)ViewBag.SendMailEnabled == true && canEdit)
-        {
-            <button type="button" class="btn btn-info" data-bs-toggle="modal" data-bs-target="#sendReportModal">
-                <i class="bi bi-envelope-paper me-1"></i>Send report to supplier
-            </button>
-        }
+        @* "Send report to supplier" moved to the Claim Management chat-panel
+           action bar (_ClaimChatPanel.cshtml). It now appears only when a
+           claim exists and has been approved. The modal markup and JS for
+           the send flow live below in this file so both render paths
+           (standalone QO and claim context) share the same wiring. *@
     </div>
 </div>
 
@@ -275,8 +270,9 @@
                 {
                     OwnerType = "QualityOrderMaterial",
                     OwnerId   = m.QoMaterialId,
-                    Editable  = editable,
-                    Categories = new[] { "QualityInspection", "SampleDefect", "ReportOnly" }
+                    Editable  = editable
+                    // No Categories: per-material photos in the QO no longer
+                    // require category selection (2026-05-30 simplification).
                 };
             }
             <partial name="~/Views/Shared/_ImageGallery.cshtml" model="matGalleryVm" />
@@ -465,24 +461,8 @@
     </div>
 </div>
 
-@* T026 (US1) -- Audit history panel for the Quality Order itself.
-   Visible to Manager / Auditor / SiteAdmin only (FR-017). *@
-@if (canSeeAudit)
-{
-    ViewBag.AuditEntityType = "QualityOrder";
-    ViewBag.AuditEntityId   = Model.QualityOrderId;
-    @await Html.PartialAsync("~/Views/Audit/_AuditHistory.cshtml")
-}
-
-@* T028 (US1) -- When this view is rendered via ClaimManagementController.Details
-   (IsClaimContext == true), ALSO show the audit history for the underlying Claim
-   so the auditor can see the claim's lifecycle alongside the QO's. *@
-@if (isClaimContext && canSeeAudit && ViewBag.Claim is SharbatlyQMS.Web.Models.QualityClaim claimForAudit)
-{
-    ViewBag.AuditEntityType = "Claim";
-    ViewBag.AuditEntityId   = claimForAudit.ClaimId;
-    @await Html.PartialAsync("~/Views/Audit/_AuditHistory.cshtml")
-}
+@* Per-entity audit panels removed 2026-06-13. Filter the master audit log
+   at /Audit (Admin menu) by entity type + id to see this QO's history. *@
 
 @* Claim chat panel -- only rendered when this view is invoked from
    ClaimManagementController.Details. In that context every other
@@ -620,6 +600,7 @@
             }
         });
         wireDefectSteppers(drawerBody);
+        wireWeightCompute(drawerBody);
     }
 
     function applyRowUpdate(data) {
@@ -744,10 +725,24 @@
             const minus    = row.querySelector('.defect-minus');
             const plus     = row.querySelector('.defect-plus');
             const isDecimal = (row.dataset.valueType || 'Number').toLowerCase() === 'decimal';
+            const sampleSizeOf = () => {
+                const form = row.closest('form');
+                const n = parseFloat(form?.dataset.sampleSize);
+                return (n > 0) ? n : 0;
+            };
+            const clampHi = v => {
+                const size = sampleSizeOf();
+                return (size > 0 && v > size) ? size : v;
+            };
             const updatePct = () => {
                 const form = row.closest('form');
-                const size = parseFloat(form?.dataset.sampleSize);
-                const v = parseFloat(input.value);
+                const size = sampleSizeOf();
+                let v = parseFloat(input.value);
+                if (!isNaN(v)) {
+                    // Cap at sample size so percentage can never exceed 100.
+                    const capped = clampHi(v);
+                    if (capped !== v) { input.value = capped; v = capped; }
+                }
                 const pctInput = form.querySelector('input[name="defect_' + input.dataset.id + '_pct"]');
                 const badge = row.querySelector('.defect-pct-badge');
                 if (!isNaN(v) && size > 0) {
@@ -769,6 +764,7 @@
                 const cur = parseFloat(input.value);
                 let next = (isNaN(cur) ? 0 : cur) + delta;
                 if (next < 0) next = 0;
+                next = clampHi(next);
                 input.value = isDecimal ? Number(next.toFixed(3)) : Math.round(next);
                 updatePct();
             };
@@ -776,6 +772,27 @@
             plus?.addEventListener('click',  () => bump(+1));
             input?.addEventListener('input', updatePct);
             updatePct();
+        });
+    }
+
+    // ---- Net weight = Gross - Tara (read-only NET input) ------------------
+    function wireWeightCompute(scope) {
+        scope.querySelectorAll('form.sample-form').forEach(form => {
+            const gross = form.querySelector('[data-weight-role="gross"]');
+            const tara  = form.querySelector('[data-weight-role="tara"]');
+            const net   = form.querySelector('[data-weight-role="net"]');
+            if (!net || (!gross && !tara)) return;
+            const recompute = () => {
+                const g = parseFloat(gross?.value);
+                const t = parseFloat(tara?.value);
+                if (!isNaN(g) && !isNaN(t)) {
+                    net.value = (Math.round((g - t) * 100) / 100).toString();
+                } else {
+                    net.value = '';
+                }
+            };
+            gross?.addEventListener('input', recompute);
+            tara?.addEventListener('input', recompute);
         });
     }
 

@@ -4,14 +4,10 @@
     ViewData["Title"] = "Mail Template";
 }
 
-<h1 class="h3 mb-3"><i class="bi bi-envelope-paper me-1"></i>Mail Template &mdash; Quality Order Report</h1>
-<p class="text-muted small">
-    Subject + body used when an operator clicks <strong>Send report to supplier</strong> on a Quality Order page.
-    The Send button is only visible on the QO page when <strong>Enabled</strong> is on below.
-    Placeholders <code>{QO_NO}</code>, <code>{CONTAINER}</code>, <code>{BOL}</code>, <code>{PO}</code>,
-    <code>{SUPPLIER}</code>, and <code>{TODAY}</code> are replaced when the operator opens the send dialog.
-    The operator can still edit the subject and body before sending.
-</p>
+<h1 class="h3 mb-3">
+    <i class="bi bi-envelope-paper me-1"></i>Mail Template &mdash; Quality Order Report
+    <small class="text-muted fs-6 fw-normal ms-2">Subject and body used when sending the QO report to suppliers.</small>
+</h1>
 
 <form asp-action="SaveMailTemplate" method="post" class="card">
     @Html.AntiForgeryToken()

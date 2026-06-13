@@ -120,7 +120,6 @@ C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\scopedcss\bundle\Sha
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\scopedcss\projectbundle\SharbatlyQMS.Web.bundle.scp.css
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\compressed\4ot8r5kkdh-{0}-9bacbulxiw-9bacbulxiw.gz
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\compressed\p83c47qlvv-{0}-61n19gt1b8-61n19gt1b8.gz
-C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\compressed\rsahfqdmax-{0}-5y36svo18e-5y36svo18e.gz
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\compressed\dtlnz0fjul-{0}-mll8m82ikk-mll8m82ikk.gz
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\compressed\ihbo46n5gy-{0}-suimnpoy5f-suimnpoy5f.gz
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\compressed\31twgwh6cc-{0}-bqjiyaj88i-bqjiyaj88i.gz
@@ -204,5 +203,6 @@ C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Release\net9.0\RBush.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Release\net9.0\SixLabors.Fonts.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Release\net9.0\System.IO.Packaging.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\SharbatlyQMS.Web.sourcelink.json
-C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\compressed\49k64jz2zf-{0}-kygju26tev-kygju26tev.gz
-C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\compressed\21953o15qz-{0}-y2r418mmqx-y2r418mmqx.gz
+C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\compressed\21953o15qz-{0}-ozjz3nsixu-ozjz3nsixu.gz
+C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\compressed\49k64jz2zf-{0}-n2y28rrdl8-n2y28rrdl8.gz
+C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Release\net9.0\compressed\rsahfqdmax-{0}-72o9lwvrjf-72o9lwvrjf.gz

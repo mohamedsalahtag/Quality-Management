@@ -267,9 +267,27 @@ public class ReportsController : Controller
         var readingsBySample = await _qos.GetReadingsBatchAsync(sampleIds);
         var defectsBySample  = await _qos.GetDefectsBatchAsync(sampleIds);
         // V20+ -- dynamic sample header values, batched.
-        // Material-scoped values are now copied onto each sample (V23+), so the
-        // per-sample header values already include them -- no separate fetch.
+        // The per-sample list includes both Sample-scoped values AND a copy of
+        // the Material-scoped values (V23+ copy-down). The PDF renderer
+        // separates them at draw time using HeaderFieldScopeById below: it
+        // shows Material-scoped values ONCE on a per-material card, then only
+        // Sample-scoped values on each compact sample card. So we don't try to
+        // filter here -- the bundle carries the full list as before.
         var headerBySample   = await _qos.GetSampleHeaderValuesBatchAsync(sampleIds);
+
+        // V21+ -- the master Material-scoped values live on
+        // qms_qo_material_header_value. They are also copied onto each sample
+        // (above), but the per-material card in the PDF renders them from the
+        // material-level table so a material with no samples yet still shows
+        // its identifying values.
+        var materialHeaderByMat = await _qos.GetMaterialHeaderValuesBatchAsync(
+            materials.Select(m => m.QoMaterialId));
+
+        // FieldId -> Scope ("Sample"|"Material") so the renderer can route each
+        // copied-down header value to the right block (material card vs sample
+        // card). Cached / once per PDF.
+        var headerFields = await _qos.GetActiveSampleHeaderFieldsAsync();
+        data.HeaderFieldScopeById = headerFields.ToDictionary(f => f.FieldId, f => f.Scope ?? "Sample");
 
         var distinctMatKeys = materials
             .Select(m => (Group: m.MaterialGroup, Category: m.MajorCategory))
@@ -294,15 +312,18 @@ public class ReportsController : Controller
                 Defects      = defectsBySample[s.SampleId].ToList(),
                 SectionMap   = new Dictionary<string, string>(sectionMap),
                 HeaderValues = headerBySample[s.SampleId].ToList(),
+                MaterialHeaderValues = materialHeaderByMat[s.QoMaterialId].ToList(),
                 Images       = new List<SharbatlyQMS.Web.Services.Pdf.ImageRef>()  // images live on the QO, not per-sample
             });
         }
 
-        // Images are uploaded per QO material line (see QO details page).
-        // The appendix in the report groups them by material so the reader
-        // sees which photos belong to which product. No arrival photos and
-        // no per-sample sub-galleries here.
-        data.ArrivalImages = new List<SharbatlyQMS.Web.Services.Pdf.ImageRef>();
+        // Images come from two owners: the parent Arrival (rendered as a
+        // dedicated block right after the page-1 Summary so the reader sees
+        // shipment/checklist photos before drilling into per-material data)
+        // and per-QO material (rendered as the appendix grouped by material).
+        // No per-sample sub-galleries.
+        data.ArrivalImages = PreprocessImages(
+            await _images.ListAsync("Arrival", qo.ArrivalId), targetW, targetH);
         data.MaterialImages = new Dictionary<long, List<SharbatlyQMS.Web.Services.Pdf.ImageRef>>();
         // Fetch every material's image list in parallel, then preprocess.
         // Each ListAsync opens its own SqlConnection, so concurrency is safe.

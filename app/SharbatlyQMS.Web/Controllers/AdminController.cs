@@ -412,6 +412,86 @@ public class AdminController : Controller
         return RedirectToAction(nameof(Settings), new { activeTab = "alerts" });
     }
 
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    public async Task<IActionResult> SaveContainerPollSettings(ContainerPollConfig containerPoll)
+    {
+        var cfg = containerPoll ?? new ContainerPollConfig();
+        // Clamp into the allowed range so a fat-fingered value can't take
+        // SAP down by pulling every second or stall the queue forever.
+        if (cfg.PollingMinutes < 5)    cfg.PollingMinutes = 5;
+        if (cfg.PollingMinutes > 1440) cfg.PollingMinutes = 1440;
+        await _settings.SaveContainerPollConfigAsync(cfg, GetCurrentUserId());
+        TempData["Success"] = "Pending Containers pulling saved.";
+        return RedirectToAction(nameof(Settings), new { activeTab = "sap" });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    public async Task<IActionResult> PullContainersNow(ContainerPollConfig containerPoll,
+        [FromServices] IConfiguration config)
+    {
+        // Save first so the start date the admin just typed is used by the
+        // background pull (and so the next scheduled tick respects the
+        // latest values).
+        var cfg = containerPoll ?? new ContainerPollConfig();
+        if (cfg.PollingMinutes < 5)    cfg.PollingMinutes = 5;
+        if (cfg.PollingMinutes > 1440) cfg.PollingMinutes = 1440;
+        await _settings.SaveContainerPollConfigAsync(cfg, GetCurrentUserId());
+
+        if (cfg.StartDate is null)
+        {
+            TempData["Error"] = "Set a start date before pulling.";
+            return RedirectToAction(nameof(Settings), new { activeTab = "sap" });
+        }
+
+        // Don't queue a second pull on top of a running one. The in-flight
+        // sync_log row (completed_at IS NULL) is the source of truth -- it's
+        // written by RefreshFromSapAsync at start and updated at end. Same
+        // guard the auto-scheduler uses.
+        var cs = config.GetConnectionString("Default")!;
+        using (var c = new Microsoft.Data.SqlClient.SqlConnection(cs))
+        {
+            var inFlight = await Dapper.SqlMapper.ExecuteScalarAsync<int>(c, @"
+                SELECT COUNT(*) FROM qms_sap_sync_log
+                WHERE  endpoint_key = @ep AND completed_at IS NULL",
+                new { ep = ContainerCacheService.SyncLogEndpointKey });
+            if (inFlight > 0)
+            {
+                TempData["Error"] = "A pull is already running. Refresh the page in a moment to see its result.";
+                return RedirectToAction(nameof(Settings), new { activeTab = "sap" });
+            }
+        }
+
+        var user      = User.FindFirstValue(ClaimTypes.Name) ?? "system";
+        var startDate = cfg.StartDate.Value;
+
+        // Fire-and-forget. The HTTP request returns immediately so the
+        // browser doesn't sit on a multi-minute load -- a bulk pull can fetch
+        // tens of thousands of rows across many OData pages. The background
+        // task writes start + completion timestamps + row counts to
+        // qms_sap_sync_log; the Settings page reads them back in its "Last
+        // pull" status line, so refreshing the page shows progress.
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await using var scope = _scopeFactory.CreateAsyncScope();
+                var cache = scope.ServiceProvider.GetRequiredService<IContainerCacheService>();
+                await cache.RefreshFromSapAsync(startDate, user, "Manual", CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                // RefreshFromSapAsync already wrote the failure to sync_log;
+                // log here too in case the throw came from somewhere upstream.
+                _adminLog.LogError(ex, "Background container pull threw");
+            }
+        });
+
+        TempData["Success"] = "Pull started in the background. Refresh this page in a moment to see the result.";
+        return RedirectToAction(nameof(Settings), new { activeTab = "sap" });
+    }
+
     // ---- Per-endpoint sync (Material Master, Vendor Master) ----------------
 
     [HttpPost, ValidateAntiForgeryToken]
@@ -1135,8 +1215,48 @@ public class AdminController : Controller
             Branding     = await _settings.GetBrandingConfigAsync(),
             Ad           = ad,
             MaterialSync = await _settings.GetEndpointSyncAsync(SyncableEndpoints.MaterialMaster),
-            VendorSync   = await _settings.GetEndpointSyncAsync(SyncableEndpoints.VendorMaster)
+            VendorSync   = await _settings.GetEndpointSyncAsync(SyncableEndpoints.VendorMaster),
+            ContainerPoll = await BuildContainerPollVmAsync()
         };
+    }
+
+    private async Task<ContainerPollConfig> BuildContainerPollVmAsync()
+    {
+        var cfg = await _settings.GetContainerPollConfigAsync();
+        // Two reads in one trip: the most recent COMPLETED run (for the
+        // "Last pull" status line) and whether anything is currently
+        // in flight (for the "Currently pulling..." note).
+        try
+        {
+            var cs = HttpContext.RequestServices.GetRequiredService<IConfiguration>()
+                       .GetConnectionString("Default")!;
+            using var c = new Microsoft.Data.SqlClient.SqlConnection(cs);
+            using var grid = await Dapper.SqlMapper.QueryMultipleAsync(c, @"
+                SELECT TOP 1 completed_at, rows_synced, message, success
+                FROM   qms_sap_sync_log
+                WHERE  endpoint_key = @ep AND completed_at IS NOT NULL
+                ORDER  BY completed_at DESC;
+
+                SELECT TOP 1 started_at
+                FROM   qms_sap_sync_log
+                WHERE  endpoint_key = @ep AND completed_at IS NULL
+                ORDER  BY started_at DESC;",
+                new { ep = ContainerPollingService.EndpointKey });
+
+            var done = (await grid.ReadAsync<(DateTime? completed_at, int? rows_synced, string? message, bool? success)>())
+                       .FirstOrDefault();
+            cfg.LastRunUtc   = done.completed_at;
+            cfg.LastRowCount = done.rows_synced;
+            cfg.LastResult   = done.completed_at is null
+                ? null
+                : ((done.success ?? false) ? (done.message ?? "OK") : ("FAILED: " + (done.message ?? "(no detail)")));
+
+            var inflightStartedAt = (await grid.ReadAsync<DateTime?>()).FirstOrDefault();
+            cfg.IsRunning    = inflightStartedAt.HasValue;
+            cfg.RunningSince = inflightStartedAt;
+        }
+        catch { /* status is best-effort */ }
+        return cfg;
     }
 
     // ---- Active Directory settings (hosted as a tab on Site Configuration) ----
@@ -1350,6 +1470,7 @@ public class SettingsVm
     public AlertConfig       Alerts       { get; set; } = new();
     public BrandingConfig    Branding     { get; set; } = new();
     public AdConfig          Ad           { get; set; } = new();
-    public EndpointSyncConfig MaterialSync{ get; set; } = new() { EndpointKey = SyncableEndpoints.MaterialMaster };
-    public EndpointSyncConfig VendorSync  { get; set; } = new() { EndpointKey = SyncableEndpoints.VendorMaster };
+    public EndpointSyncConfig  MaterialSync  { get; set; } = new() { EndpointKey = SyncableEndpoints.MaterialMaster };
+    public EndpointSyncConfig  VendorSync    { get; set; } = new() { EndpointKey = SyncableEndpoints.VendorMaster };
+    public ContainerPollConfig ContainerPoll { get; set; } = new();
 }

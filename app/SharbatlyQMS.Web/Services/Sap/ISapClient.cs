@@ -20,6 +20,18 @@ public interface ISapClient
     Task<IReadOnlyList<SapShipmentRow>> SearchAsync(SapSearchQuery query, CancellationToken ct = default);
 
     /// <summary>
+    /// Bulk-fetch every SAP shipment row whose document date (TOC_DATE) is
+    /// on/after <paramref name="sinceDocDate"/>. Pages are streamed to
+    /// <paramref name="onPage"/> so the caller (typically the container
+    /// polling background service) can UPSERT incrementally without
+    /// buffering the whole result. Returns the total row count fetched.
+    /// </summary>
+    Task<int> FetchSinceAsync(
+        DateOnly sinceDocDate,
+        Func<IReadOnlyList<SapShipmentRow>, CancellationToken, Task> onPage,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Health/availability probe -- maps to /api/sap/health in plan §8.1.
     /// </summary>
     Task<SapHealth> GetHealthAsync(CancellationToken ct = default);
@@ -52,6 +64,7 @@ public class SapShipmentRow
     public string  BolNo             { get; set; } = "";
     public string  Ebeln             { get; set; } = "";   // PO header
     public string  Ebelp             { get; set; } = "";   // PO line
+    public string  PoType            { get; set; } = "";   // EKKO.BSART (NB, ZB, etc.)
     public string  Bukrs             { get; set; } = "";   // company code
 
     // Vendor
@@ -81,6 +94,7 @@ public class SapShipmentRow
     public string  Uom               { get; set; } = "";
 
     // Shipment
+    public DateOnly? DocDate         { get; set; }   // SAP ZQC_Data column Doc_Date (DDIC BEDAT, PO document date)
     public DateOnly? LoadingDate     { get; set; }
     public DateOnly? SailingDate     { get; set; }
     public DateOnly? ExaminationDate { get; set; }

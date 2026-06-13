@@ -253,6 +253,72 @@
                     <i class="bi bi-save me-1"></i>Save SAP settings
                 </button>
             </form>
+
+            <hr class="my-4" />
+
+            <h6 class="text-uppercase small fw-bold text-primary mb-2">
+                <i class="bi bi-clock-history me-1"></i>Pending Containers pulling
+            </h6>
+            <p class="small text-muted mb-3">
+                The background puller hits the Container Search OData URL and caches every SAP row
+                whose <code>Doc_Date</code> is on/after the start date below. The page
+                <a asp-controller="Arrivals" asp-action="Pending">Arrivals → Pending Containers</a>
+                renders cached rows that don't yet have a QMS Arrival — so no container slips
+                through QC silently.
+            </p>
+            <form asp-action="SaveContainerPollSettings" method="post">
+                @Html.AntiForgeryToken()
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label" asp-for="ContainerPoll.StartDate">Start date (Doc_Date ≥)</label>
+                        <input asp-for="ContainerPoll.StartDate" type="date" class="form-control form-control-sm" />
+                        <small class="text-muted">Containers before this date are ignored. Set to your QMS go-live date.</small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" asp-for="ContainerPoll.PollingMinutes">Pull every (minutes)</label>
+                        <input asp-for="ContainerPoll.PollingMinutes" type="number" min="5" max="1440" step="1"
+                               class="form-control form-control-sm" />
+                        <small class="text-muted">5 minutes – 24 hours (1440). Examples: 60 = hourly, 300 = every 5 h, 1440 = daily.</small>
+                    </div>
+                    <div class="col-md-4 d-flex gap-2">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-save me-1"></i>Save settings
+                        </button>
+                        <button type="submit" formaction="@Url.Action("PullContainersNow")"
+                                class="btn btn-success btn-sm"
+                                title="Override the schedule and pull from SAP immediately">
+                            <i class="bi bi-cloud-download me-1"></i>Pull now
+                        </button>
+                    </div>
+                </div>
+                <div class="small mt-3">
+                    @if (Model.ContainerPoll.IsRunning && Model.ContainerPoll.RunningSince.HasValue)
+                    {
+                        var elapsedSec = (int)Math.Max(0, (DateTime.UtcNow - Model.ContainerPoll.RunningSince.Value).TotalSeconds);
+                        <span class="text-info">
+                            <i class="bi bi-arrow-repeat me-1"></i>
+                            <strong>Currently pulling…</strong>
+                            started @Model.ContainerPoll.RunningSince.Value.ToLocalTime().ToString("HH:mm:ss")
+                            (elapsed @(elapsedSec / 60) min @(elapsedSec % 60) s) — refresh this page to update.
+                        </span>
+                        <br />
+                    }
+                    <strong>Last pull:</strong>
+                    <span class="@(Model.ContainerPoll.LastRunUtc.HasValue ? "" : "text-muted")">
+                        @(Model.ContainerPoll.LastRunUtc.HasValue ? Model.ContainerPoll.LastRunUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "never")
+                    </span>
+                    @if (Model.ContainerPoll.LastRowCount.HasValue)
+                    {
+                        <span class="text-muted ms-2">(@Model.ContainerPoll.LastRowCount rows fetched)</span>
+                    }
+                    @if (!string.IsNullOrWhiteSpace(Model.ContainerPoll.LastResult))
+                    {
+                        var okPoll = Model.ContainerPoll.LastResult!.StartsWith("Fetched", StringComparison.OrdinalIgnoreCase)
+                                  || Model.ContainerPoll.LastResult.StartsWith("OK", StringComparison.OrdinalIgnoreCase);
+                        <span class="ms-2 @(okPoll ? "text-success" : "text-danger")">— @Model.ContainerPoll.LastResult</span>
+                    }
+                </div>
+            </form>
         </div>
     </div>
 </div>

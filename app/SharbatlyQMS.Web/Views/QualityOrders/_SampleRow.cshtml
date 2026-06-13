@@ -28,7 +28,15 @@
     <td>@Hv("PALLET_NO", s.PalletNo)</td>
     <td>@Hv("LOT_NO", s.LotNo)</td>
     <td>@Hv("DATE_CODE", s.DateCode)</td>
-    <td class="text-end">@s.SampleSize</td>
+    <td class="text-end">
+        @s.SampleSize
+        @if (s.SizeOverridden)
+        {
+            <span class="badge bg-warning text-dark ms-1" title="Sample-level override">
+                <i class="bi bi-pencil-square"></i>
+            </span>
+        }
+    </td>
     <td class="text-end small text-muted">@s.CreatedAt.ToLocalTime():g<br />@s.CreatedBy</td>
     <td class="text-end">
         <button type="button" class="btn btn-sm btn-outline-primary sample-open"

@@ -124,6 +124,19 @@
                     <i class="bi bi-pause-circle me-1"></i>Hold Claim
                 </button>
             }
+            @* "Send report to supplier" is available only after the claim is
+               approved. The modal markup + JS live in QualityOrders/Details.cshtml
+               (this panel is rendered inside that view in claim context, so the
+               modal is in scope). *@
+            @if ((bool?)ViewBag.SendMailEnabled == true
+                 && claim != null
+                 && claim.ClaimStatus == ClaimStatus.ClaimRequestApproved)
+            {
+                <button type="button" class="btn btn-info"
+                        data-bs-toggle="modal" data-bs-target="#sendReportModal">
+                    <i class="bi bi-envelope-paper me-1"></i>Send report to supplier
+                </button>
+            }
             @if (claim != null && !qmCanAct && !cmCanAct && canComment)
             {
                 <span class="text-muted small align-self-center">

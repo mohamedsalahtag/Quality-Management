@@ -82,13 +82,19 @@
                 </button>
                 <div class="collapse navbar-collapse" id="mainNav">
                     <ul class="navbar-nav me-auto">
+                        @{
+                            // Pending Containers is hosted under ArrivalsController so we
+                            // distinguish by action to highlight the right nav item.
+                            var onPending  = NavOn("Arrivals") && ActOn("Pending");
+                            var onArrivals = NavOn("Arrivals") && !ActOn("Pending");
+                        }
                         <li class="nav-item">
-                            <a class="nav-link @(NavOn("Home") ? "active" : "")" aria-current="@(NavOn("Home") ? "page" : null)" asp-controller="Home" asp-action="Index">
-                                <i class="bi bi-speedometer2 me-1"></i>Dashboard
+                            <a class="nav-link @(onPending ? "active" : "")" aria-current="@(onPending ? "page" : null)" asp-controller="Arrivals" asp-action="Pending">
+                                <i class="bi bi-inbox me-1"></i>Pending Containers
                             </a>
                         </li>
                         <li class="nav-item">
-                            <a class="nav-link @(NavOn("Arrivals") ? "active" : "")" aria-current="@(NavOn("Arrivals") ? "page" : null)" asp-controller="Arrivals" asp-action="Index">
+                            <a class="nav-link @(onArrivals ? "active" : "")" aria-current="@(onArrivals ? "page" : null)" asp-controller="Arrivals" asp-action="Index">
                                 <i class="bi bi-box-arrow-in-down me-1"></i>Arrivals
                             </a>
                         </li>
@@ -99,7 +105,7 @@
                         </li>
                         <li class="nav-item">
                             <a class="nav-link @(NavOn("ClaimManagement") ? "active" : "")" aria-current="@(NavOn("ClaimManagement") ? "page" : null)" asp-controller="ClaimManagement" asp-action="Index">
-                                <i class="bi bi-shield-exclamation me-1"></i>Claim Management
+                                <i class="bi bi-shield-exclamation me-1"></i>Claims
                             </a>
                         </li>
                         @if (canSeeParameters)

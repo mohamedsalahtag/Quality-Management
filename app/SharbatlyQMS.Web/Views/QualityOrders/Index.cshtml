@@ -43,7 +43,7 @@
 
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="15">
+        <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="50">
             <thead class="table-light">
                 <tr>
                     <th data-sort>QO Number</th>
@@ -56,7 +56,7 @@
                     <th data-sort>Created</th>
                     <th data-sort>Created By</th>
                     <th data-sort>Closed</th>
-                    <th class="text-end">Open</th>
+                    <th class="text-end">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -93,9 +93,15 @@
                             <td>@q.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
                             <td>@q.CreatedBy</td>
                             <td>@(q.ClosedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
-                            <td class="text-end">
-                                <a asp-action="Details" asp-route-id="@q.QualityOrderId" class="btn btn-sm btn-outline-primary">
+                            <td class="text-end text-nowrap">
+                                <a asp-action="Details" asp-route-id="@q.QualityOrderId"
+                                   class="btn btn-sm btn-outline-primary" title="Open Quality Order">
                                     <i class="bi bi-eye"></i>
+                                </a>
+                                <a asp-controller="Reports" asp-action="QualityOrderPdf" asp-route-id="@q.QualityOrderId"
+                                   class="btn btn-sm btn-outline-danger ms-1" target="_blank"
+                                   title="Download Quality Order PDF report">
+                                    <i class="bi bi-file-earmark-pdf"></i>
                                 </a>
                             </td>
                         </tr>

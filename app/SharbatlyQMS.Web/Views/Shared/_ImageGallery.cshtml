@@ -19,24 +19,43 @@
                 <input type="hidden" name="ownerId"   value="@Model.OwnerId" />
                 <input type="hidden" name="returnUrl" value="@returnUrl" />
                 <div class="row g-2 align-items-end">
-                    <div class="col-md-4">
-                        <label class="form-label mb-1">Category</label>
-                        <select name="category" class="form-select" required>
-                            @foreach (var cat in Model.Categories)
-                            {
-                                <option value="@cat">@cat</option>
-                            }
-                        </select>
-                    </div>
-                    <div class="col-md-6">
-                        <label class="form-label mb-1">Files</label>
-                        <input type="file" name="files" class="form-control" multiple accept="image/*" required />
-                    </div>
-                    <div class="col-md-2">
-                        <button type="submit" class="btn btn-primary w-100">
-                            <i class="bi bi-cloud-upload me-1"></i>Upload
-                        </button>
-                    </div>
+                    @if (Model.Categories.Length > 0)
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label mb-1">Category</label>
+                            <select name="category" class="form-select" required>
+                                @foreach (var cat in Model.Categories)
+                                {
+                                    <option value="@cat">@cat</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label mb-1">Files</label>
+                            <input type="file" name="files" class="form-control" multiple accept="image/*" required />
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="bi bi-cloud-upload me-1"></i>Upload
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        @* No categories configured (e.g. QO material photos) -
+                           hide the dropdown and post an empty category. The
+                           server tolerates a blank value. *@
+                        <input type="hidden" name="category" value="" />
+                        <div class="col-md-10">
+                            <label class="form-label mb-1">Files</label>
+                            <input type="file" name="files" class="form-control" multiple accept="image/*" required />
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="bi bi-cloud-upload me-1"></i>Upload
+                            </button>
+                        </div>
+                    }
                 </div>
                 <small class="text-muted d-block mt-1">JPG / PNG / GIF / WEBP. Max 10 MB each.</small>
             </form>

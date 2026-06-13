@@ -205,4 +205,4 @@ C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\SixLabors.Fonts.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\bin\Debug\net9.0\System.IO.Packaging.dll
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\SharbatlyQMS.Web.sourcelink.json
 C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\49k64jz2zf-{0}-kygju26tev-kygju26tev.gz
-C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\21953o15qz-{0}-4vcd4djrgj-4vcd4djrgj.gz
+C:\QualityManagemet\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\21953o15qz-{0}-y2r418mmqx-y2r418mmqx.gz

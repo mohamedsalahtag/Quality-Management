@@ -70,16 +70,16 @@ build_metadata.AdditionalFiles.CssScope =
 build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQXJyaXZhbHNcSW5kZXguY3NodG1s
 build_metadata.AdditionalFiles.CssScope = 
 
+[C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Arrivals/Pending.cshtml]
+build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQXJyaXZhbHNcUGVuZGluZy5jc2h0bWw=
+build_metadata.AdditionalFiles.CssScope = 
+
 [C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Arrivals/Search.cshtml]
 build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQXJyaXZhbHNcU2VhcmNoLmNzaHRtbA==
 build_metadata.AdditionalFiles.CssScope = 
 
 [C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Audit/Index.cshtml]
 build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQXVkaXRcSW5kZXguY3NodG1s
-build_metadata.AdditionalFiles.CssScope = 
-
-[C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Audit/_AuditHistory.cshtml]
-build_metadata.AdditionalFiles.TargetPath = Vmlld3NcQXVkaXRcX0F1ZGl0SGlzdG9yeS5jc2h0bWw=
 build_metadata.AdditionalFiles.CssScope = 
 
 [C:/QualityManagemet/app/SharbatlyQMS.Web/Views/Audit/_AuditHistoryRows.cshtml]

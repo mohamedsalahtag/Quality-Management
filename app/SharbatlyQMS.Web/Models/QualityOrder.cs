@@ -81,6 +81,7 @@ public class Sample
     public string?   CartonIdentifier   { get; set; }
     public string    SampleScope        { get; set; } = "OneCarton";
     public short?    SampleSize         { get; set; }
+    public bool      SizeOverridden     { get; set; }
     public string?   Grower             { get; set; }
     public string?   PalletNo           { get; set; }
     public string?   GrowerPallet       { get; set; }

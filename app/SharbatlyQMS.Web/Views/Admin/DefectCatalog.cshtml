@@ -13,7 +13,10 @@
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h1 class="h3 mb-0"><i class="bi bi-list-check me-1"></i>Defect Catalog</h1>
+    <h1 class="h3 mb-0">
+        <i class="bi bi-list-check me-1"></i>Defect Catalog
+        <small class="text-muted fs-6 fw-normal ms-2">Defects per material group; the Category drives the Major/Minor split.</small>
+    </h1>
     <div class="d-flex gap-2">
         <form method="get" asp-action="DefectCatalog" class="d-flex gap-2">
             <select name="materialGroup" class="form-select form-select-sm" onchange="this.form.submit()">
@@ -38,11 +41,10 @@
         </button>
     </div>
 </div>
-<p class="text-muted small">Each defect belongs to one material group. The same defect code can repeat across groups (e.g. <code>CRACK</code> for FRSH-APP and another group). The <strong>Category</strong> column drives the Major / Minor split on the sample form.</p>
 
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="20">
+        <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="50">
             <thead class="table-light">
                 <tr>
                     <th style="width:1%" data-sort="num" title="Sort order">#</th>

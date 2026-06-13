@@ -35,6 +35,21 @@ public class StubSapClient : ISapClient
         return Task.FromResult<IReadOnlyList<SapShipmentRow>>(rs.ToList());
     }
 
+    public async Task<int> FetchSinceAsync(
+        DateOnly sinceDocDate,
+        Func<IReadOnlyList<SapShipmentRow>, CancellationToken, Task> onPage,
+        CancellationToken ct = default)
+    {
+        // The stub data has no TOC_DATE; use ArrivalDate as a proxy for
+        // "document date" so dev mode still produces realistic rows.
+        var matched = Rows
+            .Where(r => r.ArrivalDate.HasValue && r.ArrivalDate.Value >= sinceDocDate)
+            .ToList();
+        if (matched.Count > 0)
+            await onPage(matched, ct);
+        return matched.Count;
+    }
+
     private static List<SapShipmentRow> BuildSampleRows() => new()
     {
         // -- Apple shipment from South Africa, container CMAU1234567, BOL MSCUAB1234 ---

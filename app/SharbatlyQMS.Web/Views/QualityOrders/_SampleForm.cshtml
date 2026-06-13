@@ -89,11 +89,15 @@
     <div class="alert alert-info small mb-2 py-2"><i class="bi bi-lock me-1"></i>Read-only because the Quality Order is <strong>@qo.StatusCode</strong>.</div>
 }
 
-@* data-sample-size carries the MATERIAL's sample size (inherited by every
-   sample); the live defect-% JS uses it as the denominator since the form no
-   longer has a Sample Size input. *@
+@* data-sample-size is the defect-% denominator for the live JS. It carries
+   the sample's effective size: the per-sample override if set (V24+),
+   otherwise the material's default. Updated client-side whenever the user
+   edits the Sample Size input. *@
+@{
+    short? effectiveSampleSize = s.SampleSize ?? qoMat?.SampleSize;
+}
 <form asp-action="SaveSample" method="post" class="sample-form"
-      data-sample-size="@(qoMat?.SampleSize)">
+      data-sample-size="@(effectiveSampleSize)">
     @Html.AntiForgeryToken()
     <input type="hidden" name="SampleId"       value="@s.SampleId" />
     <input type="hidden" name="QualityOrderId" value="@s.QualityOrderId" />
@@ -113,6 +117,28 @@
             <div class="card-header bg-primary text-white">Sample header</div>
             <div class="card-body">
                 <div class="row g-1">
+                    @* V24: Sample Size is editable per sample. Prefilled from
+                       the material's default; controller flags SizeOverridden
+                       when the posted value differs, so the material-level
+                       propagation UPDATE skips this row. *@
+                    <div class="col-6 col-md-3">
+                        <label class="form-label">
+                            Sample Size <span class="text-muted">(inspected qty)</span>
+                        </label>
+                        <input name="SampleSize" type="number" min="1" step="1" inputmode="numeric"
+                               class="form-control form-control-sm sample-size-input"
+                               value="@(effectiveSampleSize)" />
+                        @if (s.SizeOverridden)
+                        {
+                            <small class="text-warning d-block">
+                                <i class="bi bi-pencil-square me-1"></i>Overridden — material default: @(qoMat?.SampleSize?.ToString() ?? "—")
+                            </small>
+                        }
+                        else
+                        {
+                            <small class="text-muted d-block">Default from material: @(qoMat?.SampleSize?.ToString() ?? "—")</small>
+                        }
+                    </div>
                     @* Dynamic Sample-scoped header fields from qms_sample_header_field. *@
                     @foreach (var f in Model.HeaderFields)
                     {
@@ -160,41 +186,90 @@
            For a NEW sample, the GROSS_WEIGHT reading is pre-filled from the
            material's weight pulled from MARA (qoMat.NetWeight) so the
            operator doesn't retype the same number. Existing samples keep
-           whatever value was saved. *@
+           whatever value was saved.
+
+           NET_WEIGHT is reserved and computed = GROSS - TARA. The Razor
+           code below tags Gross / Tara / Net inputs with data-weight-role
+           hooks so the inline JS at the bottom of the form can keep Net
+           in sync as the operator types. Net is rendered read-only; the
+           controller recomputes it server-side too (authoritative). *@
         @{
             var isNewSampleForm = s.SampleId == 0;
             decimal? maraWeight = qoMat?.NetWeight;
+            bool IsGrossCode(string c) =>
+                string.Equals(c, "GROSS_WEIGHT", StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c, "GROSS",        StringComparison.OrdinalIgnoreCase);
+            bool IsTaraCode(string c) =>
+                string.Equals(c, "TARA",         StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c, "TARA_WEIGHT",  StringComparison.OrdinalIgnoreCase);
+            bool IsNetCode(string c) =>
+                string.Equals(c, "NET_WEIGHT",   StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(c, "NET",          StringComparison.OrdinalIgnoreCase);
+            // Pre-compute the displayed NET value: prefer (gross-tara) when
+            // both readings are present, else fall back to whatever was
+            // stored (or autoFill GROSS for a brand-new sample).
+            decimal? grossStored = readingTypes.Where(r => IsGrossCode(r.ReadingTypeCode))
+                                               .Select(r => RnumOf(r.ReadingTypeCode))
+                                               .FirstOrDefault();
+            decimal? taraStored  = readingTypes.Where(r => IsTaraCode(r.ReadingTypeCode))
+                                               .Select(r => RnumOf(r.ReadingTypeCode))
+                                               .FirstOrDefault();
         }
         <div class="section-label">Readings</div>
         <div class="row g-1">
             @foreach (var rt in readingTypes)
             {
                 var stored = RnumOf(rt.ReadingTypeCode);
-                // Auto-fill rule: code "GROSS_WEIGHT" (or just "GROSS") on a
-                // new sample defaults to the material weight when no operator
-                // entry exists yet. Cast to the typed input value.
+                bool isGross = IsGrossCode(rt.ReadingTypeCode);
+                bool isTara  = IsTaraCode(rt.ReadingTypeCode);
+                bool isNet   = IsNetCode(rt.ReadingTypeCode);
+                // Auto-fill rule: GROSS on a new sample defaults to the
+                // material weight when no operator entry exists yet.
                 decimal? autoFill = null;
-                if (isNewSampleForm && stored == null && maraWeight.HasValue && maraWeight.Value > 0 &&
-                    (string.Equals(rt.ReadingTypeCode, "GROSS_WEIGHT", StringComparison.OrdinalIgnoreCase) ||
-                     string.Equals(rt.ReadingTypeCode, "GROSS", StringComparison.OrdinalIgnoreCase)))
+                if (isNewSampleForm && stored == null && maraWeight.HasValue && maraWeight.Value > 0 && isGross)
                 {
                     autoFill = maraWeight.Value;
                 }
                 var numValue = stored ?? autoFill;
+                // NET: render as GROSS - TARA when both sides have a value
+                // (including the GROSS autoFill). Falls through to stored
+                // value when one side is missing.
+                if (isNet)
+                {
+                    var effGross = grossStored ?? (isNewSampleForm && maraWeight.HasValue && maraWeight.Value > 0 ? maraWeight : null);
+                    if (effGross.HasValue && taraStored.HasValue)
+                        numValue = decimal.Round(effGross.Value - taraStored.Value, 2);
+                }
+                string weightRole = isGross ? "gross" : isTara ? "tara" : isNet ? "net" : "";
                 <div class="col-6 col-md-3">
                     <label class="form-label">
                         @rt.ReadingName <span class="text-muted">@rt.DefaultUnit</span>
-                        @if (rt.IsMandatory)
+                        @if (rt.IsMandatory && !isNet)
                         {
                             <span class="text-danger fw-bold"
                                   title="Required — sample cannot be saved without this value">*</span>
                         }
+                        @if (isNet)
+                        {
+                            <span class="badge bg-secondary ms-1" title="Computed: Gross − Tara">auto</span>
+                        }
                     </label>
                     @if (rt.ValueKind == "Numeric")
                     {
-                        <input name="reading_@(rt.ReadingTypeCode)_num" type="number" step="any" inputmode="decimal"
-                               class="form-control form-control-sm @(rt.IsMandatory ? "is-mandatory-reading" : "")"
-                               value="@numValue" required="@(rt.IsMandatory)" />
+                        if (isNet)
+                        {
+                            <input name="reading_@(rt.ReadingTypeCode)_num" type="number" step="any" inputmode="decimal"
+                                   class="form-control form-control-sm bg-light"
+                                   value="@numValue" readonly tabindex="-1"
+                                   data-weight-role="net" />
+                        }
+                        else
+                        {
+                            <input name="reading_@(rt.ReadingTypeCode)_num" type="number" step="any" inputmode="decimal"
+                                   class="form-control form-control-sm @(rt.IsMandatory ? "is-mandatory-reading" : "")"
+                                   value="@numValue" required="@(rt.IsMandatory)"
+                                   @(weightRole != "" ? $"data-weight-role={weightRole}" : "") />
+                        }
                     }
                     else
                     {
@@ -245,7 +320,7 @@
                             }
                             <input name="defect_@(d.DefectId)_value" type="number"
                                    inputmode="@(isDecimal ? "decimal" : "numeric")"
-                                   min="0" step="@(isDecimal ? "any" : "1")"
+                                   min="0" max="@effectiveSampleSize" step="@(isDecimal ? "any" : "1")"
                                    class="form-control form-control-sm defect-value" data-id="@d.DefectId"
                                    value="@valDisplay" />
                             @if (editable)

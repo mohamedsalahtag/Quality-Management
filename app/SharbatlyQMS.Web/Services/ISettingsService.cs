@@ -29,6 +29,10 @@ public interface ISettingsService
     Task<AlertConfig> GetAlertConfigAsync();
     Task SaveAlertConfigAsync(AlertConfig cfg, int? updatedBy);
 
+    // ---- SAP Container polling (Pending Containers feature) ----
+    Task<ContainerPollConfig> GetContainerPollConfigAsync();
+    Task SaveContainerPollConfigAsync(ContainerPollConfig cfg, int? updatedBy);
+
     // ---- Auto Sync schedule (legacy global; superseded by per-endpoint below) ----
     Task<AutoSyncConfig> GetAutoSyncConfigAsync();
     Task SaveAutoSyncConfigAsync(AutoSyncConfig cfg, int? updatedBy);
@@ -112,6 +116,10 @@ public static class SettingKeys
     public const string AlertOpenQoDays       = "alert_open_qo_days";
     public const string AlertDefectPctRed     = "alert_defect_pct_red";
     public const string AlertDefectPctYellow  = "alert_defect_pct_yellow";
+
+    // SAP container polling (Pending Containers page)
+    public const string ContainerStartDate   = "Container.PreCollectedStartDate";
+    public const string ContainerPollMinutes = "Container.PollingIntervalMinutes";
 
     // Auto sync
     public const string AutoSyncEnabled      = "Sync.Auto.Enabled";
@@ -334,6 +342,23 @@ public class AlertConfig
     public int OpenQoDays       { get; set; } = 7;
     public int DefectPctRed     { get; set; } = 10;
     public int DefectPctYellow  { get; set; } = 5;
+}
+
+public class ContainerPollConfig
+{
+    /// <summary>Earliest SAP Doc_Date to consider. Null = polling disabled.</summary>
+    public DateOnly? StartDate     { get; set; }
+    /// <summary>How often the polling service should hit SAP, in minutes. Default 60.</summary>
+    public int       PollingMinutes{ get; set; } = 60;
+    /// <summary>Read-only metadata for the Settings UI status line (last
+    /// COMPLETED pull -- in-flight runs are surfaced via <see cref="IsRunning"/>).</summary>
+    public DateTime? LastRunUtc    { get; set; }
+    public string?   LastResult    { get; set; }
+    public int?      LastRowCount  { get; set; }
+    /// <summary>True when a pull is currently in flight (sync_log row with no completed_at).</summary>
+    public bool      IsRunning     { get; set; }
+    /// <summary>When the in-flight pull started; only set when <see cref="IsRunning"/> is true.</summary>
+    public DateTime? RunningSince  { get; set; }
 }
 
 public class AutoSyncConfig

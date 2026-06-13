@@ -1,0 +1,213 @@
+@using SharbatlyQMS.Web.Services
+@model IReadOnlyList<PendingPickupRow>
+@{
+    ViewData["Title"] = "Pending Containers";
+    var container = ViewBag.Container as string;
+    var bol       = ViewBag.Bol       as string;
+    var po        = ViewBag.Po        as string;
+    bool filtered = !string.IsNullOrWhiteSpace(container)
+                    || !string.IsNullOrWhiteSpace(bol)
+                    || !string.IsNullOrWhiteSpace(po);
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h1 class="h3 mb-0">
+        <i class="bi bi-inbox me-1"></i>Pending Containers
+        <span class="badge bg-secondary ms-2">@Model.Count</span>
+        <small class="text-muted fs-6 fw-normal ms-2">SAP containers without a QMS Arrival yet.</small>
+    </h1>
+    <div class="btn-group">
+        <a asp-action="Index" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left me-1"></i>Back to arrivals
+        </a>
+        <a asp-action="Search" class="btn btn-outline-primary">
+            <i class="bi bi-search me-1"></i>Search SAP directly
+        </a>
+    </div>
+</div>
+
+@if (TempData["Success"] is string ok)  { <div class="alert alert-success">@ok</div> }
+@if (TempData["Error"]   is string err) { <div class="alert alert-danger">@err</div> }
+
+@* ---- Filter form: contains-match on container / BOL / PO ---- *@
+<form method="get" class="row g-2 mb-3">
+    <div class="col-md-3">
+        <label class="form-label small mb-1">Container</label>
+        <input type="text" name="container" value="@container" class="form-control form-control-sm"
+               placeholder="e.g. CMAU1234567" autocomplete="off" />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label small mb-1">BOL</label>
+        <input type="text" name="bol" value="@bol" class="form-control form-control-sm"
+               placeholder="e.g. MSCUAB1234" autocomplete="off" />
+    </div>
+    <div class="col-md-3">
+        <label class="form-label small mb-1">PO</label>
+        <input type="text" name="po" value="@po" class="form-control form-control-sm"
+               placeholder="EBELN" autocomplete="off" />
+    </div>
+    <div class="col-md-3 d-flex align-items-end gap-2">
+        <button type="submit" class="btn btn-primary btn-sm">
+            <i class="bi bi-funnel me-1"></i>Filter
+        </button>
+        @if (filtered)
+        {
+            <a asp-action="Pending" class="btn btn-outline-secondary btn-sm">Clear</a>
+        }
+    </div>
+</form>
+
+<style>
+    /* Materials "peek": first material inline + count badge if there's
+       more. Full list lives in the Bootstrap tooltip so the row stays
+       on one line but the operator can hover to read everything. */
+    .pp-peek         { display: flex; align-items: center; gap: .35rem;
+                       max-width: 360px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .pp-peek .pp-no  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                       font-size: .75rem; color: var(--bs-secondary-color, #6c757d); }
+    .pp-peek .pp-name{ text-overflow: ellipsis; overflow: hidden; }
+    /* The tooltip body is rendered as HTML so we can lay it out cleanly. */
+    .tooltip-inner   { max-width: 460px; text-align: left; }
+    .pp-tip          { margin: 0; padding: 0; list-style: none; font-size: .8rem; }
+    .pp-tip li       { padding: 2px 0; border-bottom: 1px dashed rgba(255,255,255,.18); }
+    .pp-tip li:last-child { border-bottom: 0; }
+    .pp-tip .pp-tip-no   { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+                           opacity: .8; margin-right: .35rem; }
+    .pp-tip .pp-tip-qty  { opacity: .8; margin-left: .35rem; }
+</style>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="50">
+            <thead class="table-light">
+                <tr>
+                    <th data-sort>Container</th>
+                    <th data-sort>BOL</th>
+                    <th data-sort>PO</th>
+                    <th data-sort>Type</th>
+                    <th data-sort>Vendor</th>
+                    <th class="text-end" data-sort="num">Lines</th>
+                    <th>Materials</th>
+                    <th data-sort>Doc date</th>
+                    <th data-sort>Arrival date</th>
+                    <th class="text-end">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Count == 0)
+            {
+                <tr><td colspan="10" class="text-center text-muted py-4">
+                    @if (filtered)
+                    {
+                        <span>No pending containers match the filter. <a asp-action="Pending">Clear</a> to see all.</span>
+                    }
+                    else
+                    {
+                        <span>No pending containers — every SAP shipment since the configured start date already has a QMS Arrival.</span>
+                    }
+                </td></tr>
+            }
+            else
+            {
+                foreach (var r in Model)
+                {
+                    var firstMat = r.MaterialLines.FirstOrDefault();
+                    var extra    = r.MaterialLines.Count - 1;
+                    // Tooltip HTML: one <li> per material with code, name, qty/uom.
+                    var tipHtml = "<ul class='pp-tip'>" +
+                        string.Concat(r.MaterialLines.Select(ml =>
+                            "<li>" +
+                                "<span class='pp-tip-no'>" + System.Net.WebUtility.HtmlEncode(ml.MaterialNo ?? "") + "</span>" +
+                                System.Net.WebUtility.HtmlEncode(ml.MaterialDesc ?? "(no description)") +
+                                (ml.Quantity.HasValue && ml.Quantity.Value > 0
+                                    ? "<span class='pp-tip-qty'>" + ml.Quantity.Value.ToString("0.##") + " " + System.Net.WebUtility.HtmlEncode(ml.Uom ?? "") + "</span>"
+                                    : "") +
+                            "</li>")) +
+                        "</ul>";
+                    <tr>
+                        <td><strong>@r.ContainerNo</strong></td>
+                        <td>@r.BolNo</td>
+                        <td>@r.Ebeln</td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(r.PoType))
+                            {
+                                <span class="badge bg-light text-dark border">@r.PoType</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td>
+                            @r.VendorName
+                            @if (!string.IsNullOrEmpty(r.VendorNo))
+                            {
+                                <div class="text-muted small">@r.VendorNo</div>
+                            }
+                        </td>
+                        <td class="text-end">
+                            @if (r.LineCount > 1)
+                            {
+                                <span class="badge bg-warning text-dark"
+                                      title="@r.LineCount material lines under one Container/BOL/PO — one Arrival will cover them all.">@r.LineCount</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">@r.LineCount</span>
+                            }
+                        </td>
+                        <td>
+                            @if (firstMat == null)
+                            {
+                                <span class="text-muted small fst-italic">No material lines</span>
+                            }
+                            else
+                            {
+                                <div class="pp-peek"
+                                     data-bs-toggle="tooltip"
+                                     data-bs-html="true"
+                                     data-bs-placement="bottom"
+                                     data-bs-title="@tipHtml"
+                                     title="@tipHtml">
+                                    <span class="pp-no">@firstMat.MaterialNo</span>
+                                    <span class="pp-name">@(string.IsNullOrWhiteSpace(firstMat.MaterialDesc) ? "(no description)" : firstMat.MaterialDesc)</span>
+                                    @if (extra > 0)
+                                    {
+                                        <span class="badge bg-primary-subtle text-primary-emphasis">+@extra more</span>
+                                    }
+                                </div>
+                            }
+                        </td>
+                        <td>@(r.DocDate?.ToString("yyyy-MM-dd"))</td>
+                        <td>@(r.ArrivalDate?.ToString("yyyy-MM-dd"))</td>
+                        <td class="text-end">
+                            <form asp-action="Create" method="post" class="d-inline">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="containerNo" value="@r.ContainerNo" />
+                                <input type="hidden" name="bolNo"       value="@r.BolNo" />
+                                <input type="hidden" name="po"          value="@r.Ebeln" />
+                                <button type="submit" class="btn btn-sm btn-primary">
+                                    <i class="bi bi-plus-circle me-1"></i>Create
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    // Initialise Bootstrap tooltips on the materials peek cells. Without
+    // this they're plain title="" tooltips (single line, no HTML).
+    (function () {
+        if (!window.bootstrap || !window.bootstrap.Tooltip) return;
+        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+            new bootstrap.Tooltip(el, { container: 'body' });
+        });
+    })();
+</script>
+}

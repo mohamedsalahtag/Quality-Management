@@ -35,6 +35,14 @@ public class QualityReportData
     /// per-category defect sections + their colours on every sample card.</summary>
     public IReadOnlyList<DefectCategory> Categories { get; set; } = Array.Empty<DefectCategory>();
 
+    /// <summary>Map FieldId → Scope ("Sample"|"Material") for every active
+    /// sample-header field. Lets the renderer split per-sample HeaderValues
+    /// (which carry both scopes after the V23+ copy-down) into the slice that
+    /// belongs on the material card vs. the slice that belongs on each
+    /// sample card. Populated by ReportsController.BuildDataAsync.</summary>
+    public IReadOnlyDictionary<int, string> HeaderFieldScopeById { get; set; }
+        = new Dictionary<int, string>();
+
     // Settings
     public string SiteName     { get; set; } = "Sharbatly Quality Management";
     public string CompanyName  { get; set; } = "Mohamed Abdullah Sharbatly CO. LTD";

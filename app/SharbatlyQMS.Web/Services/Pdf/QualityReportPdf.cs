@@ -61,7 +61,12 @@ public static class QualityReportPdf
         {
             container.Page(page => RenderMainPage(page, d));
 
-            if (d.MaterialImages.Any(kv => kv.Value.Count > 0))
+            // Photo appendix: rendered when EITHER the arrival has photos
+            // OR at least one material has photos. Arrival photos come
+            // first, then material photos grouped by material.
+            bool anyMaterialImgs = d.MaterialImages.Any(kv => kv.Value.Count > 0);
+            bool anyArrivalImgs  = d.ArrivalImages.Count > 0;
+            if (anyMaterialImgs || anyArrivalImgs)
                 container.Page(page => RenderImagesPage(page, d));
         });
         return doc.GeneratePdf();
@@ -107,16 +112,51 @@ public static class QualityReportPdf
                     .Text("(no samples recorded yet -- group summary will appear once samples exist)")
                     .Italic().FontColor(Colors.Grey.Darken1);
 
-            // Per-sample detail cards (was page 2). Section header is a
-            // light band so the reader knows the report has moved from
-            // group summary to raw sample data, but there is NO forced
-            // page break -- QuestPDF flows naturally.
+            // Arrival photos used to render here. They now live at the
+            // start of the appendix page (see RenderImagesPage) so the
+            // main page stays focused on data and all photos sit together
+            // at the back of the report.
+
+            // Per-material grouped detail blocks. Each material's identity
+            // (Product/Brand/Variety/Grade/Group + Material-scoped header
+            // values like Grower/Pallet/Lot/etc.) renders ONCE on a per-
+            // material card; its samples render beneath it showing only
+            // Sample-scoped header values + readings + defects. Eliminates
+            // the per-sample repetition of the material strip.
+            //
+            // d.Samples is already ordered by (QoMaterialId, SampleNo)
+            // (QualityOrderService.ListSamplesAsync), so GroupBy preserves
+            // the table's material order naturally -- no extra OrderBy.
             if (d.Samples.Count > 0)
             {
-                col.Item().PaddingTop(2).Background(AccentLight).Padding(3)
-                    .Text("Sample Details").Bold().FontSize(9).FontColor(Accent);
-                foreach (var s in d.Samples)
-                    col.Item().Element(c => RenderSampleDetail(c, d, s));
+                // "Sample Details" starts on a fresh page (separates the
+                // page-1 grouped summary from the per-material detail), and
+                // EACH material's card also starts on a fresh page so
+                // material details and their samples don't run into the
+                // next material's strip.
+                bool firstMaterial = true;
+                foreach (var grp in d.Samples.GroupBy(s => s.Sample.QoMaterialId))
+                {
+                    col.Item().PageBreak();
+                    if (firstMaterial)
+                    {
+                        col.Item().PaddingBottom(3).Background(AccentLight).Padding(3)
+                            .Text("Sample Details").Bold().FontSize(9).FontColor(Accent);
+                        firstMaterial = false;
+                    }
+
+                    var first = grp.First();
+                    // Material card: ShowEntire so its header never orphans
+                    // at a page bottom with no samples following.
+                    col.Item().ShowEntire().Element(c =>
+                        RenderMaterialCard(c, first.Material, first.MaterialHeaderValues, d.HeaderFieldScopeById));
+
+                    // ShowEntire keeps each sample card whole: if it doesn't
+                    // fit on the current page, QuestPDF moves the entire card
+                    // to the next page instead of splitting it mid-section.
+                    foreach (var s in grp)
+                        col.Item().ShowEntire().Element(c => RenderSampleDetail(c, d, s));
+                }
             }
         });
     }
@@ -207,15 +247,20 @@ public static class QualityReportPdf
                     Field(c, "Logger Serial",    cl?.DataLoggerSerial);
                 });
                 row.RelativeItem().Column(c => {
-                    Field(c, "Seal No",                        cl?.SealNo);
-                    Field(c, "Temperature",                    cl?.SetTemperature?.ToString());
-                    Field(c, "Pulp Temperature",               JoinTemps(cl));
-                    Field(c, "Joint Survey",                   YN(s?.JointSurvey));
-                    Field(c, "Seal Intact?",                   YN(cl?.SealIntact));
-                    Field(c, "External damage to container",   YN(cl?.ExternalDamageExists));
-                    Field(c, "Visual cargo condition acceptable", YN(cl?.VisualCargoAcceptable));
-                    Field(c, "Logger active & data available", YN(cl?.LoggerActiveDataAvailable));
-                    Field(c, "TIME BAR EXCEED",                YN(s?.TimeBarExceeded));
+                    // Col-3 labels are long ("External damage to container",
+                    // "Logger active & data available", etc.). Widen the
+                    // label slot from the default 78 so each label fits on
+                    // one line instead of wrapping.
+                    const float w = 130;
+                    Field(c, "Seal No",                        cl?.SealNo,                          labelWidth: w);
+                    Field(c, "Temperature",                    cl?.SetTemperature?.ToString(),      labelWidth: w);
+                    Field(c, "Pulp Temperature",               JoinTemps(cl),                       labelWidth: w);
+                    Field(c, "Joint Survey",                   YN(s?.JointSurvey),                  labelWidth: w);
+                    Field(c, "Seal Intact?",                   YN(cl?.SealIntact),                  labelWidth: w);
+                    Field(c, "External damage to container",   YN(cl?.ExternalDamageExists),        labelWidth: w);
+                    Field(c, "Visual cargo condition acceptable", YN(cl?.VisualCargoAcceptable),    labelWidth: w);
+                    Field(c, "Logger active & data available", YN(cl?.LoggerActiveDataAvailable),   labelWidth: w);
+                    Field(c, "TIME BAR EXCEED",                YN(s?.TimeBarExceeded),              labelWidth: w);
                 });
             });
 
@@ -330,17 +375,20 @@ public static class QualityReportPdf
             //       looked at -- it just isn't populated for this group.
             col.Item().PaddingTop(2).Row(row =>
             {
+                // Col 1: grouping identity (4 lines). Col 2: Material Group +
+                // counts (4 lines). Col 3: weights (3 lines). Rebalanced from
+                // a 5/3/3 split so the row height drops by one line.
                 row.RelativeItem().Column(c => {
                     Field(c, "Product",        Dash(g.MajorCategory));
                     Field(c, "Brand",          Dash(g.Brand));
                     Field(c, "Variety",        Dash(g.Variety));
                     Field(c, "Grade",          Dash(g.Grade));
-                    Field(c, "Material Group", Dash(g.MaterialGroup));
                 });
                 row.RelativeItem().Column(c => {
-                    Field(c, "Materials",   g.MaterialCount.ToString());
-                    Field(c, "Samples",     g.SampleCount.ToString());
-                    Field(c, "Sample Size", g.SumSampleSize.ToString());
+                    Field(c, "Material Group", Dash(g.MaterialGroup));
+                    Field(c, "Materials",      g.MaterialCount.ToString());
+                    Field(c, "Samples",        g.SampleCount.ToString());
+                    Field(c, "Sample Size",    g.SumSampleSize.ToString());
                 });
                 row.RelativeItem().Column(c => {
                     Field(c, "Gross Weight", g.SumGross.ToString("0.###"));
@@ -366,13 +414,18 @@ public static class QualityReportPdf
                 var sec = g.DefectSections[si];
                 var banner = BannerBg(sec.ColorHex, si);
                 var rowBg  = TintHex(banner);
+                // Every span in the banner reverses to white so the text
+                // stays legible no matter which colour the admin configured
+                // for the category (dark reds, deep greens, etc. used to
+                // swallow the dark-grey "Total:" / "(N defects)" labels).
                 col.Item().PaddingTop(6).Background(banner).Padding(4).Text(t =>
                 {
+                    t.DefaultTextStyle(s => s.FontColor(Colors.White));
                     t.Span(sec.CategoryName.ToUpperInvariant() + " DEFECTS").Bold().FontSize(9);
-                    t.Span("   —   Total: ").FontColor(Colors.Grey.Darken3);
+                    t.Span("   —   Total: ");
                     t.Span(sec.TotalPct.ToString("0.##") + "%").Bold();
                     t.Span($"   ({sec.Rows.Count} defect" + (sec.Rows.Count == 1 ? "" : "s") + ")")
-                        .FontColor(Colors.Grey.Darken2).FontSize(7);
+                        .FontSize(7);
                 });
                 col.Item().Element(c => RenderGroupDefectGrid(c, sec.Rows, rowBg: rowBg));
             }
@@ -415,16 +468,24 @@ public static class QualityReportPdf
         });
     }
 
+    // rowBg=null renders the grid with no cell background -- used by the
+    // per-sample defect sections (2026-05-30) for a cleaner look. The page-1
+    // grouped summary still passes the section's tint so its grid reads as
+    // one coloured band beneath the loud banner.
     private static void RenderGroupDefectGrid(QuestPDF.Infrastructure.IContainer container,
-        IReadOnlyList<DefectAggRow> defects, string rowBg)
+        IReadOnlyList<DefectAggRow> defects, string? rowBg)
     {
         if (defects.Count == 0)
         {
-            container.Background(rowBg).Padding(4)
+            var empty = rowBg != null ? container.Background(rowBg) : container;
+            empty.Padding(4)
                 .Text("No defects are configured for this category in Defect Catalog.")
                 .Italic().FontColor(Colors.Grey.Darken1).FontSize(7);
             return;
         }
+        QuestPDF.Infrastructure.IContainer Cell(QuestPDF.Infrastructure.IContainer c) =>
+            (rowBg != null ? c.Background(rowBg) : c).Border(0.4f).BorderColor(GridLine).Padding(2);
+
         container.Table(table =>
         {
             // 3 column pairs of (defect name, Σ value, %) -- matches the
@@ -442,99 +503,107 @@ public static class QualityReportPdf
             });
             foreach (var d in defects)
             {
-                table.Cell().Background(rowBg).Border(0.4f).BorderColor(GridLine).Padding(2)
-                    .Text(d.Name).FontSize(7);
-                table.Cell().Background(rowBg).Border(0.4f).BorderColor(GridLine).Padding(2)
-                    .AlignRight().Text(d.SumValue.ToString("0.##")).FontSize(7);
-                table.Cell().Background(rowBg).Border(0.4f).BorderColor(GridLine).Padding(2)
-                    .AlignRight().Text(d.Percentage.ToString("0.##") + "%").FontSize(7);
+                Cell(table.Cell()).Text(d.Name).FontSize(7);
+                Cell(table.Cell()).AlignRight().Text(d.SumValue.ToString("0.##")).FontSize(7);
+                Cell(table.Cell()).AlignRight().Text(d.Percentage.ToString("0.##") + "%").FontSize(7);
             }
             var leftover = (3 - (defects.Count % 3)) % 3;
             for (int k = 0; k < leftover; k++)
             {
-                // Pad with same bg so the row reads as one visual band,
-                // not "section ends mid-row".
-                table.Cell().Background(rowBg).Border(0.4f).BorderColor(GridLine).Padding(2).Text("");
-                table.Cell().Background(rowBg).Border(0.4f).BorderColor(GridLine).Padding(2).Text("");
-                table.Cell().Background(rowBg).Border(0.4f).BorderColor(GridLine).Padding(2).Text("");
+                Cell(table.Cell()).Text("");
+                Cell(table.Cell()).Text("");
+                Cell(table.Cell()).Text("");
             }
         });
     }
 
-    // ============================ Per-sample card ============================
-    // Compact per-sample card. Header identifies the sample (QO / number /
-    // material / creator). The grouping fields (Product / Brand / Variety /
-    // Grade / Material Group) repeat so each card is self-contained for
-    // photocopying / sharing a single page. Defects use the same Major /
-    // Minor banner+grid layout as the page-1 grouped summary, iterating the
-    // FULL active catalog for the sample's material_group -- zeros render
-    // for any defect the operator didn't record, so a sample with no
-    // defects still shows every name.
-    private static void RenderSampleDetail(QuestPDF.Infrastructure.IContainer container,
-        QualityReportData d, SampleBundle s)
+    // ============================ Per-material card ==========================
+    // Rendered ONCE per material above its sample cards (2026-05-30). Carries
+    // the material's identity (Product/Brand/Variety/Grade/Group + Sample Size
+    // + Size + Pack Type) plus every Material-scoped header value
+    // (Grower/Pallet/Pack Code/Date Code/Label/Lot/etc., admin-configured at
+    // /Admin/SampleHeaders with scope="Material"). Eliminates the duplication
+    // of these fields across every sample card under the same material.
+    private static void RenderMaterialCard(QuestPDF.Infrastructure.IContainer container,
+        QualityOrderMaterial? m, List<MaterialHeaderValue> materialHeaderValues,
+        IReadOnlyDictionary<int, string> scopeById)
     {
-        var m = s.Material;
-        container.Border(0.6f).BorderColor(GridLine).Padding(4).Column(col =>
+        container.Border(0.8f).BorderColor(Accent).Padding(4).Column(col =>
         {
-            // ---- Header bar with sample identity
-            col.Item().Background(AccentLight).Padding(3).Row(hr =>
+            // ---- Material header bar (slightly stronger than the per-sample
+            //      card so it visually anchors the group below it).
+            col.Item().Background(AccentLight).Padding(3).Text(t =>
             {
-                hr.RelativeItem().Text(t =>
+                t.Span("Material  ").Bold().FontColor(Accent);
+                t.Span(m?.MaterialNo ?? "").Bold().FontColor(Accent);
+                if (!string.IsNullOrWhiteSpace(m?.MaterialDesc))
                 {
-                    t.Span("Sample #").Bold().FontColor(Accent);
-                    t.Span(s.Sample.SampleNo.ToString()).Bold().FontColor(Accent);
-                    t.Span("   ").FontColor(Colors.Grey.Darken1);
-                    t.Span(m?.MaterialNo ?? "");
-                    if (!string.IsNullOrWhiteSpace(m?.MaterialDesc))
-                    {
-                        t.Span(" — ").FontColor(Colors.Grey.Darken1);
-                        t.Span(m!.MaterialDesc!);
-                    }
-                });
-                hr.ConstantItem(160).AlignRight().Text(t =>
-                {
-                    t.DefaultTextStyle(st => st.FontSize(7).FontColor(Colors.Grey.Darken1));
-                    t.Span("QO ");
-                    t.Span(d.QualityOrder.QualityOrderNo).Bold();
-                    t.Span("  ·  by ");
-                    t.Span(s.Sample.CreatedBy);
-                });
+                    t.Span(" — ").FontColor(Colors.Grey.Darken1);
+                    t.Span(m!.MaterialDesc!);
+                }
             });
 
-            // ---- Material info (col 1) + dynamic sample header fields
-            // (cols 2+3). Material columns are NOT configurable (they come
-            // from MARA). Sample Size is hardcoded at the top of col 2 --
-            // every defect percentage divides by it. The remaining inputs
-            // come from qms_sample_header_field (V20+), so adding a new
-            // header field in /Admin/SampleHeaders makes it appear here
-            // automatically with no code change.
-            //
-            // Header values are interleaved 2-up across cols 2 and 3 to
-            // keep the per-sample card compact regardless of how many
-            // header fields the admin defines.
+            // ---- Header cells: Sample Size (V21+ material-level source of
+            //      truth), Size, Pack Type, then every Material-scoped header
+            //      value in sort order. Defensive: also include any value
+            //      whose field is unknown to the scope map (e.g. a brand new
+            //      field added between fetch and render) so nothing silently
+            //      disappears.
             var headerCells = new List<(string Label, string Value)>
             {
-                ("Sample Size", Dash(s.Sample.SampleSize?.ToString())),
+                ("Sample Size", Dash(m?.SampleSize?.ToString())),
                 ("Size",        Dash(m?.MaterialSize)),
                 ("Pack Type",   Dash(m?.PackType)),
             };
-            // Sample header values now include the Material-scoped fields too
-            // (copied onto each sample, V23+), so a single loop prints both the
-            // sample's own and the inherited material identification fields.
-            foreach (var hv in s.HeaderValues.OrderBy(h => h.SortOrder).ThenBy(h => h.FieldName))
+
+            // Helper: format one MaterialHeaderValue's value by its kind.
+            static string FormatValue(MaterialHeaderValue hv) => hv.ValueKind switch
             {
-                string val = hv.ValueKind switch
+                "Numeric" => hv.NumericValue?.ToString("0.##") ?? "",
+                "Date"    => hv.DateValue?.ToString("yyyy-MM-dd") ?? "",
+                _         => hv.TextValue ?? ""
+            };
+
+            // Five always-show identity fields. Even when no value has been
+            // entered for one (or the field isn't in the admin catalog) we
+            // still print the row with "—" so the reader sees that the slot
+            // exists. Keyed by qms_sample_header_field.field_code so an admin
+            // can rename the label without breaking this; case-insensitive.
+            // Renders BEFORE the other Material-scoped values, and the
+            // catalog-driven loop below skips any value already shown here so
+            // the field isn't printed twice.
+            var alwaysShow = new (string Code, string Label)[]
+            {
+                ("GROWER",    "Grower"),
+                ("PALLET_NO", "Pallet No"),
+                ("PACK_CODE", "Pack Code"),
+                ("DATE_CODE", "Date Code"),
+                ("LOT_NO",    "Lot No"),
+            };
+            var byCode = materialHeaderValues
+                .GroupBy(h => h.FieldCode, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
+            var shownFieldIds = new HashSet<int>();
+            foreach (var (code, label) in alwaysShow)
+            {
+                if (byCode.TryGetValue(code, out var hv))
                 {
-                    "Numeric" => hv.NumericValue?.ToString("0.##") ?? "",
-                    "Date"    => hv.DateValue?.ToString("yyyy-MM-dd") ?? "",
-                    _         => hv.TextValue ?? ""
-                };
-                var label = string.IsNullOrWhiteSpace(hv.DefaultUnit) ? hv.FieldName : $"{hv.FieldName} ({hv.DefaultUnit})";
-                headerCells.Add((label, Dash(val)));
+                    headerCells.Add((label, Dash(FormatValue(hv))));
+                    shownFieldIds.Add(hv.FieldId);
+                }
+                else
+                {
+                    headerCells.Add((label, "—"));
+                }
             }
-            // Split header cells across two columns: even indices left
-            // (col 2), odd indices right (col 3). Keeps the labeled rows
-            // balanced without forcing a fixed list of fields.
+
+            foreach (var hv in materialHeaderValues.OrderBy(h => h.SortOrder).ThenBy(h => h.FieldName))
+            {
+                if (shownFieldIds.Contains(hv.FieldId)) continue;
+                var label = string.IsNullOrWhiteSpace(hv.DefaultUnit) ? hv.FieldName : $"{hv.FieldName} ({hv.DefaultUnit})";
+                headerCells.Add((label, Dash(FormatValue(hv))));
+            }
+            // Even indices → col 2, odd → col 3 (col 1 is the identity strip).
             var leftHeader  = headerCells.Where((_, i) => i % 2 == 0).ToList();
             var rightHeader = headerCells.Where((_, i) => i % 2 == 1).ToList();
 
@@ -557,6 +626,60 @@ public static class QualityReportPdf
                     foreach (var (l, v) in rightHeader) Field(c, l, v);
                 });
             });
+        });
+    }
+
+    // ============================ Per-sample card ============================
+    // Compact per-sample card (2026-05-30 restructure): the material strip is
+    // now printed ONCE on the per-material card above this one, so this card
+    // shows only what is genuinely sample-specific -- the Sample-scoped header
+    // values (if any), the readings, and the per-category defect sections.
+    // Defects iterate the FULL active catalog for the sample's material_group
+    // so a sample with no defects still shows every defect name with zero.
+    private static void RenderSampleDetail(QuestPDF.Infrastructure.IContainer container,
+        QualityReportData d, SampleBundle s)
+    {
+        var m = s.Material;
+        // Bold border in the brand accent so each sample is clearly framed
+        // and reads as a distinct unit, even without a tinted defect grid.
+        container.PaddingTop(3).Border(1.5f).BorderColor(Accent).Padding(4).Column(col =>
+        {
+            // ---- Compact header: sample number + creator on the left, QO no
+            //      on the right so the card is still self-contained when
+            //      photocopied. Material no/desc is intentionally not
+            //      repeated -- the parent material card names it.
+            col.Item().Background(AccentLight).Padding(3).Row(hr =>
+            {
+                hr.RelativeItem().Text(t =>
+                {
+                    t.Span("Sample #").Bold().FontColor(Accent);
+                    t.Span(s.Sample.SampleNo.ToString()).Bold().FontColor(Accent);
+                    t.Span("   ").FontColor(Colors.Grey.Darken1);
+                    t.Span("by ").FontColor(Colors.Grey.Darken1).FontSize(7);
+                    t.Span(s.Sample.CreatedBy).FontSize(7);
+                });
+                hr.ConstantItem(120).AlignRight().Text(t =>
+                {
+                    t.DefaultTextStyle(st => st.FontSize(7).FontColor(Colors.Grey.Darken1));
+                    t.Span("QO ");
+                    t.Span(d.QualityOrder.QualityOrderNo).Bold();
+                });
+            });
+
+            // ---- Sample-scoped header values only. HeaderValues carries
+            //      BOTH scopes (V23+ copy-down), so filter using the scope
+            //      map. Defensive: an unknown FieldId (field deleted/renamed
+            //      between fetch and render) is treated as Sample so the
+            //      value is still visible somewhere rather than vanishing.
+            var sampleScoped = s.HeaderValues
+                .Where(hv => !d.HeaderFieldScopeById.TryGetValue(hv.FieldId, out var sc)
+                             || !string.Equals(sc, "Material", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(h => h.SortOrder).ThenBy(h => h.FieldName)
+                .ToList();
+            if (sampleScoped.Count > 0)
+            {
+                col.Item().PaddingTop(2).Element(c => RenderSampleHeaderGrid(c, sampleScoped));
+            }
 
             // ---- Readings recorded on this sample (compact 3-col grid)
             if (s.Readings.Count > 0)
@@ -575,20 +698,30 @@ public static class QualityReportPdf
                               : Array.Empty<DefectCatalogEntry>();
             var sampleSections = BuildSampleDefectSections(s, catalog, d.Categories);
 
-            // One banner + grid per category (V22+), category order/colour.
+            // Per-sample defect sections use a SOFTER look than the page-1
+            // group summary so the two are visually distinct even though the
+            // structure is identical: the bold category colour becomes the
+            // section title text on a tinted background, with a left accent
+            // stripe in the same colour. Summary stays loud, samples stay
+            // quiet — same category identity, different visual weight.
             for (int si = 0; si < sampleSections.Count; si++)
             {
                 var sec = sampleSections[si];
-                var banner = BannerBg(sec.ColorHex, si);
-                var rowBg  = TintHex(banner);
-                col.Item().PaddingTop(4).Background(banner).Padding(3).Text(t =>
+                var accent = BannerBg(sec.ColorHex, si);
+                var soft   = TintHex(accent);
+                // Header strip is filled with the category's configured
+                // colour (from /Admin/Defect Categories); white text reads
+                // on any colour from the configured palette. Grid cells
+                // below stay un-tinted so the per-sample defect list is
+                // still clean and readable.
+                col.Item().PaddingTop(4).Background(accent).Padding(3).Text(t =>
                 {
-                    t.Span(sec.CategoryName.ToUpperInvariant() + " DEFECTS").Bold().FontSize(8);
-                    t.Span("   —   Total: ").FontColor(Colors.Grey.Darken3).FontSize(7);
-                    t.Span(sec.TotalPct.ToString("0.##") + "%").Bold().FontSize(8);
-                    t.Span($"   ({sec.Rows.Count})").FontColor(Colors.Grey.Darken2).FontSize(7);
+                    t.Span(sec.CategoryName.ToUpperInvariant() + " DEFECTS").Bold().FontSize(8).FontColor(Colors.White);
+                    t.Span("   —   Total: ").FontColor(Colors.White).FontSize(7);
+                    t.Span(sec.TotalPct.ToString("0.##") + "%").Bold().FontSize(8).FontColor(Colors.White);
+                    t.Span($"   ({sec.Rows.Count})").FontColor(Colors.White).FontSize(7);
                 });
-                col.Item().Element(c => RenderGroupDefectGrid(c, sec.Rows, rowBg: rowBg));
+                col.Item().Element(c => RenderGroupDefectGrid(c, sec.Rows, rowBg: null));
             }
         });
     }
@@ -661,6 +794,44 @@ public static class QualityReportPdf
         return sections.Values.OrderBy(x => x.SortOrder).ThenBy(x => x.CategoryName).ToList();
     }
 
+    // Sample-scoped header values laid out in a 3-pair (label, value) grid.
+    // Same density/look as the readings grid below so the per-sample card
+    // stays compact regardless of how many header fields the admin defines.
+    private static void RenderSampleHeaderGrid(QuestPDF.Infrastructure.IContainer container,
+        IReadOnlyList<SampleHeaderValue> values)
+    {
+        container.Table(table =>
+        {
+            table.ColumnsDefinition(c =>
+            {
+                for (int i = 0; i < 3; i++)
+                {
+                    c.RelativeColumn(2f);  // label
+                    c.RelativeColumn(1f);  // value
+                }
+            });
+            foreach (var hv in values)
+            {
+                string val = hv.ValueKind switch
+                {
+                    "Numeric" => hv.NumericValue?.ToString("0.##") ?? "",
+                    "Date"    => hv.DateValue?.ToString("yyyy-MM-dd") ?? "",
+                    _         => hv.TextValue ?? ""
+                };
+                var label = string.IsNullOrWhiteSpace(hv.DefaultUnit) ? hv.FieldName : $"{hv.FieldName} ({hv.DefaultUnit})";
+                table.Cell().Border(0.4f).BorderColor(GridLine).Padding(2).Text(label).FontSize(7);
+                table.Cell().Border(0.4f).BorderColor(GridLine).Padding(2)
+                    .AlignRight().Text(Dash(val)).FontSize(7);
+            }
+            var leftover = (3 - (values.Count % 3)) % 3;
+            for (int k = 0; k < leftover; k++)
+            {
+                table.Cell().Border(0.4f).BorderColor(GridLine).Padding(2).Text("");
+                table.Cell().Border(0.4f).BorderColor(GridLine).Padding(2).Text("");
+            }
+        });
+    }
+
     private static void RenderSampleReadingsGrid(QuestPDF.Infrastructure.IContainer container, SampleBundle s)
     {
         container.Table(table =>
@@ -708,8 +879,18 @@ public static class QualityReportPdf
         page.Content().Column(col =>
         {
             col.Spacing(6);
-            col.Item().Text("Photos attached to this quality order, grouped by material.")
+            col.Item().Text("Photos attached to this quality order.")
                 .FontSize(8).Italic().FontColor(Colors.Grey.Darken2);
+
+            // Arrival-level photos first (relocated 2026-06-13 from the
+            // main page so the report's narrative is Summary -> per-
+            // material detail -> appendix of all photos).
+            if (d.ArrivalImages.Count > 0)
+            {
+                col.Item().PaddingTop(6).Background(AccentLight).Padding(3)
+                    .Text("Arrival Photos").Bold().FontSize(11).FontColor(Accent);
+                col.Item().Element(c => RenderImageGrid(c, d, d.ArrivalImages));
+            }
 
             foreach (var m in d.Materials)
             {
@@ -777,11 +958,11 @@ public static class QualityReportPdf
     }
 
     // ============================== helpers ================================
-    private static void Field(ColumnDescriptor col, string label, string? value, string? note = null)
+    private static void Field(ColumnDescriptor col, string label, string? value, string? note = null, float labelWidth = 78)
     {
         col.Item().Row(r =>
         {
-            r.ConstantItem(78).Text(label).FontColor(Colors.Grey.Darken1);
+            r.ConstantItem(labelWidth).Text(label).FontColor(Colors.Grey.Darken1);
             r.RelativeItem().Text(t =>
             {
                 t.Span(value ?? "").Bold();

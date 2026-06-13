@@ -83,27 +83,6 @@ public class AuditController : Controller
     }
 
     /// <summary>
-    /// AJAX endpoint that returns the per-record history rows partial.
-    /// Lazy-loaded by Views/Audit/_AuditHistory.cshtml after the host
-    /// detail page paints. Manager or SiteAdmin only (2026-05-21: Auditor
-    /// role retired; gate moved from AuditViewer to ManagerOrAdmin).
-    /// </summary>
-    [HttpGet]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
-    public async Task<IActionResult> HistoryPanel(string entityType, long entityId)
-    {
-        if (!EntityTypes.IsValid(entityType))
-            return NotFound();
-        // 2026-05-25 -- swapped from GetForRecordAsync to the composite
-        // variant so child-entity changes (Sample / SampleReading /
-        // SampleDefect / QualityOrderMaterial / ArrivalChecklist / etc.)
-        // surface on the parent record's panel instead of producing a
-        // false-empty history.
-        var rows = await _audit.GetForCompositeRecordAsync(entityType, entityId);
-        return PartialView("_AuditHistoryRows", rows);
-    }
-
-    /// <summary>
     /// T037 (US3) -- Excel export of the audit log. SiteAdmin-only as of
     /// 2026-05-21 (was AuditorOrAdmin). The date range is required (FR-013).
     /// Streams the .xlsx file directly to the response so memory stays
