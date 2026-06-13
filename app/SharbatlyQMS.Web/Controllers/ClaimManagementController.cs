@@ -85,13 +85,21 @@ public class ClaimManagementController : Controller
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         await _claims.MarkSeenAsync(id, user);
 
+        // The "Send report to supplier" button now lives in the claim
+        // chat-panel action bar, gated by ClaimRequestApproved status -- we
+        // need this flag to reflect the real mail-template setting so both
+        // the button (in _ClaimChatPanel) and the modal markup (in QO
+        // Details.cshtml) render correctly. (It used to be hardcoded false
+        // when the button lived on the QO action bar.)
+        var mailTemplate = await _settings.GetQoMailTemplateAsync();
+
         ViewBag.Arrival         = arrival;
         ViewBag.Shipment        = shipment;
         ViewBag.Materials       = materials;
         ViewBag.Samples         = samples;
         ViewBag.PhotoCounts     = photoCounts;
         ViewBag.Editable        = false;             // hard-locked in claim context
-        ViewBag.SendMailEnabled = false;             // suppress the supplier-email button
+        ViewBag.SendMailEnabled = mailTemplate.Enabled;
         ViewBag.IsClaimContext  = true;
         ViewBag.Claim           = claim;
         ViewBag.ClaimNotes      = notes;
