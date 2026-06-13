@@ -57,13 +57,17 @@ public static class ClaimStatus
         _                    => s
     };
 
+    // Each status pairs a background and a foreground colour. The custom
+    // `.bubble-status-pill` class used in _ClaimChatPanel does NOT
+    // auto-pair them (unlike Bootstrap's `.badge`), so omitting the
+    // text-* utility leaves the label illegible inside dark bubbles.
     public static string BadgeCss(string? s) => s switch
     {
-        ClaimRequest         => "bg-danger",
-        ClaimRequestApproved => "bg-dark",
+        ClaimRequest         => "bg-danger text-white",
+        ClaimRequestApproved => "bg-dark text-white",
         HoldClaim            => "bg-warning text-dark",
-        PassedQC             => "bg-success",
-        _                    => "bg-secondary"
+        PassedQC             => "bg-success text-white",
+        _                    => "bg-secondary text-white"
     };
 }
 
