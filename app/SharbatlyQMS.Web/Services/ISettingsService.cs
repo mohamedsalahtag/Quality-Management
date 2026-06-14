@@ -355,10 +355,14 @@ public class ContainerPollConfig
     public DateTime? LastRunUtc    { get; set; }
     public string?   LastResult    { get; set; }
     public int?      LastRowCount  { get; set; }
+    /// <summary>"Manual" or "Auto" for the last completed pull.</summary>
+    public string?   LastTriggerSource    { get; set; }
     /// <summary>True when a pull is currently in flight (sync_log row with no completed_at).</summary>
     public bool      IsRunning     { get; set; }
     /// <summary>When the in-flight pull started; only set when <see cref="IsRunning"/> is true.</summary>
     public DateTime? RunningSince  { get; set; }
+    /// <summary>"Manual" or "Auto" for the in-flight pull.</summary>
+    public string?   RunningTriggerSource { get; set; }
 }
 
 public class AutoSyncConfig

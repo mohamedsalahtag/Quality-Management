@@ -8,6 +8,7 @@
     bool filtered = !string.IsNullOrWhiteSpace(container)
                     || !string.IsNullOrWhiteSpace(bol)
                     || !string.IsNullOrWhiteSpace(po);
+    var pullStatus = ViewBag.PullStatus as ContainerPullStatus;
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -35,8 +36,49 @@
     </div>
 </div>
 
-@if (TempData["Success"] is string ok)  { <div class="alert alert-success">@ok</div> }
-@if (TempData["Error"]   is string err) { <div class="alert alert-danger">@err</div> }
+@* TempData success / error alerts are rendered globally by _Layout.cshtml,
+   so no duplicate block here. *@
+
+@* ---- Retrieval status indicator (last completed + currently running) ---- *@
+@if (pullStatus != null)
+{
+    <div class="card mb-3 border-0 shadow-sm">
+        <div class="card-body py-2 px-3 d-flex flex-wrap align-items-center gap-3 small">
+            @if (pullStatus.IsRunning && pullStatus.RunningSince.HasValue)
+            {
+                var elapsedSec  = (int)Math.Max(0, (DateTime.UtcNow - pullStatus.RunningSince.Value).TotalSeconds);
+                var runningTrig = string.Equals(pullStatus.RunningTriggerSource, "Manual", StringComparison.OrdinalIgnoreCase) ? "Manual" : "Auto";
+                <div class="text-info">
+                    <i class="bi bi-arrow-repeat me-1"></i>
+                    <strong>Currently retrieving…</strong>
+                    <span class="text-muted">(@runningTrig, started @pullStatus.RunningSince.Value.ToLocalTime().ToString("HH:mm:ss"), elapsed @(elapsedSec / 60) m @(elapsedSec % 60) s)</span>
+                </div>
+                <span class="text-muted">|</span>
+            }
+            <div>
+                <strong>Last successful retrieval:</strong>
+                <span class="@(pullStatus.LastRunUtc.HasValue ? "" : "text-muted")">
+                    @(pullStatus.LastRunUtc.HasValue ? pullStatus.LastRunUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "never")
+                </span>
+                @if (!string.IsNullOrEmpty(pullStatus.LastTriggerSource))
+                {
+                    var trigCss = string.Equals(pullStatus.LastTriggerSource, "Manual", StringComparison.OrdinalIgnoreCase) ? "bg-primary text-white" : "bg-info text-dark";
+                    <span class="badge @trigCss ms-1" title="How the last retrieval was triggered">@pullStatus.LastTriggerSource</span>
+                }
+                @if (pullStatus.LastRowCount.HasValue)
+                {
+                    <span class="text-muted ms-1">— @pullStatus.LastRowCount rows fetched</span>
+                }
+            </div>
+            @if (pullStatus.IsRunning)
+            {
+                <a asp-action="Pending" class="btn btn-sm btn-outline-info ms-auto">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                </a>
+            }
+        </div>
+    </div>
+}
 
 @* ---- Filter form: contains-match on container / BOL / PO ---- *@
 <form method="get" class="row g-2 mb-3">

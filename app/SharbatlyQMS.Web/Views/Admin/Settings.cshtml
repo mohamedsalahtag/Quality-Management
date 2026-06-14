@@ -295,10 +295,11 @@
                     @if (Model.ContainerPoll.IsRunning && Model.ContainerPoll.RunningSince.HasValue)
                     {
                         var elapsedSec = (int)Math.Max(0, (DateTime.UtcNow - Model.ContainerPoll.RunningSince.Value).TotalSeconds);
+                        var runningTrig = string.Equals(Model.ContainerPoll.RunningTriggerSource, "Manual", StringComparison.OrdinalIgnoreCase) ? "Manual" : "Auto";
                         <span class="text-info">
                             <i class="bi bi-arrow-repeat me-1"></i>
                             <strong>Currently pulling…</strong>
-                            started @Model.ContainerPoll.RunningSince.Value.ToLocalTime().ToString("HH:mm:ss")
+                            (<em>@runningTrig</em>) started @Model.ContainerPoll.RunningSince.Value.ToLocalTime().ToString("HH:mm:ss")
                             (elapsed @(elapsedSec / 60) min @(elapsedSec % 60) s) — refresh this page to update.
                         </span>
                         <br />
@@ -307,6 +308,11 @@
                     <span class="@(Model.ContainerPoll.LastRunUtc.HasValue ? "" : "text-muted")">
                         @(Model.ContainerPoll.LastRunUtc.HasValue ? Model.ContainerPoll.LastRunUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "never")
                     </span>
+                    @if (!string.IsNullOrEmpty(Model.ContainerPoll.LastTriggerSource))
+                    {
+                        var trigCss = string.Equals(Model.ContainerPoll.LastTriggerSource, "Manual", StringComparison.OrdinalIgnoreCase) ? "bg-primary" : "bg-info text-dark";
+                        <span class="badge @trigCss ms-2" title="How the last pull was triggered">@Model.ContainerPoll.LastTriggerSource</span>
+                    }
                     @if (Model.ContainerPoll.LastRowCount.HasValue)
                     {
                         <span class="text-muted ms-2">(@Model.ContainerPoll.LastRowCount rows fetched)</span>

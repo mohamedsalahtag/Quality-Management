@@ -26,10 +26,12 @@ public class ArrivalsController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> Pending(string? container, string? bol, string? po)
     {
-        var rows = await _cache.ListPendingAsync(container, bol, po);
-        ViewBag.Container = container;
-        ViewBag.Bol       = bol;
-        ViewBag.Po        = po;
+        var rows   = await _cache.ListPendingAsync(container, bol, po);
+        var status = await _cache.GetPullStatusAsync();
+        ViewBag.Container  = container;
+        ViewBag.Bol        = bol;
+        ViewBag.Po         = po;
+        ViewBag.PullStatus = status;
         return View(rows);
     }
 

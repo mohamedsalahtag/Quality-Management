@@ -226,6 +226,47 @@ public class ContainerCacheService : IContainerCacheService
             ) AS x");
     }
 
+    public async Task<ContainerPullStatus> GetPullStatusAsync(CancellationToken ct = default)
+    {
+        using var c = Open();
+        // Two reads in one round trip: latest COMPLETED run (for the
+        // "Last retrieval" line) + whatever is currently in flight (for
+        // the "Currently retrieving..." indicator).
+        using var grid = await c.QueryMultipleAsync(@"
+            SELECT TOP 1 completed_at, rows_synced, message, success, triggered_by, trigger_source
+            FROM   qms_sap_sync_log
+            WHERE  endpoint_key = @ep AND completed_at IS NOT NULL
+            ORDER  BY completed_at DESC;
+
+            SELECT TOP 1 started_at, trigger_source
+            FROM   qms_sap_sync_log
+            WHERE  endpoint_key = @ep AND completed_at IS NULL
+            ORDER  BY started_at DESC;",
+            new { ep = SyncLogEndpointKey });
+
+        var done = (await grid.ReadAsync<(DateTime? completed_at, int? rows_synced, string? message, bool? success, string? triggered_by, string? trigger_source)>())
+                   .FirstOrDefault();
+        var inflight = (await grid.ReadAsync<(DateTime? started_at, string? trigger_source)>())
+                       .FirstOrDefault();
+
+        var status = new ContainerPullStatus
+        {
+            LastRunUtc        = done.completed_at,
+            LastRowCount      = done.rows_synced,
+            LastTriggerSource = done.trigger_source,
+            LastTriggeredBy   = done.triggered_by,
+            LastResult        = done.completed_at is null
+                ? null
+                : ((done.success ?? false)
+                    ? (done.message ?? "OK")
+                    : ("FAILED: " + (done.message ?? "(no detail)"))),
+            IsRunning            = inflight.started_at.HasValue,
+            RunningSince         = inflight.started_at,
+            RunningTriggerSource = inflight.trigger_source
+        };
+        return status;
+    }
+
     public async Task<int> RefreshFromSapAsync(DateOnly hardFloorStartDate, string triggeredBy, string triggerSource, CancellationToken ct = default)
     {
         // Always pull every row from the admin-configured start date.

@@ -1223,37 +1223,20 @@ public class AdminController : Controller
     private async Task<ContainerPollConfig> BuildContainerPollVmAsync()
     {
         var cfg = await _settings.GetContainerPollConfigAsync();
-        // Two reads in one trip: the most recent COMPLETED run (for the
-        // "Last pull" status line) and whether anything is currently
-        // in flight (for the "Currently pulling..." note).
+        // Decorate the typed config with the runtime pull status from
+        // qms_sap_sync_log (last completed run + any in-flight pull).
+        // Same source the Pending Containers page reads.
         try
         {
-            var cs = HttpContext.RequestServices.GetRequiredService<IConfiguration>()
-                       .GetConnectionString("Default")!;
-            using var c = new Microsoft.Data.SqlClient.SqlConnection(cs);
-            using var grid = await Dapper.SqlMapper.QueryMultipleAsync(c, @"
-                SELECT TOP 1 completed_at, rows_synced, message, success
-                FROM   qms_sap_sync_log
-                WHERE  endpoint_key = @ep AND completed_at IS NOT NULL
-                ORDER  BY completed_at DESC;
-
-                SELECT TOP 1 started_at
-                FROM   qms_sap_sync_log
-                WHERE  endpoint_key = @ep AND completed_at IS NULL
-                ORDER  BY started_at DESC;",
-                new { ep = ContainerPollingService.EndpointKey });
-
-            var done = (await grid.ReadAsync<(DateTime? completed_at, int? rows_synced, string? message, bool? success)>())
-                       .FirstOrDefault();
-            cfg.LastRunUtc   = done.completed_at;
-            cfg.LastRowCount = done.rows_synced;
-            cfg.LastResult   = done.completed_at is null
-                ? null
-                : ((done.success ?? false) ? (done.message ?? "OK") : ("FAILED: " + (done.message ?? "(no detail)")));
-
-            var inflightStartedAt = (await grid.ReadAsync<DateTime?>()).FirstOrDefault();
-            cfg.IsRunning    = inflightStartedAt.HasValue;
-            cfg.RunningSince = inflightStartedAt;
+            var cache  = HttpContext.RequestServices.GetRequiredService<IContainerCacheService>();
+            var status = await cache.GetPullStatusAsync(HttpContext.RequestAborted);
+            cfg.LastRunUtc           = status.LastRunUtc;
+            cfg.LastRowCount         = status.LastRowCount;
+            cfg.LastResult           = status.LastResult;
+            cfg.LastTriggerSource    = status.LastTriggerSource;
+            cfg.IsRunning            = status.IsRunning;
+            cfg.RunningSince         = status.RunningSince;
+            cfg.RunningTriggerSource = status.RunningTriggerSource;
         }
         catch { /* status is best-effort */ }
         return cfg;

@@ -64,6 +64,37 @@ public interface IContainerCacheService
     /// Returns the number of SAP rows fetched.
     /// </summary>
     Task<int> RefreshFromSapAsync(DateOnly sinceDocDate, string triggeredBy, string triggerSource, CancellationToken ct = default);
+
+    /// <summary>
+    /// Snapshot of the latest completed pull + whether one is currently
+    /// in flight. Single source of truth for the Settings card AND the
+    /// Pending Containers page banner.
+    /// </summary>
+    Task<ContainerPullStatus> GetPullStatusAsync(CancellationToken ct = default);
+}
+
+/// <summary>
+/// Read model returned by <see cref="IContainerCacheService.GetPullStatusAsync"/>.
+/// Backed by the latest row(s) in <c>qms_sap_sync_log</c> for
+/// <c>endpoint_key = 'ContainerCache'</c>.
+/// </summary>
+public class ContainerPullStatus
+{
+    /// <summary>When the last completed pull finished (UTC). Null if none yet.</summary>
+    public DateTime? LastRunUtc    { get; set; }
+    /// <summary>Human-readable result of the last completed pull -- "Fetched N…" or "FAILED: …".</summary>
+    public string?   LastResult    { get; set; }
+    public int?      LastRowCount  { get; set; }
+    /// <summary>"Manual" or "Auto" for the last completed pull.</summary>
+    public string?   LastTriggerSource { get; set; }
+    /// <summary>The user / scheduler that fired the last completed pull.</summary>
+    public string?   LastTriggeredBy   { get; set; }
+    /// <summary>True iff a sync_log row exists with completed_at IS NULL.</summary>
+    public bool      IsRunning     { get; set; }
+    /// <summary>When the in-flight pull started (UTC). Only set when <see cref="IsRunning"/> is true.</summary>
+    public DateTime? RunningSince  { get; set; }
+    /// <summary>"Manual" or "Auto" for the in-flight pull.</summary>
+    public string?   RunningTriggerSource { get; set; }
 }
 
 /// <summary>
