@@ -16,13 +16,22 @@
         <span class="badge bg-secondary ms-2">@Model.Count</span>
         <small class="text-muted fs-6 fw-normal ms-2">SAP containers without a QMS Arrival yet.</small>
     </h1>
-    <div class="btn-group">
-        <a asp-action="Index" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left me-1"></i>Back to arrivals
-        </a>
-        <a asp-action="Search" class="btn btn-outline-primary">
-            <i class="bi bi-search me-1"></i>Search SAP directly
-        </a>
+    <div class="d-flex gap-2 flex-wrap">
+        <form asp-action="RetrieveLatestContainers" method="post" class="m-0">
+            @Html.AntiForgeryToken()
+            <button type="submit" class="btn btn-success"
+                    title="Fire an immediate SAP fetch using the admin-configured start date. Runs in the background; refresh after a moment.">
+                <i class="bi bi-cloud-download me-1"></i>Retrieve latest containers
+            </button>
+        </form>
+        <div class="btn-group">
+            <a asp-action="Index" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left me-1"></i>Back to arrivals
+            </a>
+            <a asp-action="Search" class="btn btn-outline-primary">
+                <i class="bi bi-search me-1"></i>Search SAP directly
+            </a>
+        </div>
     </div>
 </div>
 

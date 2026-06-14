@@ -33,6 +33,61 @@ public class ArrivalsController : Controller
         return View(rows);
     }
 
+    /// <summary>
+    /// Operator-friendly twin of AdminController.PullContainersNow. Kicks off
+    /// a background SAP pull using the existing admin-saved Container.* settings
+    /// and redirects back to the Pending page with a toast. Same in-flight guard
+    /// + fire-and-forget pattern as the admin version, so an operator clicking
+    /// twice or simultaneously with the auto-scheduler can't double-pull.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    public async Task<IActionResult> RetrieveLatestContainers(
+        [FromServices] ISettingsService settings,
+        [FromServices] IConfiguration   config,
+        [FromServices] IServiceScopeFactory scopeFactory)
+    {
+        var cfg = await settings.GetContainerPollConfigAsync();
+        if (cfg.StartDate is null)
+        {
+            TempData["Error"] = "Cannot retrieve: the SAP start date is not configured. Ask an admin to set it under Settings → SAP.";
+            return RedirectToAction(nameof(Pending));
+        }
+
+        var cs = config.GetConnectionString("Default")!;
+        using (var c = new Microsoft.Data.SqlClient.SqlConnection(cs))
+        {
+            var inFlight = await Dapper.SqlMapper.ExecuteScalarAsync<int>(c, @"
+                SELECT COUNT(*) FROM qms_sap_sync_log
+                WHERE  endpoint_key = @ep AND completed_at IS NULL",
+                new { ep = ContainerCacheService.SyncLogEndpointKey });
+            if (inFlight > 0)
+            {
+                TempData["Error"] = "A pull is already running. Refresh the page in a moment to see new containers.";
+                return RedirectToAction(nameof(Pending));
+            }
+        }
+
+        var user      = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        var startDate = cfg.StartDate.Value;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await using var scope = scopeFactory.CreateAsyncScope();
+                var cache = scope.ServiceProvider.GetRequiredService<IContainerCacheService>();
+                await cache.RefreshFromSapAsync(startDate, user, "Manual", CancellationToken.None);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Background container pull (from Pending page) threw");
+            }
+        });
+
+        TempData["Success"] = "Retrieving latest containers from SAP in the background. Refresh this page in a moment to see new entries.";
+        return RedirectToAction(nameof(Pending));
+    }
+
     public async Task<IActionResult> Index(string? status, string? search)
     {
         var rows = await _arrivals.ListAsync(string.IsNullOrEmpty(status) ? null : status, search);
