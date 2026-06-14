@@ -1,6 +1,12 @@
 @model ErrorViewModel
 @{
     ViewData["Title"] = "Something went wrong";
+    // SECURITY: this view is the friendly fallback for /Home/Error and is
+    // wired up via app.UseExceptionHandler("/Home/Error") in Program.cs
+    // ONLY when !Environment.IsDevelopment(). It must never render the
+    // raw exception, stack trace, message, or query string -- any of
+    // those can leak internals to an attacker. Only the RequestId
+    // correlation token is shown, and only when the framework opted in.
 }
 <div class="text-center py-5">
     <i class="bi bi-exclamation-octagon display-1 text-danger"></i>

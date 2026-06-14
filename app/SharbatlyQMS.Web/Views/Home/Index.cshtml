@@ -7,20 +7,23 @@
     var role     = User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     var fullName = User?.FindFirst(System.Security.Claims.ClaimTypes.GivenName)?.Value;
 
+    // Status badges: every bg-* is paired with an explicit text-* utility so
+    // dark-theme contrast holds. Without it the global theme can recolor
+    // body text to white-on-yellow / dark-on-dark.
     string ArrivalBadge(string s) => s switch
     {
         ArrivalStatus.Draft     => "bg-warning text-dark",
-        ArrivalStatus.Completed => "bg-success",
-        ArrivalStatus.Cancelled => "bg-secondary",
+        ArrivalStatus.Completed => "bg-success text-white",
+        ArrivalStatus.Cancelled => "bg-secondary text-white",
         _ => "bg-light text-dark"
     };
     string QoBadge(string s) => s switch
     {
-        "Initial"  => "bg-secondary",
-        "Open"     => "bg-primary",
+        "Initial"  => "bg-secondary text-white",
+        "Open"     => "bg-primary text-white",
         "Reopened" => "bg-warning text-dark",
-        "Closed"   => "bg-success",
-        "Cancelled"=> "bg-danger",
+        "Closed"   => "bg-success text-white",
+        "Cancelled"=> "bg-danger text-white",
         _          => "bg-light text-dark"
     };
 

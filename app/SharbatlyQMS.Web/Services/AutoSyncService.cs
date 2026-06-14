@@ -33,13 +33,16 @@ public class AutoSyncService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try { await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken); } catch { }
+        try { await Task.Delay(TimeSpan.FromSeconds(30), stoppingToken); }
+        catch (OperationCanceledException) { return; }
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try { await TickAsync(stoppingToken); }
+            catch (OperationCanceledException) { break; }
             catch (Exception ex) { _log.LogError(ex, "Auto sync tick failed"); }
-            try { await Task.Delay(PollInterval, stoppingToken); } catch (TaskCanceledException) { break; }
+            try { await Task.Delay(PollInterval, stoppingToken); }
+            catch (OperationCanceledException) { break; }
         }
     }
 
@@ -48,7 +51,11 @@ public class AutoSyncService : BackgroundService
         using var scope = _services.CreateScope();
         var settings = scope.ServiceProvider.GetRequiredService<ISettingsService>();
         var sync     = scope.ServiceProvider.GetRequiredService<ISapSyncService>();
+        // Hour-of-day scheduling uses the server's local clock since admins
+        // configure "run at 02:00" in local time. Everything else (suppression
+        // window, log timestamps) is UTC.
         var nowLocal = DateTime.Now;
+        var nowUtc   = DateTime.UtcNow;
 
         foreach (var key in SyncableEndpoints.All)
         {
@@ -58,7 +65,7 @@ public class AutoSyncService : BackgroundService
                 if (!cfg.Enabled || cfg.Hours.Count == 0) continue;
                 if (!cfg.Hours.Contains(nowLocal.Hour)) continue;
                 if (cfg.LastRunUtc.HasValue &&
-                    DateTime.UtcNow - cfg.LastRunUtc.Value.ToUniversalTime() < SuppressionWindow) continue;
+                    nowUtc - cfg.LastRunUtc.Value.ToUniversalTime() < SuppressionWindow) continue;
 
                 if (!_inFlight.TryAdd(key, 1))
                 {

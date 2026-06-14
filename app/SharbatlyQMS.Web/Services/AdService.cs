@@ -62,7 +62,7 @@ public class AdService : IAdService
                 {
                     using var searcher = new DirectorySearcher(entry)
                     {
-                        Filter      = $"(sAMAccountName={sam})",
+                        Filter      = $"(sAMAccountName={LdapEncode(sam)})",
                         SearchScope = SearchScope.Subtree
                     };
                     searcher.PropertiesToLoad.AddRange(new[] { "displayName", "cn", "mail", "department" });
@@ -203,7 +203,7 @@ public class AdService : IAdService
         {
             using var searcher = new DirectorySearcher(root)
             {
-                Filter      = $"(&(objectCategory=person)(objectClass=user)(sAMAccountName={username}))",
+                Filter      = $"(&(objectCategory=person)(objectClass=user)(sAMAccountName={LdapEncode(username)}))",
                 SearchScope = SearchScope.Subtree
             };
             searcher.PropertiesToLoad.AddRange(new[] { "displayName", "cn", "mail", "department", "sAMAccountName" });
@@ -380,5 +380,31 @@ public class AdService : IAdService
             return c?.Count > 0 ? c[0]?.ToString() : null;
         }
         catch { return null; }
+    }
+
+    /// <summary>
+    /// RFC 4515 §3 escape for LDAP search filter values. A user-supplied
+    /// sAMAccountName must be escaped before interpolation into a filter
+    /// string, otherwise a crafted value like <c>*)(uid=*</c> can change
+    /// the query semantics. Five characters need escaping: <c>\ * ( )</c>
+    /// and NUL. Each is replaced with its three-character \xx hex form.
+    /// </summary>
+    private static string LdapEncode(string s)
+    {
+        if (string.IsNullOrEmpty(s)) return string.Empty;
+        var sb = new System.Text.StringBuilder(s.Length + 8);
+        foreach (var ch in s)
+        {
+            switch (ch)
+            {
+                case '\\': sb.Append("\\5c"); break;
+                case '*':  sb.Append("\\2a"); break;
+                case '(':  sb.Append("\\28"); break;
+                case ')':  sb.Append("\\29"); break;
+                case '\0': sb.Append("\\00"); break;
+                default:   sb.Append(ch);     break;
+            }
+        }
+        return sb.ToString();
     }
 }

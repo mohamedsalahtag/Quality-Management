@@ -38,21 +38,31 @@ public interface ISapODataClient
 
 public class SapODataClient : ISapODataClient
 {
+    /// <summary>
+    /// Named HttpClient registered via AddHttpClient in Program.cs. Using
+    /// IHttpClientFactory gives pooled sockets + DNS refresh between SAP
+    /// requests; the raw <c>new HttpClient(handler)</c> per call we used
+    /// before leaked TCP connections in the TIME_WAIT pool under heavy
+    /// sync load.
+    /// </summary>
+    public const string HttpClientName = "SapOData";
+
     private readonly ISettingsService _settings;
+    private readonly IHttpClientFactory _httpFactory;
     private readonly ILogger<SapODataClient> _log;
 
-    public SapODataClient(ISettingsService settings, ILogger<SapODataClient> log)
+    public SapODataClient(ISettingsService settings, IHttpClientFactory httpFactory, ILogger<SapODataClient> log)
     {
-        _settings = settings; _log = log;
+        _settings = settings; _httpFactory = httpFactory; _log = log;
     }
 
     private async Task<HttpClient> BuildAsync(string? overrideUser, string? overridePassword)
     {
-        var handler = new HttpClientHandler
-        {
-            ServerCertificateCustomValidationCallback = HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        };
-        var client = new HttpClient(handler) { Timeout = TimeSpan.FromMinutes(5) };
+        // Resolve a named client from the factory; the cert-callback and
+        // timeout are configured once at registration time (Program.cs)
+        // and pooled by SocketsHttpHandler. Per-call work is just auth
+        // header rotation, which is cheap.
+        var client = _httpFactory.CreateClient(HttpClientName);
 
         // Per-call override wins; otherwise fall back to the global default.
         string user = overrideUser ?? "";
@@ -64,6 +74,7 @@ public class SapODataClient : ISapODataClient
             password = sap.Password;
         }
 
+        client.DefaultRequestHeaders.Authorization = null;
         if (!string.IsNullOrEmpty(user))
         {
             var token = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes($"{user}:{password}"));

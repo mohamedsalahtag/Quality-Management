@@ -45,6 +45,26 @@ builder.Services.AddScoped<SharbatlyQMS.Web.Services.Sap.ISapClient,
                            SharbatlyQMS.Web.Services.Sap.HybridSapClient>();
 builder.Services.AddScoped<SharbatlyQMS.Web.Services.Sap.ISapODataClient,
                            SharbatlyQMS.Web.Services.Sap.SapODataClient>();
+// L3: a single named HttpClient for every SAP OData call. The factory
+// pools the underlying SocketsHttpHandler, which the previous "new
+// HttpClient(new HttpClientHandler())" idiom did not. H5: cert validation
+// is wired here so SapODataClient no longer needs IWebHostEnvironment
+// (and prod defaults to the secure path).
+builder.Services.AddHttpClient(SharbatlyQMS.Web.Services.Sap.SapODataClient.HttpClientName, c =>
+{
+    c.Timeout = TimeSpan.FromMinutes(5);
+})
+.ConfigurePrimaryHttpMessageHandler(sp =>
+{
+    var env = sp.GetRequiredService<IWebHostEnvironment>();
+    var handler = new HttpClientHandler();
+    if (env.IsDevelopment())
+    {
+        handler.ServerCertificateCustomValidationCallback =
+            HttpClientHandler.DangerousAcceptAnyServerCertificateValidator;
+    }
+    return handler;
+});
 builder.Services.AddScoped<SharbatlyQMS.Web.Services.Sap.ISapSyncService,
                            SharbatlyQMS.Web.Services.Sap.SapSyncService>();
 builder.Services.AddScoped<IContainerCacheService, ContainerCacheService>();
@@ -73,7 +93,11 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         opt.SlidingExpiration   = true;
         opt.Cookie.Name         = "SharbatlyQMS.Auth";
         opt.Cookie.SameSite     = SameSiteMode.Lax;
-        opt.Cookie.SecurePolicy = CookieSecurePolicy.None;
+        // SameAsRequest: the Secure flag is set automatically when the request
+        // is HTTPS. In production behind HTTPS the cookie is Secure; behind an
+        // HTTP-only dev/test host it still works. Avoids the previous .None
+        // setting that allowed the cookie to be sniffed even on HTTPS hosts.
+        opt.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
         opt.Cookie.MaxAge       = TimeSpan.FromDays(30);
         opt.Cookie.HttpOnly     = true;
     });
@@ -99,7 +123,8 @@ builder.Services.AddAuthorization(opt =>
 builder.Services.AddAntiforgery(opt =>
 {
     opt.Cookie.SameSite     = SameSiteMode.Lax;
-    opt.Cookie.SecurePolicy = CookieSecurePolicy.None;
+    // Match the auth cookie: HTTPS host -> Secure; HTTP host -> no Secure.
+    opt.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
     opt.HeaderName          = "X-CSRF-TOKEN";
 });
 

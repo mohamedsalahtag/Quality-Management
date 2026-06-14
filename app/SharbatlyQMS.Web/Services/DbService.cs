@@ -46,6 +46,25 @@ public class DbService : IDbService
         return rows.ToDictionary(r => r.ConfigKey, r => r.ConfigValue);
     }
 
+    public async Task SetConfigManyAsync(IEnumerable<KeyValuePair<string, string?>> entries, int? updatedBy)
+    {
+        var list = entries.ToList();
+        if (list.Count == 0) return;
+        using var c = Open();
+        await c.OpenAsync();
+        using var tx = (Microsoft.Data.SqlClient.SqlTransaction)await c.BeginTransactionAsync();
+        const string sql = @"
+            MERGE SiteConfiguration AS t
+            USING (SELECT @key AS ConfigKey) AS s ON t.ConfigKey = s.ConfigKey
+            WHEN MATCHED THEN UPDATE SET ConfigValue = @value,
+                UpdatedAt = SYSUTCDATETIME(), UpdatedBy = @updatedBy
+            WHEN NOT MATCHED THEN INSERT (ConfigKey, ConfigValue, UpdatedAt, UpdatedBy)
+                VALUES (@key, @value, SYSUTCDATETIME(), @updatedBy);";
+        foreach (var kv in list)
+            await c.ExecuteAsync(sql, new { key = kv.Key, value = kv.Value ?? "", updatedBy }, tx);
+        tx.Commit();
+    }
+
     // ---- Users -----------------------------------------------------------
     private const string UserSelect = @"
         SELECT UserId, EmployeeId, Username, FullName, Email, Department,

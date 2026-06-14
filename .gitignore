@@ -19,3 +19,11 @@ Thumbs.db
 # Runtime / smoke artefacts (already tracked items not retroactively ignored)
 runtime.log
 smoketest.log
+
+# Per-environment app settings carry real connection strings + secrets and
+# must not be committed. The shared appsettings.json keeps a placeholder.
+# Use `git rm --cached <file>` once to stop tracking already-committed copies.
+**/appsettings.Development.json
+**/appsettings.Production.json
+**/appsettings.Local.json
+**/appsettings.*.local.json

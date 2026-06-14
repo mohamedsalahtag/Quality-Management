@@ -458,9 +458,17 @@ public class SapSyncService : ISapSyncService
 
     private async Task UpdateLastRunAsync(string endpointKey, bool ok, int rows, string message)
     {
-        await _settings.SetAsync($"Sap.Sync.{endpointKey}.LastRunUtc",   DateTime.UtcNow.ToString("o"));
-        await _settings.SetAsync($"Sap.Sync.{endpointKey}.LastResult",   (ok ? "OK: " : "FAIL: ") + Trim(message, 400));
-        await _settings.SetAsync($"Sap.Sync.{endpointKey}.LastRowCount", rows.ToString());
+        // Persist all three "last run" keys in a single transaction so a
+        // process kill mid-write can never leave LastRunUtc updated but
+        // LastResult / LastRowCount stale. Mirrors the wall-clock atomicity
+        // we get on sync_log.completed_at + success + rows_synced.
+        var entries = new List<KeyValuePair<string, string?>>
+        {
+            new($"Sap.Sync.{endpointKey}.LastRunUtc",   DateTime.UtcNow.ToString("o")),
+            new($"Sap.Sync.{endpointKey}.LastResult",   (ok ? "OK: " : "FAIL: ") + Trim(message, 400)),
+            new($"Sap.Sync.{endpointKey}.LastRowCount", rows.ToString())
+        };
+        await _settings.SetManyAsync(entries);
     }
 
     private static string Trim(string s, int max) => s == null ? "" : (s.Length <= max ? s : s.Substring(0, max));

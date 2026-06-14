@@ -331,6 +331,13 @@ public class AuditService : IAuditService
             }
             if (cursorTime.HasValue && cursorId.HasValue)
             {
+                // Keyset pagination on (changed_at DESC, audit_id DESC).
+                // The OR/<= split is intentional: rows with the same
+                // changed_at as the previous page's tail row are still
+                // included on the next page as long as their audit_id is
+                // strictly less than the tail row's. Without the second
+                // branch, ties on changed_at (sub-millisecond collisions on
+                // bulk inserts) would silently drop rows.
                 where.Add("(changed_at < @cursorTime OR (changed_at = @cursorTime AND audit_id < @cursorId))");
                 p.Add("cursorTime", cursorTime.Value);
                 p.Add("cursorId",   cursorId.Value);

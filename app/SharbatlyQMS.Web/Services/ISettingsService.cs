@@ -10,6 +10,10 @@ public interface ISettingsService
 {
     Task<string?> GetAsync(string key);
     Task SetAsync(string key, string? value, int? updatedBy = null);
+    /// <summary>Writes many config keys in a single transaction so a crash
+    /// between writes cannot leave a related group of keys partially
+    /// updated (e.g. LastRunUtc / LastResult / LastRowCount).</summary>
+    Task SetManyAsync(IEnumerable<KeyValuePair<string, string?>> entries, int? updatedBy = null);
     Task<IReadOnlyDictionary<string, string?>> GetManyAsync(IEnumerable<string> keys);
 
     // ---- SAP OData ----

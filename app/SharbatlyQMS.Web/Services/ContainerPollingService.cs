@@ -48,13 +48,16 @@ public class ContainerPollingService : BackgroundService
         catch (Exception ex) { _log.LogWarning(ex, "Container startup sweep failed"); }
 
         // Initial settle so the host has finished priming everything.
-        try { await Task.Delay(TimeSpan.FromSeconds(45), stoppingToken); } catch { }
+        try { await Task.Delay(TimeSpan.FromSeconds(45), stoppingToken); }
+        catch (OperationCanceledException) { return; }
 
         while (!stoppingToken.IsCancellationRequested)
         {
             try { await TickAsync(stoppingToken); }
+            catch (OperationCanceledException) { break; }
             catch (Exception ex) { _log.LogError(ex, "Container polling tick failed"); }
-            try { await Task.Delay(PollInterval, stoppingToken); } catch (TaskCanceledException) { break; }
+            try { await Task.Delay(PollInterval, stoppingToken); }
+            catch (OperationCanceledException) { break; }
         }
     }
 

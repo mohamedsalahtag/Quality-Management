@@ -1,7 +1,7 @@
 @using SharbatlyQMS.Web.Models
 @model IReadOnlyList<ClaimListRow>
 @{
-    ViewData["Title"] = "Claim Management";
+    ViewData["Title"] = "Claims";
     var status = ViewBag.Status as string;
     var search = ViewBag.Search as string;
 
@@ -34,7 +34,7 @@
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0"><i class="bi bi-shield-exclamation me-1 text-danger"></i>Claim Management</h1>
+    <h1 class="h3 mb-0"><i class="bi bi-shield-exclamation me-1 text-danger"></i>Claims</h1>
 </div>
 
 <form method="get" class="row g-2 mb-3 align-items-stretch">
@@ -117,8 +117,10 @@
                             </td>
                             <td>@(lastActivity?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
                             <td class="text-end">
-                                <a asp-action="Details" asp-route-id="@r.QualityOrderId" class="btn btn-sm btn-outline-primary">
-                                    <i class="bi bi-eye"></i>
+                                <a asp-action="Details" asp-route-id="@r.QualityOrderId"
+                                   class="btn btn-sm btn-outline-primary"
+                                   aria-label="View claim details" title="View claim details">
+                                    <i class="bi bi-eye" aria-hidden="true"></i>
                                 </a>
                             </td>
                         </tr>

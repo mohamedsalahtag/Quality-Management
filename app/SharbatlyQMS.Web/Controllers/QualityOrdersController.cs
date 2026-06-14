@@ -76,7 +76,7 @@ public class QualityOrdersController : Controller
         // so the sample-table rows show live Grower/Pallet/Lot/Date-code.
         var sampleHeaders = await _qos.GetSampleHeaderValuesBatchAsync(samples.Select(s => s.SampleId));
 
-        var editable = qo.StatusCode == "Open";
+        var editable = qo.StatusCode == QualityOrderStatus.Open;
 
         var mailTemplate = await _settings.GetQoMailTemplateAsync();
 
@@ -167,7 +167,7 @@ public class QualityOrdersController : Controller
                                   ? await _qos.GetSampleHeaderValuesAsync(sample.SampleId)
                                   : Array.Empty<SampleHeaderValue>(),
             Categories       = await _cat.GetActiveCategoriesAsync(),
-            Editable         = qo.StatusCode == "Open"
+            Editable         = qo.StatusCode == QualityOrderStatus.Open
         };
         return PartialView("_SampleForm", vm);
     }
@@ -201,7 +201,7 @@ public class QualityOrdersController : Controller
                               .Where(f => f.Scope == "Material").ToList(),
             ExistingValues = await _qos.GetMaterialHeaderValuesAsync(qoMaterialId),
             SampleSize   = mat.SampleSize,
-            Editable     = qo.StatusCode == "Open"
+            Editable     = qo.StatusCode == QualityOrderStatus.Open
         };
         return PartialView("_MaterialForm", vm);
     }

@@ -257,10 +257,10 @@
             <hr class="my-4" />
 
             <h6 class="text-uppercase small fw-bold text-primary mb-2">
-                <i class="bi bi-clock-history me-1"></i>Pending Containers pulling
+                <i class="bi bi-clock-history me-1"></i>Pending Containers retrieval
             </h6>
             <p class="small text-muted mb-3">
-                The background puller hits the Container Search OData URL and caches every SAP row
+                The background retrieval hits the Container Search OData URL and caches every SAP row
                 whose <code>Doc_Date</code> is on/after the start date below. The page
                 <a asp-controller="Arrivals" asp-action="Pending">Arrivals → Pending Containers</a>
                 renders cached rows that don't yet have a QMS Arrival — so no container slips
@@ -298,7 +298,7 @@
                         var runningTrig = string.Equals(Model.ContainerPoll.RunningTriggerSource, "Manual", StringComparison.OrdinalIgnoreCase) ? "Manual" : "Auto";
                         <span class="text-info">
                             <i class="bi bi-arrow-repeat me-1"></i>
-                            <strong>Currently pulling…</strong>
+                            <strong>Currently retrieving…</strong>
                             (<em>@runningTrig</em>) started @Model.ContainerPoll.RunningSince.Value.ToLocalTime().ToString("HH:mm:ss")
                             (elapsed @(elapsedSec / 60) min @(elapsedSec % 60) s) — refresh this page to update.
                         </span>

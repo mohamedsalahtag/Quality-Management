@@ -43,10 +43,11 @@ public class ReportsController : Controller
     /// When the arrival has images attached, an Images Appendix page is
     /// added at the end with the photos grouped by category.
     /// </summary>
-    public async Task<IActionResult> ArrivalChecklistPdf(long id)
+    public async Task<IActionResult> ArrivalChecklistPdf(long id, CancellationToken ct = default)
     {
         var arrival = await _arrivals.GetAsync(id);
         if (arrival == null) return NotFound();
+        ct.ThrowIfCancellationRequested();
 
         var checklist = await _arrivals.GetChecklistAsync(id) ?? new SharbatlyQMS.Web.Models.ArrivalChecklist { ArrivalId = id };
         var shipment  = await _arrivals.GetShipmentAsync(id);
@@ -68,7 +69,7 @@ public class ReportsController : Controller
         // Preprocessing runs in parallel via PreprocessImages.
         var targetW = Math.Max(120, thumb.PdfWidth  * 2);
         var targetH = Math.Max(90,  thumb.PdfHeight * 2);
-        var images = PreprocessImages(await _images.ListAsync("Arrival", id), targetW, targetH);
+        var images = await PreprocessImagesAsync(await _images.ListAsync("Arrival", id), targetW, targetH);
 
         var data = new SharbatlyQMS.Web.Services.Pdf.ArrivalReportData
         {
@@ -86,7 +87,7 @@ public class ReportsController : Controller
         };
 
         var bytes = SharbatlyQMS.Web.Services.Pdf.ArrivalReportPdf.Build(data);
-        var name  = $"{arrival.ArrivalNo}-checklist-{DateTime.Now:yyyyMMdd-HHmm}.pdf";
+        var name  = $"{arrival.ArrivalNo}-checklist-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf";
         return File(bytes, "application/pdf", name);
     }
 
@@ -96,12 +97,21 @@ public class ReportsController : Controller
     /// dialog can pre-populate (operator may edit before sending).
     /// </summary>
     [HttpGet]
+    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> PrepareSendQualityReport(long id)
     {
         var qo = await _qos.GetAsync(id);
         if (qo == null) return NotFound();
+        // Server-side gates: the UI hides the dialog unless the QO is Closed
+        // and the mail template is enabled, but a direct GET would bypass both
+        // checks. Refuse here so a tampered request can't pre-populate a
+        // dialog for a non-closeable QO or a disabled feature.
+        if (qo.StatusCode != QualityOrderStatus.Closed)
+            return Json(new { ok = false, error = "Report can only be sent for Closed Quality Orders." });
         var arrival = await _arrivals.GetAsync(qo.ArrivalId);
         var template = await _settings.GetQoMailTemplateAsync();
+        if (!template.Enabled)
+            return Json(new { ok = false, error = "Sending the quality report by email is disabled in Settings." });
 
         VendorInfo? vendor = null;
         if (!string.IsNullOrWhiteSpace(arrival?.VendorNo))
@@ -123,7 +133,7 @@ public class ReportsController : Controller
             emailKnown    = !string.IsNullOrWhiteSpace(vendor?.Email),
             subject       = Substitute(template.Subject),
             body          = Substitute(template.Body),
-            fileName      = $"{qo.QualityOrderNo}-{DateTime.Now:yyyyMMdd-HHmm}.pdf"
+            fileName      = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf"
         });
     }
 
@@ -134,16 +144,25 @@ public class ReportsController : Controller
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
-    public async Task<IActionResult> SendQualityReport(long id, string to, string? cc, string subject, string body)
+    public async Task<IActionResult> SendQualityReport(long id, string to, string? cc, string subject, string body, CancellationToken ct = default)
     {
         var qo = await _qos.GetAsync(id);
         if (qo == null) return Json(new { ok = false, error = "Quality Order not found." });
+        // Server-side gates -- the UI hides the button when these are false,
+        // but a direct POST must not bypass them. Closed QO + mail template
+        // enabled. Order matters: state check first so a feature-flag error
+        // doesn't leak QO existence.
+        if (qo.StatusCode != QualityOrderStatus.Closed)
+            return Json(new { ok = false, error = "Report can only be sent for Closed Quality Orders." });
+        var template = await _settings.GetQoMailTemplateAsync();
+        if (!template.Enabled)
+            return Json(new { ok = false, error = "Sending the quality report by email is disabled in Settings." });
         if (string.IsNullOrWhiteSpace(to))
             return Json(new { ok = false, error = "Recipient email is required." });
 
         var data  = await BuildDataAsync(qo);
         var bytes = QualityReportPdf.Build(data);
-        var fileName = $"{qo.QualityOrderNo}-{DateTime.Now:yyyyMMdd-HHmm}.pdf";
+        var fileName = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf";
 
         var toList = SplitAddrs(to);
         var ccList = SplitAddrs(cc ?? "");
@@ -161,10 +180,11 @@ public class ReportsController : Controller
                 .Select(a => a.Trim())
                 .Where(a => a.Length > 0);
 
-    public async Task<IActionResult> QualityOrderPdf(long id)
+    public async Task<IActionResult> QualityOrderPdf(long id, CancellationToken ct = default)
     {
         var qo = await _qos.GetAsync(id);
         if (qo == null) return NotFound();
+        ct.ThrowIfCancellationRequested();
 
         var data = await BuildDataAsync(qo);
         var bytes = QualityReportPdf.Build(data);
@@ -187,7 +207,7 @@ public class ReportsController : Controller
         }
         catch (Exception ex) { _log.LogWarning(ex, "Report log write failed (non-fatal)"); }
 
-        var fileName = $"{qo.QualityOrderNo}-{DateTime.Now:yyyyMMdd-HHmm}.pdf";
+        var fileName = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf";
         return File(bytes, "application/pdf", fileName);
     }
 
@@ -322,7 +342,7 @@ public class ReportsController : Controller
         // shipment/checklist photos before drilling into per-material data)
         // and per-QO material (rendered as the appendix grouped by material).
         // No per-sample sub-galleries.
-        data.ArrivalImages = PreprocessImages(
+        data.ArrivalImages = await PreprocessImagesAsync(
             await _images.ListAsync("Arrival", qo.ArrivalId), targetW, targetH);
         data.MaterialImages = new Dictionary<long, List<SharbatlyQMS.Web.Services.Pdf.ImageRef>>();
         // Fetch every material's image list in parallel, then preprocess.
@@ -332,7 +352,7 @@ public class ReportsController : Controller
         await Task.WhenAll(listingTasks.Select(t => t.ListTask));
         foreach (var (qoMaterialId, listTask) in listingTasks)
         {
-            var matImages = PreprocessImages(listTask.Result, targetW, targetH);
+            var matImages = await PreprocessImagesAsync(await listTask, targetW, targetH);
             if (matImages.Count > 0)
                 data.MaterialImages[qoMaterialId] = matImages;
         }
@@ -373,15 +393,19 @@ public class ReportsController : Controller
     // break the whole report. Per-image work runs in parallel so a report
     // with many photos doesn't serialize 100ms+ resizes on the request
     // thread.
-    private List<SharbatlyQMS.Web.Services.Pdf.ImageRef> PreprocessImages(
+    private async Task<List<SharbatlyQMS.Web.Services.Pdf.ImageRef>> PreprocessImagesAsync(
         IEnumerable<ViewModels.ImageInfo> assets, int targetW, int targetH)
     {
         var inputs = assets.ToArray();
         if (inputs.Length == 0) return new List<SharbatlyQMS.Web.Services.Pdf.ImageRef>();
 
+        // Each TryPreprocess is CPU-bound (ImageSharp resize + JPEG encode);
+        // dispatch to the thread pool with Task.Run, then await Task.WhenAll
+        // so the request thread is freed while the workers run. Replaces a
+        // sync-over-async Task.WaitAll that risked thread-pool starvation.
         var tasks = inputs.Select(i => Task.Run(() => TryPreprocess(i, targetW, targetH))).ToArray();
-        Task.WaitAll(tasks);
-        return tasks.Select(t => t.Result).Where(r => r != null).Cast<SharbatlyQMS.Web.Services.Pdf.ImageRef>().ToList();
+        var results = await Task.WhenAll(tasks);
+        return results.Where(r => r != null).Cast<SharbatlyQMS.Web.Services.Pdf.ImageRef>().ToList();
     }
 
     private SharbatlyQMS.Web.Services.Pdf.ImageRef? TryPreprocess(

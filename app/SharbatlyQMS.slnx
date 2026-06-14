@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="SharbatlyQMS.Migrate/SharbatlyQMS.Migrate.csproj" />
   <Project Path="SharbatlyQMS.Web/SharbatlyQMS.Web.csproj" />
+  <Project Path="SharbatlyQMS.Tests/SharbatlyQMS.Tests.csproj" />
 </Solution>

@@ -9,7 +9,7 @@
     var samples     = ViewBag.Samples     as IReadOnlyList<Sample>               ?? new List<Sample>();
     var photoCounts = ViewBag.PhotoCounts as IReadOnlyDictionary<long, int>      ?? new Dictionary<long, int>();
     var sampleHeaders = ViewBag.SampleHeaders as ILookup<long, SampleHeaderValue>;
-    var editable    = (bool?)ViewBag.Editable ?? (Model.StatusCode == "Open");
+    var editable    = (bool?)ViewBag.Editable ?? (Model.StatusCode == QualityOrderStatus.Open);
     var role        = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     var canEdit     = role == UserRoles.Operator || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
     var canManage   = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;

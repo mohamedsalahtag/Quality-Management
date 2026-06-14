@@ -170,6 +170,45 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-06-14 (security + code-quality hardening pass — 30 findings, no behavior changes)
+- **Why.** A full review (security / data layer / SAP / UI / bugs) flagged 30 findings across four tiers. This batch closes every one of them while preserving existing flows; no menu items, role gates, or user-visible workflows changed.
+- **Critical.**
+  - **C1 secrets out of source.** `appsettings.json` now ships a placeholder; real connection string lives in `appsettings.{Development,Production}.json`, which are now in `.gitignore` (committed copies untracked via `git rm --cached`). Env var `ConnectionStrings__Default` overrides at runtime.
+  - **C2 cookies.** Auth + antiforgery cookies switched from `CookieSecurePolicy.None` to `SameAsRequest` so HTTPS hosts get `Secure` automatically; HTTP dev hosts still work.
+  - **C3 SendQualityReport gate.** Both `PrepareSendQualityReport` (GET) and `SendQualityReport` (POST) refuse unless QO is `Closed` AND the QO mail template is enabled — UI guards were already correct; servers now match.
+  - **C4 arrival race.** New filtered UNIQUE index `UX_qms_arrival_active_triplet` on `(container_no, bol_no, ebeln)` WHERE `status_code <> 'Cancelled'` (V27). Migration is self-protecting: if duplicate active triplets already exist it lists them instead of failing. **One pre-existing duplicate found on live DB**: `CMAU1234567 / MSCUAB1234 / 4500001001` (2 rows). Resolve (cancel the older arrival_no) then re-apply V27 to enable the constraint.
+  - **C5 sync_log atomicity.** `ContainerCacheService.RefreshFromSapAsync` now uses an explicit `startedAtUtc` and a 3-attempt retry on the closing UPDATE so a host kill between the two writes can no longer leak a `completed_at IS NULL` row (the existing startup sweep still mops up if all 3 retries fail).
+- **High.**
+  - **H1 LDAP injection.** New RFC 4515 `LdapEncode` in `AdService`; both `DirectorySearcher` filters use it (`(sAMAccountName={...})`).
+  - **H3 sync-over-async.** `ReportsController.PreprocessImagesAsync` replaces `PreprocessImages` (`Task.WaitAll` → `await Task.WhenAll`); call sites await it.
+  - **H4 OData filter hardening.** `HybridSapClient.IsSafeKey` whitelists Container/BOL/PO/Material to `[A-Z0-9_-]{1,35}` before OData `$filter` interpolation.
+  - **H5 SAP TLS.** `DangerousAcceptAnyServerCertificateValidator` is now gated on `IsDevelopment()` and lives on the `IHttpClientFactory`-managed named client.
+  - **H6 antiforgery audit.** Confirmed: every `[HttpPost]` action across all controllers already carries `[ValidateAntiForgeryToken]`.
+  - **H7 badge contrast.** `QoBadge` + `ArrivalBadge` now pair every `bg-*` with an explicit `text-*` utility so dark-theme contrast holds (matches the earlier `ClaimStatus.BadgeCss` pattern).
+- **Medium.**
+  - **M1 QO IDOR.** Org-wide visibility is intentional (ClaimManager and Viewer both need read); documented on `QualityOrderService.GetAsync`. Class-level `[Authorize]` + `AuditContextActionFilter` are the row-level controls.
+  - **M3 cancellation.** `CancellationToken` propagated to the heaviest endpoints (`ArrivalChecklistPdf`, `QualityOrderPdf`, `SendQualityReport`).
+  - **M4 UTC.** `AutoSyncService` now stamps `DateTime.UtcNow` end-to-end (the `DateTime.Now` was only kept for the operator-facing "run at hour X" scheduling).
+  - **M5 atomic settings writes.** New `IDbService.SetConfigManyAsync` + `ISettingsService.SetManyAsync` (single transaction). `SapSyncService.UpdateLastRunAsync` uses it — `LastRunUtc` / `LastResult` / `LastRowCount` can no longer drift on a crash mid-write.
+  - **M6 wording.** Settings "Pending Containers pulling" → "Pending Containers retrieval"; "Currently pulling…" → "Currently retrieving…" — matches the user-facing Pending page.
+  - **M7 Claims title.** `Views/ClaimManagement/Index.cshtml` title + `<h1>` updated to "Claims".
+  - **M8 narrowed catches.** `AutoSyncService` and `ContainerPollingService` now catch only `OperationCanceledException` on the inner `Task.Delay` (other exceptions surface and log).
+  - **M9 typed banner.** New `ViewModels/BannerVm.cs` + `BannerExtensions.Banner(this Controller, BannerVm)` shim — writes through TempData so the global `_Layout` render path keeps working; callers can migrate incrementally.
+  - **M10 batch_no index.** New filtered UNIQUE index `UX_qms_sap_container_cache_key_nullbatch` (V27) — matches the `IS NULL` branch of the MERGE in `UpsertAsync`.
+- **Low.**
+  - **L1 batched arrival INSERTs.** `ArrivalService.CreateFromSapAsync` builds a list and does one `c.ExecuteAsync(sql, list, tx)` instead of N round trips.
+  - **L2 audit cursor.** Documented the keyset pagination logic so the "<= within bucket" pattern survives future refactors.
+  - **L3 IHttpClientFactory.** New `AddHttpClient(SapODataClient.HttpClientName, …)` registration in `Program.cs`; `SapODataClient.BuildAsync` resolves through the factory (pooled sockets, DNS refresh).
+  - **L4 test project.** New `app/SharbatlyQMS.Tests/` (xUnit). Two suites: `AdServiceLdapEncodeTests` (H1) and `HybridSapClientFilterTests` (H4). 19 tests, all green.
+  - **L5 tooltip init.** Moved to `site.js` with a `MutationObserver` so AJAX partials get tooltips too.
+  - **L6 a11y.** New `site.js` helper promotes `title` → `aria-label` for icon-only buttons site-wide; the spinner injection switched to safe DOM APIs (`createElement` + `prepend`).
+  - **L7 stub parity.** `StubSapClient` now logs fetch counts symmetric to `HybridSapClient`.
+  - **L8 error page.** Documented the production-only routing for `Views/Shared/Error.cshtml`.
+  - **L9 pagination.** `data-tablekit data-page-size="50"` added to Audit list and three Admin catalog tables.
+  - **L10 status constants.** Replaced literal `"Open"` checks with `QualityOrderStatus.Open` in controllers + the two views that did the same comparison.
+- **Files touched.** NEW: `app/db/V27__container_cache_pending_unique_and_batch.sql`, `app/SharbatlyQMS.Tests/` (new project, registered in `app/SharbatlyQMS.slnx`), `ViewModels/BannerVm.cs`. MODIFIED: `Program.cs`, `Controllers/{ReportsController,QualityOrdersController}.cs`, `Services/{ArrivalService,AdService,AuditService,AutoSyncService,ContainerCacheService,ContainerPollingService,DbService,IDbService,ISettingsService,QualityOrderService,SettingsService}.cs`, `Services/Sap/{HybridSapClient,SapODataClient,SapSyncService,StubSapClient}.cs`, `Views/Admin/{DefectCategories,ReadingTypes,SampleHeaders,Settings}.cshtml`, `Views/Audit/Index.cshtml`, `Views/ClaimManagement/Index.cshtml`, `Views/Home/Index.cshtml`, `Views/QualityOrders/{Details,Sample}.cshtml`, `Views/Shared/Error.cshtml`, `wwwroot/js/site.js`, `appsettings.json`, `.gitignore`.
+- **Verified.** `dotnet build` clean (0/0). `dotnet test` 19/19 green. V27 applied to live DB at 192.168.3.10 (M10 index created; C4 index pending duplicate resolution). Local + remote both serving HTTP 200 after Republish.
+
 ### 2026-06-13/14 (large batch: per-sample size override, dashboard redesign, SAP container pre-collection)
 - **What changed.** Multi-stream session covering UX polish + a major SAP integration:
   1. **Per-sample size override (V24)** — `Sample.SampleSize` is now editable on the sample form with a `size_overridden` BIT flag; the material-level propagation UPDATE skips overridden rows.

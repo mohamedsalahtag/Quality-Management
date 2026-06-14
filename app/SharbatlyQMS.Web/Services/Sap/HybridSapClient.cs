@@ -95,14 +95,18 @@ public class HybridSapClient : ISapClient
 
         // Build OData v4 $filter clause. Empty values mean "no filter on that
         // axis" (matches the ABAP "( field = @value OR @value IS INITIAL )" idiom).
+        // Inputs are whitelisted to SAP-natural-key shapes (alphanumeric, '-',
+        // '_', up to 35 chars) BEFORE interpolation; values outside that shape
+        // are rejected so they cannot extend the filter. Esc() still doubles
+        // single quotes so a legal value containing one is harmless.
         var filters = new List<string>();
-        if (!string.IsNullOrWhiteSpace(q.ContainerNo))
+        if (!string.IsNullOrWhiteSpace(q.ContainerNo) && IsSafeKey(q.ContainerNo))
             filters.Add($"Container eq '{Esc(q.ContainerNo)}'");
-        if (!string.IsNullOrWhiteSpace(q.BolNo))
+        if (!string.IsNullOrWhiteSpace(q.BolNo) && IsSafeKey(q.BolNo))
             filters.Add($"BOL eq '{Esc(q.BolNo)}'");
-        if (!string.IsNullOrWhiteSpace(q.Ebeln))
+        if (!string.IsNullOrWhiteSpace(q.Ebeln) && IsSafeKey(q.Ebeln))
             filters.Add($"PO_Number eq '{Esc(q.Ebeln)}'");
-        if (!string.IsNullOrWhiteSpace(q.MaterialNo))
+        if (!string.IsNullOrWhiteSpace(q.MaterialNo) && IsSafeKey(q.MaterialNo))
             filters.Add($"Material eq '{Esc(q.MaterialNo)}'");
 
         var url = sap.ContainerSearchUrl;
@@ -272,4 +276,22 @@ public class HybridSapClient : ISapClient
 
     // OData literal-string escape: single quotes are doubled.
     private static string Esc(string s) => s.Replace("'", "''");
+
+    /// <summary>
+    /// SAP natural-key shape guard. Container / BOL / PO / Material are short
+    /// codes drawn from [A-Z0-9_-]; values outside that shape are silently
+    /// dropped from the filter so a free-text query cannot extend the OData
+    /// $filter expression. 35 is the largest SAP natural-key field width we
+    /// hit in ZQC_Data.
+    /// </summary>
+    private static bool IsSafeKey(string s)
+    {
+        if (string.IsNullOrWhiteSpace(s) || s.Length > 35) return false;
+        foreach (var ch in s)
+        {
+            if (!(char.IsLetterOrDigit(ch) || ch == '-' || ch == '_'))
+                return false;
+        }
+        return true;
+    }
 }

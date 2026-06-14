@@ -55,6 +55,15 @@ public class QualityOrderService : IQualityOrderService
         return rows.ToList();
     }
 
+    /// <summary>
+    /// Returns a QO by id with no caller-scope check. QO visibility is
+    /// intentionally org-wide: Viewer / Operator / Manager / ClaimManager /
+    /// SiteAdmin all need to read every QO (Operator records work,
+    /// ClaimManager approves claims tied to a QO, Manager / SiteAdmin
+    /// oversee). The QualityOrdersController class-level [Authorize] gate
+    /// + AuditContextActionFilter (which logs every read) are the only
+    /// row-level controls; this method does not need its own.
+    /// </summary>
     public async Task<QualityOrder?> GetAsync(long qualityOrderId)
     {
         using var c = Open();

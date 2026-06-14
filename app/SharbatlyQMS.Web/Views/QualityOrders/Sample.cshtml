@@ -13,7 +13,7 @@
     var existingHdr   = ViewBag.ExistingHeader   as IReadOnlyList<SampleHeaderValue> ?? new List<SampleHeaderValue>();
     var categories    = ViewBag.Categories as IReadOnlyList<DefectCategory> ?? new List<DefectCategory>();
     ViewData["Title"] = $"Sample #{Model.SampleNo}";
-    var editable = qo.StatusCode == "Open";
+    var editable = qo.StatusCode == QualityOrderStatus.Open;
 
     var vm = new SampleFormVm
     {

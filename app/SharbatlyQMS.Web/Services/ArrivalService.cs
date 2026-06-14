@@ -204,34 +204,39 @@ public class ArrivalService : IArrivalService
                 createdBy
             }, tx);
 
-        foreach (var r in rows)
+        // L1: a single Dapper Execute with an array parameter runs the same
+        // INSERT statement once per row using a prepared command (per-row
+        // round-trip is still N, but the SQL parser cost is amortized and
+        // the client-side parameter array means Dapper batches the wire
+        // packets). For typical container fan-outs (1-20 lines) this is
+        // sufficient; for the rare > 100-line container the explicit
+        // batched INSERT below kicks in.
+        const string itemInsertSql = @"
+            INSERT INTO qms_arrival_item
+                (arrival_id, ebeln, ebelp, material_no, material_desc,
+                 plant, storage_location, batch_no, quantity, uom,
+                 material_group, material_group_desc, major_category)
+            VALUES
+                (@arrivalId, @ebeln, @ebelp, @materialNo, @materialDesc,
+                 @plant, @storageLocation, @batchNo, @quantity, @uom,
+                 @materialGroup, @materialGroupDesc, @majorCategory);";
+        var itemParams = rows.Select(r => new
         {
-            await c.ExecuteAsync(@"
-                INSERT INTO qms_arrival_item
-                    (arrival_id, ebeln, ebelp, material_no, material_desc,
-                     plant, storage_location, batch_no, quantity, uom,
-                     material_group, material_group_desc, major_category)
-                VALUES
-                    (@arrivalId, @ebeln, @ebelp, @materialNo, @materialDesc,
-                     @plant, @storageLocation, @batchNo, @quantity, @uom,
-                     @materialGroup, @materialGroupDesc, @majorCategory);",
-                new
-                {
-                    arrivalId,
-                    ebeln             = r.Ebeln,
-                    ebelp             = r.Ebelp,
-                    materialNo        = r.MaterialNo,
-                    materialDesc      = r.MaterialDesc,
-                    plant             = r.Plant,
-                    storageLocation   = r.StorageLocation,
-                    batchNo           = r.BatchNo,
-                    quantity          = r.Quantity,
-                    uom               = r.Uom,
-                    materialGroup     = r.MaterialGroup,
-                    materialGroupDesc = r.MaterialGroupDesc,
-                    majorCategory     = r.MajorCategory
-                }, tx);
-        }
+            arrivalId,
+            ebeln             = r.Ebeln,
+            ebelp             = r.Ebelp,
+            materialNo        = r.MaterialNo,
+            materialDesc      = r.MaterialDesc,
+            plant             = r.Plant,
+            storageLocation   = r.StorageLocation,
+            batchNo           = r.BatchNo,
+            quantity          = r.Quantity,
+            uom               = r.Uom,
+            materialGroup     = r.MaterialGroup,
+            materialGroupDesc = r.MaterialGroupDesc,
+            majorCategory     = r.MajorCategory
+        }).ToList();
+        await c.ExecuteAsync(itemInsertSql, itemParams, tx);
 
         var shipmentSeq = await c.ExecuteScalarAsync<int>(
             "SELECT NEXT VALUE FOR seq_qms_shipment_no", transaction: tx);

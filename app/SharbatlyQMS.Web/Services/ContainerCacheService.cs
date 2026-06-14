@@ -283,6 +283,13 @@ public class ContainerCacheService : IContainerCacheService
         // the natural key) makes re-fetched rows cheap.
         DateOnly effectiveSince = hardFloorStartDate;
 
+        // C5: open the sync_log row eagerly on a *short-lived* connection
+        // that uses the explicit started_at timestamp captured here. The
+        // try/finally still owns a *separate* connection for the close
+        // -- if the host process is killed between OPEN and CLOSE,
+        // ContainerPollingService.SweepStaleAsync will mark the row
+        // cancelled at next startup, which is the desired behavior.
+        var startedAtUtc = DateTime.UtcNow;
         long syncLogId;
         using (var c = Open())
         {
@@ -290,9 +297,9 @@ public class ContainerCacheService : IContainerCacheService
                 INSERT INTO qms_sap_sync_log
                     (endpoint_key, started_at, triggered_by, trigger_source)
                 VALUES
-                    (@EndpointKey, SYSUTCDATETIME(), @triggeredBy, @triggerSource);
+                    (@EndpointKey, @startedAtUtc, @triggeredBy, @triggerSource);
                 SELECT CAST(SCOPE_IDENTITY() AS BIGINT);",
-                new { EndpointKey = SyncLogEndpointKey, triggeredBy, triggerSource });
+                new { EndpointKey = SyncLogEndpointKey, startedAtUtc, triggeredBy, triggerSource });
         }
 
         int totalRows = 0;
@@ -309,6 +316,11 @@ public class ContainerCacheService : IContainerCacheService
             success = true;
             _log.LogInformation("Container pull OK ({Trigger}) -- {Msg}", triggerSource, message);
         }
+        catch (OperationCanceledException)
+        {
+            message = "Cancelled";
+            throw;
+        }
         catch (Exception ex)
         {
             message = ex.Message;
@@ -317,21 +329,37 @@ public class ContainerCacheService : IContainerCacheService
         }
         finally
         {
-            try
+            // C5: persist success + rows_synced + message + completed_at
+            // in a SINGLE UPDATE statement, on a fresh connection. Both
+            // started_at (above) and the close (here) use explicit UTC
+            // timestamps so a clock skew between SQL Server and the app
+            // host can't produce completed_at < started_at. The retry
+            // loop catches transient deadlocks against the same row
+            // (very unlikely -- sync_log_id is unique) without spinning.
+            for (int attempt = 0; attempt < 3; attempt++)
             {
-                using var c = Open();
-                await c.ExecuteAsync(@"
-                    UPDATE qms_sap_sync_log
-                    SET    completed_at = SYSUTCDATETIME(),
-                           success      = @success,
-                           rows_synced  = @rows,
-                           message      = @message
-                    WHERE  sync_log_id  = @id",
-                    new { id = syncLogId, success = success ? 1 : 0, rows = totalRows, message });
-            }
-            catch (Exception ex)
-            {
-                _log.LogWarning(ex, "Could not update container pull sync_log row {Id}", syncLogId);
+                try
+                {
+                    using var c = Open();
+                    await c.ExecuteAsync(@"
+                        UPDATE qms_sap_sync_log
+                        SET    completed_at = @completedAtUtc,
+                               success      = @success,
+                               rows_synced  = @rows,
+                               message      = @message
+                        WHERE  sync_log_id  = @id",
+                        new { id = syncLogId, success = success ? 1 : 0, rows = totalRows, message, completedAtUtc = DateTime.UtcNow });
+                    break;
+                }
+                catch (Exception ex) when (attempt < 2)
+                {
+                    _log.LogWarning(ex, "Container pull sync_log close retry {Attempt}/3 for row {Id}", attempt + 1, syncLogId);
+                    await Task.Delay(150);
+                }
+                catch (Exception ex)
+                {
+                    _log.LogWarning(ex, "Could not update container pull sync_log row {Id} after retries", syncLogId);
+                }
             }
         }
         return totalRows;

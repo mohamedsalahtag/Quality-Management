@@ -10,6 +10,10 @@ namespace SharbatlyQMS.Web.Services.Sap;
 public class StubSapClient : ISapClient
 {
     private static readonly List<SapShipmentRow> Rows = BuildSampleRows();
+    private readonly ILogger<StubSapClient>? _log;
+
+    public StubSapClient() { _log = null; }
+    public StubSapClient(ILogger<StubSapClient> log) { _log = log; }
 
     public Task<SapHealth> GetHealthAsync(CancellationToken ct = default) =>
         Task.FromResult(new SapHealth
@@ -32,7 +36,9 @@ public class StubSapClient : ISapClient
         if (!string.IsNullOrWhiteSpace(q.MaterialNo))
             rs = rs.Where(r => r.MaterialNo.Contains(q.MaterialNo, StringComparison.OrdinalIgnoreCase));
 
-        return Task.FromResult<IReadOnlyList<SapShipmentRow>>(rs.ToList());
+        var list = rs.ToList();
+        _log?.LogInformation("Stub search returned {Count} row(s) for query {@Query}", list.Count, q);
+        return Task.FromResult<IReadOnlyList<SapShipmentRow>>(list);
     }
 
     public async Task<int> FetchSinceAsync(
@@ -47,6 +53,11 @@ public class StubSapClient : ISapClient
             .ToList();
         if (matched.Count > 0)
             await onPage(matched, ct);
+        // Symmetry with HybridSapClient.FetchSinceAsync log line: dev mode
+        // should produce equivalent diagnostic output so a regression that
+        // only surfaces in dev (or vice versa) is not hidden by the log
+        // gap. Counts can legitimately be 0 in either implementation.
+        _log?.LogInformation("Stub fetch-since(>= {Date}) returned {Count} row(s)", sinceDocDate, matched.Count);
         return matched.Count;
     }
 

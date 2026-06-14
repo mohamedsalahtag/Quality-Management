@@ -11,6 +11,8 @@ public class SettingsService : ISettingsService
     public Task<string?> GetAsync(string key) => _db.GetConfigAsync(key);
     public Task SetAsync(string key, string? value, int? updatedBy = null) =>
         _db.SetConfigAsync(key, value ?? "", updatedBy);
+    public Task SetManyAsync(IEnumerable<KeyValuePair<string, string?>> entries, int? updatedBy = null) =>
+        _db.SetConfigManyAsync(entries, updatedBy);
     public Task<IReadOnlyDictionary<string, string?>> GetManyAsync(IEnumerable<string> keys) =>
         _db.GetConfigManyAsync(keys);
 
