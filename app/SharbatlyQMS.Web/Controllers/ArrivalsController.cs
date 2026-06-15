@@ -24,14 +24,23 @@ public class ArrivalsController : Controller
 
     [HttpGet]
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
-    public async Task<IActionResult> Pending(string? container, string? bol, string? po)
+    public async Task<IActionResult> Pending(
+        string? container, string? bol, string? po,
+        string? plant, string? poType, string? storageLoc)
     {
-        var rows   = await _cache.ListPendingAsync(container, bol, po);
-        var status = await _cache.GetPullStatusAsync();
-        ViewBag.Container  = container;
-        ViewBag.Bol        = bol;
-        ViewBag.Po         = po;
-        ViewBag.PullStatus = status;
+        var rows    = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc);
+        var status  = await _cache.GetPullStatusAsync();
+        var options = await _cache.GetPendingFilterOptionsAsync();
+        ViewBag.Container         = container;
+        ViewBag.Bol               = bol;
+        ViewBag.Po                = po;
+        ViewBag.Plant             = plant;
+        ViewBag.PoType            = poType;
+        ViewBag.StorageLoc        = storageLoc;
+        ViewBag.PullStatus        = status;
+        ViewBag.PlantOptions      = options.Plants;
+        ViewBag.PoTypeOptions     = options.PoTypes;
+        ViewBag.StorageLocOptions = options.StorageLocations;
         return View(rows);
     }
 

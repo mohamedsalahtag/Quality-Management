@@ -84,29 +84,43 @@ public class ContainerCacheService : IContainerCacheService
 
     public async Task<IReadOnlyList<PendingPickupRow>> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
+        string? plant = null, string? poType = null, string? storageLoc = null,
         CancellationToken ct = default)
     {
         using var c = Open();
         // Same filter clause is applied to both result sets so the
         // material-lines query never returns lines for triplets the
-        // first query filtered out.
+        // first query filtered out. Container / BOL / PO use LIKE for
+        // free-text contains-match; Plant / PoType / StorageLoc use
+        // equality because they come from dropdowns sourced from the
+        // same column values.
         const string filterClause = @"
             has_arrival = 0
-            AND (@Container IS NULL OR container_no LIKE @Container)
-            AND (@Bol       IS NULL OR bol_no       LIKE @Bol)
-            AND (@Po        IS NULL OR ebeln        LIKE @Po)";
+            AND (@Container  IS NULL OR container_no LIKE @Container)
+            AND (@Bol        IS NULL OR bol_no       LIKE @Bol)
+            AND (@Po         IS NULL OR ebeln        LIKE @Po)
+            AND (@Plant      IS NULL OR plant        = @Plant)
+            AND (@PoType     IS NULL OR po_type      = @PoType)
+            AND (@StorageLoc IS NULL OR storage_loc  = @StorageLoc)";
 
         // SQL LIKE wildcards: empty input -> NULL (match everything);
         // populated input -> '%value%' contains-match (operators usually
         // remember a partial number).
         static string? Wrap(string? s) =>
             string.IsNullOrWhiteSpace(s) ? null : $"%{s.Trim()}%";
+        // Exact-match: trim and convert empty to null so the (@x IS NULL)
+        // branch above kicks in.
+        static string? Exact(string? s) =>
+            string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
         var p = new
         {
-            Container = Wrap(container),
-            Bol       = Wrap(bol),
-            Po        = Wrap(po)
+            Container  = Wrap(container),
+            Bol        = Wrap(bol),
+            Po         = Wrap(po),
+            Plant      = Exact(plant),
+            PoType     = Exact(poType),
+            StorageLoc = Exact(storageLoc)
         };
 
         using var grid = await c.QueryMultipleAsync($@"
@@ -117,6 +131,8 @@ public class ContainerCacheService : IContainerCacheService
                 MAX(vendor_no)     AS VendorNo,
                 MAX(vendor_name)   AS VendorName,
                 MAX(po_type)       AS PoType,
+                MAX(plant)         AS Plant,
+                MAX(storage_loc)   AS StorageLocation,
                 COUNT(*)           AS LineCount,
                 MAX(doc_date)      AS DocDate,
                 MAX(arrival_date)  AS ArrivalDate,
@@ -154,6 +170,45 @@ public class ContainerCacheService : IContainerCacheService
             t.MaterialLines = byTriplet[$"{t.ContainerNo}|{t.BolNo}|{t.Ebeln}"].ToList();
         }
         return triplets;
+    }
+
+    public async Task<PendingFilterOptions> GetPendingFilterOptionsAsync(CancellationToken ct = default)
+    {
+        using var c = Open();
+        // Three cheap DISTINCT queries over the pending-filtered index
+        // (IX_qms_sap_container_cache_pending) -- index-only seeks, no
+        // table scans. Combined into one round trip with QueryMultiple.
+        // The third query returns (plant, storage_loc) pairs because
+        // storage-loc codes repeat across plants (e.g. "0001" appears
+        // under multiple plants in SAP); the UI needs the parent plant
+        // to render and filter correctly.
+        using var grid = await c.QueryMultipleAsync(@"
+            SELECT DISTINCT plant
+            FROM   qms_sap_container_cache
+            WHERE  has_arrival = 0 AND plant IS NOT NULL AND plant <> ''
+            ORDER  BY plant;
+
+            SELECT DISTINCT po_type
+            FROM   qms_sap_container_cache
+            WHERE  has_arrival = 0 AND po_type IS NOT NULL AND po_type <> ''
+            ORDER  BY po_type;
+
+            SELECT DISTINCT plant AS Plant, storage_loc AS Code
+            FROM   qms_sap_container_cache
+            WHERE  has_arrival = 0
+              AND  plant       IS NOT NULL AND plant       <> ''
+              AND  storage_loc IS NOT NULL AND storage_loc <> ''
+            ORDER  BY plant, storage_loc;");
+
+        var plants    = (await grid.ReadAsync<string>()).ToList();
+        var poTypes   = (await grid.ReadAsync<string>()).ToList();
+        var storage   = (await grid.ReadAsync<PlantStorageLoc>()).ToList();
+        return new PendingFilterOptions
+        {
+            Plants           = plants,
+            PoTypes          = poTypes,
+            StorageLocations = storage
+        };
     }
 
     public async Task<IReadOnlyList<SapShipmentRow>> GetTripletRowsAsync(string containerNo, string bolNo, string ebeln, CancellationToken ct = default)

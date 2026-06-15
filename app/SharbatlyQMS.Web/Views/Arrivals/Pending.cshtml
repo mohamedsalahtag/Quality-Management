@@ -1,14 +1,24 @@
+@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.Services
 @model IReadOnlyList<PendingPickupRow>
 @{
     ViewData["Title"] = "Pending Containers";
-    var container = ViewBag.Container as string;
-    var bol       = ViewBag.Bol       as string;
-    var po        = ViewBag.Po        as string;
+    var container   = ViewBag.Container  as string;
+    var bol         = ViewBag.Bol        as string;
+    var po          = ViewBag.Po         as string;
+    var plant       = ViewBag.Plant      as string;
+    var poType      = ViewBag.PoType     as string;
+    var storageLoc  = ViewBag.StorageLoc as string;
     bool filtered = !string.IsNullOrWhiteSpace(container)
                     || !string.IsNullOrWhiteSpace(bol)
-                    || !string.IsNullOrWhiteSpace(po);
-    var pullStatus = ViewBag.PullStatus as ContainerPullStatus;
+                    || !string.IsNullOrWhiteSpace(po)
+                    || !string.IsNullOrWhiteSpace(plant)
+                    || !string.IsNullOrWhiteSpace(poType)
+                    || !string.IsNullOrWhiteSpace(storageLoc);
+    var pullStatus       = ViewBag.PullStatus        as ContainerPullStatus;
+    var plantOptions     = ViewBag.PlantOptions      as IReadOnlyList<string>          ?? Array.Empty<string>();
+    var poTypeOptions    = ViewBag.PoTypeOptions     as IReadOnlyList<string>          ?? Array.Empty<string>();
+    var storageOptions   = ViewBag.StorageLocOptions as IReadOnlyList<PlantStorageLoc> ?? Array.Empty<PlantStorageLoc>();
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -80,24 +90,65 @@
     </div>
 }
 
-@* ---- Filter form: contains-match on container / BOL / PO ---- *@
+@* ---- Filter form ----
+   Free-text contains-match on Container / BOL / PO; exact-match on the
+   three SAP-categorical dropdowns (Plant, PO Type, Storage Loc).
+   The Storage Loc dropdown is plant-scoped: each <option> carries the
+   parent plant code in `data-plant`; site-level JS narrows visible
+   options when the Plant dropdown changes (storage-loc codes repeat
+   across plants in SAP, so showing all of them un-scoped would be
+   ambiguous). *@
 <form method="get" class="row g-2 mb-3">
-    <div class="col-md-3">
+    <div class="col-md-2">
         <label class="form-label small mb-1">Container</label>
         <input type="text" name="container" value="@container" class="form-control form-control-sm"
                placeholder="e.g. CMAU1234567" autocomplete="off" />
     </div>
-    <div class="col-md-3">
+    <div class="col-md-2">
         <label class="form-label small mb-1">BOL</label>
         <input type="text" name="bol" value="@bol" class="form-control form-control-sm"
                placeholder="e.g. MSCUAB1234" autocomplete="off" />
     </div>
-    <div class="col-md-3">
+    <div class="col-md-1">
         <label class="form-label small mb-1">PO</label>
         <input type="text" name="po" value="@po" class="form-control form-control-sm"
                placeholder="EBELN" autocomplete="off" />
     </div>
-    <div class="col-md-3 d-flex align-items-end gap-2">
+    <div class="col-md-2">
+        <label class="form-label small mb-1">Plant</label>
+        <select name="plant" id="pending-plant-filter" class="form-select form-select-sm">
+            <option value="">All plants</option>
+            @foreach (var pl in plantOptions)
+            {
+                <option value="@pl" selected="@(string.Equals(pl, plant, StringComparison.OrdinalIgnoreCase))">@SapPlantDirectory.PlantLabel(pl)</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-2">
+        <label class="form-label small mb-1">Storage Loc</label>
+        <select name="storageLoc" id="pending-storage-filter" class="form-select form-select-sm">
+            <option value="">All storage locations</option>
+            @foreach (var sl in storageOptions)
+            {
+                <option value="@sl.Code" data-plant="@sl.Plant"
+                        selected="@(string.Equals(sl.Code, storageLoc, StringComparison.OrdinalIgnoreCase)
+                                    && (string.IsNullOrEmpty(plant) || string.Equals(sl.Plant, plant, StringComparison.OrdinalIgnoreCase)))">
+                    @SapPlantDirectory.StorageLocationLabel(sl.Plant, sl.Code)
+                </option>
+            }
+        </select>
+    </div>
+    <div class="col-md-1">
+        <label class="form-label small mb-1">PO type</label>
+        <select name="poType" class="form-select form-select-sm">
+            <option value="">All</option>
+            @foreach (var pt in poTypeOptions)
+            {
+                <option value="@pt" selected="@(string.Equals(pt, poType, StringComparison.OrdinalIgnoreCase))">@pt</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-2 d-flex align-items-end gap-2">
         <button type="submit" class="btn btn-primary btn-sm">
             <i class="bi bi-funnel me-1"></i>Filter
         </button>
@@ -137,6 +188,8 @@
                     <th data-sort>PO</th>
                     <th data-sort>Type</th>
                     <th data-sort>Vendor</th>
+                    <th data-sort>Plant</th>
+                    <th data-sort>Storage Loc</th>
                     <th class="text-end" data-sort="num">Lines</th>
                     <th>Materials</th>
                     <th data-sort>Doc date</th>
@@ -147,7 +200,7 @@
             <tbody>
             @if (Model.Count == 0)
             {
-                <tr><td colspan="10" class="text-center text-muted py-4">
+                <tr><td colspan="12" class="text-center text-muted py-4">
                     @if (filtered)
                     {
                         <span>No pending containers match the filter. <a asp-action="Pending">Clear</a> to see all.</span>
@@ -194,6 +247,30 @@
                             @if (!string.IsNullOrEmpty(r.VendorNo))
                             {
                                 <div class="text-muted small">@r.VendorNo</div>
+                            }
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(r.Plant))
+                            {
+                                var plantName = SapPlantDirectory.PlantName(r.Plant);
+                                <span class="badge bg-light text-dark border"
+                                      data-bs-toggle="tooltip" title="@(plantName ?? r.Plant)">@r.Plant</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(r.StorageLocation))
+                            {
+                                var slName = SapPlantDirectory.StorageLocationName(r.Plant, r.StorageLocation);
+                                <span class="badge bg-light text-dark border"
+                                      data-bs-toggle="tooltip" title="@(slName ?? r.StorageLocation)">@r.StorageLocation</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
                             }
                         </td>
                         <td class="text-end">
@@ -252,13 +329,43 @@
 
 @section Scripts {
 <script>
-    // Initialise Bootstrap tooltips on the materials peek cells. Without
-    // this they're plain title="" tooltips (single line, no HTML).
+    // Bootstrap tooltips are now wired up site-wide by site.js, so this
+    // view no longer needs a local init block.
+
+    // Storage Loc dropdown is plant-scoped: each <option> carries the
+    // parent plant code in data-plant. When the user picks a plant we
+    // hide the options whose data-plant doesn't match; when "All plants"
+    // is selected we show everything. If the current storage-loc
+    // selection becomes hidden by the plant change, reset it to "All"
+    // so the form submission is consistent with what the user sees.
     (function () {
-        if (!window.bootstrap || !window.bootstrap.Tooltip) return;
-        document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
-            new bootstrap.Tooltip(el, { container: 'body' });
-        });
+        var plantSel   = document.getElementById('pending-plant-filter');
+        var storageSel = document.getElementById('pending-storage-filter');
+        if (!plantSel || !storageSel) return;
+
+        function applyPlantFilter() {
+            var plant = plantSel.value;
+            var anyVisible = false;
+            Array.prototype.forEach.call(storageSel.options, function (opt) {
+                if (!opt.value) { opt.hidden = false; anyVisible = true; return; }
+                var optPlant = opt.getAttribute('data-plant') || '';
+                var match    = !plant || optPlant === plant;
+                opt.hidden = !match;
+                if (match) anyVisible = true;
+            });
+            // If the currently-selected option is now hidden, snap back
+            // to the empty "All storage locations" placeholder.
+            var sel = storageSel.options[storageSel.selectedIndex];
+            if (sel && sel.hidden) storageSel.value = '';
+            // Disable the dropdown entirely if nothing under the plant
+            // matched (e.g. plant with no pending storage locs).
+            storageSel.disabled = !anyVisible;
+        }
+
+        plantSel.addEventListener('change', applyPlantFilter);
+        // Run once on load so a bookmarked URL with ?plant=X starts
+        // with the storage-loc dropdown already narrowed.
+        applyPlantFilter();
     })();
 </script>
 }

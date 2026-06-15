@@ -24,10 +24,23 @@ public interface IContainerCacheService
     /// limit -- the page's client-side tablekit paginator handles long
     /// lists. Optional filters narrow the result on the SQL side so the
     /// search box on the page does not have to ship a huge HTML payload.
+    /// Plant and PoType are exact-match (sourced from the page's
+    /// dropdowns, which themselves come from
+    /// <see cref="GetPendingFilterOptionsAsync"/>).
     /// </summary>
     Task<IReadOnlyList<PendingPickupRow>> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
+        string? plant = null, string? poType = null, string? storageLoc = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Distinct plant + po_type values present in CURRENTLY PENDING cache
+    /// rows. Feeds the Plant and PO Type dropdowns on /Arrivals/Pending.
+    /// Pending-only (not whole-cache) by design: a plant in the dropdown
+    /// that has zero pending rows would just produce an empty result page
+    /// when the operator picks it.
+    /// </summary>
+    Task<PendingFilterOptions> GetPendingFilterOptionsAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Returns every cached SapShipmentRow for the given (Container, BOL, PO)
@@ -106,10 +119,12 @@ public class PendingPickupRow
     public string  ContainerNo  { get; set; } = "";
     public string  BolNo        { get; set; } = "";
     public string  Ebeln        { get; set; } = "";
-    public string? VendorNo     { get; set; }
-    public string? VendorName   { get; set; }
-    public string? PoType       { get; set; }
-    public int     LineCount    { get; set; }
+    public string? VendorNo        { get; set; }
+    public string? VendorName      { get; set; }
+    public string? PoType          { get; set; }
+    public string? Plant           { get; set; }
+    public string? StorageLocation { get; set; }
+    public int     LineCount       { get; set; }
     // SQL DATE columns come back from Dapper as System.DateTime (it has no
     // built-in mapper to DateOnly). The view only reads .ToString("yyyy-MM-dd")
     // so DateTime works identically here.
@@ -120,6 +135,23 @@ public class PendingPickupRow
     /// <summary>Per-PO-line materials inside this triplet, ordered by Ebelp.</summary>
     public List<PendingMaterialLine> MaterialLines { get; set; } = new();
 }
+
+/// <summary>
+/// Dropdown sources for the Pending Containers filter form. All lists
+/// are sorted alphabetically and exclude null / empty values. The
+/// <see cref="StorageLocations"/> list carries the parent plant code so
+/// the page can render a Plant-dependent dropdown (storage-loc codes
+/// repeat across plants -- "0001" exists under multiple plants).
+/// </summary>
+public class PendingFilterOptions
+{
+    public IReadOnlyList<string>           Plants           { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<string>           PoTypes          { get; init; } = Array.Empty<string>();
+    public IReadOnlyList<PlantStorageLoc>  StorageLocations { get; init; } = Array.Empty<PlantStorageLoc>();
+}
+
+/// <summary>(Plant, storage-loc) pair drawn from currently-pending cache rows.</summary>
+public sealed record PlantStorageLoc(string Plant, string Code);
 
 public class PendingMaterialLine
 {
