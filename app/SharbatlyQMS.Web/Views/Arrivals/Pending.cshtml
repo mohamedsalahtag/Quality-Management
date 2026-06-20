@@ -19,6 +19,7 @@
     var plantOptions     = ViewBag.PlantOptions      as IReadOnlyList<string>          ?? Array.Empty<string>();
     var poTypeOptions    = ViewBag.PoTypeOptions     as IReadOnlyList<string>          ?? Array.Empty<string>();
     var storageOptions   = ViewBag.StorageLocOptions as IReadOnlyList<PlantStorageLoc> ?? Array.Empty<PlantStorageLoc>();
+    var plantScopeLocked = ViewBag.PlantScopeLocked  as string;
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -116,13 +117,28 @@
     </div>
     <div class="col-md-2">
         <label class="form-label small mb-1">Plant</label>
-        <select name="plant" id="pending-plant-filter" class="form-select form-select-sm">
-            <option value="">All plants</option>
-            @foreach (var pl in plantOptions)
-            {
-                <option value="@pl" selected="@(string.Equals(pl, plant, StringComparison.OrdinalIgnoreCase))">@SapPlantDirectory.PlantLabel(pl)</option>
-            }
-        </select>
+        @if (plantScopeLocked != null)
+        {
+            @* Operator is plant-scoped: forced server-side; render a locked
+               badge instead of a dropdown so the user understands why every
+               row belongs to their plant. *@
+            <div class="form-control form-control-sm bg-light d-flex align-items-center"
+                 title="Your account is restricted to this plant.">
+                <i class="bi bi-lock-fill text-muted me-1"></i>
+                <span class="small">@SapPlantDirectory.PlantLabel(plantScopeLocked)</span>
+            </div>
+            <input type="hidden" id="pending-plant-filter" name="plant" value="@plantScopeLocked" />
+        }
+        else
+        {
+            <select name="plant" id="pending-plant-filter" class="form-select form-select-sm">
+                <option value="">All plants</option>
+                @foreach (var pl in plantOptions)
+                {
+                    <option value="@pl" selected="@(string.Equals(pl, plant, StringComparison.OrdinalIgnoreCase))">@SapPlantDirectory.PlantLabel(pl)</option>
+                }
+            </select>
+        }
     </div>
     <div class="col-md-2">
         <label class="form-label small mb-1">Storage Loc</label>
@@ -160,11 +176,28 @@
 </form>
 
 <style>
+    /* Compact grid: 13 columns wrapped on narrow screens. Combined cells
+       (PO/STO, Plant/Storage, Dates) collapse to 10 columns; the
+       supporting CSS below keeps each header on one line, codes in
+       monospace + nowrap, and stacks the secondary value as a muted
+       sub-line so primary sortable data still wins the eye. */
+    .pending-table              { font-size: .875rem; }
+    .pending-table th           { white-space: nowrap; vertical-align: middle; font-weight: 600; }
+    .pending-table td           { vertical-align: middle; }
+    .pp-code                    { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+                                  white-space: nowrap; }
+    .pp-sub                     { font-size: .72rem; line-height: 1.15; color: var(--bs-secondary-color, #6c757d);
+                                  white-space: nowrap; }
+    .pp-sub-label               { font-weight: 600; opacity: .65; margin-right: .2rem;
+                                  text-transform: uppercase; letter-spacing: .02em; }
+    .pp-stack                   { display: flex; flex-direction: column; gap: 1px; }
+    .pp-stack .pp-badges        { display: flex; gap: .25rem; flex-wrap: wrap; }
+
     /* Materials "peek": first material inline + count badge if there's
        more. Full list lives in the Bootstrap tooltip so the row stays
        on one line but the operator can hover to read everything. */
     .pp-peek         { display: flex; align-items: center; gap: .35rem;
-                       max-width: 360px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+                       max-width: 320px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
     .pp-peek .pp-no  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
                        font-size: .75rem; color: var(--bs-secondary-color, #6c757d); }
     .pp-peek .pp-name{ text-overflow: ellipsis; overflow: hidden; }
@@ -180,27 +213,25 @@
 
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="50">
+        <table class="table table-sm table-hover align-middle mb-0 pending-table" data-tablekit data-page-size="50">
             <thead class="table-light">
                 <tr>
                     <th data-sort>Container</th>
                     <th data-sort>BOL</th>
-                    <th data-sort>PO</th>
+                    <th data-sort>PO / STO</th>
                     <th data-sort>Type</th>
                     <th data-sort>Vendor</th>
-                    <th data-sort>Plant</th>
-                    <th data-sort>Storage Loc</th>
+                    <th data-sort>Plant / Storage</th>
                     <th class="text-end" data-sort="num">Lines</th>
                     <th>Materials</th>
-                    <th data-sort>Doc date</th>
-                    <th data-sort>Arrival date</th>
+                    <th data-sort>Dates</th>
                     <th class="text-end">Action</th>
                 </tr>
             </thead>
             <tbody>
             @if (Model.Count == 0)
             {
-                <tr><td colspan="12" class="text-center text-muted py-4">
+                <tr><td colspan="10" class="text-center text-muted py-4">
                     @if (filtered)
                     {
                         <span>No pending containers match the filter. <a asp-action="Pending">Clear</a> to see all.</span>
@@ -229,9 +260,17 @@
                             "</li>")) +
                         "</ul>";
                     <tr>
-                        <td><strong>@r.ContainerNo</strong></td>
-                        <td>@r.BolNo</td>
-                        <td>@r.Ebeln</td>
+                        <td class="pp-code"><strong>@r.ContainerNo</strong></td>
+                        <td class="pp-code">@r.BolNo</td>
+                        <td class="pp-code">
+                            <div class="pp-stack">
+                                <span><strong>@r.Ebeln</strong></span>
+                                @if (!string.IsNullOrEmpty(r.Sto))
+                                {
+                                    <span class="pp-sub"><span class="pp-sub-label">STO</span>@r.Sto</span>
+                                }
+                            </div>
+                        </td>
                         <td>
                             @if (!string.IsNullOrEmpty(r.PoType))
                             {
@@ -246,27 +285,26 @@
                             @r.VendorName
                             @if (!string.IsNullOrEmpty(r.VendorNo))
                             {
-                                <div class="text-muted small">@r.VendorNo</div>
+                                <div class="pp-sub">@r.VendorNo</div>
                             }
                         </td>
                         <td>
-                            @if (!string.IsNullOrEmpty(r.Plant))
+                            @if (!string.IsNullOrEmpty(r.Plant) || !string.IsNullOrEmpty(r.StorageLocation))
                             {
-                                var plantName = SapPlantDirectory.PlantName(r.Plant);
-                                <span class="badge bg-light text-dark border"
-                                      data-bs-toggle="tooltip" title="@(plantName ?? r.Plant)">@r.Plant</span>
-                            }
-                            else
-                            {
-                                <span class="text-muted">—</span>
-                            }
-                        </td>
-                        <td>
-                            @if (!string.IsNullOrEmpty(r.StorageLocation))
-                            {
-                                var slName = SapPlantDirectory.StorageLocationName(r.Plant, r.StorageLocation);
-                                <span class="badge bg-light text-dark border"
-                                      data-bs-toggle="tooltip" title="@(slName ?? r.StorageLocation)">@r.StorageLocation</span>
+                                <div class="pp-badges">
+                                    @if (!string.IsNullOrEmpty(r.Plant))
+                                    {
+                                        var plantName = SapPlantDirectory.PlantName(r.Plant);
+                                        <span class="badge bg-light text-dark border"
+                                              data-bs-toggle="tooltip" title="@(plantName ?? r.Plant)">@r.Plant</span>
+                                    }
+                                    @if (!string.IsNullOrEmpty(r.StorageLocation))
+                                    {
+                                        var slName = SapPlantDirectory.StorageLocationName(r.Plant, r.StorageLocation);
+                                        <span class="badge bg-light text-dark border"
+                                              data-bs-toggle="tooltip" title="@(slName ?? r.StorageLocation)">@r.StorageLocation</span>
+                                    }
+                                </div>
                             }
                             else
                             {
@@ -306,8 +344,18 @@
                                 </div>
                             }
                         </td>
-                        <td>@(r.DocDate?.ToString("yyyy-MM-dd"))</td>
-                        <td>@(r.ArrivalDate?.ToString("yyyy-MM-dd"))</td>
+                        <td>
+                            <div class="pp-stack pp-code">
+                                <span>
+                                    <span class="pp-sub-label">PO</span>
+                                    @(r.DocDate?.ToString("yyyy-MM-dd") ?? "—")
+                                </span>
+                                <span class="pp-sub">
+                                    <span class="pp-sub-label">Arr</span>
+                                    @(r.ArrivalDate?.ToString("yyyy-MM-dd") ?? "—")
+                                </span>
+                            </div>
+                        </td>
                         <td class="text-end">
                             <form asp-action="Create" method="post" class="d-inline">
                                 @Html.AntiForgeryToken()

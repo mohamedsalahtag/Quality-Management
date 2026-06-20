@@ -12,4 +12,7 @@ public class SampleRowVm
     /// (including Material-scoped values copied down) rather than the frozen
     /// legacy columns on qms_sample.</summary>
     public IReadOnlyList<SampleHeaderValue> HeaderValues { get; set; } = Array.Empty<SampleHeaderValue>();
+    /// <summary>V31 (2026-06-20): photo count for this sample (qms_image_link
+    /// rows with owner_type='Sample'). Renders the camera badge on the row.</summary>
+    public int PhotoCount { get; set; }
 }

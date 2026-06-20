@@ -94,7 +94,10 @@
    otherwise the material's default. Updated client-side whenever the user
    edits the Sample Size input. *@
 @{
-    short? effectiveSampleSize = s.SampleSize ?? qoMat?.SampleSize;
+    // Sample's own value if set; otherwise the material's effective default
+    // (numeric column if present, parsed from MARA's MaterialSize text otherwise).
+    short? materialDefaultSize = qoMat?.EffectiveSampleSize;
+    short? effectiveSampleSize = s.SampleSize ?? materialDefaultSize;
 }
 <form asp-action="SaveSample" method="post" class="sample-form"
       data-sample-size="@(effectiveSampleSize)">
@@ -117,10 +120,12 @@
             <div class="card-header bg-primary text-white">Sample header</div>
             <div class="card-body">
                 <div class="row g-1">
-                    @* V24: Sample Size is editable per sample. Prefilled from
-                       the material's default; controller flags SizeOverridden
-                       when the posted value differs, so the material-level
-                       propagation UPDATE skips this row. *@
+                    @* 2026-06-20: Sample size defaults to the material's effective
+                       size (numeric column when set, otherwise parsed from MARA's
+                       MaterialSize text). Editable per sample -- the controller
+                       flags SizeOverridden when the posted value differs from
+                       the material's effective size, which preserves the per-sample
+                       value across future material-level Override propagations. *@
                     <div class="col-6 col-md-3">
                         <label class="form-label">
                             Sample Size <span class="text-muted">(inspected qty)</span>
@@ -131,12 +136,12 @@
                         @if (s.SizeOverridden)
                         {
                             <small class="text-warning d-block">
-                                <i class="bi bi-pencil-square me-1"></i>Overridden — material default: @(qoMat?.SampleSize?.ToString() ?? "—")
+                                <i class="bi bi-pencil-square me-1"></i>Overridden — material default: @(materialDefaultSize?.ToString() ?? "—")
                             </small>
                         }
                         else
                         {
-                            <small class="text-muted d-block">Default from material: @(qoMat?.SampleSize?.ToString() ?? "—")</small>
+                            <small class="text-muted d-block">Default from material: @(materialDefaultSize?.ToString() ?? "—")</small>
                         }
                     </div>
                     @* Dynamic Sample-scoped header fields from qms_sample_header_field. *@
@@ -287,7 +292,16 @@
 
         @* Defects: one section per category (ordered + coloured by the
            category master). Two sections side-by-side on wide screens,
-           stacked on tablet/phone. *@
+           stacked on tablet/phone.
+
+           The running-total banner enforces sum(defects) <= sample size --
+           the JS updates it as values change and the server re-applies the
+           same clamp on save. *@
+        <div class="defect-total-banner small text-muted mt-2"
+             data-state="ok" aria-live="polite">
+            Defects total: <span class="defect-total-current">0</span>
+            / <span class="defect-total-size">@(effectiveSampleSize?.ToString() ?? "—")</span><span class="defect-total-note"></span>
+        </div>
         <div class="row g-2 mt-2">
             @if (defectGroups.Count == 0)
             {
@@ -318,9 +332,12 @@
                             {
                                 <button type="button" class="btn btn-outline-secondary btn-step defect-minus" tabindex="-1">−</button>
                             }
+                            @* No per-input max -- the cap is the SUM of all
+                               defects on the form. JS enforces it live; the
+                               controller re-clamps on save. *@
                             <input name="defect_@(d.DefectId)_value" type="number"
                                    inputmode="@(isDecimal ? "decimal" : "numeric")"
-                                   min="0" max="@effectiveSampleSize" step="@(isDecimal ? "any" : "1")"
+                                   min="0" step="@(isDecimal ? "any" : "1")"
                                    class="form-control form-control-sm defect-value" data-id="@d.DefectId"
                                    value="@valDisplay" />
                             @if (editable)
@@ -333,6 +350,39 @@
                     }
                 </div>
             }
+        </div>
+
+        @* V31 (2026-06-20): Photos card per sample. Brand-new samples (SampleId
+           == 0) need to be saved before they get an id to attach photos to;
+           we show a helpful placeholder until then. *@
+        <div class="card mt-3">
+            <div class="card-header py-2 d-flex align-items-center gap-2">
+                <i class="bi bi-images"></i>
+                <strong>Photos</strong>
+                @if (s.SampleId > 0)
+                {
+                    <span class="text-muted small">drag & drop, paste from clipboard, or pick files</span>
+                }
+            </div>
+            <div class="card-body">
+                @if (s.SampleId == 0)
+                {
+                    <div class="text-muted small">Save the sample first to enable photo uploads for it.</div>
+                }
+                else
+                {
+                    var sampleGalleryVm = new ImageGalleryVm
+                    {
+                        OwnerType = "Sample",
+                        OwnerId   = s.SampleId,
+                        Editable  = editable,
+                        // V31 (2026-06-20): Ajax mode keeps the sample drawer
+                        // open across uploads + deletes.
+                        Ajax      = true
+                    };
+                    <partial name="~/Views/Shared/_ImageGallery.cshtml" model="sampleGalleryVm" />
+                }
+            </div>
         </div>
 
         @if (editable)

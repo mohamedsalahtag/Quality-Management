@@ -50,6 +50,7 @@
                     <th data-sort>Container</th>
                     <th data-sort>BOL</th>
                     <th data-sort>PO</th>
+                    <th data-sort>Plant</th>
                     <th data-sort>Supplier</th>
                     <th data-sort>Arrival</th>
                     <th data-sort>Status</th>
@@ -62,7 +63,7 @@
             <tbody>
                 @if (!Model.Any())
                 {
-                    <tr><td colspan="11" class="text-center text-muted py-4">
+                    <tr><td colspan="12" class="text-center text-muted py-4">
                         No Quality Orders yet. Complete an arrival, then click <em>Create Quality Order</em>.
                     </td></tr>
                 }
@@ -82,6 +83,17 @@
                             <td><code>@q.ContainerNo</code></td>
                             <td>@q.BolNo</td>
                             <td>@q.Ebeln</td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(q.Plant))
+                                {
+                                    <span class="badge bg-light text-dark border"
+                                          data-bs-toggle="tooltip" title="@(SapPlantDirectory.PlantName(q.Plant) ?? q.Plant)">@q.Plant</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
                             <td>@q.VendorName</td>
                             <td>
                                 <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@q.ArrivalId"

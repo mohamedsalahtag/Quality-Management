@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SharbatlyQMS.Web.Extensions;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.ViewModels;
@@ -28,16 +29,43 @@ public class QualityOrdersController : Controller
 
     public async Task<IActionResult> Index(string? status, string? search)
     {
-        var rows = await _qos.ListAsync(string.IsNullOrEmpty(status) ? null : status, search);
+        var scoped = User.GetScopedPlant();
+        var rows = await _qos.ListAsync(string.IsNullOrEmpty(status) ? null : status, search, scoped);
         ViewBag.Status = status;
         ViewBag.Search = search;
+        ViewBag.PlantScopeLocked = scoped;
         return View(rows);
+    }
+
+    /// <summary>Forbid() when the user is plant-scoped and the QO belongs to a
+    /// different plant; null when access is OK.</summary>
+    private async Task<IActionResult?> EnsureCanReadQoAsync(long qualityOrderId)
+    {
+        var scoped = User.GetScopedPlant();
+        if (scoped == null) return null;
+        var plant = await _qos.GetPlantForQoAsync(qualityOrderId);
+        return string.Equals(plant, scoped, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : Forbid();
+    }
+
+    /// <summary>Forbid() when the user is plant-scoped and the arrival's plant
+    /// (where this QO would attach) doesn't match. Used by CreateForArrival.</summary>
+    private async Task<IActionResult?> EnsureCanReadArrivalAsync(long arrivalId)
+    {
+        var scoped = User.GetScopedPlant();
+        if (scoped == null) return null;
+        var plant = await _arrivals.GetPlantAsync(arrivalId);
+        return string.Equals(plant, scoped, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : Forbid();
     }
 
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> CreateForArrival(long arrivalId)
     {
+        if (await EnsureCanReadArrivalAsync(arrivalId) is { } block) return block;
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         try
         {
@@ -54,6 +82,7 @@ public class QualityOrdersController : Controller
 
     public async Task<IActionResult> Details(long id)
     {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
         var qo = await _qos.GetAsync(id);
         if (qo == null) return NotFound();
         // Round-trips for Details: QO, Arrival, Shipment, Materials, Samples,
@@ -69,12 +98,20 @@ public class QualityOrdersController : Controller
         foreach (var m in materials)
             if (mara.TryGetValue(m.MaterialNo, out var mm)) m.ApplyMara(mm);
 
+        // V31 (2026-06-20): photos moved from per-material to per-sample.
+        // Count per-sample photos so each sample row shows its own badge; the
+        // per-material count is no longer rendered.
         var photoCounts = await _images.CountByOwnersAsync(
-            "QualityOrderMaterial", materials.Select(m => m.QoMaterialId));
+            "Sample", samples.Select(s => s.SampleId));
 
         // Per-sample header values (incl. Material-scoped values copied down)
         // so the sample-table rows show live Grower/Pallet/Lot/Date-code.
         var sampleHeaders = await _qos.GetSampleHeaderValuesBatchAsync(samples.Select(s => s.SampleId));
+
+        // V31: material-header completeness map for the "Add sample" gate.
+        // qoMaterialId -> true when every mandatory Material-scoped header
+        // field has a value. Used to disable + pulse-animate the button.
+        var headerComplete = await _qos.GetMaterialHeaderCompleteMapAsync(id);
 
         var editable = qo.StatusCode == QualityOrderStatus.Open;
 
@@ -86,6 +123,7 @@ public class QualityOrdersController : Controller
         ViewBag.Samples             = samples;
         ViewBag.PhotoCounts         = photoCounts;
         ViewBag.SampleHeaders       = sampleHeaders;
+        ViewBag.HeaderComplete      = headerComplete;
         ViewBag.Editable            = editable;
         ViewBag.SendMailEnabled     = mailTemplate.Enabled;
         return View(qo);
@@ -173,6 +211,26 @@ public class QualityOrdersController : Controller
     }
 
     /// <summary>
+    /// V31 (2026-06-20): dedicated photos-only side panel for a sample. Lighter
+    /// than SamplePanel -- no readings / defects / header / autoload -- so the
+    /// operator can attach photos to an existing sample in two clicks without
+    /// the sample-edit drawer loading.
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> SamplePhotosPanel(long sampleId)
+    {
+        var sample = await _qos.GetSampleAsync(sampleId);
+        if (sample == null) return NotFound();
+        if (await EnsureCanReadQoAsync(sample.QualityOrderId) is { } block) return block;
+        var qo = await _qos.GetAsync(sample.QualityOrderId);
+        if (qo == null) return NotFound();
+        ViewBag.Sample   = sample;
+        ViewBag.Qo       = qo;
+        ViewBag.Editable = qo.StatusCode == QualityOrderStatus.Open;
+        return PartialView("SamplePhotosPanel");
+    }
+
+    /// <summary>
     /// Returns the <c>_MaterialForm</c> partial for the per-material "Material
     /// details" panel: the Material-scoped header fields + the material's
     /// Sample Size, entered once and inherited by every sample. Loaded over
@@ -211,7 +269,7 @@ public class QualityOrdersController : Controller
     /// in-place DOM update of the material card.</summary>
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
-    public async Task<IActionResult> SaveMaterialHeaderAjax(long qoMaterialId, short? sampleSize, IFormCollection form)
+    public async Task<IActionResult> SaveMaterialHeaderAjax(long qoMaterialId, IFormCollection form)
     {
         try
         {
@@ -257,14 +315,14 @@ public class QualityOrdersController : Controller
             }
 
             var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
-            await _qos.SaveMaterialHeaderValuesAndSizeAsync(qoMaterialId, sampleSize, values, user);
+            await _qos.SaveMaterialHeaderValuesAsync(qoMaterialId, values, user);
 
             // Echo back a display summary so the card can update without reload.
             var summary = values
                 .OrderBy(v => v.SortOrder)
                 .Select(v => new { v.FieldName, value = v.TextValue ?? v.NumericValue?.ToString() ?? v.DateValue?.ToString("yyyy-MM-dd") })
                 .ToList();
-            return Json(new { ok = true, qoMaterialId, sampleSize, values = summary });
+            return Json(new { ok = true, qoMaterialId, values = summary });
         }
         catch (Exception ex)
         {
@@ -276,24 +334,63 @@ public class QualityOrdersController : Controller
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> Open(long id)
-        => await TransitionAsync(id, (qos, user, _) => qos.OpenAsync(id, user), null);
-
-    [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
-    public async Task<IActionResult> Close(long id, string? reason)
     {
-        // Business rule: every material line on the QO must have at least one
-        // sample recorded before the QO can be closed. Surface the missing
-        // materials so the QC operator knows exactly what's left to record.
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+        return await TransitionAsync(id, (qos, user, _) => qos.OpenAsync(id, user), null);
+    }
+
+    // Shared precondition for Submit (operator) and Close/Finish (supervisor):
+    // every material on the QO must have at least one sample recorded. Returns
+    // the user-facing error message OR null when OK to proceed.
+    private async Task<string?> CheckAllMaterialsSampledAsync(long id)
+    {
         var materials = await _qos.GetMaterialsAsync(id);
         var samples   = await _qos.ListSamplesAsync(id);
         var sampledMaterialIds = samples.Select(s => s.QoMaterialId).ToHashSet();
         var unsampled = materials.Where(m => !sampledMaterialIds.Contains(m.QoMaterialId)).ToList();
-        if (unsampled.Count > 0)
+        if (unsampled.Count == 0) return null;
+        return "The following material(s) have no samples — "
+            + string.Join(", ", unsampled.Select(m => m.MaterialNo))
+            + ". Add at least one sample per material first.";
+    }
+
+    /// <summary>V31 (2026-06-20): operator marks data entry complete. Locks the
+    /// QO until a Supervisor finishes or cancel-submits it.</summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    public async Task<IActionResult> Submit(long id)
+    {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+        if (await CheckAllMaterialsSampledAsync(id) is { } err)
         {
-            TempData["Error"] = "Cannot close: the following material(s) have no samples — "
-                + string.Join(", ", unsampled.Select(m => m.MaterialNo))
-                + ". Add at least one sample per material before closing.";
+            TempData["Error"] = "Cannot submit: " + err;
+            return RedirectToAction(nameof(Details), new { id });
+        }
+        return await TransitionAsync(id, (qos, user, _) => qos.SubmitAsync(id, user), null);
+    }
+
+    /// <summary>V31 (2026-06-20): Supervisor returns a Submitted QO to Open so
+    /// the operator can fix mistakes. Reason optional but recorded.</summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    public async Task<IActionResult> CancelSubmit(long id, string? reason)
+    {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+        return await TransitionAsync(id, (qos, user, r) => qos.CancelSubmitAsync(id, user, r), reason);
+    }
+
+    /// <summary>"Finish order" — V31 (2026-06-20): policy widened to
+    /// SupervisorOrAbove; source status is now Submitted (was Open). The same
+    /// "all materials sampled" precondition still applies as a safety net,
+    /// though the Submit step should have enforced it earlier.</summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    public async Task<IActionResult> Close(long id, string? reason)
+    {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+        if (await CheckAllMaterialsSampledAsync(id) is { } err)
+        {
+            TempData["Error"] = "Cannot finish: " + err;
             return RedirectToAction(nameof(Details), new { id });
         }
         return await TransitionAsync(id, (qos, user, r) => qos.CloseAsync(id, user, r), reason);
@@ -302,18 +399,27 @@ public class QualityOrdersController : Controller
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
     public async Task<IActionResult> Reopen(long id, string? reason)
-        => await TransitionAsync(id, (qos, user, r) => qos.ReopenAsync(id, user, r), reason);
+    {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+        return await TransitionAsync(id, (qos, user, r) => qos.ReopenAsync(id, user, r), reason);
+    }
 
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
     public async Task<IActionResult> Cancel(long id, string? reason)
-        => await TransitionAsync(id, (qos, user, r) => qos.CancelAsync(id, user, r), reason);
+    {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+        return await TransitionAsync(id, (qos, user, r) => qos.CancelAsync(id, user, r), reason);
+    }
 
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> SaveOverride(long qoMaterialId, long quality_order_id,
         string newSize, string? reason)
     {
+        // V31 (2026-06-20): editable-gate restored. Override endpoints were
+        // missing this check before; now they refuse on any non-Open status.
+        if (await EnsureEditableRedirectAsync(quality_order_id) is { } block) return block;
         if (string.IsNullOrWhiteSpace(newSize))
         {
             TempData["Error"] = "Override size is required.";
@@ -329,6 +435,8 @@ public class QualityOrdersController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> ClearOverride(long qoMaterialId, long qualityOrderId)
     {
+        // V31: editable-gate restored (was missing).
+        if (await EnsureEditableRedirectAsync(qualityOrderId) is { } block) return block;
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         await _qos.ClearOverrideAsync(qoMaterialId, user);
         TempData["Success"] = "Material size override cleared.";
@@ -341,11 +449,15 @@ public class QualityOrdersController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> CreateSample(long qualityOrderId, long qoMaterialId)
     {
-        var qo = await _qos.GetAsync(qualityOrderId);
-        if (qo == null) return NotFound();
-        if (qo.StatusCode != QualityOrderStatus.Open)
+        if (await EnsureCanReadQoAsync(qualityOrderId) is { } block) return block;
+        if (await EnsureEditableRedirectAsync(qualityOrderId) is { } block2) return block2;
+        // V31 (2026-06-20): refuse if the material's mandatory header fields
+        // are not all filled. The UI also disables + pulses the button, but
+        // the server is authoritative against hand-crafted POSTs.
+        var headerComplete = await _qos.GetMaterialHeaderCompleteMapAsync(qualityOrderId);
+        if (headerComplete.TryGetValue(qoMaterialId, out var ok) && !ok)
         {
-            TempData["Error"] = "Quality Order must be Open to add samples.";
+            TempData["Error"] = "Fill the material's mandatory header fields before adding samples.";
             return RedirectToAction(nameof(Details), new { id = qualityOrderId });
         }
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
@@ -467,12 +579,13 @@ public class QualityOrdersController : Controller
             return (null, false, 0,
                 $"Sample cannot be saved — these mandatory fields have no value: {string.Join(", ", missingMandatory)}.");
 
-        // V24: decide whether the posted sample size is an override of the
-        // material's default. A blank input falls back to the material default
-        // (inherited). Any non-null value that differs from the material's
-        // current sample_size is treated as a manual override and protected
-        // from the material-level propagation UPDATE.
-        var materialDefaultSize = matForReadings?.SampleSize;
+        // 2026-06-20: V24 override-detection restored. The sample-size input on
+        // the form is editable; blank input falls back to the material's
+        // EffectiveSampleSize (numeric column when set, else parsed from MARA's
+        // MaterialSize text). Any non-null posted value that differs from that
+        // default is flagged as a per-sample override and protected from the
+        // material-level propagation UPDATE.
+        var materialDefaultSize = matForReadings?.EffectiveSampleSize;
         if (!sample.SampleSize.HasValue)
         {
             sample.SampleSize     = materialDefaultSize;
@@ -561,17 +674,27 @@ public class QualityOrdersController : Controller
         // zero rather than NULL, per business rule.
         var defectsCatalog = await _cat.GetActiveDefectsForGroupAsync(matForReadings?.MaterialGroup);
         // Denominator is the SAMPLE's own size (V24-aware) falling back to
-        // the material's default. Defect values posted above the sample size
-        // are silently clamped so percentages can never exceed 100 -- this
-        // mirrors the client-side max-attr + JS clamp.
+        // the material's default. The SUM of defect values is capped at the
+        // sample size (you can't find more defective items than you inspected);
+        // each value is clamped to whatever room is left after the defects
+        // already processed in catalog order -- this mirrors the client-side
+        // running-total clamp + banner.
         var sampleSize = sample.SampleSize ?? matForReadings?.SampleSize ?? 0;
         var defects = new List<SampleDefect>();
+        decimal runningTotal = 0m;
         foreach (var dc in defectsCatalog)
         {
             var v = form[$"defect_{dc.DefectId}_value"].ToString();
             var p = form[$"defect_{dc.DefectId}_pct"].ToString();
             decimal value = decimal.TryParse(v, out var dv) ? dv : 0m;
-            if (sampleSize > 0 && value > sampleSize) value = sampleSize;
+            if (value < 0m) value = 0m;
+            if (sampleSize > 0)
+            {
+                var remaining = sampleSize - runningTotal;
+                if (remaining < 0m) remaining = 0m;
+                if (value > remaining) value = remaining;
+                runningTotal += value;
+            }
             decimal pct;
             if (sampleSize > 0)                  pct = Math.Round(value / sampleSize * 100m, 4);
             else if (decimal.TryParse(p, out var dp)) pct = dp;
@@ -625,6 +748,8 @@ public class QualityOrdersController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> SaveSample(Sample sample, IFormCollection form)
     {
+        if (sample.QualityOrderId > 0 && await EnsureCanReadQoAsync(sample.QualityOrderId) is { } block)
+            return block;
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var (saved, _, _, error) = await SaveSampleCoreAsync(sample, form, user);
         if (saved == null)
@@ -647,6 +772,8 @@ public class QualityOrdersController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> SaveSampleAjax(Sample sample, IFormCollection form)
     {
+        if (sample.QualityOrderId > 0 && await EnsureCanReadQoAsync(sample.QualityOrderId) is { } block)
+            return block;
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var (saved, isNew, newCount, error) = await SaveSampleCoreAsync(sample, form, user);
         if (saved == null)
@@ -681,6 +808,7 @@ public class QualityOrdersController : Controller
         try
         {
             var s = await _qos.GetSampleAsync(sampleId);
+            if (s != null && await EnsureCanReadQoAsync(s.QualityOrderId) is { } block) return block;
             if (s == null)
             {
                 _log.LogWarning("DeleteSample: sample {SampleId} not found (may already be deleted)", sampleId);
@@ -711,6 +839,7 @@ public class QualityOrdersController : Controller
         {
             var s = await _qos.GetSampleAsync(sampleId);
             if (s == null) return Json(new { ok = false, error = "Sample not found." });
+            if (await EnsureCanReadQoAsync(s.QualityOrderId) is { } _) return Forbid();
             var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
             await _qos.SoftDeleteSampleAsync(sampleId, user);
             var siblings = await _qos.ListSamplesAsync(s.QualityOrderId);
@@ -735,15 +864,20 @@ public class QualityOrdersController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> SaveOverrideAjax(long qoMaterialId, string newSize, string? reason)
     {
-        if (string.IsNullOrWhiteSpace(newSize))
-            return Json(new { ok = false, error = "Override size is required." });
+        // V31 (2026-06-20): editable-gate restored. Resolve the parent QO from
+        // the material, then refuse on any non-Open status.
+        var qoIdNullable = await _qos.GetQoIdForMaterialAsync(qoMaterialId);
+        if (qoIdNullable == null) return Json(new { ok = false, error = "Material not found." });
+        if (await EnsureEditableAjaxAsync(qoIdNullable.Value) is { } block) return block;
+        if (!short.TryParse(newSize, out var n) || n < 1)
+            return Json(new { ok = false, error = "Sample size must be a positive whole number." });
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
-        await _qos.SaveOverrideAsync(qoMaterialId, newSize, reason, user);
+        await _qos.SaveOverrideAsync(qoMaterialId, n.ToString(System.Globalization.CultureInfo.InvariantCulture), reason, user);
         return Json(new
         {
             ok              = true,
             qoMaterialId,
-            materialSize    = newSize,
+            materialSize    = n.ToString(System.Globalization.CultureInfo.InvariantCulture),
             sizeOverridden  = true,
             overrideReason  = reason ?? ""
         });
@@ -754,6 +888,8 @@ public class QualityOrdersController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> ClearOverrideAjax(long qoMaterialId, long qualityOrderId)
     {
+        // V31 (2026-06-20): editable-gate restored.
+        if (await EnsureEditableAjaxAsync(qualityOrderId) is { } block) return block;
         _log.LogInformation("ClearOverrideAjax: qoMaterialId={Qm} qualityOrderId={Qo}", qoMaterialId, qualityOrderId);
         try
         {
@@ -793,5 +929,29 @@ public class QualityOrdersController : Controller
         var (ok, error) = await op(_qos, user, reason);
         TempData[ok ? "Success" : "Error"] = ok ? "Status updated." : error;
         return RedirectToAction(nameof(Details), new { id });
+    }
+
+    // V31 (2026-06-20): central editable-gate. Returns a Json error result if
+    // the QO is not Open; null if OK. Use at the top of every AJAX mutator.
+    private async Task<IActionResult?> EnsureEditableAjaxAsync(long qoId)
+    {
+        var qo = await _qos.GetAsync(qoId);
+        if (qo == null) return Json(new { ok = false, error = "Quality Order not found." });
+        if (qo.StatusCode != QualityOrderStatus.Open)
+            return Json(new { ok = false, error = $"Quality Order is {QualityOrderStatus.DisplayName(qo.StatusCode)} — only Open orders are editable." });
+        return null;
+    }
+
+    // Same guard, but for endpoints that redirect on error (non-AJAX form posts).
+    private async Task<IActionResult?> EnsureEditableRedirectAsync(long qoId)
+    {
+        var qo = await _qos.GetAsync(qoId);
+        if (qo == null) return NotFound();
+        if (qo.StatusCode != QualityOrderStatus.Open)
+        {
+            TempData["Error"] = $"Quality Order is {QualityOrderStatus.DisplayName(qo.StatusCode)} — only Open orders are editable.";
+            return RedirectToAction(nameof(Details), new { id = qoId });
+        }
+        return null;
     }
 }

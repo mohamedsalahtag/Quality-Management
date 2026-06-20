@@ -62,26 +62,90 @@
     // Standalone page: deep-link / no-JS-Details access. Wire the same
     // touch-friendly defect stepper + auto-net weight compute used inside
     // the QO Details drawer so direct visitors get the same experience.
+    // Rule: SUM of all defect values on a sample <= sample size; each input
+    // caps at (sampleSize - sumOfOtherDefects). Mirrored server-side.
+    // Defensive: same fallback chain + multi-event listeners + dynamic max
+    // as the drawer flow in Details.cshtml.
+    function resolveSampleSize(form) {
+        if (!form) return 0;
+        const fromData = parseFloat(form.dataset.sampleSize);
+        if (fromData > 0) return fromData;
+        const sizeInput = form.querySelector('.sample-size-input');
+        const fromInput = parseFloat(sizeInput?.value);
+        return (fromInput > 0) ? fromInput : 0;
+    }
+    function sumOtherDefects(form, exceptInput) {
+        let sum = 0;
+        form.querySelectorAll('.defect-value').forEach(el => {
+            if (el === exceptInput) return;
+            const x = parseFloat(el.value);
+            if (!isNaN(x) && x > 0) sum += x;
+        });
+        return sum;
+    }
+    function refreshDefectTotal(form, clampedTo) {
+        if (!form) return;
+        const size = resolveSampleSize(form);
+        let total = 0;
+        form.querySelectorAll('.defect-value').forEach(el => {
+            const x = parseFloat(el.value);
+            if (!isNaN(x) && x > 0) total += x;
+        });
+        const banner   = form.querySelector('.defect-total-banner');
+        const curSpan  = form.querySelector('.defect-total-current');
+        const sizeSpan = form.querySelector('.defect-total-size');
+        const noteSpan = form.querySelector('.defect-total-note');
+        if (curSpan)  curSpan.textContent  = (Math.round(total * 1000) / 1000).toString();
+        if (sizeSpan) sizeSpan.textContent = (size > 0) ? size.toString() : '—';
+        if (!banner) return;
+        if (!(size > 0)) {
+            banner.dataset.state = 'no-size';
+            banner.classList.remove('text-danger', 'fw-bold');
+            banner.classList.add('text-muted');
+            banner.title = '';
+            if (noteSpan) noteSpan.textContent = ' — sample size not set; use "Override size" on the material card.';
+            return;
+        }
+        if (noteSpan) noteSpan.textContent = '';
+        const atCap = (total >= size - 1e-9);
+        const justClamped = (clampedTo === true) && atCap;
+        if (justClamped) {
+            banner.dataset.state = 'over';
+            banner.classList.remove('text-muted');
+            banner.classList.add('text-danger', 'fw-bold');
+            banner.title = 'Sample size limit reached — extra values were capped';
+        } else {
+            banner.dataset.state = 'ok';
+            banner.classList.remove('text-danger', 'fw-bold');
+            banner.classList.add('text-muted');
+            banner.title = '';
+        }
+    }
     (function wireDefectSteppers(scope) {
         scope.querySelectorAll('.defect-stepper').forEach(row => {
             const input = row.querySelector('.defect-value');
             const minus = row.querySelector('.defect-minus');
             const plus  = row.querySelector('.defect-plus');
-            const clampToSampleSize = (v) => {
+            const clampToRemaining = (v) => {
                 const form = row.closest('form');
-                const size = parseFloat(form?.dataset.sampleSize);
-                if (size > 0 && v > size) return size;
-                return v;
+                const size = resolveSampleSize(form);
+                if (!(size > 0)) return v;
+                const remaining = Math.max(0, size - sumOtherDefects(form, input));
+                return (v > remaining) ? remaining : v;
             };
             const updatePct = () => {
                 const form = row.closest('form');
-                const size = parseFloat(form?.dataset.sampleSize);
+                const size = resolveSampleSize(form);
+                if (size > 0) {
+                    input.max = Math.max(0, size - sumOtherDefects(form, input));
+                } else {
+                    input.removeAttribute('max');
+                }
                 let v = parseFloat(input.value);
+                let clamped = false;
                 if (!isNaN(v)) {
-                    // Cap the displayed value at the sample size so the
-                    // operator can't push it above 100%.
-                    const capped = clampToSampleSize(v);
-                    if (capped !== v) { input.value = capped; v = capped; }
+                    const capped = clampToRemaining(v);
+                    if (capped !== v) { input.value = capped; v = capped; clamped = true; }
                 }
                 const pctInput = form.querySelector('input[name="defect_' + input.dataset.id + '_pct"]');
                 const badge = row.querySelector('.defect-pct-badge');
@@ -96,18 +160,38 @@
                     badge.textContent = '';
                     badge.className = 'badge defect-pct-badge bg-light text-muted';
                 }
+                refreshDefectTotal(form, clamped);
             };
             const bump = delta => {
                 const cur = parseInt(input.value, 10);
                 let next = Math.max(0, (isNaN(cur) ? 0 : cur) + delta);
-                next = clampToSampleSize(next);
+                next = clampToRemaining(next);
                 input.value = next;
                 updatePct();
             };
             minus?.addEventListener('click', () => bump(-1));
             plus?.addEventListener('click',  () => bump(+1));
-            input?.addEventListener('input', updatePct);
+            input?.addEventListener('input',  updatePct);
+            input?.addEventListener('change', updatePct);
+            input?.addEventListener('blur',   updatePct);
             updatePct();
+        });
+        // Live update when the operator edits the per-sample Sample Size
+        // input -- same as the drawer flow in Details.cshtml.
+        scope.querySelectorAll('form.sample-form').forEach(form => {
+            const sizeInput = form.querySelector('.sample-size-input');
+            if (sizeInput && sizeInput.dataset.banwired !== '1') {
+                sizeInput.dataset.banwired = '1';
+                sizeInput.addEventListener('input', () => {
+                    const n = parseFloat(sizeInput.value);
+                    form.dataset.sampleSize = (n > 0) ? n : '';
+                    form.querySelectorAll('.defect-value').forEach(el => {
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                    });
+                    refreshDefectTotal(form, false);
+                });
+            }
+            refreshDefectTotal(form, false);
         });
     })(document);
 

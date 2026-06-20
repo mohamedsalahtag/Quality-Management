@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SharbatlyQMS.Web.Extensions;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.ViewModels;
@@ -59,6 +60,15 @@ public class ClaimManagementController : Controller
     /// </summary>
     public async Task<IActionResult> Details(long id)
     {
+        // Plant-scoped Operators must not see claims for QOs in other plants.
+        // Manager / ClaimManager / SiteAdmin / Viewer are unscoped and pass.
+        var scoped = User.GetScopedPlant();
+        if (scoped != null)
+        {
+            var qoPlant = await _qos.GetPlantForQoAsync(id);
+            if (!string.Equals(qoPlant, scoped, StringComparison.OrdinalIgnoreCase))
+                return Forbid();
+        }
         var qo = await _qos.GetAsync(id);
         if (qo == null) return NotFound();
 

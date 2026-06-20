@@ -10,6 +10,11 @@
     var role = User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     var fullName = User?.FindFirst(System.Security.Claims.ClaimTypes.GivenName)?.Value
                 ?? User?.Identity?.Name;
+    // Plant scope claim — present only for Operators with a plant assignment.
+    // Rendered as a badge next to the user name so the operator can tell at a
+    // glance which plant's data they're seeing.
+    var plantScope = User?.FindFirst("PlantCode")?.Value;
+    if (string.IsNullOrWhiteSpace(plantScope)) plantScope = null;
     // Role gates for menu visibility. Parameters need Manager or SiteAdmin;
     // Admin pages stay SiteAdmin-only.
     var canSeeParameters = role == UserRoles.Manager || role == UserRoles.SiteAdmin;
@@ -108,6 +113,17 @@
                                 <i class="bi bi-shield-exclamation me-1"></i>Claims
                             </a>
                         </li>
+                        @* V31 (2026-06-20): flat per-defect data hub for analytics.
+                           Gated client-side by role (Supervisor and above) -- the
+                           controller's [Authorize] guard is authoritative. *@
+                        @if (role == UserRoles.Supervisor || role == UserRoles.Manager || role == UserRoles.SiteAdmin)
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link @(NavOn("Reports") ? "active" : "")" asp-controller="Reports" asp-action="FlatDefects">
+                                    <i class="bi bi-grid-3x3-gap me-1"></i>Data hub
+                                </a>
+                            </li>
+                        }
                         @if (canSeeParameters)
                         {
                             @* Parameters: per-material-group catalogs that drive
@@ -153,7 +169,8 @@
                                 </a>
                                 <ul class="dropdown-menu dropdown-menu-end">
                                     <li><h6 class="dropdown-header">View site as</h6></li>
-                                    @foreach (var r in new[] { UserRoles.Viewer, UserRoles.Operator, UserRoles.Manager, UserRoles.ClaimManager })
+                                    @* V31 (2026-06-20): Supervisor added to the impersonation list. *@
+                                    @foreach (var r in new[] { UserRoles.Viewer, UserRoles.Operator, UserRoles.Supervisor, UserRoles.Manager, UserRoles.ClaimManager })
                                     {
                                         <li>
                                             <form asp-controller="Account" asp-action="ViewAs" method="post" class="d-inline">
@@ -199,9 +216,16 @@
                             <a class="nav-link dropdown-toggle d-flex align-items-center gap-2" href="#" data-bs-toggle="dropdown">
                                 @await Html.PartialAsync("_UserAvatar", new ViewDataDictionary(ViewData) { { "Size", 28 } })
                                 <span>@fullName</span>
+                                @if (plantScope != null)
+                                {
+                                    <span class="badge bg-info text-dark border ms-1"
+                                          title="Your queue, arrivals, and quality orders are restricted to this plant.">
+                                        <i class="bi bi-geo-alt me-1"></i>@plantScope
+                                    </span>
+                                }
                             </a>
                             <ul class="dropdown-menu dropdown-menu-end">
-                                <li><h6 class="dropdown-header">@role</h6></li>
+                                <li><h6 class="dropdown-header">@role @if (plantScope != null) { <text>— @SapPlantDirectory.PlantLabel(plantScope)</text> }</h6></li>
                                 <li><a class="dropdown-item" asp-controller="Account" asp-action="Profile"><i class="bi bi-person-vcard me-1"></i>My Profile</a></li>
                                 <li><hr class="dropdown-divider" /></li>
                                 <li>
@@ -287,6 +311,10 @@
             }
         })();
     </script>
+    @* V31 (2026-06-20): document-level AJAX wiring for any image gallery on
+       the page (including ones injected later into the sample drawer via
+       innerHTML, where inline <script> tags would not run). *@
+    <script src="~/js/image-gallery-ajax.js" defer></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

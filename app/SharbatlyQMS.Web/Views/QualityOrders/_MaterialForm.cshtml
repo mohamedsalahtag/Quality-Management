@@ -23,12 +23,8 @@
             Entered once for <code>@m.MaterialNo</code> @m.MaterialDesc and inherited by every sample of this material.
         </p>
         <div class="row g-2">
-            @* Sample size -- material-level source of truth; propagated to every sample. *@
-            <div class="col-6 col-md-4">
-                <label class="form-label">Sample size <span class="text-danger fw-bold" title="Defect percentages divide by this">*</span></label>
-                <input name="sampleSize" type="number" inputmode="numeric" min="1"
-                       class="form-control form-control-sm" value="@Model.SampleSize" required />
-            </div>
+            @* Sample size is now owned by the Override Size modal on the material
+               card (2026-06-20). It propagates to every sample on save. *@
 
             @foreach (var f in Model.HeaderFields)
             {

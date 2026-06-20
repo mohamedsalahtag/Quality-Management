@@ -37,6 +37,11 @@ builder.Services.AddScoped<IMaraService, MaraService>();
 builder.Services.AddScoped<IVendorService, VendorService>();
 builder.Services.AddScoped<ICatalogCache, CatalogCache>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
+// V34 (2026-06-20): Perspective Analyzer (server-side pivot + saved configs).
+builder.Services.AddScoped<SharbatlyQMS.Web.Services.Reports.IPivotService,
+                           SharbatlyQMS.Web.Services.Reports.PivotService>();
+builder.Services.AddScoped<SharbatlyQMS.Web.Services.Reports.IPerspectiveService,
+                           SharbatlyQMS.Web.Services.Reports.PerspectiveService>();
 #pragma warning disable CA1416 // AdService uses System.DirectoryServices (Windows-only); host runs on Windows.
 builder.Services.AddScoped<IAdService, AdService>();
 #pragma warning restore CA1416
@@ -108,8 +113,13 @@ builder.Services.AddAuthorization(opt =>
         p => p.RequireRole(UserRoles.SiteAdmin));
     opt.AddPolicy(AuthPolicies.ManagerOrAdmin,
         p => p.RequireRole(UserRoles.Manager, UserRoles.SiteAdmin));
+    // Supervisor (2026-06-20): reviews operator work. Can Finish a Submitted QO,
+    // cancel-submit it back to Open, edit Completed arrivals, view the flat
+    // data-hub report. Cannot reopen Finished QOs (Manager-only).
+    opt.AddPolicy(AuthPolicies.SupervisorOrAbove,
+        p => p.RequireRole(UserRoles.Supervisor, UserRoles.Manager, UserRoles.SiteAdmin));
     opt.AddPolicy(AuthPolicies.OperatorOrAbove,
-        p => p.RequireRole(UserRoles.Operator, UserRoles.Manager, UserRoles.SiteAdmin));
+        p => p.RequireRole(UserRoles.Operator, UserRoles.Supervisor, UserRoles.Manager, UserRoles.SiteAdmin));
     // Claim Manager (commercial approver) or SiteAdmin -- gates the Approve/Hold
     // actions in Claim Management. SiteAdmin still acts as both roles.
     opt.AddPolicy(AuthPolicies.ClaimManagerOrAdmin,

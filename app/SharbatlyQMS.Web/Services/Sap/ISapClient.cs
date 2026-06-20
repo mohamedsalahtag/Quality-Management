@@ -62,7 +62,8 @@ public class SapShipmentRow
     // Container / BOL / PO identity
     public string  ContainerNo       { get; set; } = "";
     public string  BolNo             { get; set; } = "";
-    public string  Ebeln             { get; set; } = "";   // PO header
+    public string  Ebeln             { get; set; } = "";   // PO header -- sourced from ZQC_Data.ShipmentNo
+    public string? Sto               { get; set; }         // Stock Transport Order -- sourced from ZQC_Data.PO_Number
     public string  Ebelp             { get; set; } = "";   // PO line
     public string  PoType            { get; set; } = "";   // EKKO.BSART (NB, ZB, etc.)
     public string  Bukrs             { get; set; } = "";   // company code

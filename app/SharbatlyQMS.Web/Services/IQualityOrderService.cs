@@ -1,12 +1,18 @@
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Reports;
 
 namespace SharbatlyQMS.Web.Services;
 
 public interface IQualityOrderService
 {
-    Task<IReadOnlyList<QualityOrder>> ListAsync(string? status, string? search);
+    Task<IReadOnlyList<QualityOrder>> ListAsync(string? status, string? search, string? plant = null);
     Task<QualityOrder?> GetAsync(long qualityOrderId);
     Task<QualityOrder?> GetByArrivalAsync(long arrivalId);
+
+    /// <summary>Plant code inherited via the QO's arrival (denormalized on
+    /// qms_arrival.plant). Null when the QO doesn't exist. Used by the
+    /// controller-level plant-scope gate on Details / Edit endpoints.</summary>
+    Task<string?> GetPlantForQoAsync(long qualityOrderId);
     Task<IReadOnlyList<QualityOrderMaterial>> GetMaterialsAsync(long qualityOrderId);
 
     /// <summary>The parent quality_order_id for a QO material, or null if not found.</summary>
@@ -20,6 +26,12 @@ public interface IQualityOrderService
     Task<long> CreateForArrivalAsync(long arrivalId, string user);
 
     Task<(bool ok, string? error)> OpenAsync(long qualityOrderId, string user);
+    /// <summary>V31 (2026-06-20): operator marks data entry complete; locks
+    /// the QO until a Supervisor finishes (Close) or cancel-submits.</summary>
+    Task<(bool ok, string? error)> SubmitAsync(long qualityOrderId, string user);
+    /// <summary>V31: Supervisor returns a Submitted QO to Open so the operator
+    /// can fix mistakes. Reason optional but recorded in the audit log.</summary>
+    Task<(bool ok, string? error)> CancelSubmitAsync(long qualityOrderId, string user, string? reason);
     Task<(bool ok, string? error)> CloseAsync(long qualityOrderId, string user, string? reason);
     Task<(bool ok, string? error)> ReopenAsync(long qualityOrderId, string user, string? reason);
     Task<(bool ok, string? error)> CancelAsync(long qualityOrderId, string user, string? reason);
@@ -78,10 +90,26 @@ public interface IQualityOrderService
     /// PDF builder.</summary>
     Task<ILookup<long, MaterialHeaderValue>> GetMaterialHeaderValuesBatchAsync(IEnumerable<long> qoMaterialIds);
 
-    /// <summary>Save a material's sample_size (source of truth, propagated to
-    /// every sample) plus its Material-scoped header values, atomically.</summary>
-    Task SaveMaterialHeaderValuesAndSizeAsync(long qoMaterialId, short? sampleSize,
+    /// <summary>Save a material's Material-scoped header values (replace whole
+    /// set, copy down to every sample). Sample size is set elsewhere via the
+    /// Override Size flow (SaveOverrideAsync).</summary>
+    Task SaveMaterialHeaderValuesAsync(long qoMaterialId,
         IEnumerable<MaterialHeaderValue> values, string user);
+
+    /// <summary>V31 (2026-06-20): returns qoMaterialId -> isComplete, where
+    /// "complete" means every active Material-scoped header field that is
+    /// mandatory has a value on that material. Used by the QO Details page to
+    /// gate the "Add sample" button and by the Submit precondition.</summary>
+    Task<IReadOnlyDictionary<long, bool>> GetMaterialHeaderCompleteMapAsync(long qualityOrderId);
+
+    /// <summary>V31 (2026-06-20): streams one row per (sample × catalog defect)
+    /// for the flat data-hub report at /Reports/FlatDefects. Includes zero-value
+    /// rows so pivot tables can compute coverage. Filters are AND'd; see
+    /// <see cref="FlatDefectFilter"/> for the available fields. Use the
+    /// async-enumerable hot path so the Excel export never materialises the
+    /// full result set in memory.</summary>
+    IAsyncEnumerable<FlatDefectRow> StreamFlatDefectRowsAsync(
+        FlatDefectFilter filter, CancellationToken ct);
 
     // ----- Quality Order PDF: grouped summary -----
     /// <summary>

@@ -1,0 +1,32 @@
+@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.ViewModels
+@{
+    var sample   = ViewBag.Sample as Sample ?? new Sample();
+    var qo       = ViewBag.Qo     as QualityOrder ?? new QualityOrder();
+    var editable = (bool?)ViewBag.Editable ?? false;
+    var vm = new ImageGalleryVm
+    {
+        OwnerType = "Sample",
+        OwnerId   = sample.SampleId,
+        Editable  = editable,
+        Ajax      = true
+    };
+}
+
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <div>
+        <h5 class="mb-0">
+            <i class="bi bi-images me-1"></i>Photos &mdash;
+            Sample #@sample.SampleNo
+        </h5>
+        <small class="text-muted">QO @qo.QualityOrderNo</small>
+    </div>
+    @if (!editable)
+    {
+        <span class="badge bg-secondary">
+            <i class="bi bi-lock me-1"></i>Read-only (QO is @QualityOrderStatus.DisplayName(qo.StatusCode))
+        </span>
+    }
+</div>
+
+<partial name="~/Views/Shared/_ImageGallery.cshtml" model="vm" />

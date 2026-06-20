@@ -149,7 +149,14 @@ public class AccountController : Controller
             new(ClaimTypes.Role,           user.Role),
             new("Department",              user.Department ?? ""),
             new("EmployeeId",              user.EmployeeId ?? ""),
-            new("ProfilePicture",          user.ProfilePicture ?? "")
+            new("ProfilePicture",          user.ProfilePicture ?? ""),
+            // Plant scope: only Operators are restricted. Manager / SiteAdmin /
+            // Viewer / ClaimManager always see every plant, so they get an
+            // empty PlantCode claim regardless of any DB assignment.
+            new("PlantCode",
+                string.Equals(user.Role, UserRoles.Operator, StringComparison.OrdinalIgnoreCase)
+                    ? (user.PlantCode ?? "")
+                    : "")
         };
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);

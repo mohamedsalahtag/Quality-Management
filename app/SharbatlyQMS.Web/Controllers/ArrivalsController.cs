@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SharbatlyQMS.Web.Extensions;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.Services.Sap;
@@ -28,6 +29,12 @@ public class ArrivalsController : Controller
         string? container, string? bol, string? po,
         string? plant, string? poType, string? storageLoc)
     {
+        // Operator plant-scope: if the user is restricted to a plant, force
+        // the dropdown value to it (and the view replaces the dropdown with
+        // a locked badge). Manager / SiteAdmin / etc. pass null and see all.
+        var scoped = User.GetScopedPlant();
+        if (scoped != null) plant = scoped;
+
         var rows    = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc);
         var status  = await _cache.GetPullStatusAsync();
         var options = await _cache.GetPendingFilterOptionsAsync();
@@ -41,7 +48,20 @@ public class ArrivalsController : Controller
         ViewBag.PlantOptions      = options.Plants;
         ViewBag.PoTypeOptions     = options.PoTypes;
         ViewBag.StorageLocOptions = options.StorageLocations;
+        ViewBag.PlantScopeLocked  = scoped;
         return View(rows);
+    }
+
+    /// <summary>Returns Forbid() when the user is plant-scoped and the arrival
+    /// belongs to a different plant; null when access is OK.</summary>
+    private async Task<IActionResult?> EnsureCanReadArrivalAsync(long arrivalId)
+    {
+        var scoped = User.GetScopedPlant();
+        if (scoped == null) return null;
+        var plant = await _arrivals.GetPlantAsync(arrivalId);
+        return string.Equals(plant, scoped, StringComparison.OrdinalIgnoreCase)
+            ? null
+            : Forbid();
     }
 
     /// <summary>
@@ -101,9 +121,11 @@ public class ArrivalsController : Controller
 
     public async Task<IActionResult> Index(string? status, string? search)
     {
-        var rows = await _arrivals.ListAsync(string.IsNullOrEmpty(status) ? null : status, search);
+        var scoped = User.GetScopedPlant();
+        var rows = await _arrivals.ListAsync(string.IsNullOrEmpty(status) ? null : status, search, scoped);
         ViewBag.Status = status;
         ViewBag.Search = search;
+        ViewBag.PlantScopeLocked = scoped;
         return View(rows);
     }
 
@@ -131,7 +153,14 @@ public class ArrivalsController : Controller
                 sapError = ex.Message;
             }
         }
+        // Plant-scope: drop rows that don't belong to the operator's plant.
+        var scoped = User.GetScopedPlant();
+        if (scoped != null)
+            results = results
+                .Where(r => string.Equals(r.Plant, scoped, StringComparison.OrdinalIgnoreCase))
+                .ToList();
         ViewBag.SapError = sapError;
+        ViewBag.PlantScopeLocked = scoped;
 
         var distinctBols = results.Select(r => r.BolNo).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         bool ambiguous = !string.IsNullOrWhiteSpace(container)
@@ -225,6 +254,15 @@ public class ArrivalsController : Controller
             return RedirectToAction(nameof(Search));
         }
 
+        // Plant-scope: refuse to create an arrival outside the operator's plant.
+        var scoped = User.GetScopedPlant();
+        if (scoped != null &&
+            !matched.Any(r => string.Equals(r.Plant, scoped, StringComparison.OrdinalIgnoreCase)))
+        {
+            TempData["Error"] = $"This shipment belongs to plant {matched.FirstOrDefault()?.Plant ?? "(unknown)"}; you are scoped to {scoped}.";
+            return RedirectToAction(nameof(Pending));
+        }
+
         try
         {
             var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
@@ -242,6 +280,7 @@ public class ArrivalsController : Controller
 
     public async Task<IActionResult> Details(long id)
     {
+        if (await EnsureCanReadArrivalAsync(id) is { } block) return block;
         var arrival = await _arrivals.GetAsync(id);
         if (arrival == null) return NotFound();
 
@@ -268,11 +307,15 @@ public class ArrivalsController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> SaveChecklist(ArrivalChecklist checklist)
     {
+        if (await EnsureCanReadArrivalAsync(checklist.ArrivalId) is { } block) return block;
         var arrival = await _arrivals.GetAsync(checklist.ArrivalId);
         if (arrival == null) return NotFound();
-        if (arrival.StatusCode != ArrivalStatus.Draft)
+        // V31 (2026-06-20): Supervisor and above can edit Completed arrivals.
+        // Draft is always editable by OperatorOrAbove (the controller-level
+        // policy). Cancelled is never editable.
+        if (!CanEditArrival(arrival.StatusCode))
         {
-            TempData["Error"] = "Only Draft arrivals can be edited.";
+            TempData["Error"] = $"Arrival is {arrival.StatusCode} — not editable.";
             return RedirectToAction(nameof(Details), new { id = checklist.ArrivalId });
         }
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
@@ -285,11 +328,12 @@ public class ArrivalsController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> SaveShipment(ShipmentSnapshot shipment)
     {
+        if (await EnsureCanReadArrivalAsync(shipment.ArrivalId) is { } block) return block;
         var arrival = await _arrivals.GetAsync(shipment.ArrivalId);
         if (arrival == null) return NotFound();
-        if (arrival.StatusCode != ArrivalStatus.Draft)
+        if (!CanEditArrival(arrival.StatusCode))
         {
-            TempData["Error"] = "Only Draft arrivals can be edited.";
+            TempData["Error"] = $"Arrival is {arrival.StatusCode} — not editable.";
             return RedirectToAction(nameof(Details), new { id = shipment.ArrivalId });
         }
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
@@ -302,6 +346,7 @@ public class ArrivalsController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> Complete(long id)
     {
+        if (await EnsureCanReadArrivalAsync(id) is { } block) return block;
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var (ok, error) = await _arrivals.CompleteAsync(id, user);
         TempData[ok ? "Success" : "Error"] = ok
@@ -314,6 +359,7 @@ public class ArrivalsController : Controller
     [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
     public async Task<IActionResult> ReopenForEdit(long id, string? reason)
     {
+        if (await EnsureCanReadArrivalAsync(id) is { } block) return block;
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var (ok, error) = await _arrivals.ReopenForEditAsync(id, user, reason);
         TempData[ok ? "Success" : "Error"] = ok
@@ -326,6 +372,7 @@ public class ArrivalsController : Controller
     [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
     public async Task<IActionResult> Delete(long id)
     {
+        if (await EnsureCanReadArrivalAsync(id) is { } block) return block;
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var (ok, error) = await _arrivals.DeleteAsync(id, user);
         if (!ok)
@@ -335,5 +382,22 @@ public class ArrivalsController : Controller
         }
         TempData["Success"] = "Arrival deleted.";
         return RedirectToAction(nameof(Index));
+    }
+
+    // V31 (2026-06-20): combined status + role gate for arrival edits.
+    // Draft -> any OperatorOrAbove (controller-level policy).
+    // Completed -> Supervisor and above only (data fixes after completion).
+    // Cancelled -> nobody (even SiteAdmin, who would Reopen first).
+    private bool CanEditArrival(string statusCode)
+    {
+        if (statusCode == ArrivalStatus.Draft) return true;
+        if (statusCode == ArrivalStatus.Completed)
+        {
+            var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+            return role == UserRoles.Supervisor
+                || role == UserRoles.Manager
+                || role == UserRoles.SiteAdmin;
+        }
+        return false;
     }
 }

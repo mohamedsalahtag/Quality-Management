@@ -68,7 +68,7 @@ public class DbService : IDbService
     // ---- Users -----------------------------------------------------------
     private const string UserSelect = @"
         SELECT UserId, EmployeeId, Username, FullName, Email, Department,
-               ProfilePicture, PasswordHash, Role, IsActive, IsOnline,
+               ProfilePicture, PasswordHash, Role, PlantCode, IsActive, IsOnline,
                LastLogin, LastSeen, CreatedAt, CreatedBy, DisabledAt, DisabledBy
         FROM Users";
 
@@ -107,10 +107,10 @@ public class DbService : IDbService
         return await c.ExecuteScalarAsync<int>(@"
             INSERT INTO Users
                 (EmployeeId, Username, FullName, Email, Department, ProfilePicture,
-                 PasswordHash, Role, IsActive, CreatedAt, CreatedBy)
+                 PasswordHash, Role, PlantCode, IsActive, CreatedAt, CreatedBy)
             VALUES
                 (@EmployeeId, @Username, @FullName, @Email, @Department, @ProfilePicture,
-                 @PasswordHash, @Role, @IsActive, SYSUTCDATETIME(), @CreatedBy);
+                 @PasswordHash, @Role, @PlantCode, @IsActive, SYSUTCDATETIME(), @CreatedBy);
             SELECT CAST(SCOPE_IDENTITY() AS INT);", u);
     }
 
@@ -121,7 +121,7 @@ public class DbService : IDbService
             UPDATE Users SET
               EmployeeId = @EmployeeId, FullName = @FullName, Email = @Email,
               Department = @Department, PasswordHash = @PasswordHash,
-              Role = @Role, IsActive = @IsActive
+              Role = @Role, PlantCode = @PlantCode, IsActive = @IsActive
             WHERE UserId = @UserId", u);
     }
 

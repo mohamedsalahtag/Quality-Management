@@ -61,12 +61,14 @@ public static class QualityReportPdf
         {
             container.Page(page => RenderMainPage(page, d));
 
-            // Photo appendix: rendered when EITHER the arrival has photos
-            // OR at least one material has photos. Arrival photos come
-            // first, then material photos grouped by material.
+            // Photo appendix: rendered when ANY of arrival, material (legacy),
+            // or per-sample photos exist. Per-sample photos are the V31
+            // canonical source; the material map is kept for back-compat but
+            // is empty for new reports.
+            bool anySampleImgs   = d.Samples.Any(sb => sb.Images.Count > 0);
             bool anyMaterialImgs = d.MaterialImages.Any(kv => kv.Value.Count > 0);
             bool anyArrivalImgs  = d.ArrivalImages.Count > 0;
-            if (anyMaterialImgs || anyArrivalImgs)
+            if (anySampleImgs || anyMaterialImgs || anyArrivalImgs)
                 container.Page(page => RenderImagesPage(page, d));
         });
         return doc.GeneratePdf();
@@ -892,10 +894,17 @@ public static class QualityReportPdf
                 col.Item().Element(c => RenderImageGrid(c, d, d.ArrivalImages));
             }
 
+            // V31 (2026-06-20): photos are per-sample. Group by material in
+            // the appendix; under each material, list samples in SampleNo
+            // order with each sample's own image grid. Materials and samples
+            // with no images are skipped so the page stays compact.
             foreach (var m in d.Materials)
             {
-                if (!d.MaterialImages.TryGetValue(m.QoMaterialId, out var imgs) || imgs.Count == 0)
-                    continue;
+                var matSamples = d.Samples
+                    .Where(sb => sb.Material?.QoMaterialId == m.QoMaterialId && sb.Images.Count > 0)
+                    .OrderBy(sb => sb.Sample.SampleNo)
+                    .ToList();
+                if (matSamples.Count == 0) continue;
                 col.Item().PaddingTop(6).Text(t =>
                 {
                     t.Span("Material ").FontColor(Accent).Bold().FontSize(11);
@@ -906,7 +915,16 @@ public static class QualityReportPdf
                         t.Span(m.MaterialDesc!).FontSize(10);
                     }
                 });
-                col.Item().Element(c => RenderImageGrid(c, d, imgs));
+                foreach (var sb in matSamples)
+                {
+                    col.Item().PaddingTop(3).PaddingLeft(8).Text(t =>
+                    {
+                        t.Span($"Sample #{sb.Sample.SampleNo}").Bold().FontSize(9).FontColor(Accent);
+                        t.Span($" — {sb.Images.Count} photo{(sb.Images.Count == 1 ? "" : "s")}")
+                            .FontSize(8).FontColor(Colors.Grey.Darken1);
+                    });
+                    col.Item().PaddingLeft(8).Element(c => RenderImageGrid(c, d, sb.Images));
+                }
             }
         });
     }

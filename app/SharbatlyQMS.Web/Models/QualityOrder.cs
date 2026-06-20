@@ -22,6 +22,8 @@ public class QualityOrder
     public string?  BolNo         { get; set; }
     public string?  Ebeln         { get; set; }   // SAP PO number
     public string?  VendorName    { get; set; }
+    /// <summary>SAP plant inherited from the parent arrival (qms_arrival.plant).</summary>
+    public string?  Plant         { get; set; }
     public string?  ArrivalNo     { get; set; }
 }
 
@@ -57,18 +59,41 @@ public class QualityOrderMaterial
     public DateTime?OverrideApprovedAt  { get; set; }
     // Material-level sample size (source of truth). Samples inherit it; the
     // per-sample qms_sample.sample_size is kept as an inherited cache that
-    // every defect-% calculation still divides by. Entered in the
-    // "Material details" panel on the QO Details page.
+    // every defect-% calculation still divides by. Set via the Override Size
+    // modal (2026-06-20) when the operator wants to deviate from MARA; left
+    // null otherwise so EffectiveSampleSize parses MARA's MaterialSize string.
     public short?   SampleSize          { get; set; }
+
+    // Effective numeric size used as the inherited default on every sample
+    // form. Prefers the explicit numeric column when set (e.g., after an
+    // override); otherwise tries to parse MARA's MaterialSize text (e.g., "30").
+    // Returns null when neither yields a positive short -- defect % then
+    // shows "—" on the sample form. Read-only (no setter) so Dapper ignores
+    // it during model mapping.
+    public short?   EffectiveSampleSize =>
+        SampleSize ?? (short.TryParse(MaterialSize, out var n) && n > 0 ? (short?)n : null);
 }
 
 public static class QualityOrderStatus
 {
     public const string Initial   = "Initial";
     public const string Open      = "Open";
+    public const string Submitted = "Submitted";
+    // 'Closed' is the persisted code; UI labels it as "Finished" via DisplayName.
+    // Kept as-is in the DB so existing Closed rows + claim queries that match on
+    // status_code = 'Closed' don't need a data migration.
     public const string Closed    = "Closed";
     public const string Reopened  = "Reopened";
     public const string Cancelled = "Cancelled";
+
+    /// <summary>Human-friendly label for views, dropdowns, badges. UI says
+    /// "Finished" where the schema says "Closed".</summary>
+    public static string DisplayName(string? code) => code switch
+    {
+        Closed   => "Finished",
+        Reopened => "Open",      // transient — actual DB value is 'Open' after a reopen
+        _        => code ?? ""
+    };
 }
 
 public class Sample

@@ -35,6 +35,7 @@ public class ArrivalService : IArrivalService
                a.bukrs          Bukrs,
                a.vendor_no      VendorNo,
                a.vendor_name    VendorName,
+               a.plant          Plant,
                a.status_code    StatusCode,
                a.created_at     CreatedAt,
                a.created_by     CreatedBy,
@@ -51,18 +52,30 @@ public class ArrivalService : IArrivalService
             ORDER  BY quality_order_id DESC
         ) qo";
 
-    public async Task<IReadOnlyList<Arrival>> ListAsync(string? status, string? search)
+    public async Task<IReadOnlyList<Arrival>> ListAsync(string? status, string? search, string? plant = null)
     {
         using var c = Open();
         var rows = await c.QueryAsync<Arrival>(ArrivalSelect + @"
             WHERE  (@status IS NULL OR a.status_code = @status)
+              AND  (@plant  IS NULL OR a.plant       = @plant)
               AND  (@search IS NULL
                     OR a.arrival_no   LIKE '%' + @search + '%'
                     OR a.container_no LIKE '%' + @search + '%'
                     OR a.bol_no       LIKE '%' + @search + '%'
                     OR a.vendor_name  LIKE '%' + @search + '%')
-            ORDER BY a.created_at DESC", new { status, search });
+            ORDER BY a.created_at DESC", new { status, search, plant });
         return rows.ToList();
+    }
+
+    /// <summary>Returns the arrival's plant code, or null when the arrival doesn't exist.
+    /// Used by the controller-level plant-scope gate before letting an Operator open
+    /// a Details / Edit page for an arrival outside their plant.</summary>
+    public async Task<string?> GetPlantAsync(long arrivalId)
+    {
+        using var c = Open();
+        return await c.ExecuteScalarAsync<string?>(
+            "SELECT plant FROM qms_arrival WHERE arrival_id = @arrivalId",
+            new { arrivalId });
     }
 
     public async Task<Arrival?> GetAsync(long arrivalId)
@@ -187,10 +200,10 @@ public class ArrivalService : IArrivalService
         var arrivalId = await c.ExecuteScalarAsync<long>(@"
             INSERT INTO qms_arrival
                 (arrival_no, source_system, bol_no, container_no, ebeln, bukrs,
-                 vendor_no, vendor_name, status_code, created_at, created_by)
+                 vendor_no, vendor_name, plant, status_code, created_at, created_by)
             VALUES
                 (@arrivalNo, 'S4HANA', @bol, @container, @ebeln, @bukrs,
-                 @vendorNo, @vendorName, 'Draft', SYSUTCDATETIME(), @createdBy);
+                 @vendorNo, @vendorName, @plant, 'Draft', SYSUTCDATETIME(), @createdBy);
             SELECT CAST(SCOPE_IDENTITY() AS BIGINT);",
             new
             {
@@ -201,6 +214,7 @@ public class ArrivalService : IArrivalService
                 bukrs      = first.Bukrs,
                 vendorNo   = first.VendorNo,
                 vendorName = first.VendorName,
+                plant      = first.Plant,
                 createdBy
             }, tx);
 

@@ -1,0 +1,375 @@
+@using SharbatlyQMS.Web.Models.Reports
+@model PerspectiveAnalyzerVm
+
+@*
+ * V34 (2026-06-20). Perspective Analyzer card.
+ * Chip-based field picker:
+ *   Available  --[+ Rows / + Cols]-->  Rows zone | Cols zone
+ *   Each chip has remove + reorder controls. Dragging is supported.
+ *   A dim can only live in one zone at a time (mutual exclusion).
+ *
+ * Renders pivot output as a Bootstrap crosstab table (with optional heatmap
+ * coloring) or as a Plotly chart.
+ *@
+
+<div class="card mt-4" id="perspectiveCard"
+     data-report="@Model.ReportKey"
+     data-filter-query="@(Model.FilterQuery ?? "")"
+     data-can-share="@(Model.CanShare ? "true" : "false")">
+
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span>
+            <i class="bi bi-bar-chart-line me-1"></i>
+            <strong>Perspective analyzer</strong>
+            <span class="badge text-bg-secondary ms-2">beta</span>
+            <small class="text-muted ms-2">Pivot the filtered data hub above into any cross-tab or chart.</small>
+        </span>
+        <div class="d-flex align-items-center gap-2">
+            <select id="perspectiveSelect" class="form-select form-select-sm" style="min-width: 240px;">
+                <option value="">(no perspective loaded)</option>
+            </select>
+            <button type="button" class="btn btn-outline-primary btn-sm" id="btnSaveAs">
+                <i class="bi bi-bookmark-plus me-1"></i>Save as…
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnSave" disabled>
+                <i class="bi bi-save me-1"></i>Save
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnSetDefault" disabled>
+                <i class="bi bi-star me-1"></i>Set as default
+            </button>
+            <button type="button" class="btn btn-outline-danger btn-sm" id="btnDelete" disabled>
+                <i class="bi bi-trash me-1"></i>Delete
+            </button>
+        </div>
+    </div>
+
+    <div class="card-body">
+        <style>
+            #perspectiveCard .pivot-zone { min-height: 90px; border: 1px dashed #c9ced3; border-radius: .375rem; padding: .5rem; background: #fafbfc; }
+            #perspectiveCard .pivot-zone.drag-over { background: #e7f1ff; border-color: #0d6efd; }
+            #perspectiveCard .pivot-zone-label { font-size: .8rem; color: #6c757d; margin-bottom: .25rem; }
+            #perspectiveCard .pivot-chip { display: inline-flex; align-items: center; gap: .25rem; padding: .2rem .5rem; margin: .15rem; border-radius: 999px; background: #e9ecef; font-size: .85rem; cursor: grab; user-select: none; }
+            #perspectiveCard .pivot-chip.dragging { opacity: .4; }
+            #perspectiveCard .pivot-chip .chip-x { cursor: pointer; opacity: .55; }
+            #perspectiveCard .pivot-chip .chip-x:hover { opacity: 1; color: #dc3545; }
+            #perspectiveCard .pivot-chip-zone-row { background: #fff7e6; }
+            #perspectiveCard .pivot-chip-zone-col { background: #e6f3ff; }
+            #perspectiveCard .pivot-chip-zone-drill { background: #f3eaff; }
+            #perspectiveCard .pivot-chip-zone-value { background: #e8f5e9; }
+            #perspectiveCard .value-chip { display: inline-flex; align-items: center; gap: .35rem; padding: .25rem .6rem; margin: .2rem; border-radius: .375rem; background: #d4edda; border: 1px solid #a3d9a5; font-size: .85rem; cursor: pointer; user-select: none; }
+            #perspectiveCard .value-chip .chip-x { opacity: .6; padding-left: .35rem; border-left: 1px solid rgba(0,0,0,.1); margin-left: .25rem; }
+            #perspectiveCard .value-chip .chip-x:hover { opacity: 1; color: #dc3545; }
+            #perspectiveCard .value-chip.dragging { opacity: .4; }
+            #perspectiveCard .drill-chip { display: inline-flex; align-items: center; gap: .35rem; padding: .25rem .6rem; margin: .2rem; border-radius: .375rem; background: #ede0ff; border: 1px solid #d1b3ff; font-size: .85rem; cursor: pointer; user-select: none; }
+            #perspectiveCard .drill-chip .chip-x { opacity: .6; padding-left: .35rem; border-left: 1px solid rgba(0,0,0,.1); margin-left: .25rem; }
+            #perspectiveCard .drill-chip .chip-x:hover { opacity: 1; color: #dc3545; }
+            #perspectiveCard .available-list { max-height: 240px; overflow-y: auto; }
+            #perspectiveCard .available-item { display: flex; justify-content: space-between; align-items: center; padding: .2rem .5rem; border-radius: .25rem; cursor: grab; }
+            #perspectiveCard .available-item:hover { background: #f1f3f5; }
+            #perspectiveCard .available-item .ai-btns { white-space: nowrap; }
+            #perspectiveCard .available-item .btn { padding: 0 .35rem; font-size: .75rem; line-height: 1.4; }
+            #perspectiveCard .pivot-output-wrap { min-height: 360px; }
+            #perspectiveCard .pivot-table { font-size: .85rem; }
+            #perspectiveCard .pivot-table thead th { position: sticky; top: 0; background: #f8f9fa; z-index: 1; }
+            #perspectiveCard .pivot-table td.heat { color: #212529; }
+            #perspectiveCard .pivot-table tbody td[data-row-key]:hover { outline: 2px solid #0d6efd; cursor: pointer; }
+            #perspectiveCard .scope-bar { background: #f8f9fa; border: 1px solid #e9ecef; border-radius: .375rem; padding: .4rem .6rem; }
+            #perspectiveCard .scope-crumb { font-size: .85rem; color: #495057; }
+            #perspectiveCard .scope-crumb.muted { font-style: italic; color: #8a929a; }
+            #perspectiveCard .values-list { max-height: 320px; overflow-y: auto; border: 1px solid #e9ecef; border-radius: .25rem; padding: .25rem; }
+            #perspectiveCard .values-list .form-check { margin-bottom: .15rem; }
+        </style>
+
+        <!-- Scope toggle + breadcrumb -->
+        <div class="scope-bar d-flex flex-wrap align-items-center gap-2 mb-3">
+            <div class="btn-group btn-group-sm" role="group" aria-label="Analyzer scope">
+                <input type="radio" class="btn-check" name="pivotScope" id="scopePage" value="page" autocomplete="off" checked />
+                <label class="btn btn-outline-primary" for="scopePage">
+                    <i class="bi bi-funnel-fill me-1"></i>Match page filters
+                </label>
+                <input type="radio" class="btn-check" name="pivotScope" id="scopeAll" value="all" autocomplete="off" />
+                <label class="btn btn-outline-primary" for="scopeAll">
+                    <i class="bi bi-globe2 me-1"></i>Whole dataset
+                </label>
+            </div>
+            <div class="scope-crumb flex-grow-1" id="scopeCrumb">
+                <i class="bi bi-info-circle me-1"></i>Scope: <span id="scopeCrumbText"></span>
+            </div>
+        </div>
+
+        <div class="row g-3 mb-2">
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body p-2">
+                        <div class="pivot-zone-label">
+                            <i class="bi bi-grid-3x3 me-1"></i>Available fields
+                            <small class="text-muted">(click + to add, or drag a chip)</small>
+                        </div>
+                        <input type="text" id="dimSearch" class="form-control form-control-sm mb-2"
+                               placeholder="Search…" />
+                        <div id="availableList" class="available-list"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body p-2">
+                        <div class="pivot-zone-label">
+                            <i class="bi bi-list-ul me-1"></i><strong>Rows</strong>
+                            <small class="text-muted">drag chips up/down to reorder · × to remove</small>
+                        </div>
+                        <div id="rowsZone" class="pivot-zone pivot-chip-zone-row" data-zone="rows"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-lg-4">
+                <div class="card h-100">
+                    <div class="card-body p-2">
+                        <div class="pivot-zone-label">
+                            <i class="bi bi-layout-three-columns me-1"></i><strong>Columns</strong>
+                            <small class="text-muted">drag chips left/right to reorder · × to remove</small>
+                        </div>
+                        <div id="colsZone" class="pivot-zone pivot-chip-zone-col" data-zone="cols"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Drill / Filter strip -->
+        <div class="card mb-3">
+            <div class="card-body p-2">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="pivot-zone-label mb-0">
+                        <i class="bi bi-filter-circle me-1"></i><strong>Drill / Filter</strong>
+                        <small class="text-muted">
+                            include-only: chips below LIMIT the pivot to the values you pick.
+                            Hover a chip to see all picked values · click to edit · × to remove.
+                            You can also click any cell in the result table to drill into it.
+                        </small>
+                    </span>
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="btnAddDrill">
+                        <i class="bi bi-plus-circle me-1"></i>Add filter
+                    </button>
+                </div>
+                <div id="drillZone" class="pivot-zone pivot-chip-zone-drill" style="min-height: 56px;"></div>
+            </div>
+        </div>
+
+        <!-- Values chip zone (V34.3 multi-measure). Holds one chip per
+             measure column in the result; reorder = which is "first" (chart
+             default). Click a chip to edit; × to remove. -->
+        <div class="card mb-3">
+            <div class="card-body p-2">
+                <div class="d-flex justify-content-between align-items-center mb-1">
+                    <span class="pivot-zone-label mb-0">
+                        <i class="bi bi-calculator me-1"></i><strong>Values</strong>
+                        <small class="text-muted">
+                            measures + aggregations. Drag chips to reorder · click to edit · × to remove.
+                            The first chip is the default for charts.
+                        </small>
+                    </span>
+                    <button type="button" class="btn btn-sm btn-outline-success" id="btnAddMeasure">
+                        <i class="bi bi-plus-circle me-1"></i>Add measure
+                    </button>
+                </div>
+                <div id="valuesZone" class="pivot-zone pivot-chip-zone-value" style="min-height: 56px;"></div>
+            </div>
+        </div>
+
+        <div class="row g-2 mb-2">
+            <div class="col-md-3">
+                <label class="form-label small">Number format (fallback)</label>
+                <select id="pivotFormat" class="form-select form-select-sm">
+                    <option value="auto">Auto</option>
+                    <option value="int">0   (integer)</option>
+                    <option value="dec1">0.0  (1 decimal)</option>
+                    <option value="dec2">0.00 (2 decimals)</option>
+                    <option value="percent">0%   (percent)</option>
+                </select>
+                <small class="text-muted">Applied to any measure chip that has no format override.</small>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Renderer</label>
+                <select id="pivotRenderer" class="form-select form-select-sm"></select>
+                <label class="form-label small mt-1 d-none" id="chartMeasureLabel" for="chartMeasure">Measure to chart</label>
+                <select id="chartMeasure" class="form-select form-select-sm d-none"></select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small">Top N rows</label>
+                <input type="number" id="pivotTopN" class="form-control form-control-sm"
+                       min="1" max="500" placeholder="optional" />
+                <small class="text-muted">Capped by the first measure's row total.</small>
+            </div>
+            <div class="col-md-3 d-flex align-items-end flex-column">
+                <div class="form-check small mb-1" id="heatmapWrap">
+                    <input type="checkbox" class="form-check-input" id="pivotHeatmap" checked />
+                    <label class="form-check-label" for="pivotHeatmap">Heat (per measure)</label>
+                </div>
+                <div class="form-check small mb-1" id="hideZeroWrap"
+                     title="Skip rows where every measure's row total is 0.">
+                    <input type="checkbox" class="form-check-input" id="pivotHideZero" checked />
+                    <label class="form-check-label" for="pivotHideZero">Hide 0s</label>
+                </div>
+            </div>
+        </div>
+
+        <div class="d-flex gap-2 mb-2">
+            <button type="button" class="btn btn-primary btn-sm" id="btnRunPivot">
+                <i class="bi bi-play me-1"></i>Run
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" id="btnResetPivot">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
+            </button>
+            <button type="button" class="btn btn-outline-success btn-sm ms-auto" id="btnExportXlsx" disabled>
+                <i class="bi bi-file-earmark-excel me-1"></i>Export pivot to Excel
+            </button>
+        </div>
+
+        <div id="pivotMessage" class="alert alert-info py-2 small mb-2 d-none"></div>
+
+        <div id="pivotMeta" class="small text-muted mb-1"></div>
+
+        <div id="pivotOutput" class="pivot-output-wrap"></div>
+    </div>
+</div>
+
+<!-- Drill values picker modal -->
+<div class="modal fade" id="drillPickerModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-filter-circle me-1"></i>
+          <span id="drillModalTitle">Drill filter</span>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="drillEditingKey" />
+        <div class="mb-2">
+          <label class="form-label small">Dimension</label>
+          <select id="drillDimSelect" class="form-select form-select-sm"></select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Search values</label>
+          <input type="text" id="drillValueSearch" class="form-control form-control-sm"
+                 placeholder="type to filter…" />
+        </div>
+        <div id="drillValuesLoading" class="text-muted small mb-1 d-none">
+            <span class="spinner-border spinner-border-sm me-1"></span>Loading…
+        </div>
+        <div id="drillValuesTruncated" class="text-warning small mb-1 d-none">
+            Showing the first 200 values — refine your search to narrow the list.
+        </div>
+        <div id="drillValuesList" class="values-list"></div>
+        <div class="d-flex justify-content-between mt-2">
+            <button type="button" class="btn btn-link btn-sm p-0" id="drillSelectAll">Select all visible</button>
+            <button type="button" class="btn btn-link btn-sm p-0 text-danger" id="drillClearAll">Clear selection</button>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnApplyDrill">
+            <i class="bi bi-check2 me-1"></i>Apply
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Measure picker modal (V34.3) -->
+<div class="modal fade" id="measurePickerModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="bi bi-calculator me-1"></i>
+          <span id="measureModalTitle">Add measure</span>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="measureEditingIndex" />
+        <div class="mb-2">
+          <label class="form-label small">Measure</label>
+          <select id="measureSelect" class="form-select form-select-sm"></select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Aggregation</label>
+          <select id="measureAgg" class="form-select form-select-sm"></select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Number format (optional override)</label>
+          <select id="measureFormat" class="form-select form-select-sm">
+            <option value="">(use global default)</option>
+            <option value="auto">Auto</option>
+            <option value="int">0   (integer)</option>
+            <option value="dec1">0.0  (1 decimal)</option>
+            <option value="dec2">0.00 (2 decimals)</option>
+            <option value="percent">0%   (percent)</option>
+          </select>
+        </div>
+        <div class="mb-2">
+          <label class="form-label small">Custom column label (optional)</label>
+          <input type="text" id="measureLabel" class="form-control form-control-sm"
+                 maxlength="60" placeholder="e.g. Total defects" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-success" id="btnApplyMeasure">
+            <i class="bi bi-check2 me-1"></i>Apply
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Save-As modal -->
+<div class="modal fade" id="savePerspectiveModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-bookmark me-1"></i>Save perspective</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <input type="hidden" id="saveId" />
+        <div class="mb-3">
+          <label class="form-label">Name</label>
+          <input type="text" id="saveName" class="form-control" maxlength="150" />
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Visibility</label>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="saveScope" id="scopePrivate" value="private" checked />
+            <label class="form-check-label" for="scopePrivate">
+              <strong>Private</strong> &mdash; only you can see it
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="radio" name="saveScope" id="scopeShared" value="shared"
+                   @(Model.CanShare ? "" : "disabled") />
+            <label class="form-check-label" for="scopeShared">
+              <strong>Shared</strong> &mdash; visible to every QMS user
+              @if (!Model.CanShare)
+              {
+                  <small class="text-muted">(managers and site admins only)</small>
+              }
+            </label>
+          </div>
+        </div>
+        <div class="form-check">
+          <input type="checkbox" class="form-check-input" id="saveIsDefault" />
+          <label class="form-check-label" for="saveIsDefault">
+            Open with this perspective by default
+          </label>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="btnConfirmSave">Save</button>
+      </div>
+    </div>
+  </div>
+</div>

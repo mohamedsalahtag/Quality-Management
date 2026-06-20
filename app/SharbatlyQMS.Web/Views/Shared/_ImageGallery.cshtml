@@ -44,17 +44,54 @@
                     {
                         @* No categories configured (e.g. QO material photos) -
                            hide the dropdown and post an empty category. The
-                           server tolerates a blank value. *@
+                           server tolerates a blank value.
+
+                           V31 (2026-06-20): for per-sample galleries (Ajax=true)
+                           render an enriched drop-zone -- drag/drop, paste, and
+                           click-to-pick all submit the file list. *@
                         <input type="hidden" name="category" value="" />
-                        <div class="col-md-10">
-                            <label class="form-label mb-1">Files</label>
-                            <input type="file" name="files" class="form-control" multiple accept="image/*" required />
-                        </div>
-                        <div class="col-md-2">
-                            <button type="submit" class="btn btn-primary w-100">
-                                <i class="bi bi-cloud-upload me-1"></i>Upload
-                            </button>
-                        </div>
+                        @if (Model.Ajax)
+                        {
+                            @* V31 (2026-06-20): per-sample upload bar.
+                               - Browse: standard file picker (works on desktop + mobile).
+                               - Camera: capture="environment" -> rear camera on mobile/tablet;
+                                 desktop browsers ignore capture and fall back to the picker.
+                               - Drop-zone: drag/drop + paste + click-to-pick (existing). *@
+                            <div class="col-12">
+                                <div class="d-flex flex-wrap gap-2 mb-2 align-items-center">
+                                    <label class="btn btn-primary btn-sm mb-0 ig-browse-label">
+                                        <i class="bi bi-folder2-open me-1"></i>Browse files
+                                        <input class="ig-extra-file" type="file" name="files"
+                                               multiple accept="image/*" hidden />
+                                    </label>
+                                    <label class="btn btn-outline-primary btn-sm mb-0 ig-camera-label"
+                                           title="Open the device camera (mobile / tablet) or file picker (desktop)">
+                                        <i class="bi bi-camera me-1"></i>Camera
+                                        <input class="ig-extra-file" type="file" name="files"
+                                               multiple accept="image/*" capture="environment" hidden />
+                                    </label>
+                                    <span class="text-muted small">or drag &amp; drop / paste from clipboard:</span>
+                                </div>
+                                <div class="photo-dropzone" role="button" tabindex="0">
+                                    <i class="bi bi-cloud-arrow-up fs-3 d-block mb-1 text-muted"></i>
+                                    <strong>Drop photos here</strong>
+                                    <div class="small text-muted mt-1">JPG / PNG / GIF / WEBP — max 10 MB each. Multiple files supported.</div>
+                                    <input type="file" name="files" multiple accept="image/*" />
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="col-md-10">
+                                <label class="form-label mb-1">Files</label>
+                                <input type="file" name="files" class="form-control" multiple accept="image/*" required />
+                            </div>
+                            <div class="col-md-2">
+                                <button type="submit" class="btn btn-primary w-100">
+                                    <i class="bi bi-cloud-upload me-1"></i>Upload
+                                </button>
+                            </div>
+                        }
                     }
                 </div>
                 <small class="text-muted d-block mt-1">JPG / PNG / GIF / WEBP. Max 10 MB each.</small>
@@ -69,52 +106,6 @@
 
 </div>
 
-@if (Model.Ajax)
-{
-    <script>
-    // Add/remove images without a full-page reload so the surrounding tab stays
-    // active. Delegated on document and registered once; only acts on galleries
-    // flagged data-ajax="true". Other galleries keep their normal POST+redirect.
-    (function () {
-        if (window.__igAjaxInit) return;
-        window.__igAjaxInit = true;
-
-        function ajaxGalleryOf(el) {
-            var g = el.closest('.image-gallery');
-            return (g && g.getAttribute('data-ajax') === 'true') ? g : null;
-        }
-
-        document.addEventListener('submit', function (e) {
-            if (e.defaultPrevented) return;          // e.g. delete confirm() was cancelled
-            var form = e.target;
-            var gallery = ajaxGalleryOf(form);
-            if (!gallery) return;
-            var grid = gallery.querySelector('.ig-grid');
-
-            var isUpload = form.classList.contains('ig-upload-form');
-            var isDelete = !isUpload && grid && grid.contains(form);
-            if (!isUpload && !isDelete) return;
-
-            e.preventDefault();
-            var btn = form.querySelector('button[type="submit"]');
-            if (btn) btn.disabled = true;
-
-            fetch(form.action, {
-                method: 'POST',
-                headers: { 'X-Requested-With': 'XMLHttpRequest' },
-                body: new FormData(form)
-            })
-            .then(function (r) { if (!r.ok) throw new Error('Request failed'); return r.text(); })
-            .then(function (html) {
-                grid.innerHTML = html;
-                if (isUpload) {
-                    var file = form.querySelector('input[type="file"]');
-                    if (file) file.value = '';
-                }
-            })
-            .catch(function () { alert(isUpload ? 'Upload failed. Please try again.' : 'Could not remove the image.'); })
-            .finally(function () { if (btn) btn.disabled = false; });
-        });
-    })();
-    </script>
-}
+@* V31 (2026-06-20): AJAX wiring moved to /js/image-gallery-ajax.js (loaded
+   once in _Layout.cshtml). Inline <script> tags inside this partial would not
+   execute when the partial is injected via innerHTML in the sample drawer. *@

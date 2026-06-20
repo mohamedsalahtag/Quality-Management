@@ -65,13 +65,19 @@ public class AdminController : Controller
     // and Add.
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.AdminOnly)]
-    public async Task<IActionResult> CreateUser(string username, string role)
+    public async Task<IActionResult> CreateUser(string username, string role, string? plantCode)
     {
         if (string.IsNullOrWhiteSpace(username) || !UserRoles.IsValid(role))
         {
             TempData["Error"] = "Username and a valid role are required.";
             return RedirectToAction(nameof(Users));
         }
+        // Plant scope applies to Operators only; the picker is hidden in the UI
+        // for every other role but we strip on the server too as a hard rule.
+        if (!string.Equals(role, UserRoles.Operator, StringComparison.OrdinalIgnoreCase))
+            plantCode = null;
+        else if (string.IsNullOrWhiteSpace(plantCode))
+            plantCode = null;
         var adCfg = await _settings.GetAdConfigAsync();
         if (!adCfg.IsConfigured)
         {
@@ -105,11 +111,14 @@ public class AdminController : Controller
             Email        = info.Email,
             Department   = info.Department,
             Role         = role,
+            PlantCode    = plantCode,
             PasswordHash = "",        // AD-managed; password lives in the directory
             IsActive     = true,
             CreatedBy    = GetCurrentUserId()
         });
-        TempData["Success"] = $"User '{info.Username}' added with role {role}.";
+        TempData["Success"] = plantCode != null
+            ? $"User '{info.Username}' added as {role} scoped to plant {plantCode}."
+            : $"User '{info.Username}' added with role {role}.";
         return RedirectToAction(nameof(Users));
     }
 
@@ -148,7 +157,7 @@ public class AdminController : Controller
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.AdminOnly)]
     public async Task<IActionResult> EditUser(int userId, string fullName, string email,
-        string? department, string? employeeId, string role)
+        string? department, string? employeeId, string role, string? plantCode)
     {
         var u = await _db.GetUserByIdAsync(userId);
         if (u == null) return NotFound();
@@ -163,6 +172,11 @@ public class AdminController : Controller
         u.Department = department;
         u.EmployeeId = employeeId;
         u.Role       = role;
+        // Plant scope applies to Operators only; clear for every other role.
+        u.PlantCode  = string.Equals(role, UserRoles.Operator, StringComparison.OrdinalIgnoreCase)
+                        && !string.IsNullOrWhiteSpace(plantCode)
+                            ? plantCode
+                            : null;
         await _db.UpdateUserAsync(u);
         TempData["Success"] = $"User '{u.Username}' updated.";
         return RedirectToAction(nameof(Users));

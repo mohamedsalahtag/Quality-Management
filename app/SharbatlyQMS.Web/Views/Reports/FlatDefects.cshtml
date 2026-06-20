@@ -1,0 +1,304 @@
+@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.Models.Reports
+@model IReadOnlyList<FlatDefectRow>
+@{
+    ViewData["Title"] = "Flat defects — data hub";
+    var f             = (ViewBag.Filter   as FlatDefectFilter) ?? new FlatDefectFilter();
+    int previewLimit  = (int?) ViewBag.PreviewLimit ?? 200;
+    bool truncated    = (bool?)ViewBag.Truncated    ?? false;
+
+    // V34 (2026-06-20): Perspective Analyzer share-rights gate.
+    var role          = User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    var canShare      = role == UserRoles.Manager || role == UserRoles.SiteAdmin;
+    var filterQuery   = Context.Request.QueryString.HasValue
+                            ? Context.Request.QueryString.Value
+                            : "";
+
+    // Export URL preserves every filter.
+    string FmtDate(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
+}
+
+<style>
+    /* Data hub: wide table + sticky header. The horizontal scroll lives on
+       the outer .table-responsive wrapper so the filter card stays put. */
+    .flat-defects-table { white-space: nowrap; }
+    .flat-defects-table thead th { position: sticky; top: 0; background: #f8f9fa; z-index: 1; }
+    /* Chevron rotation on the filter card. */
+    .filter-card-toggle .chev { transition: transform .2s; }
+    .filter-card-toggle.collapsed .chev { transform: rotate(-90deg); }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h1 class="h4 mb-0"><i class="bi bi-grid-3x3-gap me-1"></i>Flat defects (data hub)</h1>
+    <a class="btn btn-success" target="_blank"
+       href="@Url.Action("FlatDefectsExcel", "Reports", new {
+            qualityOrderId  = f.QualityOrderId, arrivalId = f.ArrivalId,
+            status          = f.Status,        plant     = f.Plant,
+            materialGroup   = f.MaterialGroup, majorCategory = f.MajorCategory,
+            variety         = f.Variety,       origin    = f.Origin,
+            materialClass   = f.MaterialClass,
+            vendorName      = f.VendorName,    vendorNo  = f.VendorNo,
+            storageLocation = f.StorageLocation,
+            containerNo     = f.ContainerNo,   bolNo     = f.BolNo, ebeln = f.Ebeln,
+            sampleScope     = f.SampleScope,
+            poFrom          = FmtDate(f.PoFrom), poTo = FmtDate(f.PoTo) })">
+        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+    </a>
+</div>
+
+<p class="text-muted small mb-3">
+    One row per (sample × every catalog defect for the material group). Defaults to the last 30 days of PO Date —
+    widen via the filter card. The Excel export includes <strong>all</strong> rows (zero-value defects + raw SAP
+    columns like Arrival No / STO / Severity that the on-screen preview hides for clarity).
+</p>
+
+<form asp-action="FlatDefects" method="get" class="card mb-3" id="filterCard">
+    <div class="card-header filter-card-toggle d-flex justify-content-between align-items-center" role="button"
+         data-bs-toggle="collapse" data-bs-target="#filterPanel" aria-expanded="true" aria-controls="filterPanel">
+        <span><i class="bi bi-funnel me-1"></i><strong>Filters</strong>
+              <small class="text-muted ms-2">(click to expand / collapse — last state remembered)</small></span>
+        <i class="bi bi-chevron-down chev"></i>
+    </div>
+    <div class="collapse show" id="filterPanel">
+        <div class="card-body">
+            <div class="row g-2">
+                <div class="col-md-2">
+                    <label class="form-label small">PO date from</label>
+                    <input type="date" name="PoFrom" class="form-control form-control-sm"
+                           value="@FmtDate(f.PoFrom)" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">PO date to</label>
+                    <input type="date" name="PoTo" class="form-control form-control-sm"
+                           value="@FmtDate(f.PoTo)" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">QO Status</label>
+                    <select name="Status" class="form-select form-select-sm">
+                        <option value="">(any)</option>
+                        <option value="Initial"   selected="@(f.Status == "Initial")">Initial</option>
+                        <option value="Open"      selected="@(f.Status == "Open")">Open</option>
+                        <option value="Submitted" selected="@(f.Status == "Submitted")">Submitted</option>
+                        <option value="Closed"    selected="@(f.Status == "Closed")">Finished</option>
+                        <option value="Cancelled" selected="@(f.Status == "Cancelled")">Cancelled</option>
+                    </select>
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label small">Plant</label>
+                    <input type="text" name="Plant" class="form-control form-control-sm" maxlength="4"
+                           value="@f.Plant" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Storage Loc.</label>
+                    <input type="text" name="StorageLocation" class="form-control form-control-sm" maxlength="4"
+                           value="@f.StorageLocation" />
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label small">QO id</label>
+                    <input type="number" name="QualityOrderId" class="form-control form-control-sm"
+                           value="@(f.QualityOrderId)" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Arrival id</label>
+                    <input type="number" name="ArrivalId" class="form-control form-control-sm"
+                           value="@(f.ArrivalId)" />
+                </div>
+
+                <div class="col-md-2">
+                    <label class="form-label small">Material Group</label>
+                    <input type="text" name="MaterialGroup" class="form-control form-control-sm"
+                           value="@f.MaterialGroup" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Major Category</label>
+                    <input type="text" name="MajorCategory" class="form-control form-control-sm"
+                           value="@f.MajorCategory" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Variety</label>
+                    <input type="text" name="Variety" class="form-control form-control-sm"
+                           value="@f.Variety" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Class</label>
+                    <input type="text" name="MaterialClass" class="form-control form-control-sm"
+                           value="@f.MaterialClass" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Origin</label>
+                    <input type="text" name="Origin" class="form-control form-control-sm"
+                           value="@f.Origin" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Sample Scope</label>
+                    <select name="SampleScope" class="form-select form-select-sm">
+                        <option value="">(any)</option>
+                        <option value="OneCarton"   selected="@(f.SampleScope == "OneCarton")">One Carton</option>
+                        <option value="MultiCarton" selected="@(f.SampleScope == "MultiCarton")">Multi Carton</option>
+                    </select>
+                </div>
+
+                <div class="col-md-3">
+                    <label class="form-label small">Supplier (name contains)</label>
+                    <input type="text" name="VendorName" class="form-control form-control-sm"
+                           value="@f.VendorName" placeholder="e.g. arabian" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Vendor No (exact)</label>
+                    <input type="text" name="VendorNo" class="form-control form-control-sm" maxlength="10"
+                           value="@f.VendorNo" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">Container No</label>
+                    <input type="text" name="ContainerNo" class="form-control form-control-sm"
+                           value="@f.ContainerNo" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">BOL No</label>
+                    <input type="text" name="BolNo" class="form-control form-control-sm"
+                           value="@f.BolNo" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small">PO (Ebeln)</label>
+                    <input type="text" name="Ebeln" class="form-control form-control-sm" maxlength="10"
+                           value="@f.Ebeln" />
+                </div>
+                <div class="col-md-1 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary btn-sm w-100">
+                        <i class="bi bi-search me-1"></i>Filter
+                    </button>
+                </div>
+            </div>
+            <div class="mt-2">
+                <a href="@Url.Action("FlatDefects", "Reports")"
+                   class="btn btn-link btn-sm">Clear all filters</a>
+            </div>
+        </div>
+    </div>
+</form>
+
+@if (truncated)
+{
+    <div class="alert alert-info py-2 small">
+        Preview limited to the first @previewLimit rows.
+        Use <strong>Download Excel</strong> for the full result (streamed; no row cap).
+    </div>
+}
+
+<div class="table-responsive small">
+    <table class="table table-sm table-bordered table-hover align-middle flat-defects-table">
+        <thead class="table-light">
+            <tr>
+                <th>Plant</th>
+                <th>Storage Loc</th>
+                <th>Container</th>
+                <th>BOL</th>
+                <th>PO</th>
+                <th>PO Date</th>
+                <th>Shipping Date</th>
+                <th>Arrival Date</th>
+                <th>Receive Date</th>
+                <th class="text-end">Transit Days</th>
+                <th>Supplier</th>
+                <th>QO</th>
+                <th>Status</th>
+                <th>Material</th>
+                <th>Material Group</th>
+                <th>Major Cat</th>
+                <th>Sub Cat</th>
+                <th>Variety</th>
+                <th>Class</th>
+                <th>Origin</th>
+                <th class="text-end">Sample #</th>
+                <th class="text-end">Sample size</th>
+                <th>Defect</th>
+                <th>Defect Category</th>
+                <th class="text-end">Value</th>
+                <th class="text-end">%</th>
+            </tr>
+        </thead>
+        <tbody>
+            @{
+                int shown = 0;
+            }
+            @foreach (var r in Model)
+            {
+                // V31 (2026-06-20): hide zero-value defect rows from the preview
+                // to keep it readable. They're still in the Excel export.
+                if (r.DefectValue == 0m) { continue; }
+                shown++;
+                <tr>
+                    <td>@r.Plant</td>
+                    <td>@r.StorageLocation</td>
+                    <td>@r.ContainerNo</td>
+                    <td>@r.BolNo</td>
+                    <td>@r.Ebeln</td>
+                    <td>@r.PoDate?.ToString("yyyy-MM-dd")</td>
+                    <td>@r.ShippingDate?.ToString("yyyy-MM-dd")</td>
+                    <td>@r.ArrivalDate?.ToString("yyyy-MM-dd")</td>
+                    <td>@r.ReceiveDate?.ToString("yyyy-MM-dd")</td>
+                    <td class="text-end">@r.TransitDays</td>
+                    <td>@r.VendorName</td>
+                    <td>@r.QualityOrderNo</td>
+                    <td>@r.QoStatusDisplay</td>
+                    <td><code>@r.MaterialNo</code> @r.MaterialDesc</td>
+                    <td>@r.MaterialGroup</td>
+                    <td>@r.MajorCategory</td>
+                    <td>@r.SubMajorCategory</td>
+                    <td>@r.Variety</td>
+                    <td>@r.MaterialClass</td>
+                    <td>@r.Origin</td>
+                    <td class="text-end">@r.SampleNo</td>
+                    <td class="text-end">@r.SampleSize</td>
+                    <td>@r.DefectName <small class="text-muted">@r.DefectCode</small></td>
+                    <td>@r.DefectCategory</td>
+                    <td class="text-end">@(r.DefectValue?.ToString("0.###"))</td>
+                    <td class="text-end">@(r.DefectPercentage?.ToString("0.##"))</td>
+                </tr>
+            }
+            @if (shown == 0)
+            {
+                <tr><td colspan="26" class="text-center text-muted py-3">
+                    No non-zero defect rows for this filter. Try widening the PO-date range or
+                    clearing one of the filters — the Excel export will still include zero-value rows.
+                </td></tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@* V34 (2026-06-20): Perspective Analyzer card. Runs server-side GROUP BY
+   over dbo.vw_qms_flat_defects scoped by the same filter as the preview. *@
+@await Html.PartialAsync("_PerspectiveAnalyzer", new PerspectiveAnalyzerVm
+{
+    ReportKey   = "flat_defects",
+    FilterQuery = filterQuery,
+    CanShare    = canShare
+})
+<form id="perspectiveAfForm" method="post" class="d-none">@Html.AntiForgeryToken()</form>
+
+@section Scripts {
+    <script src="~/lib/plotly/plotly-basic.min.js" asp-append-version="true"></script>
+    <script src="~/js/perspective-analyzer.js" asp-append-version="true"></script>
+
+<script>
+    // V31 (2026-06-20): remember the filter-card open/collapsed state across
+    // page loads in localStorage. Default = expanded on first visit.
+    (function () {
+        var KEY = 'flatdefects.filterPanel.collapsed';
+        var panel = document.getElementById('filterPanel');
+        var toggle = document.querySelector('.filter-card-toggle');
+        if (!panel || !toggle) return;
+        // Apply remembered state BEFORE any user click.
+        try {
+            if (localStorage.getItem(KEY) === '1') {
+                panel.classList.remove('show');
+                toggle.classList.add('collapsed');
+                toggle.setAttribute('aria-expanded', 'false');
+            }
+        } catch (e) { /* localStorage unavailable -- ignore */ }
+        panel.addEventListener('shown.bs.collapse',  function () { try { localStorage.setItem(KEY, '0'); } catch (e) {} toggle.classList.remove('collapsed'); });
+        panel.addEventListener('hidden.bs.collapse', function () { try { localStorage.setItem(KEY, '1'); } catch (e) {} toggle.classList.add('collapsed'); });
+    })();
+</script>
+}

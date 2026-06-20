@@ -119,6 +119,8 @@ public class PendingPickupRow
     public string  ContainerNo  { get; set; } = "";
     public string  BolNo        { get; set; } = "";
     public string  Ebeln        { get; set; } = "";
+    /// <summary>Stock Transport Order. Sourced from ZQC_Data.PO_Number in the new endpoint shape.</summary>
+    public string? Sto             { get; set; }
     public string? VendorNo        { get; set; }
     public string? VendorName      { get; set; }
     public string? PoType          { get; set; }

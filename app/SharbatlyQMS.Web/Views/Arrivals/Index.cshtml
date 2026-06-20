@@ -43,6 +43,7 @@
                     <th data-sort>Arrival #</th>
                     <th data-sort>Container</th>
                     <th data-sort>BOL</th>
+                    <th data-sort>Plant</th>
                     <th data-sort>Vendor</th>
                     <th data-sort>Created</th>
                     <th data-sort>Created By</th>
@@ -54,7 +55,7 @@
             <tbody>
                 @if (!Model.Any())
                 {
-                    <tr><td colspan="9" class="text-center text-muted py-4">
+                    <tr><td colspan="10" class="text-center text-muted py-4">
                         No arrivals yet. Click <em>New arrival from SAP</em> to create the first one.
                     </td></tr>
                 }
@@ -66,6 +67,17 @@
                             <td><code>@a.ArrivalNo</code></td>
                             <td>@a.ContainerNo</td>
                             <td>@a.BolNo</td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(a.Plant))
+                                {
+                                    <span class="badge bg-light text-dark border"
+                                          data-bs-toggle="tooltip" title="@(SapPlantDirectory.PlantName(a.Plant) ?? a.Plant)">@a.Plant</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
                             <td>@a.VendorName</td>
                             <td>@a.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
                             <td>@a.CreatedBy</td>

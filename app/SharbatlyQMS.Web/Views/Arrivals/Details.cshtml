@@ -7,9 +7,15 @@
     var shipment  = ViewBag.Shipment  as ShipmentSnapshot;
     var draft     = Model.StatusCode == ArrivalStatus.Draft;
     var role      = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-    var canEdit   = role == UserRoles.Operator || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
-    var canManage = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;
-    var isAdmin   = canManage;   // backward-compat alias for blocks that already use isAdmin
+    // V31 (2026-06-20): Supervisor included in canEdit (OperatorOrAbove now
+    // covers it). New canSupervise gate unlocks edits on Completed arrivals.
+    var canEdit       = role == UserRoles.Operator || role == UserRoles.Supervisor || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
+    var canSupervise  = role == UserRoles.Supervisor || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
+    var canManage     = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;
+    var isAdmin       = canManage;   // backward-compat alias for blocks that already use isAdmin
+    // Combined "edit allowed on this arrival" gate: draft is editable by every
+    // OperatorOrAbove; Completed is editable by Supervisor+.
+    var canEditArrival = (draft && canEdit) || (Model.StatusCode == ArrivalStatus.Completed && canSupervise);
     var hasQo     = Model.QualityOrderId.HasValue;
     var (cls, label) = Model.StatusCode switch
     {
@@ -234,7 +240,7 @@
         <div class="card">
             <div class="card-header bg-primary text-white"><i class="bi bi-truck me-1"></i>Shipment snapshot @(shipment != null ? "— " + shipment.InternalShipmentNo : "")</div>
             <div class="card-body">
-                <fieldset @(draft ? "" : "disabled")>
+                <fieldset @(canEditArrival ? "" : "disabled")>
                     <div class="row g-3">
                         <div class="col-md-3"><label class="form-label">Vessel name</label>
                             <input class="form-control" value="@shipment?.VesselName" disabled /></div>
@@ -285,10 +291,14 @@
                     </div>
                 </fieldset>
             </div>
-            @if (draft)
+            @if (canEditArrival)
             {
                 <div class="card-footer text-end">
                     <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>Save shipment details</button>
+                    @if (!draft)
+                    {
+                        <span class="small text-warning ms-2"><i class="bi bi-shield-lock me-1"></i>Supervisor edit on Completed arrival</span>
+                    }
                 </div>
             }
         </div>
@@ -410,7 +420,7 @@
         @Html.AntiForgeryToken()
         <input type="hidden" name="ChecklistId" value="@checklist.ChecklistId" />
         <input type="hidden" name="ArrivalId"   value="@Model.ArrivalId" />
-        <fieldset @(draft ? "" : "disabled")>
+        <fieldset @(canEditArrival ? "" : "disabled")>
 
         @* ---- Identity strip (read-only context from arrival header) ---- *@
         <div class="card mb-2 border-secondary">
@@ -619,11 +629,15 @@
 
         </fieldset>
 
-        @if (draft)
+        @if (canEditArrival)
         {
             <div class="d-flex gap-2 sticky-bottom bg-body py-2 border-top">
                 <button type="submit" class="btn btn-primary btn-lg flex-grow-1">
                     <i class="bi bi-save me-1"></i>Save checklist
+                    @if (!draft)
+                    {
+                        <span class="small ms-2"><i class="bi bi-shield-lock me-1"></i>Supervisor edit</span>
+                    }
                 </button>
             </div>
         }

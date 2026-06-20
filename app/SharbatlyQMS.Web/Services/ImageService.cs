@@ -86,6 +86,12 @@ public class ImageService : IImageService
         IReadOnlyList<IFormFile> files, string uploadedBy)
     {
         if (files == null || files.Count == 0) return 0;
+        // V31 (2026-06-20): qms_image_link.image_category is VARCHAR(40) NOT NULL.
+        // ASP.NET model binding silently converts an empty "category=" form field
+        // to null, which then violated the NOT NULL constraint on every upload --
+        // assets landed in qms_image_asset but no link row got created (orphans).
+        // Coalesce to empty string here so every code path is safe.
+        category ??= "";
 
         var thumbCfg = await _settings.GetThumbnailConfigAsync();
         var ownerDir = Path.Combine(_env.WebRootPath, "uploads", ownerType, ownerId.ToString());

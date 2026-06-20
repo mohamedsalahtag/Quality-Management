@@ -11,6 +11,9 @@ public class Arrival
     public string?   Bukrs        { get; set; }
     public string?   VendorNo     { get; set; }
     public string?   VendorName   { get; set; }
+    /// <summary>Denormalized SAP plant (e.g. RD01) from the first cache row at
+    /// create time. Drives the plant-scope filter on /Arrivals and gates Details access.</summary>
+    public string?   Plant        { get; set; }
     public string    StatusCode   { get; set; } = "Draft";
     public DateTime  CreatedAt    { get; set; }
     public string    CreatedBy    { get; set; } = "";

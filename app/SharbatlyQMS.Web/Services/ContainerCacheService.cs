@@ -48,6 +48,7 @@ public class ContainerCacheService : IContainerCacheService
                 material_desc  = @MaterialDesc,
                 material_group = @MaterialGroup,
                 po_type        = @PoType,
+                sto            = @Sto,
                 doc_date       = @DocDate,
                 arrival_date   = @ArrivalDate,
                 receive_date   = @ReceiveDate,
@@ -57,11 +58,11 @@ public class ContainerCacheService : IContainerCacheService
                 last_seen_at   = SYSUTCDATETIME()
             WHEN NOT MATCHED THEN INSERT
                 (container_no, bol_no, ebeln, ebelp, material_no, plant, storage_loc, batch_no,
-                 vendor_no, vendor_name, material_desc, material_group, po_type,
+                 vendor_no, vendor_name, material_desc, material_group, po_type, sto,
                  doc_date, arrival_date, receive_date, quantity, uom, payload_json)
             VALUES
                 (@ContainerNo, @BolNo, @Ebeln, @Ebelp, @MaterialNo, @Plant, @StorageLoc, @BatchNo,
-                 @VendorNo, @VendorName, @MaterialDesc, @MaterialGroup, @PoType,
+                 @VendorNo, @VendorName, @MaterialDesc, @MaterialGroup, @PoType, @Sto,
                  @DocDate, @ArrivalDate, @ReceiveDate, @Quantity, @Uom, @PayloadJson);";
         foreach (var r in rows)
         {
@@ -71,7 +72,7 @@ public class ContainerCacheService : IContainerCacheService
             {
                 r.ContainerNo, r.BolNo, r.Ebeln, r.Ebelp, r.MaterialNo,
                 r.Plant, StorageLoc = r.StorageLocation, r.BatchNo,
-                r.VendorNo, r.VendorName, r.MaterialDesc, r.MaterialGroup, r.PoType,
+                r.VendorNo, r.VendorName, r.MaterialDesc, r.MaterialGroup, r.PoType, r.Sto,
                 DocDate     = r.DocDate.HasValue     ? (DateTime?)r.DocDate.Value.ToDateTime(TimeOnly.MinValue)     : null,
                 ArrivalDate = r.ArrivalDate.HasValue ? (DateTime?)r.ArrivalDate.Value.ToDateTime(TimeOnly.MinValue) : null,
                 ReceiveDate = r.ReceiveDate.HasValue ? (DateTime?)r.ReceiveDate.Value.ToDateTime(TimeOnly.MinValue) : null,
@@ -128,6 +129,7 @@ public class ContainerCacheService : IContainerCacheService
                 container_no       AS ContainerNo,
                 bol_no             AS BolNo,
                 ebeln              AS Ebeln,
+                MAX(sto)           AS Sto,
                 MAX(vendor_no)     AS VendorNo,
                 MAX(vendor_name)   AS VendorName,
                 MAX(po_type)       AS PoType,

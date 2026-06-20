@@ -17,7 +17,7 @@ namespace SharbatlyQMS.Web.Services.Sap;
 /// <c>$filter</c> clauses combined with <c>and</c>:
 ///   * Container -> Container eq '...'
 ///   * BOL       -> BOL eq '...'
-///   * PO        -> PO_Number eq '...'
+///   * PO        -> ShipmentNo eq '...'
 ///   * Material  -> Material eq '...'
 /// The same ABAP query the user pasted in chat uses exact-equality with
 /// "OR @field IS INITIAL" -- we get the same semantics by only emitting
@@ -105,7 +105,8 @@ public class HybridSapClient : ISapClient
         if (!string.IsNullOrWhiteSpace(q.BolNo) && IsSafeKey(q.BolNo))
             filters.Add($"BOL eq '{Esc(q.BolNo)}'");
         if (!string.IsNullOrWhiteSpace(q.Ebeln) && IsSafeKey(q.Ebeln))
-            filters.Add($"PO_Number eq '{Esc(q.Ebeln)}'");
+            // ShipmentNo is the PO from the operator's perspective; PO_Number holds the STO.
+            filters.Add($"ShipmentNo eq '{Esc(q.Ebeln)}'");
         if (!string.IsNullOrWhiteSpace(q.MaterialNo) && IsSafeKey(q.MaterialNo))
             filters.Add($"Material eq '{Esc(q.MaterialNo)}'");
 
@@ -218,7 +219,9 @@ public class HybridSapClient : ISapClient
     {
         ContainerNo       = Get(d, "Container") ?? "",
         BolNo             = Get(d, "BOL") ?? "",
-        Ebeln             = Get(d, "PO_Number") ?? "",
+        // ZQC_Data: ShipmentNo is the PO from the operator's perspective; PO_Number holds the STO.
+        Ebeln             = Get(d, "ShipmentNo") ?? "",
+        Sto               = Get(d, "PO_Number"),
         Ebelp             = Get(d, "Line_No") ?? "",
         PoType            = Get(d, "PO_Type") ?? "",
         DocDate           = ParseDate(Get(d, "Doc_Date")),
@@ -238,7 +241,10 @@ public class HybridSapClient : ISapClient
         LoadingDate       = ParseDate(Get(d, "LoadingDate")),
         SailingDate       = ParseDate(Get(d, "Sailing_Date")),
         ExaminationDate   = ParseDate(Get(d, "Examination_Date")),
-        ArrivalDate       = ParseDate(Get(d, "Arrival_Date")),
+        // Operator wants the "Arrival date" column on /Arrivals/Pending sourced
+        // from the SAP Receive_Date field (Arrival_Date in this CDS view is
+        // sparse / unreliable). Both properties read the same source for now.
+        ArrivalDate       = ParseDate(Get(d, "Receive_Date")),
         ReceiveDate       = ParseDate(Get(d, "Receive_Date")),
         TransitDays       = ParseShort(Get(d, "Transit_Days")),
         LoadingPort       = Get(d, "Loading_Port") ?? "",

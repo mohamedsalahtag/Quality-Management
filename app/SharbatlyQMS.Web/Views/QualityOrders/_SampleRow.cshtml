@@ -39,6 +39,14 @@
     </td>
     <td class="text-end small text-muted">@s.CreatedAt.ToLocalTime():g<br />@s.CreatedBy</td>
     <td class="text-end">
+        <button type="button" class="btn btn-sm btn-outline-info sample-photos"
+                data-sample-id="@s.SampleId" title="Photos">
+            <i class="bi bi-camera"></i>
+            @if (Model.PhotoCount > 0)
+            {
+                <span class="badge bg-primary ms-1">@Model.PhotoCount</span>
+            }
+        </button>
         <button type="button" class="btn btn-sm btn-outline-primary sample-open"
                 data-sample-id="@s.SampleId" title="Open sample">
             <i class="bi bi-pencil-square"></i>

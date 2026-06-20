@@ -61,6 +61,33 @@ input[type="number"]::-webkit-outer-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
+/* V31 (2026-06-20): pulsing yellow halo on the "Fill material header to add
+   samples" button. Draws the operator's eye to the action they must take
+   first; CSS-only so it works inside the Razor partial without extra JS. */
+@keyframes header-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 193, 7, .55); }
+  50%      { box-shadow: 0 0 0 8px rgba(255, 193, 7, 0); }
+}
+.btn-needs-headers {
+  animation: header-pulse 1.5s ease-in-out infinite;
+}
+/* V31: per-sample photo drop-zone. */
+.photo-dropzone {
+  border: 2px dashed #ced4da;
+  border-radius: .5rem;
+  padding: 1rem;
+  text-align: center;
+  background: #f8f9fa;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s;
+}
+.photo-dropzone:hover,
+.photo-dropzone.dragover {
+  background: #e7f1ff;
+  border-color: #0d6efd;
+}
+.photo-dropzone input[type="file"] { display: none; }
+
 input[type="number"] {
   -moz-appearance: textfield;
        appearance: textfield;

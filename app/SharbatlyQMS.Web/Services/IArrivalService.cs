@@ -5,9 +5,13 @@ namespace SharbatlyQMS.Web.Services;
 
 public interface IArrivalService
 {
-    Task<IReadOnlyList<Arrival>> ListAsync(string? status, string? search);
+    Task<IReadOnlyList<Arrival>> ListAsync(string? status, string? search, string? plant = null);
     Task<Arrival?> GetAsync(long arrivalId);
     Task<IReadOnlyList<ArrivalItem>> GetItemsAsync(long arrivalId);
+
+    /// <summary>Plant code denormalized on the arrival header. Null when no row
+    /// exists. Cheap single-column read used by the plant-scope gate.</summary>
+    Task<string?> GetPlantAsync(long arrivalId);
 
     /// <summary>
     /// Find an existing arrival matching the given (container, BOL, PO) triple --

@@ -104,7 +104,9 @@ public static class ActionCodes
 
     // QualityOrder transitions
     public const string Opened             = "Opened";
-    public const string Closed             = "Closed";
+    public const string Submitted          = "Submitted";       // V31: operator marks data entry complete
+    public const string CancelSubmit       = "CancelSubmit";    // V31: supervisor reverts Submitted -> Open
+    public const string Closed             = "Closed";          // UI-labelled "Finished"
     public const string Reopened           = "Reopened";
     public const string Cancelled          = "Cancelled";
 
@@ -121,7 +123,7 @@ public static class ActionCodes
     public static readonly string[] All =
     {
         Created, Updated, Deleted,
-        Opened, Closed, Reopened, Cancelled,
+        Opened, Submitted, CancelSubmit, Closed, Reopened, Cancelled,
         ClaimRequest, PassedQC, Approved, Hold,
         Override, OverrideCleared
     };

@@ -1,7 +1,9 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Reports;
 
 namespace SharbatlyQMS.Web.Services;
 
@@ -9,11 +11,13 @@ public class QualityOrderService : IQualityOrderService
 {
     private readonly string _cs;
     private readonly IAuditService _audit;
-    public QualityOrderService(IConfiguration config, IAuditService audit)
+    private readonly IMaraService _mara;
+    public QualityOrderService(IConfiguration config, IAuditService audit, IMaraService mara)
     {
         _cs = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
         _audit = audit;
+        _mara  = mara;
     }
     private SqlConnection Open() => new(_cs);
 
@@ -35,15 +39,17 @@ public class QualityOrderService : IQualityOrderService
                a.bol_no             BolNo,
                a.ebeln              Ebeln,
                a.vendor_name        VendorName,
+               a.plant              Plant,
                a.arrival_no         ArrivalNo
         FROM   qms_quality_order qo
         LEFT   JOIN qms_arrival  a ON a.arrival_id = qo.arrival_id";
 
-    public async Task<IReadOnlyList<QualityOrder>> ListAsync(string? status, string? search)
+    public async Task<IReadOnlyList<QualityOrder>> ListAsync(string? status, string? search, string? plant = null)
     {
         using var c = Open();
         var rows = await c.QueryAsync<QualityOrder>(QoSelect + @"
             WHERE  (@status IS NULL OR qo.status_code = @status)
+              AND  (@plant  IS NULL OR a.plant        = @plant)
               AND  (@search IS NULL OR
                     qo.quality_order_no LIKE '%' + @search + '%' OR
                     a.container_no      LIKE '%' + @search + '%' OR
@@ -51,18 +57,28 @@ public class QualityOrderService : IQualityOrderService
                     a.ebeln             LIKE '%' + @search + '%' OR
                     a.vendor_name       LIKE '%' + @search + '%' OR
                     qo.created_by       LIKE '%' + @search + '%')
-            ORDER BY qo.created_at DESC", new { status, search });
+            ORDER BY qo.created_at DESC", new { status, search, plant });
         return rows.ToList();
     }
 
+    /// <summary>QO inherits plant from its arrival header (qms_arrival.plant,
+    /// added in V29). Single-column read for the plant-scope gate.</summary>
+    public async Task<string?> GetPlantForQoAsync(long qualityOrderId)
+    {
+        using var c = Open();
+        return await c.ExecuteScalarAsync<string?>(@"
+            SELECT a.plant
+            FROM   qms_quality_order qo
+            JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
+            WHERE  qo.quality_order_id = @qualityOrderId",
+            new { qualityOrderId });
+    }
+
     /// <summary>
-    /// Returns a QO by id with no caller-scope check. QO visibility is
-    /// intentionally org-wide: Viewer / Operator / Manager / ClaimManager /
-    /// SiteAdmin all need to read every QO (Operator records work,
-    /// ClaimManager approves claims tied to a QO, Manager / SiteAdmin
-    /// oversee). The QualityOrdersController class-level [Authorize] gate
-    /// + AuditContextActionFilter (which logs every read) are the only
-    /// row-level controls; this method does not need its own.
+    /// Returns a QO by id. Caller is responsible for plant-scope checks via
+    /// <see cref="GetPlantForQoAsync"/> -- this method does not enforce them
+    /// because some surfaces (audit, claim approval) deliberately bypass
+    /// the operator's plant filter.
     /// </summary>
     public async Task<QualityOrder?> GetAsync(long qualityOrderId)
     {
@@ -185,12 +201,26 @@ public class QualityOrderService : IQualityOrderService
     }
 
     public Task<(bool ok, string? error)> OpenAsync(long qoId, string user)   => Transition(qoId, user, null, "Open",     new[] { "Initial" });
-    public Task<(bool ok, string? error)> CloseAsync(long qoId, string user, string? reason)  => Transition(qoId, user, reason, "Closed",   new[] { "Open" });
+    // Submit (V31, 2026-06-20): operator marks data entry complete. Locks the
+    // QO against further edits until a Supervisor either finishes (->Closed)
+    // or cancel-submits (->Open) for fixes.
+    public Task<(bool ok, string? error)> SubmitAsync(long qoId, string user) => Transition(qoId, user, null, "Submitted", new[] { "Open" });
+    // Cancel-submit (V31, 2026-06-20): Supervisor returns a Submitted QO to
+    // Open so the operator can correct it. Reason is optional but recorded.
+    public Task<(bool ok, string? error)> CancelSubmitAsync(long qoId, string user, string? reason) =>
+        Transition(qoId, user, reason, "Open", new[] { "Submitted" });
+    // Finish (V31): "Close" now requires Submitted as the source, so the
+    // Supervisor/Manager review step is mandatory between operator entry and
+    // finished state. Existing legacy 'Open' QOs cannot be closed directly any
+    // more -- they must transit through Submit first.
+    public Task<(bool ok, string? error)> CloseAsync(long qoId, string user, string? reason)  => Transition(qoId, user, reason, "Closed",   new[] { "Submitted" });
     // Reopen folds back into Open -- the user explicitly didn't want a
     // separate "Reopened" status. Audit columns (reopened_at / by /
     // reason) still record that the QO was re-opened.
     public Task<(bool ok, string? error)> ReopenAsync(long qoId, string user, string? reason) => Transition(qoId, user, reason, "Reopened", new[] { "Closed" });
-    public Task<(bool ok, string? error)> CancelAsync(long qoId, string user, string? reason) => Transition(qoId, user, reason, "Cancelled",new[] { "Initial", "Open" });
+    // Cancel (V31): widened to also accept Submitted -- an aborted submit can
+    // be cancelled outright without a Supervisor having to first cancel-submit.
+    public Task<(bool ok, string? error)> CancelAsync(long qoId, string user, string? reason) => Transition(qoId, user, reason, "Cancelled",new[] { "Initial", "Open", "Submitted" });
 
     private async Task<(bool ok, string? error)> Transition(long qoId, string user, string? reason, string toStatus, string[] fromStatuses)
     {
@@ -204,9 +234,9 @@ public class QualityOrderService : IQualityOrderService
         if (!fromStatuses.Contains(current))
             return (false, $"Cannot transition from {current} to {toStatus}.");
 
-        // Finishing (Closed) is now a one-click confirm -- no reason is
-        // required. Reopen / Cancel still demand a justification so the
-        // audit trail explains why a finished QO was unblocked.
+        // Finishing (Closed) and Submit / cancel-submit are one-click. Reopen
+        // (Closed -> Open) and Cancel (-> Cancelled) still demand a reason so
+        // the audit trail explains why a finished QO was unblocked or aborted.
         if ((toStatus == "Reopened" || toStatus == "Cancelled") && string.IsNullOrWhiteSpace(reason))
             return (false, $"Reason is required to {toStatus.ToLowerInvariant()}.");
 
@@ -214,12 +244,18 @@ public class QualityOrderService : IQualityOrderService
         // editable state, but the reopened_* audit fields still get
         // stamped so we know it was re-opened (and the status history
         // row below records the Closed -> Reopened transition).
-        var sql = toStatus switch
+        var sql = (toStatus, current) switch
         {
-            "Open"      => "UPDATE qms_quality_order SET status_code='Open',     opened_at=SYSUTCDATETIME(), opened_by=@user WHERE quality_order_id=@qoId",
-            "Closed"    => "UPDATE qms_quality_order SET status_code='Closed',   closed_at=SYSUTCDATETIME(), closed_by=@user, close_reason=@reason WHERE quality_order_id=@qoId",
-            "Reopened"  => "UPDATE qms_quality_order SET status_code='Open',     reopened_at=SYSUTCDATETIME(), reopened_by=@user, reopen_reason=@reason WHERE quality_order_id=@qoId",
-            "Cancelled" => "UPDATE qms_quality_order SET status_code='Cancelled' WHERE quality_order_id=@qoId",
+            // First Initial->Open opening
+            ("Open", "Initial")       => "UPDATE qms_quality_order SET status_code='Open',     opened_at=SYSUTCDATETIME(), opened_by=@user WHERE quality_order_id=@qoId",
+            // Submitted -> Open: cancel-submit. Don't overwrite opened_at;
+            // just stamp the status. The audit log + status history row
+            // record who cancelled the submit and when.
+            ("Open", "Submitted")     => "UPDATE qms_quality_order SET status_code='Open' WHERE quality_order_id=@qoId",
+            ("Submitted", _)          => "UPDATE qms_quality_order SET status_code='Submitted' WHERE quality_order_id=@qoId",
+            ("Closed", _)             => "UPDATE qms_quality_order SET status_code='Closed',   closed_at=SYSUTCDATETIME(), closed_by=@user, close_reason=@reason WHERE quality_order_id=@qoId",
+            ("Reopened", _)           => "UPDATE qms_quality_order SET status_code='Open',     reopened_at=SYSUTCDATETIME(), reopened_by=@user, reopen_reason=@reason WHERE quality_order_id=@qoId",
+            ("Cancelled", _)          => "UPDATE qms_quality_order SET status_code='Cancelled' WHERE quality_order_id=@qoId",
             _ => throw new InvalidOperationException("Unknown target status.")
         };
         await c.ExecuteAsync(sql, new { qoId, user, reason }, tx);
@@ -232,13 +268,15 @@ public class QualityOrderService : IQualityOrderService
         // domain action (Opened / Closed / Reopened / Cancelled) rather than
         // a generic Updated, per FR-002 and the 2026-05-20 clarification on
         // domain action label preservation.
-        var auditAction = toStatus switch
+        var auditAction = (toStatus, current) switch
         {
-            "Open"      => ActionCodes.Opened,
-            "Closed"    => ActionCodes.Closed,
-            "Reopened"  => ActionCodes.Reopened,
-            "Cancelled" => ActionCodes.Cancelled,
-            _           => ActionCodes.Updated
+            ("Open", "Initial")        => ActionCodes.Opened,
+            ("Open", "Submitted")      => ActionCodes.CancelSubmit,
+            ("Submitted", _)           => ActionCodes.Submitted,
+            ("Closed", _)              => ActionCodes.Closed,
+            ("Reopened", _)            => ActionCodes.Reopened,
+            ("Cancelled", _)           => ActionCodes.Cancelled,
+            _                          => ActionCodes.Updated
         };
         await _audit.WriteAsync(c, tx,
             EntityTypes.QualityOrder, qoId, auditAction,
@@ -252,10 +290,17 @@ public class QualityOrderService : IQualityOrderService
 
     public async Task SaveOverrideAsync(long qoMaterialId, string newSize, string? reason, string user)
     {
-        // PH-1.1 + PH-2.1 (2026-05-20): wrap UPDATE + audit-write in a single
-        // transaction so a failure of either rolls both back. Replaces the
-        // previous inline INSERT INTO qms_audit_log with the unified
-        // IAuditService write path.
+        // Override is now THE editor for sample size (2026-06-20): the standalone
+        // sample-size input on Material Details was removed. newSize is parsed as
+        // a positive short; the same value is mirrored into material_size (string)
+        // so any consumer that still reads material_size sees a consistent value.
+        // The new sample_size is then propagated to EVERY non-deleted sample on
+        // this material -- no V24 size_overridden skip; per-sample divergence is
+        // no longer a thing.
+        if (!short.TryParse(newSize, out var newSizeNum) || newSizeNum < 1)
+            throw new ArgumentException("Sample size must be a positive whole number.", nameof(newSize));
+        var newSizeStr = newSizeNum.ToString(System.Globalization.CultureInfo.InvariantCulture);
+
         using var c = Open();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
@@ -263,34 +308,50 @@ public class QualityOrderService : IQualityOrderService
             UPDATE qms_quality_order_material SET
               size_overridden        = 1,
               original_material_size = ISNULL(original_material_size, material_size),
-              override_material_size = @newSize,
-              material_size          = @newSize,
+              override_material_size = @newSizeStr,
+              material_size          = @newSizeStr,
+              sample_size            = @newSizeNum,
               override_reason        = @reason,
               override_approved_by   = @user,
               override_approved_at   = SYSUTCDATETIME()
             WHERE qo_material_id = @qoMaterialId",
-            new { qoMaterialId, newSize, reason = (object?)reason ?? DBNull.Value, user },
+            new { qoMaterialId, newSizeStr, newSizeNum, reason = (object?)reason ?? DBNull.Value, user },
             transaction: tx);
+        // Propagation respects per-sample overrides: a sample with
+        // size_overridden = 1 keeps its custom value (V24+). Operators
+        // who want every sample reset can clear the per-sample override
+        // by typing the new default into each sample's input.
+        await c.ExecuteAsync(@"
+            UPDATE qms_sample SET
+              sample_size = @newSizeNum,
+              updated_at  = SYSUTCDATETIME(),
+              updated_by  = @user
+            WHERE qo_material_id = @qoMaterialId
+              AND is_deleted = 0
+              AND size_overridden = 0",
+            new { qoMaterialId, newSizeNum, user }, transaction: tx);
         await _audit.WriteAsync(c, tx,
             EntityTypes.QualityOrderMaterial, qoMaterialId, ActionCodes.Override,
             oldValues: null,
-            newValues: new { newSize, reason = reason ?? "" },
+            newValues: new { sample_size = newSizeNum, reason = reason ?? "" },
             actor: user);
         tx.Commit();
     }
 
     public async Task ClearOverrideAsync(long qoMaterialId, string user)
     {
-        // PH-1.2 + PH-2.2 (2026-05-20): wrap UPDATE + audit-write in one
-        // transaction. Restore the original size (if one was captured) and
-        // clear all override metadata so the material line looks like it
-        // never had one. Audit log keeps a trail for compliance.
+        // Restore sample_size + material_size from the snapshot captured on the
+        // first override (original_material_size is a string -- TRY_CAST it back
+        // to a short for sample_size; non-numeric legacy specs collapse to NULL,
+        // matching the "no value set" state where defect % shows "—"). Propagate
+        // to every sample so the inherited cache stays in step.
         using var c = Open();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
         await c.ExecuteAsync(@"
             UPDATE qms_quality_order_material SET
               material_size          = ISNULL(original_material_size, material_size),
+              sample_size            = TRY_CAST(original_material_size AS SMALLINT),
               size_overridden        = 0,
               original_material_size = NULL,
               override_material_size = NULL,
@@ -300,6 +361,15 @@ public class QualityOrderService : IQualityOrderService
             WHERE qo_material_id = @qoMaterialId",
             new { qoMaterialId },
             transaction: tx);
+        await c.ExecuteAsync(@"
+            UPDATE qms_sample SET
+              sample_size = (SELECT sample_size FROM qms_quality_order_material WHERE qo_material_id = @qoMaterialId),
+              updated_at  = SYSUTCDATETIME(),
+              updated_by  = @user
+            WHERE qo_material_id = @qoMaterialId
+              AND is_deleted = 0
+              AND size_overridden = 0",
+            new { qoMaterialId, user }, transaction: tx);
         await _audit.WriteAsync(c, tx,
             EntityTypes.QualityOrderMaterial, qoMaterialId, ActionCodes.OverrideCleared,
             oldValues: null, newValues: null, actor: user);
@@ -839,7 +909,7 @@ public class QualityOrderService : IQualityOrderService
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
         // Only replace the SAMPLE-scoped rows. Material-scoped values are
-        // copied down from the material (SaveMaterialHeaderValuesAndSizeAsync /
+        // copied down from the material (SaveMaterialHeaderValuesAsync /
         // CreateSampleAsync) and must survive a per-sample save.
         await c.ExecuteAsync(@"
             DELETE v FROM qms_sample_header_value v
@@ -913,10 +983,13 @@ public class QualityOrderService : IQualityOrderService
         return rows.ToLookup(r => r.QoMaterialId);
     }
 
-    public async Task SaveMaterialHeaderValuesAndSizeAsync(long qoMaterialId, short? sampleSize,
+    public async Task SaveMaterialHeaderValuesAsync(long qoMaterialId,
         IEnumerable<MaterialHeaderValue> values, string user)
     {
-        // Drop empty rows -- same "not applicable" convention as the sample path.
+        // Sample size is no longer touched here (2026-06-20): it's owned by the
+        // Override Size modal (SaveOverrideAsync), which writes sample_size on
+        // the material and propagates to every sample atomically. This method
+        // is now strictly about Material-scoped header values.
         var keep = values
             .Where(v => !string.IsNullOrWhiteSpace(v.TextValue)
                         || v.NumericValue.HasValue
@@ -927,29 +1000,6 @@ public class QualityOrderService : IQualityOrderService
         using var c = Open();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
-
-        var oldSize = await c.ExecuteScalarAsync<short?>(
-            "SELECT sample_size FROM qms_quality_order_material WHERE qo_material_id = @qoMaterialId",
-            new { qoMaterialId }, tx);
-
-        // Source-of-truth sample size on the material...
-        await c.ExecuteAsync(
-            "UPDATE qms_quality_order_material SET sample_size = @sampleSize WHERE qo_material_id = @qoMaterialId",
-            new { qoMaterialId, sampleSize }, tx);
-
-        // ...propagated to every (non-deleted, non-overridden) sample of this
-        // material so the per-sample inherited cache that every defect-% calc
-        // divides by stays in step. Samples flagged size_overridden=1 keep
-        // their user-entered value (V24+). Only writes when a size is set, to
-        // avoid blanking samples when the material size is cleared.
-        if (sampleSize.HasValue)
-            await c.ExecuteAsync(@"
-                UPDATE qms_sample SET sample_size = @sampleSize,
-                       updated_at = SYSUTCDATETIME(), updated_by = @user
-                WHERE qo_material_id = @qoMaterialId
-                  AND is_deleted = 0
-                  AND size_overridden = 0",
-                new { qoMaterialId, sampleSize, user }, tx);
 
         // Replace the whole material header-value set.
         await c.ExecuteAsync(
@@ -984,11 +1034,44 @@ public class QualityOrderService : IQualityOrderService
 
         await _audit.WriteAsync(c, tx,
             EntityTypes.QualityOrderMaterial, qoMaterialId, ActionCodes.Updated,
-            oldValues: new { sample_size = oldSize },
-            newValues: new { sample_size = sampleSize, header_fields = keep.Length,
+            oldValues: null,
+            newValues: new { header_fields = keep.Length,
                              values = keep.Select(k => new { k.FieldId, k.TextValue, k.NumericValue, k.DateValue }) },
             actor: user);
         tx.Commit();
+    }
+
+    public async Task<IReadOnlyDictionary<long, bool>> GetMaterialHeaderCompleteMapAsync(long qualityOrderId)
+    {
+        // V31 (2026-06-20): for the QO Details "Add sample" gate.
+        // Materials are "complete" if every active+mandatory Material-scoped
+        // header field has a stored value. A material with no mandatory fields
+        // configured is trivially complete. Materials with no value rows yet
+        // (CASE WHEN NOT EXISTS) are NOT complete unless mandatory_count = 0.
+        using var c = Open();
+        await c.OpenAsync();
+        var rows = await c.QueryAsync<(long QoMaterialId, bool IsComplete)>(@"
+            WITH mandatory AS (
+                SELECT field_id FROM qms_sample_header_field
+                WHERE is_active = 1 AND is_mandatory = 1 AND scope = 'Material'
+            )
+            SELECT m.qo_material_id AS QoMaterialId,
+                   CAST(
+                     CASE WHEN NOT EXISTS (
+                       SELECT 1 FROM mandatory mf
+                       WHERE NOT EXISTS (
+                         SELECT 1 FROM qms_qo_material_header_value v
+                         WHERE v.qo_material_id = m.qo_material_id
+                           AND v.field_id = mf.field_id
+                           AND (v.text_value IS NOT NULL
+                                OR v.numeric_value IS NOT NULL
+                                OR v.date_value IS NOT NULL)
+                       )
+                     ) THEN 1 ELSE 0 END AS BIT) AS IsComplete
+            FROM qms_quality_order_material m
+            WHERE m.quality_order_id = @qualityOrderId;",
+            new { qualityOrderId });
+        return rows.ToDictionary(r => r.QoMaterialId, r => r.IsComplete);
     }
 
     // ===================================================================
@@ -1286,5 +1369,337 @@ public class QualityOrderService : IQualityOrderService
         }
 
         return result;
+    }
+
+    // ===================================================================
+    // V31 (2026-06-20) -- Flat per-defect data-hub report.
+    //
+    // One row per (sample × every catalog defect for the sample's material
+    // group). LEFT JOIN to qms_sample_defect surfaces the operator-entered
+    // value when present, NULL/zero otherwise. The result is streamed via
+    // IAsyncEnumerable so the Excel export never materialises the full set;
+    // ClosedXML writes cells as the enumerable yields. All small lookup
+    // dictionaries (header field codes, reading-type codes, MARA) are
+    // fetched once per call and re-used inside the loop.
+    // ===================================================================
+    public async IAsyncEnumerable<FlatDefectRow> StreamFlatDefectRowsAsync(
+        FlatDefectFilter filter,
+        [EnumeratorCancellation] CancellationToken ct)
+    {
+        // V31 (2026-06-20). Five batched queries + OUTER APPLY for cache dedup.
+        // Filter set widened: PO-date range (cc.doc_date), MARA columns (variety,
+        // material_class, origin, major/sub category), per-line storage_location,
+        // container/BOL/ebeln, vendor name substring + vendor code exact, sample
+        // scope. All push down to the seed query WHERE so we don't materialize a
+        // wide set in memory just to filter it.
+        const string seedSql = @"
+            SELECT s.sample_id          AS SampleId,
+                   s.qo_material_id     AS QoMaterialId,
+                   s.quality_order_id   AS QualityOrderId,
+                   s.sample_no          AS SampleNo,
+                   s.sample_scope       AS SampleScope,
+                   s.sample_size        AS SampleSize,
+                   s.size_overridden    AS SizeOverridden,
+                   s.grower             AS Grower,
+                   s.pallet_no          AS PalletNo,
+                   s.grower_pallet      AS GrowerPallet,
+                   s.pack_code          AS PackCode,
+                   s.date_code          AS DateCode,
+                   s.label_value        AS LabelValue,
+                   s.lot_no             AS LotNo,
+                   s.created_at         AS CreatedAt,
+                   s.created_by         AS CreatedBy,
+                   qo.quality_order_no  AS QualityOrderNo,
+                   qo.status_code       AS StatusCode,
+                   qo.created_at        AS QoCreatedAt,
+                   m.material_no        AS MaterialNo,
+                   m.material_desc      AS MaterialDesc,
+                   m.material_group     AS MaterialGroup,
+                   m.material_group_desc AS MaterialGroupDesc,
+                   m.major_category     AS MajorCategory,
+                   m.variety            AS Variety,
+                   m.material_class     AS MaterialClass,
+                   m.origin             AS Origin,
+                   m.brand              AS Brand,
+                   m.pack_type          AS PackType,
+                   m.material_size      AS MaterialSize,
+                   m.sample_size        AS MaterialSampleSize,
+                   ai.quantity          AS Quantity,
+                   ai.uom               AS Uom,
+                   ai.storage_location  AS StorageLocation,
+                   a.arrival_no         AS ArrivalNo,
+                   a.plant              AS Plant,
+                   a.container_no       AS ContainerNo,
+                   a.bol_no             AS BolNo,
+                   a.ebeln              AS Ebeln,
+                   a.vendor_name        AS VendorName,
+                   a.vendor_no          AS VendorNo,
+                   cc.sto               AS Sto,
+                   cc.doc_date          AS PoDate,
+                   -- Prefer authoritative shipment snapshot for dates;
+                   -- fall back to the SAP cache when shipment row is absent.
+                   COALESCE(ss.arrival_date, cc.arrival_date)  AS ArrivalDate,
+                   COALESCE(ss.receive_date, cc.receive_date)  AS ReceiveDate,
+                   ss.loading_date      AS LoadingDate,
+                   ss.sailing_date      AS ShippingDate,
+                   ss.transit_days      AS TransitDays
+            FROM   qms_sample s
+            JOIN   qms_quality_order qo         ON qo.quality_order_id = s.quality_order_id
+            JOIN   qms_quality_order_material m ON m.qo_material_id   = s.qo_material_id
+            JOIN   qms_arrival_item ai          ON ai.arrival_item_id = m.arrival_item_id
+            JOIN   qms_arrival a                ON a.arrival_id       = ai.arrival_id
+            LEFT JOIN qms_shipment_snapshot ss  ON ss.arrival_id      = a.arrival_id
+            OUTER APPLY (
+                -- The cache's natural key is wider than (container_no, bol_no, ebeln);
+                -- pick any one matching row so the seed list has 1 row per sample.
+                SELECT TOP 1 c2.sto, c2.doc_date, c2.arrival_date, c2.receive_date
+                FROM   qms_sap_container_cache c2
+                WHERE  c2.container_no = a.container_no
+                  AND  c2.bol_no       = a.bol_no
+                  AND  c2.ebeln        = a.ebeln
+            ) cc
+            WHERE  s.is_deleted = 0
+              AND (@qoId          IS NULL OR qo.quality_order_id = @qoId)
+              AND (@arrivalId     IS NULL OR a.arrival_id        = @arrivalId)
+              AND (@status        IS NULL OR qo.status_code      = @status)
+              AND (@plant         IS NULL OR a.plant             = @plant)
+              AND (@materialGroup IS NULL OR m.material_group    = @materialGroup)
+              AND (@majorCat      IS NULL OR m.major_category    = @majorCat)
+              AND (@variety       IS NULL OR m.variety           = @variety)
+              AND (@origin        IS NULL OR m.origin            = @origin)
+              AND (@matClass      IS NULL OR m.material_class    = @matClass)
+              AND (@vendorName    IS NULL OR a.vendor_name LIKE '%' + @vendorName + '%')
+              AND (@vendorNo      IS NULL OR a.vendor_no         = @vendorNo)
+              AND (@storageLoc    IS NULL OR ai.storage_location = @storageLoc)
+              AND (@containerNo   IS NULL OR a.container_no      = @containerNo)
+              AND (@bolNo         IS NULL OR a.bol_no            = @bolNo)
+              AND (@ebeln         IS NULL OR a.ebeln             = @ebeln)
+              AND (@sampleScope   IS NULL OR s.sample_scope      = @sampleScope)
+              -- PO-date range. NULL cc.doc_date rows are included so arrivals
+              -- whose SAP cache row was deleted / never linked still surface.
+              AND (@poFrom        IS NULL OR cc.doc_date IS NULL OR cc.doc_date >= @poFrom)
+              AND (@poToExcl      IS NULL OR cc.doc_date IS NULL OR cc.doc_date <  @poToExcl)
+            ORDER BY a.arrival_id, m.qo_material_id, s.sample_no;";
+
+        DateTime? poToExcl = filter.PoTo.HasValue
+            ? (filter.PoTo.Value.TimeOfDay == TimeSpan.Zero
+                ? filter.PoTo.Value.AddDays(1)
+                : filter.PoTo.Value)
+            : null;
+
+        List<FlatSampleSeed> samples;
+        using (var c = Open())
+        {
+            await c.OpenAsync(ct);
+            samples = (await c.QueryAsync<FlatSampleSeed>(new CommandDefinition(
+                seedSql,
+                new
+                {
+                    qoId          = filter.QualityOrderId,
+                    arrivalId     = filter.ArrivalId,
+                    status        = string.IsNullOrWhiteSpace(filter.Status) ? null : filter.Status,
+                    plant         = string.IsNullOrWhiteSpace(filter.Plant) ? null : filter.Plant,
+                    materialGroup = string.IsNullOrWhiteSpace(filter.MaterialGroup) ? null : filter.MaterialGroup,
+                    majorCat      = string.IsNullOrWhiteSpace(filter.MajorCategory) ? null : filter.MajorCategory,
+                    variety       = string.IsNullOrWhiteSpace(filter.Variety) ? null : filter.Variety,
+                    origin        = string.IsNullOrWhiteSpace(filter.Origin) ? null : filter.Origin,
+                    matClass      = string.IsNullOrWhiteSpace(filter.MaterialClass) ? null : filter.MaterialClass,
+                    vendorName    = string.IsNullOrWhiteSpace(filter.VendorName) ? null : filter.VendorName,
+                    vendorNo      = string.IsNullOrWhiteSpace(filter.VendorNo) ? null : filter.VendorNo,
+                    storageLoc    = string.IsNullOrWhiteSpace(filter.StorageLocation) ? null : filter.StorageLocation,
+                    containerNo   = string.IsNullOrWhiteSpace(filter.ContainerNo) ? null : filter.ContainerNo,
+                    bolNo         = string.IsNullOrWhiteSpace(filter.BolNo) ? null : filter.BolNo,
+                    ebeln         = string.IsNullOrWhiteSpace(filter.Ebeln) ? null : filter.Ebeln,
+                    sampleScope   = string.IsNullOrWhiteSpace(filter.SampleScope) ? null : filter.SampleScope,
+                    poFrom        = filter.PoFrom,
+                    poToExcl
+                },
+                commandTimeout: 120,
+                cancellationToken: ct))).ToList();
+        }
+        if (samples.Count == 0) yield break;
+
+        // V31: MARA enrichment -- the QOM snapshot can have NULL Variety/Class/Origin
+        // for old QOs; merge live MARA values so the data hub matches what the
+        // Details page + PDF reports show.
+        var maraMap = await _mara.LookupAsync(samples.Select(s => s.MaterialNo ?? "").Distinct());
+        foreach (var s in samples)
+        {
+            if (s.MaterialNo == null) continue;
+            if (!maraMap.TryGetValue(s.MaterialNo, out var mm)) continue;
+            if (string.IsNullOrWhiteSpace(s.Variety))          s.Variety          = mm.Variety;
+            if (string.IsNullOrWhiteSpace(s.MaterialClass))    s.MaterialClass    = mm.MaterialClass;
+            if (string.IsNullOrWhiteSpace(s.Origin))           s.Origin           = mm.Origin;
+            if (string.IsNullOrWhiteSpace(s.MajorCategory))    s.MajorCategory    = mm.MajorCategory;
+            if (string.IsNullOrWhiteSpace(s.SubMajorCategory)) s.SubMajorCategory = mm.SubMajorCategory;
+            if (string.IsNullOrWhiteSpace(s.Brand))            s.Brand            = mm.Brand;
+            if (string.IsNullOrWhiteSpace(s.PackType))         s.PackType         = mm.PackType;
+            // NOTE: seed.PackCode is sample-scoped (qms_sample.pack_code) -- we
+            // do NOT overwrite it with MARA's material-level pack code.
+        }
+
+        var sampleIds = samples.Select(s => s.SampleId).ToList();
+        var matIds    = samples.Select(s => s.QoMaterialId).Distinct().ToList();
+        var groups    = samples.Select(s => s.MaterialGroup ?? "")
+                               .Where(g => !string.IsNullOrWhiteSpace(g))
+                               .Distinct().ToList();
+
+        // 2-5: batched side-channel fetches. Each opens + disposes its own
+        // connection cleanly -- no nested readers, no MARS dependency.
+        var sampleHeaders = await GetSampleHeaderValuesBatchAsync(sampleIds);
+        var matHeaders    = await GetMaterialHeaderValuesBatchAsync(matIds);
+        var readings      = await GetReadingsBatchAsync(sampleIds);
+        var defects       = await GetDefectsBatchAsync(sampleIds);
+
+        // 6: defect catalog per material group. Direct service call -- the
+        // result is small per group; if profiling later shows hot calls,
+        // wire CatalogCache in via DI.
+        var catalogByGroup = new Dictionary<string, IReadOnlyList<DefectCatalogEntry>>();
+        foreach (var g in groups)
+            catalogByGroup[g] = await GetActiveDefectsForGroupAsync(g);
+
+        // 7: emit one row per (sample × every catalog defect for the group).
+        foreach (var s in samples)
+        {
+            ct.ThrowIfCancellationRequested();
+            var group   = s.MaterialGroup ?? "";
+            var catalog = catalogByGroup.TryGetValue(group, out var cat)
+                ? cat
+                : (IReadOnlyList<DefectCatalogEntry>)Array.Empty<DefectCatalogEntry>();
+            // GroupBy/First for safety -- qms_sample_defect has UNIQUE(sample,defect)
+            // so duplicates aren't expected, but the GetDefectsBatchAsync SELECT
+            // could legitimately repeat a defect row if the catalog ever changes.
+            var entered = defects[s.SampleId]
+                .GroupBy(d => d.DefectId)
+                .ToDictionary(g => g.Key, g => g.First());
+
+            // Pre-flatten the wide bags once per sample so the catalog loop
+            // below is just dictionary copy. Use GroupBy + First instead of
+            // ToDictionary so we are tolerant of duplicate keys -- the
+            // GetReadingsBatchAsync JOIN matches qms_reading_type on code only
+            // and the catalog has the same code repeated across material groups,
+            // so each sample reading row appears N times (one per catalog row).
+            // We collapse to the first occurrence; the value is identical anyway.
+            var sHeaderBag = sampleHeaders[s.SampleId]
+                .GroupBy(h => h.FieldCode ?? "")
+                .ToDictionary(g => g.Key,
+                              g => { var h = g.First();
+                                     return FormatHv(h.ValueKind, h.TextValue, h.NumericValue, h.DateValue); });
+            var mHeaderBag = matHeaders[s.QoMaterialId]
+                .GroupBy(h => h.FieldCode ?? "")
+                .ToDictionary(g => g.Key,
+                              g => { var h = g.First();
+                                     return FormatHv(h.ValueKind, h.TextValue, h.NumericValue, h.DateValue); });
+            var readingBag = readings[s.SampleId]
+                .GroupBy(r => r.ReadingTypeCode ?? "")
+                .ToDictionary(g => g.Key,
+                              g => { var r = g.First();
+                                     return r.NumericValue?.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                                            ?? r.TextValue; });
+
+            foreach (var dc in catalog)
+            {
+                entered.TryGetValue(dc.DefectId, out var sd);
+                yield return new FlatDefectRow
+                {
+                    // Arrival / PO
+                    ArrivalNo       = s.ArrivalNo,
+                    Plant           = s.Plant,
+                    StorageLocation = s.StorageLocation,
+                    ContainerNo     = s.ContainerNo,
+                    BolNo           = s.BolNo,
+                    Ebeln           = s.Ebeln,
+                    Sto             = s.Sto,
+                    PoDate          = s.PoDate,
+                    LoadingDate     = s.LoadingDate,
+                    ShippingDate    = s.ShippingDate,
+                    ArrivalDate     = s.ArrivalDate,
+                    ReceiveDate     = s.ReceiveDate,
+                    TransitDays     = s.TransitDays,
+                    VendorName      = s.VendorName,
+                    VendorNo        = s.VendorNo,
+                    // QO
+                    QualityOrderId  = s.QualityOrderId,
+                    QualityOrderNo  = s.QualityOrderNo,
+                    QoStatus        = s.StatusCode,
+                    QoStatusDisplay = QualityOrderStatus.DisplayName(s.StatusCode),
+                    QoCreatedAt     = s.QoCreatedAt,
+                    // Material (MARA-enriched where snapshot was NULL)
+                    QoMaterialId    = s.QoMaterialId,
+                    MaterialNo      = s.MaterialNo,
+                    MaterialDesc    = s.MaterialDesc,
+                    MaterialGroup   = s.MaterialGroup,
+                    MaterialGroupDesc = s.MaterialGroupDesc,
+                    MajorCategory   = s.MajorCategory,
+                    SubMajorCategory = s.SubMajorCategory,
+                    Variety         = s.Variety,
+                    MaterialClass   = s.MaterialClass,
+                    Origin          = s.Origin,
+                    Brand           = s.Brand,
+                    PackType        = s.PackType,
+                    PackCode        = null,           // material-level pack code not pulled (sample's lives in PackCodeSample)
+                    MaterialSize    = s.MaterialSize,
+                    MaterialSampleSize = s.MaterialSampleSize,
+                    NetWeight       = null,  // not pulled in seed (was already null in prev version)
+                    ArrivalItemQuantity = s.Quantity,
+                    ArrivalItemUom  = s.Uom,
+                    // Sample
+                    SampleId        = s.SampleId,
+                    SampleNo        = s.SampleNo,
+                    SampleScope     = s.SampleScope,
+                    SampleSize      = s.SampleSize,
+                    SizeOverridden  = s.SizeOverridden,
+                    Grower          = s.Grower,
+                    PalletNo        = s.PalletNo,
+                    GrowerPallet    = s.GrowerPallet,
+                    PackCodeSample  = s.PackCode,
+                    DateCode        = s.DateCode,
+                    LabelValue      = s.LabelValue,
+                    LotNo           = s.LotNo,
+                    SampleCreatedAt = s.CreatedAt,
+                    SampleCreatedBy = s.CreatedBy,
+                    // Defect row
+                    DefectId        = dc.DefectId,
+                    DefectCode      = dc.DefectCode,
+                    DefectName      = dc.DefectName,
+                    DefectCategory  = dc.DefectCategory,
+                    SeverityCode    = sd?.SeverityCode ?? dc.DefectCategory,
+                    DefectValue     = sd?.DefectValue ?? 0m,
+                    DefectPercentage= sd?.DefectPercentage,
+                    DefectComment   = sd?.Comment,
+                    // Wide bags
+                    MaterialHeaderValues = new Dictionary<string, string?>(mHeaderBag),
+                    SampleHeaderValues   = new Dictionary<string, string?>(sHeaderBag),
+                    Readings             = new Dictionary<string, string?>(readingBag),
+                };
+            }
+        }
+    }
+
+    private static string? FormatHv(string? kind, string? text, decimal? num, DateTime? date) => kind switch
+    {
+        "Numeric" => num?.ToString(System.Globalization.CultureInfo.InvariantCulture),
+        "Date"    => date?.ToString("yyyy-MM-dd"),
+        _         => text
+    };
+    private static string? SafeStr(System.Data.IDataReader r, string name)
+    {
+        var i = r.GetOrdinal(name);
+        return r.IsDBNull(i) ? null : r.GetString(i);
+    }
+    private static DateTime? SafeDt(System.Data.IDataReader r, string name)
+    {
+        var i = r.GetOrdinal(name);
+        return r.IsDBNull(i) ? null : (DateTime?)r.GetDateTime(i);
+    }
+    private static decimal? SafeDec(System.Data.IDataReader r, string name)
+    {
+        var i = r.GetOrdinal(name);
+        return r.IsDBNull(i) ? null : (decimal?)r.GetDecimal(i);
+    }
+    private static short? SafeShort(System.Data.IDataReader r, string name)
+    {
+        var i = r.GetOrdinal(name);
+        return r.IsDBNull(i) ? null : (short?)r.GetInt16(i);
     }
 }

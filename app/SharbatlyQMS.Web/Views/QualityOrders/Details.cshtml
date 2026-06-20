@@ -11,23 +11,28 @@
     var sampleHeaders = ViewBag.SampleHeaders as ILookup<long, SampleHeaderValue>;
     var editable    = (bool?)ViewBag.Editable ?? (Model.StatusCode == QualityOrderStatus.Open);
     var role        = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-    var canEdit     = role == UserRoles.Operator || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
-    var canManage   = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;
+    // V31 (2026-06-20): role hierarchy widened. Operator includes Supervisor for
+    // edit-on-Open; new canSupervise flag controls Finish + Cancel submit;
+    // canManage stays Manager/SiteAdmin (Reopen Finished QOs).
+    var canEdit      = role == UserRoles.Operator || role == UserRoles.Supervisor || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
+    var canSupervise = role == UserRoles.Supervisor || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
+    var canManage    = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;
     // When this view is rendered by ClaimManagementController.Details, every
     // QO mutation surface is suppressed -- the only interactive area is the
-    // claim chat panel rendered at the bottom of the page. Forcing all three
-    // gates false naturally collapses the existing @if(canEdit/canManage/canAct)
+    // claim chat panel rendered at the bottom of the page. Forcing all four
+    // gates false naturally collapses the @if(canEdit/canSupervise/canManage/canAct)
     // blocks throughout this view.
     var isClaimContext = (bool?)ViewBag.IsClaimContext ?? false;
-    if (isClaimContext) { editable = false; canEdit = false; canManage = false; }
+    if (isClaimContext) { editable = false; canEdit = false; canSupervise = false; canManage = false; }
     // Combined "user may interact with mutating buttons on this page".
     // editable carries the QO-status guard; role carries the per-user guard.
-    var canAct      = editable && canEdit;
+    var canAct       = editable && canEdit;
     var (cls, label) = Model.StatusCode switch
     {
         "Initial"   => ("secondary", "Initial"),
         "Open"      => ("primary",   "Open"),
-        "Closed"    => ("success",   "Closed"),
+        "Submitted" => ("info",      "Submitted"),
+        "Closed"    => ("success",   "Finished"),       // UI label (DB stays 'Closed')
         "Cancelled" => ("dark",      "Cancelled"),
         _           => ("secondary", Model.StatusCode)
     };
@@ -85,11 +90,27 @@
                 <button type="submit" class="btn btn-primary"><i class="bi bi-unlock me-1"></i>Open</button>
             </form>
         }
+        @* V31 (2026-06-20): Submit (operator on Open) -> Submitted. After submit,
+           Supervisor reviews and Finishes or cancel-submits. *@
         @if (canAct)
+        {
+            <form asp-action="Submit" asp-route-id="@Model.QualityOrderId" method="post"
+                  onsubmit="return confirm('Submit this Quality Order for supervisor review? No more changes will be allowed until the supervisor either finishes or cancel-submits.');">
+                @Html.AntiForgeryToken()
+                <button type="submit" class="btn btn-primary"><i class="bi bi-send-check me-1"></i>Submit</button>
+            </form>
+        }
+        @if (Model.StatusCode == QualityOrderStatus.Submitted && canSupervise)
         {
             <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#closeModal">
                 <i class="bi bi-check-circle me-1"></i>Finish order
             </button>
+            <form asp-action="CancelSubmit" asp-route-id="@Model.QualityOrderId" method="post" class="d-inline"
+                  onsubmit="return confirm('Cancel the submit and return this QO to Open so the operator can fix it?');">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="reason" value="" />
+                <button type="submit" class="btn btn-outline-warning"><i class="bi bi-arrow-counterclockwise me-1"></i>Cancel submit</button>
+            </form>
         }
         @if (Model.StatusCode == QualityOrderStatus.Closed && canManage)
         {
@@ -129,14 +150,18 @@
 }
 
 @* ---- One collapsible card per material. Header stays visible when
-       collapsed so the user can still trigger Add sample / Photos /
-       Override on a material whose body is hidden. ---- *@
+       collapsed so the user can still trigger Add sample / Override on a
+       material whose body is hidden. Per-material Photos button was removed
+       in V31 (2026-06-20) -- photos are now per-sample (see sample drawer). ---- *@
+@{
+    var headerComplete = ViewBag.HeaderComplete as IReadOnlyDictionary<long, bool>
+                         ?? new Dictionary<long, bool>();
+}
 @foreach (var m in materials)
 {
     var matSamples = samples.Where(s => s.QoMaterialId == m.QoMaterialId).OrderBy(s => s.SampleNo).ToList();
-    var photoCount = photoCounts.TryGetValue(m.QoMaterialId, out var pc) ? pc : 0;
+    var matHeaderOk = headerComplete.TryGetValue(m.QoMaterialId, out var hc) && hc;
     var bodyId     = $"matBody-{m.QoMaterialId}";
-    var photoDrawerId = $"matPhotos-{m.QoMaterialId}";
 
     <div class="card mb-3 mat-card collapsed-card" data-qo-material-id="@m.QoMaterialId">
         @* Whole header is the collapse target -- the chevron is purely
@@ -159,23 +184,33 @@
             <div class="d-flex gap-2 flex-wrap">
                 @if (canAct)
                 {
-                    @* Add sample is the first (leftmost) action -- requested. *@
-                    <button type="button" class="btn btn-sm btn-success sample-add"
-                            data-qo-id="@Model.QualityOrderId"
-                            data-qo-material-id="@m.QoMaterialId">
-                        <i class="bi bi-plus-circle me-1"></i>Add sample
-                    </button>
+                    @* V31 (2026-06-20): Add sample button is state-aware -- it
+                       refuses (with an obvious pulse) when the material's
+                       mandatory header fields aren't filled yet. Click on the
+                       warning variant opens the Material Details modal so the
+                       operator can fill the fields without scrolling. *@
+                    if (matHeaderOk)
+                    {
+                        <button type="button" class="btn btn-sm btn-success sample-add"
+                                data-qo-id="@Model.QualityOrderId"
+                                data-qo-material-id="@m.QoMaterialId">
+                            <i class="bi bi-plus-circle me-1"></i>Add sample
+                        </button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-warning btn-needs-headers material-details-btn"
+                                data-bs-toggle="modal" data-bs-target="#materialDetailsModal"
+                                data-qo-material-id="@m.QoMaterialId"
+                                title="Fill the required Material details before adding samples.">
+                            <i class="bi bi-exclamation-triangle me-1"></i>Fill material header to add samples
+                        </button>
+                    }
                 }
                 <button type="button" class="btn btn-sm btn-outline-info material-details-btn"
                         data-bs-toggle="modal" data-bs-target="#materialDetailsModal"
                         data-qo-material-id="@m.QoMaterialId">
                     <i class="bi bi-card-list me-1"></i>Material details
-                </button>
-                <button type="button"
-                        class="btn btn-sm @(photoCount > 0 ? "btn-outline-primary" : "btn-outline-secondary")"
-                        data-bs-toggle="offcanvas" data-bs-target="#@photoDrawerId" aria-controls="@photoDrawerId">
-                    <i class="bi bi-images me-1"></i>Photos
-                    <span class="badge @(photoCount > 0 ? "bg-primary" : "bg-secondary") ms-1">@photoCount</span>
                 </button>
                 @if (canAct)
                 {
@@ -183,7 +218,7 @@
                             data-bs-toggle="modal" data-bs-target="#overrideModal"
                             data-qo-material-id="@m.QoMaterialId"
                             data-quality-order-id="@Model.QualityOrderId"
-                            data-current-size="@m.MaterialSize">
+                            data-current-size="@(m.MaterialSize ?? "")">
                         <i class="bi bi-pencil-square me-1"></i>Override size
                     </button>
                 }
@@ -201,7 +236,7 @@
                     <div class="col-md-4 col-lg-3"><strong>Origin:</strong> @m.Origin</div>
                     <div class="col-md-4 col-lg-3 size-cell" data-qo-material-id="@m.QoMaterialId">
                         <strong>Size:</strong>
-                        <span class="size-value">@m.MaterialSize</span>
+                        <span class="size-value">@(m.MaterialSize ?? "—")</span>
                         <span class="override-badge @(m.SizeOverridden ? "" : "d-none")">
                             <span class="badge bg-warning text-dark ms-1" title="@m.OverrideReason">Override</span>
                             @if (canAct)
@@ -239,7 +274,8 @@
                             {
                                 var rowVm = new SampleRowVm {
                                     Sample = s, Editable = editable,
-                                    HeaderValues = sampleHeaders?[s.SampleId].ToList() ?? new List<SampleHeaderValue>()
+                                    HeaderValues = sampleHeaders?[s.SampleId].ToList() ?? new List<SampleHeaderValue>(),
+                                    PhotoCount  = photoCounts.TryGetValue(s.SampleId, out var spc) ? spc : 0
                                 };
                                 <partial name="~/Views/QualityOrders/_SampleRow.cshtml" model="rowVm" />
                             }
@@ -254,30 +290,8 @@
         </div>
     </div>
 
-    @* Photo drawer per material -- one of these per material is acceptable
-       since N is small (one drawer per material card, not per sample). *@
-    <div class="offcanvas offcanvas-end" tabindex="-1" id="@photoDrawerId" style="width: 640px; max-width: 95vw;">
-        <div class="offcanvas-header border-bottom">
-            <h5 class="offcanvas-title">
-                <i class="bi bi-images me-1"></i>Photos &mdash;
-                <code>@m.MaterialNo</code> <span class="text-muted">@m.MaterialDesc</span>
-            </h5>
-            <button type="button" class="btn-close" data-bs-dismiss="offcanvas"></button>
-        </div>
-        <div class="offcanvas-body">
-            @{
-                var matGalleryVm = new ImageGalleryVm
-                {
-                    OwnerType = "QualityOrderMaterial",
-                    OwnerId   = m.QoMaterialId,
-                    Editable  = editable
-                    // No Categories: per-material photos in the QO no longer
-                    // require category selection (2026-05-30 simplification).
-                };
-            }
-            <partial name="~/Views/Shared/_ImageGallery.cshtml" model="matGalleryVm" />
-        </div>
-    </div>
+    @* V31 (2026-06-20): per-material Photos drawer removed. Photos are now
+       per-sample (see the photo card inside the sample drawer in _SampleForm). *@
 }
 
 @* ---- ONE shared sample drawer for the whole page. Its body is filled
@@ -294,6 +308,24 @@
         <div class="text-center py-5 text-muted">
             <div class="spinner-border" role="status"></div>
             <div class="small mt-2">Loading sample…</div>
+        </div>
+    </div>
+</div>
+
+@* V31 (2026-06-20): standalone Photos drawer per sample. Lighter than the
+   sample-edit drawer -- loads only the image gallery for a quick upload. *@
+<div class="offcanvas offcanvas-end" tabindex="-1" id="samplePhotosDrawer" style="--bs-offcanvas-width: 640px;">
+    <div class="offcanvas-header border-bottom bg-info-subtle">
+        <h5 class="offcanvas-title">
+            <i class="bi bi-camera me-1 text-info"></i>
+            <span id="samplePhotosDrawerTitle">Sample photos</span>
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+    </div>
+    <div class="offcanvas-body" id="samplePhotosDrawerBody">
+        <div class="text-center py-5 text-muted">
+            <div class="spinner-border" role="status"></div>
+            <div class="small mt-2">Loading photos…</div>
         </div>
     </div>
 </div>
@@ -426,12 +458,12 @@
         <form id="overrideForm" class="modal-content">
             <input type="hidden" name="qoMaterialId" id="ov-qo-material-id" />
             <input type="hidden" name="qualityOrderId" id="ov-quality-order-id" />
-            <div class="modal-header"><h5 class="modal-title">Override material size</h5>
+            <div class="modal-header"><h5 class="modal-title">Override sample size (inspected qty)</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
-                <p class="small text-muted">Current size: <code id="ov-current"></code>. The override is fully audited.</p>
-                <label class="form-label">New size *</label>
-                <input name="newSize" class="form-control" required />
+                <p class="small text-muted">Current sample size: <code id="ov-current"></code>. The new value is applied to every sample on this material. The override is fully audited.</p>
+                <label class="form-label">New sample size *</label>
+                <input name="newSize" type="number" min="1" step="1" inputmode="numeric" class="form-control" required />
                 <label class="form-label mt-2">Reason <span class="text-muted small">(optional)</span></label>
                 <textarea name="reason" class="form-control" rows="3"></textarea>
             </div>
@@ -624,6 +656,30 @@
             loadDrawer('sampleId=' + sid, 'Sample (loading…)', { sampleId: sid });
             return;
         }
+        // V31 (2026-06-20): dedicated Photos drawer per sample row. Lazy
+        // loads SamplePhotosPanel into #samplePhotosDrawerBody so only the
+        // photo gallery renders -- no readings / defects / header.
+        const photos = ev.target.closest('.sample-photos');
+        if (photos) {
+            const sid = photos.dataset.sampleId;
+            const drawerEl = document.getElementById('samplePhotosDrawer');
+            const body     = document.getElementById('samplePhotosDrawerBody');
+            const title    = document.getElementById('samplePhotosDrawerTitle');
+            if (title) title.textContent = 'Sample photos (loading…)';
+            if (body)  body.innerHTML    = '<div class="text-center py-5 text-muted"><div class="spinner-border"></div><div class="small mt-2">Loading photos…</div></div>';
+            const drawer = bootstrap.Offcanvas.getOrCreateInstance(drawerEl);
+            drawer.show();
+            try {
+                const res = await fetch('@Url.Action("SamplePhotosPanel", "QualityOrders")?sampleId=' + sid,
+                    { headers: { 'Accept': 'text/html' } });
+                if (!res.ok) { body.innerHTML = '<div class="alert alert-danger m-2">Could not load photos.</div>'; return; }
+                body.innerHTML = await res.text();
+                if (title) title.textContent = 'Sample photos';
+            } catch (e) {
+                body.innerHTML = '<div class="alert alert-danger m-2">Could not load photos: ' + e.message + '</div>';
+            }
+            return;
+        }
         const add = ev.target.closest('.sample-add');
         if (add) {
             const qoMatId = add.dataset.qoMaterialId;
@@ -719,29 +775,100 @@
     });
 
     // ---- Defect steppers (delegated; works for any drawer instance) ------
+    // Rule: SUM of all defect values on a sample <= sample size. Each input's
+    // own cap is (sampleSize - sumOfOtherDefects). The server applies the
+    // same clamp in catalog order on save.
+    // Defensive: read size from form.dataset.sampleSize, fall back to the
+    // Sample Size input value so the cap survives any render path where one
+    // source is missing.
+    function resolveSampleSize(form) {
+        if (!form) return 0;
+        const fromData = parseFloat(form.dataset.sampleSize);
+        if (fromData > 0) return fromData;
+        const sizeInput = form.querySelector('.sample-size-input');
+        const fromInput = parseFloat(sizeInput?.value);
+        return (fromInput > 0) ? fromInput : 0;
+    }
+    function sumOtherDefects(form, exceptInput) {
+        let sum = 0;
+        form.querySelectorAll('.defect-value').forEach(el => {
+            if (el === exceptInput) return;
+            const x = parseFloat(el.value);
+            if (!isNaN(x) && x > 0) sum += x;
+        });
+        return sum;
+    }
+    function refreshDefectTotal(form, clampedTo) {
+        if (!form) return;
+        const size = resolveSampleSize(form);
+        let total = 0;
+        form.querySelectorAll('.defect-value').forEach(el => {
+            const x = parseFloat(el.value);
+            if (!isNaN(x) && x > 0) total += x;
+        });
+        const banner    = form.querySelector('.defect-total-banner');
+        const curSpan   = form.querySelector('.defect-total-current');
+        const sizeSpan  = form.querySelector('.defect-total-size');
+        const noteSpan  = form.querySelector('.defect-total-note');
+        if (curSpan)  curSpan.textContent  = (Math.round(total * 1000) / 1000).toString();
+        if (sizeSpan) sizeSpan.textContent = (size > 0) ? size.toString() : '—';
+        if (!banner) return;
+        if (!(size > 0)) {
+            // No denominator -- explain instead of silently allowing any value.
+            banner.dataset.state = 'no-size';
+            banner.classList.remove('text-danger', 'fw-bold');
+            banner.classList.add('text-muted');
+            banner.title = '';
+            if (noteSpan) noteSpan.textContent = ' — sample size not set; use "Override size" on the material card.';
+            return;
+        }
+        if (noteSpan) noteSpan.textContent = '';
+        const atCap = (total >= size - 1e-9);
+        const justClamped = (clampedTo === true) && atCap;
+        if (justClamped) {
+            banner.dataset.state = 'over';
+            banner.classList.remove('text-muted');
+            banner.classList.add('text-danger', 'fw-bold');
+            banner.title = 'Sample size limit reached — extra values were capped';
+        } else {
+            banner.dataset.state = 'ok';
+            banner.classList.remove('text-danger', 'fw-bold');
+            banner.classList.add('text-muted');
+            banner.title = '';
+        }
+    }
     function wireDefectSteppers(scope) {
         scope.querySelectorAll('.defect-stepper').forEach(row => {
             const input    = row.querySelector('.defect-value');
             const minus    = row.querySelector('.defect-minus');
             const plus     = row.querySelector('.defect-plus');
             const isDecimal = (row.dataset.valueType || 'Number').toLowerCase() === 'decimal';
-            const sampleSizeOf = () => {
+            // v: candidate value for THIS input. Returns it capped to the
+            // room left after every OTHER defect on the form. With sample
+            // size 100 and others summing to 80, this caps at 20.
+            const clampToRemaining = v => {
                 const form = row.closest('form');
-                const n = parseFloat(form?.dataset.sampleSize);
-                return (n > 0) ? n : 0;
-            };
-            const clampHi = v => {
-                const size = sampleSizeOf();
-                return (size > 0 && v > size) ? size : v;
+                const size = resolveSampleSize(form);
+                if (!(size > 0)) return v;
+                const remaining = Math.max(0, size - sumOtherDefects(form, input));
+                return (v > remaining) ? remaining : v;
             };
             const updatePct = () => {
                 const form = row.closest('form');
-                const size = sampleSizeOf();
+                const size = resolveSampleSize(form);
+                // Browser-level upper bound: max = (size - sumOthers). With
+                // the typed-into input excluded from sumOthers, max == remaining
+                // room. Native number-input spinners + form validity honour this.
+                if (size > 0) {
+                    input.max = Math.max(0, size - sumOtherDefects(form, input));
+                } else {
+                    input.removeAttribute('max');
+                }
                 let v = parseFloat(input.value);
+                let clamped = false;
                 if (!isNaN(v)) {
-                    // Cap at sample size so percentage can never exceed 100.
-                    const capped = clampHi(v);
-                    if (capped !== v) { input.value = capped; v = capped; }
+                    const capped = clampToRemaining(v);
+                    if (capped !== v) { input.value = capped; v = capped; clamped = true; }
                 }
                 const pctInput = form.querySelector('input[name="defect_' + input.dataset.id + '_pct"]');
                 const badge = row.querySelector('.defect-pct-badge');
@@ -756,6 +883,7 @@
                     badge.textContent = '';
                     badge.className = 'badge defect-pct-badge bg-light text-muted';
                 }
+                refreshDefectTotal(form, clamped);
             };
             const bump = delta => {
                 // Stepper always nudges by 1 -- intuitive for both integer and
@@ -764,14 +892,37 @@
                 const cur = parseFloat(input.value);
                 let next = (isNaN(cur) ? 0 : cur) + delta;
                 if (next < 0) next = 0;
-                next = clampHi(next);
+                next = clampToRemaining(next);
                 input.value = isDecimal ? Number(next.toFixed(3)) : Math.round(next);
                 updatePct();
             };
             minus?.addEventListener('click', () => bump(-1));
             plus?.addEventListener('click',  () => bump(+1));
-            input?.addEventListener('input', updatePct);
+            // Listen to input + change + blur so the cap re-applies regardless
+            // of which event the browser fires for typing / paste / autocomplete.
+            input?.addEventListener('input',  updatePct);
+            input?.addEventListener('change', updatePct);
+            input?.addEventListener('blur',   updatePct);
             updatePct();
+        });
+        // Keep data-sample-size + banner + defect maxes in sync when the
+        // operator edits the per-sample Sample Size input. Defect-% badges
+        // also recompute via updatePct (triggered by the dispatched 'input'
+        // event on every .defect-value).
+        scope.querySelectorAll('form.sample-form').forEach(form => {
+            const sizeInput = form.querySelector('.sample-size-input');
+            if (sizeInput && sizeInput.dataset.banwired !== '1') {
+                sizeInput.dataset.banwired = '1';
+                sizeInput.addEventListener('input', () => {
+                    const n = parseFloat(sizeInput.value);
+                    form.dataset.sampleSize = (n > 0) ? n : '';
+                    form.querySelectorAll('.defect-value').forEach(el => {
+                        el.dispatchEvent(new Event('input', { bubbles: true }));
+                    });
+                    refreshDefectTotal(form, false);
+                });
+            }
+            refreshDefectTotal(form, false);
         });
     }
 
