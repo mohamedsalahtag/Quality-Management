@@ -1,0 +1,83 @@
+HOW TO USE data-hub-pack FOR A NEW PROJECT
+============================================
+
+This pack gives you, in a single bundle, every feature of the Sharbatly QMS
+data hub + Perspective Analyzer:
+
+  - A filtered flat-row preview page with an Excel export.
+  - A drag-and-drop pivot UI (Rows / Cols / Values / Drill chip zones).
+  - Saved perspectives, per user, with manager-shared option + per-user default.
+  - Drill-down by cell click or by value picker, scope toggle (page filter
+    vs whole dataset), multi-measure, table + Plotly chart renderers,
+    polished XLSX export with merged headers and frozen panes.
+
+You do not need to rebuild any of that. Follow these four steps.
+
+
+STEP 1 — open a fresh AI chat (Claude Code or similar)
+------------------------------------------------------
+
+Paste the entire contents of INSTALL_PROMPT.md into the chat. That tells
+the AI exactly what to read, what to ask you, and what to produce.
+
+
+STEP 2 — answer the AI's questions
+----------------------------------
+
+It will ask you four things:
+
+  1. What database table(s) you want to pivot over. If you don't have a
+     denormalised view yet, the AI will draft one from your tables.
+  2. Which dimensions you want to slice by (e.g. Plant, Vendor, Date)
+     and which measures (e.g. Sum of Defects, Count of Samples).
+  3. What roles in your app can read the analyzer and which can save
+     shared perspectives. Defaults are "Supervisor or above" and
+     "Manager or SiteAdmin"; you can pick any policy names.
+  4. Whether you already have a filter form for the report. If yes,
+     paste the filter class. If no, the AI generates a minimal one.
+
+
+STEP 3 — review the plan and approve
+------------------------------------
+
+The AI will produce a written plan listing:
+
+  - The exact files it will copy.
+  - The exact lines it will merge into Program.cs and _Layout.cshtml.
+  - The migration script for your DB.
+  - The view it will create (or update) for the pivot to read from.
+
+Read it. Adjust anything you want. Then say "go".
+
+
+STEP 4 — verify
+---------------
+
+The AI runs through the install. When it's done:
+
+  - Browse to your new report page.
+  - Drag two dims to Rows, pick a measure, click Run. Numbers appear.
+  - Switch renderer to Bar. A chart appears.
+  - Save the perspective, reload the page, load it back. It restores.
+  - Click "Export pivot to Excel". A polished XLSX downloads.
+
+That's it. The pack ships everything else.
+
+
+FILES YOU WILL HAND THE AI
+==========================
+
+Just point it at the pack folder. It reads SPEC.md, examples/, and the
+reference/ tree on its own.
+
+
+WHAT THE PACK COSTS
+===================
+
+Zero license fees. Open-source only:
+
+  - Plotly basic 2.35.2 (MIT)
+  - ClosedXML (MIT)  — already in any ASP.NET Core report stack
+  - Bootstrap 5 / jQuery 3 / Bootstrap Icons — already in the host
+
+No internet calls at runtime. Plotly is vendored inside the pack.

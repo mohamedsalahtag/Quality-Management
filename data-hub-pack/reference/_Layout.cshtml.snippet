@@ -1,0 +1,39 @@
+@* =====================================================================
+ * data-hub-pack — _Layout.cshtml snippet
+ *
+ * The analyzer's per-page <script> includes go in the HOST PAGE's
+ * @section Scripts block, NOT here. _Layout.cshtml only needs to make
+ * sure that:
+ *
+ *   (1) Bootstrap 5 bundle is loaded
+ *   (2) Bootstrap Icons CSS is loaded
+ *   (3) jQuery is loaded (the partial uses bootstrap.Modal directly; jQuery
+ *       is only required if your host pages already rely on it)
+ *   (4) @RenderSectionAsync("Scripts", required: false) is called BEFORE </body>
+ *
+ * The pack's _PerspectiveAnalyzer.cshtml partial assumes all four.
+ *
+ * Below is the order to place these in your <body>'s end (matching the
+ * Sharbatly QMS layout convention):
+ * ===================================================================== *@
+
+@* CSS in <head> *@
+<link rel="stylesheet" href="~/lib/bootstrap/dist/css/bootstrap.min.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+@* If your shop bans CDNs at runtime, vendor bootstrap-icons under wwwroot/lib too. *@
+
+@* Before </body> *@
+<script src="~/lib/jquery/dist/jquery.min.js"></script>
+<script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
+@await RenderSectionAsync("Scripts", required: false)
+
+@* =====================================================================
+ * The HOST PAGE that mounts the analyzer should include, INSIDE its
+ * own @section Scripts { ... } block:
+ *
+ *     <script src="~/lib/plotly/plotly-basic.min.js" asp-append-version="true"></script>
+ *     <script src="~/js/perspective-analyzer.js" asp-append-version="true"></script>
+ *
+ * Plotly is ~1 MB and only the data-hub page needs it -- do NOT load it
+ * from _Layout, do NOT make every page pay that cost.
+ * ===================================================================== *@

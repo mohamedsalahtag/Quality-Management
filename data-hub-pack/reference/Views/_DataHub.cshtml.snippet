@@ -1,0 +1,120 @@
+@* =====================================================================
+ * data-hub-pack — host page template (Views/Reports/YourHubAction.cshtml)
+ *
+ * This is what mounts the Perspective Analyzer partial on a host page.
+ * Includes:
+ *   - A title strip + Excel-export-of-flat-rows button (your domain hub).
+ *   - A collapsible filter form (replace with YOUR filter fields).
+ *   - A small preview table (replace columns with YOUR row schema).
+ *   - The _PerspectiveAnalyzer partial (the actual analyzer).
+ *   - The Scripts section pulling in plotly-basic.min.js + perspective-analyzer.js.
+ *
+ * Replace every YourXxx / IReadOnlyList<YourRow> with your project's types.
+ * ===================================================================== *@
+
+@using YourApp.Models.Reports
+@model IReadOnlyList<YourRow>
+@{
+    ViewData["Title"] = "Data hub";
+    var f         = (ViewBag.Filter as ExampleFilter) ?? new ExampleFilter();
+    var role      = User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+    var canShare  = role == "Manager" || role == "SiteAdmin";
+    var filterQs  = Context.Request.QueryString.HasValue
+                       ? Context.Request.QueryString.Value
+                       : "";
+    string FmtDate(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
+}
+
+<style>
+    .flat-table { white-space: nowrap; }
+    .flat-table thead th { position: sticky; top: 0; background: #f8f9fa; z-index: 1; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h1 class="h4 mb-0"><i class="bi bi-grid-3x3-gap me-1"></i>Data hub</h1>
+    <a class="btn btn-success" target="_blank"
+       href="@Url.Action("YourHubExcel", "DataHub", new {
+            fromDate = FmtDate(f.FromDate), toDate = FmtDate(f.ToDate),
+            status = f.Status, plant = f.Plant, vendorName = f.VendorName,
+            primaryId = f.PrimaryId })">
+        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+    </a>
+</div>
+
+@* -----------------------------------------------------------------------
+ * Filter card. Replace with your own filter inputs. Each <input name="">
+ * must match a property name on your filter class so [FromQuery] binds.
+ * --------------------------------------------------------------------- *@
+<form asp-action="YourHubAction" method="get" class="card mb-3">
+    <div class="card-body">
+        <div class="row g-2">
+            <div class="col-md-2">
+                <label class="form-label small">From</label>
+                <input type="date" name="FromDate" class="form-control form-control-sm" value="@FmtDate(f.FromDate)" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">To</label>
+                <input type="date" name="ToDate"   class="form-control form-control-sm" value="@FmtDate(f.ToDate)" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Status</label>
+                <input type="text" name="Status"   class="form-control form-control-sm" value="@f.Status" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Plant</label>
+                <input type="text" name="Plant"    class="form-control form-control-sm" value="@f.Plant" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small">Vendor (contains)</label>
+                <input type="text" name="VendorName" class="form-control form-control-sm" value="@f.VendorName" />
+            </div>
+            <div class="col-md-1 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary btn-sm w-100">
+                    <i class="bi bi-search me-1"></i>Filter
+                </button>
+            </div>
+        </div>
+    </div>
+</form>
+
+@* -----------------------------------------------------------------------
+ * Small preview table (first ~200 rows). Replace the columns with your
+ * row schema. The analyzer below pivots over the full view, not this list.
+ * --------------------------------------------------------------------- *@
+<div class="table-responsive small">
+    <table class="table table-sm table-bordered table-hover align-middle flat-table">
+        <thead class="table-light">
+            <tr>
+                <th>Replace</th>
+                <th>with</th>
+                <th>your</th>
+                <th>columns</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var r in Model)
+            {
+                <tr>
+                    <td>@r</td>
+                    <td></td><td></td><td></td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+
+@* -----------------------------------------------------------------------
+ * Perspective Analyzer card. Same partial regardless of report.
+ * --------------------------------------------------------------------- *@
+@await Html.PartialAsync("_PerspectiveAnalyzer", new PerspectiveAnalyzerVm
+{
+    ReportKey   = "your_report_key",     // must match a PivotRegistry entry
+    FilterQuery = filterQs,
+    CanShare    = canShare
+})
+<form id="perspectiveAfForm" method="post" class="d-none">@Html.AntiForgeryToken()</form>
+
+@section Scripts {
+    <script src="~/lib/plotly/plotly-basic.min.js"  asp-append-version="true"></script>
+    <script src="~/js/perspective-analyzer.js"     asp-append-version="true"></script>
+}

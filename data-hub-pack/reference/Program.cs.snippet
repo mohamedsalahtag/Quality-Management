@@ -1,0 +1,42 @@
+// =====================================================================
+// data-hub-pack — Program.cs snippet
+//
+// Paste these lines into your host's Program.cs (after AddControllersWithViews
+// but before app.Build()). Adjust namespaces to match where you placed the
+// pack's services in your project.
+// =====================================================================
+
+// --- 1. Memory cache (used by PivotService.GetDistinctValuesAsync) -----
+// If you already call AddMemoryCache() elsewhere, skip this line.
+builder.Services.AddMemoryCache();
+
+// --- 2. Antiforgery header name (must match the JS module's POST header)
+// The pack's perspective-analyzer.js sends "X-CSRF-TOKEN". If you change
+// this name, also change the header name inside that JS file.
+builder.Services.AddAntiforgery(o =>
+{
+    o.HeaderName = "X-CSRF-TOKEN";
+    // Carry over your existing cookie settings here (SameSite, SecurePolicy).
+});
+
+// --- 3. Pack services ---------------------------------------------------
+// Replace IDataHubFilterAdapter with YourProjectDataHubFilterAdapter.
+// Until you implement your own, DefaultDataHubFilterAdapter emits no
+// constraints -- analyzer still runs over the whole view.
+builder.Services.AddScoped<YourApp.Services.Reports.IDataHubFilterAdapter,
+                           YourApp.Services.Reports.DefaultDataHubFilterAdapter>();
+builder.Services.AddScoped<YourApp.Services.Reports.IPivotService,
+                           YourApp.Services.Reports.PivotService>();
+builder.Services.AddScoped<YourApp.Services.Reports.IPerspectiveService,
+                           YourApp.Services.Reports.PerspectiveService>();
+
+// --- 4. (optional) Auth policies expected by the pack's controller -----
+// The reference DataHubController gates everything with
+// [Authorize(Policy = "SupervisorOrAbove")]. Adapt the role list to yours.
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("SupervisorOrAbove", p =>
+        p.RequireRole("Supervisor", "Manager", "SiteAdmin"));
+    options.AddPolicy("ManagerOrAdmin", p =>
+        p.RequireRole("Manager", "SiteAdmin"));
+});
