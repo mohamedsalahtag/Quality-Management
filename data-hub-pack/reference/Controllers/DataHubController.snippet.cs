@@ -360,9 +360,18 @@ public class DataHubController : Controller
         }
 
         // 5. Polish ----------------------------------------------------------
-        ws.SheetView.FreezeRows(headerInnerRow);
-        if (rowDimCount > 0) ws.SheetView.FreezeColumns(rowDimCount);
-        ws.Columns().AdjustToContents();
+        // No freeze panes -- Excel's split-bar rendering uglifies a short
+        // report. AdjustToContents is bounded to the column-header row + data
+        // rows so the merged 13-pt title doesn't bias widths. Min/max clamps
+        // give short row-dim labels a comfortable column and stop one outlier
+        // from blowing the layout.
+        int lastUsedRow = ws.LastRowUsed()?.RowNumber() ?? firstDataRow;
+        ws.Columns().AdjustToContents(headerTopRow, lastUsedRow);
+        foreach (var col in ws.ColumnsUsed())
+        {
+            if (col.Width < 10) col.Width = 10;
+            if (col.Width > 60) col.Width = 60;
+        }
 
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
@@ -373,13 +382,19 @@ public class DataHubController : Controller
     {
         if (v == null) { cell.Value = ""; return; }
         cell.Value = (double)v.Value;
+        // Number-format note: the previous "auto" format `#,##0.##` rendered
+        // the integer 2 as "2." because Excel emits the literal `.` even when
+        // no decimals follow. Per-cell branch picks the clean integer format
+        // when the value has no fractional part.
         cell.Style.NumberFormat.Format = format switch
         {
             "int"     => "#,##0",
             "dec1"    => "#,##0.0",
             "dec2"    => "#,##0.00",
             "percent" => "0.00%",
-            _         => "#,##0.##",   // auto
+            _         => v.Value == Math.Truncate(v.Value)
+                            ? "#,##0"       // auto + integer
+                            : "#,##0.##",   // auto + fraction
         };
         cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
     }
