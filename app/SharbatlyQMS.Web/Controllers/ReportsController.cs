@@ -958,9 +958,26 @@ public class ReportsController : Controller
         }
 
         // ----- 5. Polish ---------------------------------------------------
-        ws.SheetView.FreezeRows(headerInnerRow);
-        if (rowDimCount > 0) ws.SheetView.FreezeColumns(rowDimCount);
-        ws.Columns().AdjustToContents();
+        // V34.5 (2026-06-21): freeze panes DROPPED.
+        // Earlier iterations froze the header rows + row-dim columns so they
+        // stayed visible while scrolling. User feedback: the freeze-split
+        // bars Excel draws make the sheet look heavy and ugly; the file
+        // looks right only when freeze is manually turned off. So we leave
+        // every row/column scrollable. The sheet is short enough to skim
+        // without freeze; users who want it can View > Freeze Panes
+        // themselves.
+        //
+        // AdjustToContents stays bounded to the header row + data rows so
+        // the merged 13-pt title doesn't bias column widths. Min/max clamps
+        // give very short labels (BU01) a comfortable column and stop one
+        // outlier from blowing the layout.
+        int lastUsedRow = ws.LastRowUsed()?.RowNumber() ?? firstDataRow;
+        ws.Columns().AdjustToContents(headerTopRow, lastUsedRow);
+        foreach (var col in ws.ColumnsUsed())
+        {
+            if (col.Width < 10) col.Width = 10;
+            if (col.Width > 60) col.Width = 60;
+        }
 
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
@@ -971,13 +988,19 @@ public class ReportsController : Controller
     {
         if (v == null) { cell.Value = ""; return; }
         cell.Value = (double)v.Value;
+        // V34.4 (2026-06-21): the previous "auto" format `#,##0.##` renders the
+        // integer 2 as "2." because the literal `.` in the format string is
+        // always emitted even when no decimals follow. Per-cell branch: pick
+        // the clean integer format when the value has no fractional part.
         cell.Style.NumberFormat.Format = format switch
         {
             "int"     => "#,##0",
             "dec1"    => "#,##0.0",
             "dec2"    => "#,##0.00",
             "percent" => "0.00%",
-            _         => "#,##0.##",   // auto
+            _         => v.Value == Math.Truncate(v.Value)
+                            ? "#,##0"        // auto + integer  → no decimal point
+                            : "#,##0.##",    // auto + fraction → up to 2 dp
         };
         cell.Style.Alignment.Horizontal = XLAlignmentHorizontalValues.Right;
     }

@@ -27,3 +27,9 @@ smoketest.log
 **/appsettings.Production.json
 **/appsettings.Local.json
 **/appsettings.*.local.json
+
+# Help docs -- generated bundles. Source hubs + screenshots stay tracked.
+docs/help/output/
+docs/help/_capture_details.py
+docs/help/_verify_xlsx.py
+docs/help/_verify*.xlsx

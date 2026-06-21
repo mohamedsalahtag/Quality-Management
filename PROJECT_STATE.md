@@ -2,7 +2,7 @@
 
 > **For any AI agent (Claude Code, OpenAI Codex, Cursor, ChatGPT, GitHub Copilot, ...) picking up this project: read this file first.** It captures the live state of the QMS web application — what is built, where it runs, the decisions that shaped it, and the files that contain the authoritative truth.
 
-Last updated: **2026-06-20** (Perspective Analyzer — server-side SQL pivot + saved/shared/default perspectives layered on the data hub).
+Last updated: **2026-06-20** (Full Help & User Guide — English User + Admin + Arabic RTL editions in PDF / Word / PowerPoint / HTML site, built from one source-of-truth hub with 22 real screen captures).
 
 ---
 
@@ -169,6 +169,58 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 ---
 
 ## 8. Decisions log (newest first)
+
+### 2026-06-21 (Perspective Analyzer XLSX — drop freeze panes entirely after user review)
+
+After getting the freeze-panes plumbing to actually work in Excel (the BOM fix below), the user opened the file and reported: *"design is good but freezing panes is making it look very bad, only restores good form when I unfreeze panes."* The horizontal/vertical freeze split bars Excel draws across the sheet clutter the layout for a report that's typically short enough to skim.
+
+Decision: drop freeze panes entirely. Removed `FreezeRows`, `FreezeColumns`, `TopLeftCellAddress` calls + the `FixPaneFreezeState` post-processor + the `IndexOf` helper from `BuildPivotWorkbook`. `AdjustToContents(headerTopRow, lastUsedRow)` with min/max column-width clamps remain (they fixed the cramped material-code columns and aren't freeze-related). The number-format auto-detection (clean integer vs. up-to-2-decimals) also stays.
+
+Files touched: `Controllers/ReportsController.cs` — `BuildPivotWorkbook` shortened by ~50 lines; the freeze post-processor methods are deleted.
+
+Verified by live download: `sheetViews` block now reads `<x:sheetView workbookViewId="0" />` (no `<pane>` child); `openpyxl.freeze_panes == None`. File opens in Excel with every row/column scrollable — what the user wanted.
+
+### 2026-06-21 (Perspective Analyzer XLSX — second pass: byte-level post-processor preserves UTF-8 BOM so Excel honours `state="frozen"`)
+
+First pass shipped a String-based post-processor that rewrote `state="frozenSplit"` → `state="frozen"` and verified the XML attribute looked right. openpyxl loaded the file and reported `freeze_panes = D7`. But Excel still rendered the pane as a split — scrolling past row 6 left no frozen header.
+
+Root cause (second pass): `ClosedXML` writes `xl/worksheets/sheet1.xml` with a UTF-8 BOM (the literal bytes `0xEF 0xBB 0xBF` at the start). My first post-processor decoded via `StreamReader(Encoding.UTF8)` (correctly strips the BOM) and re-wrote via `StreamWriter(new UTF8Encoding(false))` (deliberately omits the BOM). Result: the new entry was valid UTF-8 without the BOM. **openpyxl tolerated this; Excel did not** — without the BOM at the start of sheet1.xml, Excel silently downgrades the `state="frozen"` to a "split" rendering.
+
+Fix: replaced the post-processor with a **byte-level** search-and-replace. Read the raw bytes of the entry, do a binary search for the ASCII sequence `state="frozenSplit"` (no decoding), splice in `state="frozen"` (5 bytes shorter), write the resulting bytes back unchanged. BOM, line endings, encoding declaration — all preserved.
+
+Verified by `requests` → `zipfile` round-trip:
+- `raw[:3].hex()` = `efbbbf` (UTF-8 BOM preserved).
+- `sheetViews` block contains `<x:pane … state="frozen" />`, no `"frozenSplit"`.
+- `openpyxl` reads `ws.freeze_panes == "D7"`.
+
+Files touched: `Controllers/ReportsController.cs` — `FixPaneFreezeState` rewritten with a byte-level `IndexOf + Buffer.BlockCopy` splice. No other surface changed.
+
+### 2026-06-21 (Perspective Analyzer XLSX — fix freeze panes + integer formatting + column widths)
+
+User opened a downloaded `pivot-flat_defects-…xlsx` and reported three real formatting bugs.
+
+- **Freeze panes weren't holding.** Root cause: ClosedXML 0.105 writes `<pane … state="frozenSplit" />` whenever BOTH `FreezeRows` and `FreezeColumns` are set, instead of `state="frozen"`. Excel renders `frozenSplit` as draggable split bars (you can scroll past the headers), not as a real freeze. Confirmed by inspecting the raw `xl/worksheets/sheet1.xml` of a live export. Fix: `BuildPivotWorkbook` keeps the two ClosedXML freeze calls, then a small post-processing pass `FixPaneFreezeState` opens the saved `MemoryStream` as a `ZipArchive` and rewrites `state="frozenSplit"` → `state="frozen"` in `sheet1.xml`. Verified via a scripted Playwright download: the pane element now says `state="frozen"` and Excel locks the column header + row-dim columns when you scroll.
+- **Integers showed a trailing dot.** Root cause: the `auto` number-format string was `#,##0.##`. Excel's format spec emits the literal `.` even when no decimals follow, so `2` rendered as `2.`. Fix: per-cell branch in `SetMeasureCell` — if `v == Math.Truncate(v)` use `#,##0` (clean integer); else use `#,##0.##` (up to 2 decimals). The other formats (`int`, `dec1`, `dec2`, `percent`) are user-explicit and stay untouched. Verified in the live styles.xml — the test export defined only `#,##0`, no `#,##0.##` was needed because every defect count was an integer.
+- **Column widths too narrow.** Root cause: `ws.Columns().AdjustToContents()` measured EVERY used row, including the merged 13-pt bold title in row 1 that spans every column. The averaging biased widths down so material codes like `ORVAGGEG04065CAF30` got truncated. Fix: call the range-bounded overload `AdjustToContents(headerTopRow, lastUsedRow)` so widths fit the column-header row + data only; the merged title overflows visually as expected (it's merged across all data columns anyway). Plus clamp to `min 10 / max 60` so tiny labels (`BU01`) still get a comfortable column and one extreme outlier doesn't blow out the layout.
+- **Files touched.** MODIFIED: `Controllers/ReportsController.cs` — `SetMeasureCell` (auto-format split), `BuildPivotWorkbook` (TopLeftCellAddress + bounded AdjustToContents + min/max clamps + the new private `FixPaneFreezeState` post-processor).
+- **Verified.** `dotnet build` clean. Republished local + remote at 2026-06-21. Drove `POST /Reports/PivotExcel` via `requests`, downloaded the bytes, unzipped, inspected `xl/worksheets/sheet1.xml`: pane element now says `state="frozen"`; styles.xml carries `#,##0` (the clean integer format) instead of `#,##0.##`. `http://192.168.3.15:5244/Account/Login` → HTTP 200 throughout.
+
+### 2026-06-20 (Help & User Guide — English + Arabic, User + Admin, in PDF / Word / PowerPoint / HTML)
+
+End-user and admin documentation built from a single Markdown Help Hub, rendered by the `app-help-authoring` skill into every format the team uses.
+
+- **Source of truth.** `docs/help/help-source.md` (English, ~1500 lines) + `docs/help/help-source.ar.md` (Arabic user-only, ~440 lines). Both reference the same screenshots and the same `{{site_url}}` placeholder filled at build time. The skill's contract is one hub edits per audience/language; outputs are regenerated.
+- **Editions.** English builds two — **User** (everyday staff; admin-only screens + `For Admins` callouts stripped) and **Admin** (everything). Arabic builds the User edition only (admin docs are not translated). English User + Arabic User HTML sites cross-link via a language switcher.
+- **Real screen captures.** All 22 page screenshots taken from the live app at `http://192.168.3.15:5244` via Playwright with the `axuser` AD account. A one-off script (`docs/help/_capture_details.py`, gitignored) scraped real Arrival / QO / Sample IDs to capture the details / sample form / photos drawer pages that need a record ID in the URL.
+- **HTML sites get live search + collapsible FAQ + glossary cards + RTL switcher** from the skill's renderer — no hand-coding.
+- **The Arabic hub uses Arabic body text but keeps the metadata keys `**Route:**`, `**Who uses it:**`, `**Screenshot:**` and every on-screen button label in English** (e.g. `اضغط على **Sign in**`). The parser only recognises English structural keys, and users find buttons by their actual on-screen English labels.
+- **Built artefacts** (under `docs/help/output/`, gitignored):
+    - `Sharbatly-QMS-User.pdf` / `.docx` / `.pptx` + `help-site-user/`  (English, ~1.5–2 MB each)
+    - `Sharbatly-QMS-Admin.pdf` / `.docx` / `.pptx` + `help-site-admin/` (English, 2–3.4 MB)
+    - `Sharbatly-QMS-User-AR.pdf` / `.docx` / `.pptx` + `help-site-user-ar/` (Arabic RTL, 1.5–2.6 MB)
+- **Files touched.** NEW: `docs/help/help-source.md`, `docs/help/help-source.ar.md`, `docs/help/assets/screenshots/*.png` (22 PNGs), `docs/help/_capture_details.py` (one-off helper, gitignored). MODIFIED: `.gitignore` (ignores generated bundles + the capture helper).
+- **Verified.** Build script reported zero failures across both passes. Final image counts per HTML site: User English 14, Admin English 22, User Arabic 14 (the User editions correctly omit the 8 admin-only screens). DOCX/PPTX/PDF all grew from text-only sizes (~50 KB) to image-bearing sizes (1.5–3.4 MB), confirming images embedded.
+- **To rebuild after future feature work.** Edit the hub(s) → re-run `python build_help.py --hub docs/help/help-source.md --site-url http://192.168.3.15:5244 --alt-langs "العربية:../help-site-user-ar/index.html"` and the AR sibling command. Re-capture screenshots only when UI changes.
 
 ### 2026-06-20 (Perspective Analyzer — multi-measure ("Σ Values" zone) + polished XLSX export)
 
