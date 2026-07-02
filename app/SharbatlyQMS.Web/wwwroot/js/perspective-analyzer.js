@@ -887,6 +887,9 @@
             yaxis: { title: measure.label, automargin: true },
             legend: { orientation: "h" }
         };
+        // Purge any prior Plotly instance in this container before re-plotting so
+        // repeated Run/renderer/measure changes don't accumulate detached graphs.
+        try { Plotly.purge($output); } catch (e) { /* nothing to purge */ }
         Plotly.newPlot($output, data, layout, { responsive: true, displaylogo: false });
     }
 

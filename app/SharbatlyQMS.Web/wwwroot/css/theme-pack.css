@@ -46,7 +46,9 @@ html[data-theme="sepia"] {
     --theme-surface:      #fff8e7;
     --theme-surface-alt:  #ebe1c8;
     --theme-text:         #5b4636;
-    --theme-text-muted:   #8a7a5b;
+    /* Darkened from #8a7a5b (~3.3:1 on the sepia surface, below WCAG AA) to
+       ~#6a5a3c which clears 4.5:1 for muted body text. */
+    --theme-text-muted:   #6a5a3c;
     --theme-border:       #d6c9a8;
     --theme-navbar-bg:    #6b4319;
     --theme-navbar-text:  #fff8e7;

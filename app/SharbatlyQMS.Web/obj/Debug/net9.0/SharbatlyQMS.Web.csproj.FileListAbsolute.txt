@@ -128,12 +128,10 @@ Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\scopedcss\Views\Shared\_Layout.cshtml.r
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\scopedcss\bundle\SharbatlyQMS.Web.styles.css
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\scopedcss\projectbundle\SharbatlyQMS.Web.bundle.scp.css
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\49k64jz2zf-{0}-yu1bzeq57d-yu1bzeq57d.gz
-Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\4ot8r5kkdh-{0}-9bacbulxiw-9bacbulxiw.gz
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\p83c47qlvv-{0}-61n19gt1b8-61n19gt1b8.gz
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\rsahfqdmax-{0}-72o9lwvrjf-72o9lwvrjf.gz
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\2y5847z5b2-{0}-3bqh8xso9n-3bqh8xso9n.gz
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\dtlnz0fjul-{0}-qb1qmh1t0q-qb1qmh1t0q.gz
-Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\21953o15qz-{0}-ozjz3nsixu-ozjz3nsixu.gz
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\ihbo46n5gy-{0}-suimnpoy5f-suimnpoy5f.gz
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\sxuvjks1c3-{0}-26f9b7qkas-26f9b7qkas.gz
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\31twgwh6cc-{0}-bqjiyaj88i-bqjiyaj88i.gz
@@ -210,4 +208,6 @@ Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\refint\SharbatlyQMS.Web.dll
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\SharbatlyQMS.Web.pdb
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\SharbatlyQMS.Web.genruntimeconfig.cache
 Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\ref\SharbatlyQMS.Web.dll
-Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\bowwy1gcy8-{0}-zndqjmhm75-zndqjmhm75.gz
+Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\4ot8r5kkdh-{0}-1nzdmctd1a-1nzdmctd1a.gz
+Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\bowwy1gcy8-{0}-vuhzvf6h29-vuhzvf6h29.gz
+Q:\app\SharbatlyQMS.Web\obj\Debug\net9.0\compressed\21953o15qz-{0}-iw8fdjfuhh-iw8fdjfuhh.gz

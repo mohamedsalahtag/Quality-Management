@@ -67,10 +67,22 @@
                 th.classList.add('tk-sortable');
                 var caret = document.createElement('i');
                 caret.className = 'tk-caret bi bi-arrow-down-up';
+                caret.setAttribute('aria-hidden', 'true');
                 th.appendChild(document.createTextNode(' '));
                 th.appendChild(caret);
                 carets.push(caret);
+                // Accessibility: make sortable headers keyboard-operable and
+                // announce sort state to screen readers.
+                th.setAttribute('tabindex', '0');
+                th.setAttribute('role', 'button');
+                th.setAttribute('aria-sort', 'none');
                 th.addEventListener('click', function () { sortBy(th, caret); });
+                th.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') {
+                        e.preventDefault();
+                        sortBy(th, caret);
+                    }
+                });
             });
         }
 
@@ -98,8 +110,12 @@
                 return av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' }) * mul;
             });
 
-            carets.forEach(function (c) { c.className = 'tk-caret bi bi-arrow-down-up'; });
+            carets.forEach(function (c) {
+                c.className = 'tk-caret bi bi-arrow-down-up';
+                if (c.parentElement) c.parentElement.setAttribute('aria-sort', 'none');
+            });
             caret.className = 'tk-caret bi ' + (state.dir === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill');
+            th.setAttribute('aria-sort', state.dir === 'asc' ? 'ascending' : 'descending');
 
             rows.forEach(function (r) { tbody.appendChild(r); });
             state.page = 1;

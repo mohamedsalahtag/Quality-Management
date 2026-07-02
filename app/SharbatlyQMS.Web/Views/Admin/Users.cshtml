@@ -374,6 +374,14 @@
             var hidden    = document.getElementById('bulkHiddenInputs');
             var clearBtn  = document.getElementById('bulkClear');
 
+            // A row hidden by tablekit's client-side pagination has no offsetParent.
+            // Scope "select all" to VISIBLE rows so it can't silently tick rows on
+            // other pages and delete more than the user can see.
+            function isVisible(b) {
+                var tr = b.closest('tr');
+                return tr && tr.offsetParent !== null;
+            }
+
             function refresh() {
                 var picked = Array.from(rowBoxes).filter(function (b) { return b.checked; });
                 countEl.textContent = picked.length;
@@ -390,7 +398,7 @@
             rowBoxes.forEach(function (b) { b.addEventListener('change', refresh); });
             if (selectAll) {
                 selectAll.addEventListener('change', function () {
-                    rowBoxes.forEach(function (b) { b.checked = selectAll.checked; });
+                    rowBoxes.forEach(function (b) { if (isVisible(b)) b.checked = selectAll.checked; });
                     refresh();
                 });
             }

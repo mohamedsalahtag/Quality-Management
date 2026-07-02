@@ -119,7 +119,7 @@
             </button>
         }
         <a asp-controller="Reports" asp-action="QualityOrderPdf" asp-route-id="@Model.QualityOrderId"
-           class="btn btn-danger" target="_blank">
+           class="btn btn-outline-danger" target="_blank">
             <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF report
         </a>
         @* "Send report to supplier" moved to the Claim Management chat-panel
@@ -758,6 +758,11 @@
         mdBody.innerHTML = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>';
         const res = await fetch('@Url.Action("MaterialPanel", "QualityOrders")?qoMaterialId=' + qoMatId, { headers: { 'Accept': 'text/html' } });
         mdBody.innerHTML = res.ok ? await res.text() : '<div class="alert alert-danger m-2">Could not load material details.</div>';
+        // Hide the Save button when the loaded form is read-only (QO not Open),
+        // so a disabled, no-op Save isn't shown next to the "Read-only" banner.
+        const loadedForm = mdBody.querySelector('#materialDetailsForm');
+        const saveBtn = document.getElementById('mdm-save');
+        if (saveBtn) saveBtn.classList.toggle('d-none', !loadedForm || loadedForm.dataset.editable !== 'true');
     });
     document.getElementById('mdm-save')?.addEventListener('click', async () => {
         const form = mdBody.querySelector('#materialDetailsForm');

@@ -14,7 +14,7 @@
 }
 
 <form id="materialDetailsForm" asp-action="SaveMaterialHeaderAjax" method="post" class="material-form"
-      data-qo-material-id="@m.QoMaterialId">
+      data-qo-material-id="@m.QoMaterialId" data-editable="@(editable ? "true" : "false")">
     @Html.AntiForgeryToken()
     <input type="hidden" name="qoMaterialId"   value="@m.QoMaterialId" />
     <input type="hidden" name="qualityOrderId" value="@Model.Qo.QualityOrderId" />
