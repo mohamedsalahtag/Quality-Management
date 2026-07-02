@@ -58,6 +58,27 @@
     <span class="badge bg-secondary fs-6">@role</span>
 </div>
 
+@* ---- SAP sync failure warning (admins only) ---- *@
+@if (Model.IsAdmin && Model.SyncFailures.Any())
+{
+    <div class="alert alert-warning d-flex align-items-start" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2 mt-1"></i>
+        <div>
+            <strong>SAP sync needs attention.</strong>
+            The most recent sync failed for:
+            @foreach (var sf in Model.SyncFailures)
+            {
+                <div class="small">
+                    <span class="fw-semibold">@sf.EndpointKey</span>
+                    @if (sf.CompletedAt.HasValue) { <text>— @sf.CompletedAt.Value.ToLocalTime().ToString("g")</text> }
+                    @if (!string.IsNullOrWhiteSpace(sf.Message)) { <text>: @(sf.Message!.Length > 160 ? sf.Message[..160] + "…" : sf.Message)</text> }
+                </div>
+            }
+            <div class="small mt-1">Open <a asp-controller="Admin" asp-action="Settings" asp-route-activeTab="sap">Site Configuration → SAP</a> to retry.</div>
+        </div>
+    </div>
+}
+
 @* ---- KPI tiles ---- *@
 <div class="row g-3 mb-3">
     <div class="col-6 col-md-4 col-xl-2">

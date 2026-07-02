@@ -41,8 +41,35 @@ public class DashboardService : IDashboardService
             OpenQos            = agg.OpenQos,
             ThroughputTrend    = agg.ThroughputTrend,
             OpenQoAgeBuckets   = agg.OpenQoAgeBuckets,
-            DefectByGroup      = agg.DefectByGroup
+            DefectByGroup      = agg.DefectByGroup,
+            SyncFailures       = await GetRecentSyncFailuresAsync()
         };
+    }
+
+    // Surfaces SAP-sync failures so an admin sees them on the dashboard instead
+    // of only in the Event Log / SAP settings tab. Returns the endpoints whose
+    // most recent sync run failed.
+    private async Task<List<SyncFailure>> GetRecentSyncFailuresAsync()
+    {
+        try
+        {
+            using var c = new SqlConnection(_cs);
+            var rows = await c.QueryAsync<SyncFailure>(@"
+                SELECT l.endpoint_key AS EndpointKey,
+                       l.completed_at AS CompletedAt,
+                       l.message      AS Message
+                FROM   qms_sap_sync_log l
+                JOIN  (SELECT endpoint_key, MAX(started_at) AS mx
+                       FROM qms_sap_sync_log GROUP BY endpoint_key) t
+                       ON t.endpoint_key = l.endpoint_key AND t.mx = l.started_at
+                WHERE  l.success = 0");
+            return rows.ToList();
+        }
+        catch
+        {
+            // Best-effort: never let a sync-log read break the dashboard.
+            return new List<SyncFailure>();
+        }
     }
 
     private async Task<Aggregates> LoadAggregatesAsync(AlertConfig thresholds)

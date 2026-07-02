@@ -92,10 +92,29 @@ public class SapSyncService : ISapSyncService
                 if (pruneTable != null)
                 {
                     using var pc = new SqlConnection(_cs);
-                    var pruned = await pc.ExecuteAsync(
-                        $"DELETE FROM {pruneTable} WHERE synced_at < @startedAt",
-                        new { startedAt }, commandTimeout: 120);
-                    if (pruned > 0) message = $"{message} Pruned {pruned} stale row(s).";
+                    await pc.OpenAsync(ct);
+                    // Safety guard: a truncated-but-"successful" SAP response (page
+                    // cap hit, or SAP returned a partial HTTP-200 set) would make
+                    // almost every existing row look "stale" and the prune would
+                    // wipe a valid cache. Refuse to prune when it would delete more
+                    // than 30% of the table; log it so an admin can investigate.
+                    var existing = await pc.ExecuteScalarAsync<int>($"SELECT COUNT(*) FROM {pruneTable}");
+                    var stale    = await pc.ExecuteScalarAsync<int>(
+                        $"SELECT COUNT(*) FROM {pruneTable} WHERE synced_at < @startedAt", new { startedAt });
+                    if (existing > 0 && stale > existing * 0.30)
+                    {
+                        message = $"{message} Prune SKIPPED: fetch returned {rows} row(s) but {stale}/{existing} " +
+                                  "cache rows would be deleted — treating as a possibly incomplete SAP response.";
+                        _log.LogWarning("SAP {Endpoint} prune skipped: would delete {Stale}/{Existing} rows after a {Rows}-row fetch.",
+                            endpointKey, stale, existing, rows);
+                    }
+                    else
+                    {
+                        var pruned = await pc.ExecuteAsync(
+                            $"DELETE FROM {pruneTable} WHERE synced_at < @startedAt",
+                            new { startedAt }, commandTimeout: 120);
+                        if (pruned > 0) message = $"{message} Pruned {pruned} stale row(s).";
+                    }
                 }
             }
 

@@ -18,6 +18,15 @@ public class DashboardVm
     public List<ThroughputPoint>   ThroughputTrend  { get; set; } = new();
     public int[]                   OpenQoAgeBuckets { get; set; } = new int[4];   // 0-3 / 3-7 / 7-14 / 14+
     public List<DefectGroupPoint>  DefectByGroup    { get; set; } = new();
+    /// <summary>SAP endpoints whose most recent sync run failed (shown to admins).</summary>
+    public List<SyncFailure>       SyncFailures     { get; set; } = new();
+}
+
+public class SyncFailure
+{
+    public string    EndpointKey { get; set; } = "";
+    public DateTime? CompletedAt { get; set; }
+    public string?   Message     { get; set; }
 }
 
 public class DashboardCounts

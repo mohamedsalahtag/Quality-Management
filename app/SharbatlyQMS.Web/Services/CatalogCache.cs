@@ -17,6 +17,11 @@ public class CatalogCache : ICatalogCache
     private readonly IMemoryCache _cache;
     private readonly IQualityOrderService _qos;
 
+    // Tracks the dynamic section-map keys we've issued so Invalidate() can clear
+    // them too (IMemoryCache has no prefix-removal API). Static because the cache
+    // it fronts is the singleton IMemoryCache while this service is scoped.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, byte> _sectionMapKeys = new();
+
     public CatalogCache(IMemoryCache cache, IQualityOrderService qos)
     {
         _cache = cache;
@@ -74,6 +79,7 @@ public class CatalogCache : ICatalogCache
             return hit;
         var data = await _qos.GetDisplaySectionMapAsync(materialGroup, majorCategory);
         _cache.Set(key, data, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TtL });
+        _sectionMapKeys.TryAdd(key, 0);
         return data;
     }
 
@@ -101,11 +107,11 @@ public class CatalogCache : ICatalogCache
         _cache.Remove(KeyDefects);
         _cache.Remove(KeyHeaderFields);
         _cache.Remove(KeyCategories);
-        // Section-map keys are dynamic; cheapest approach is to compact the
-        // entire IMemoryCache for our prefix. There's no public API for
-        // prefix removal, so we just rely on absolute expiry for those --
-        // they're per (group, category) so changes flow through naturally
-        // when the matching admin endpoint is saved (admin can hard-reload
-        // for instant effect).
+        // Clear the dynamic per-(group, category) section-map keys too, so a
+        // display-section change takes effect immediately instead of lingering
+        // for up to the 60-minute TTL.
+        foreach (var key in _sectionMapKeys.Keys)
+            _cache.Remove(key);
+        _sectionMapKeys.Clear();
     }
 }
