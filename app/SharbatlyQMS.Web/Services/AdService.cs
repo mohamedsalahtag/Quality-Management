@@ -39,6 +39,17 @@ public class AdService : IAdService
         if (!cfg.IsConfigured)
             return Task.FromResult<(bool, AdUserInfo?, string?)>((false, null, "AD not configured"));
 
+        // System.DirectoryServices has no async API and each bind attempt blocks
+        // for the full TCP/LDAP timeout when the DC is slow/unreachable. Offload
+        // the blocking bind ladder to a thread-pool thread so it doesn't pin the
+        // request thread (a morning login burst against a slow DC could otherwise
+        // starve the pool). Bind logic itself is unchanged.
+        return Task.Run(() => AuthenticateCore(username, password, cfg));
+    }
+
+    private (bool ok, AdUserInfo? info, string? error) AuthenticateCore(
+        string username, string password, AdConfig cfg)
+    {
         var (server, _) = ParseLdap(cfg.LdapPath, cfg.Domain);
         var sam = username.Contains('@') ? username.Split('@')[0] : username;
         var upn = sam.Contains('@') ? sam : $"{sam}@{cfg.Domain}";
@@ -80,21 +91,21 @@ public class AdService : IAdService
                 }
 
                 _log.LogInformation("AD auth SUCCESS for {Sam} via [{Label}]", sam, label);
-                return Task.FromResult<(bool, AdUserInfo?, string?)>((true,
+                return (true,
                     new AdUserInfo
                     {
                         Username   = sam,
                         FullName   = string.IsNullOrWhiteSpace(fullName) ? sam : fullName,
                         Email      = email,
                         Department = dept
-                    }, null));
+                    }, null);
             }
             catch (COMException ex)
                 when (ex.ErrorCode == unchecked((int)0x8007052E)   // wrong password
                    || ex.ErrorCode == unchecked((int)0x80070005))  // access denied
             {
                 _log.LogWarning("AD auth WRONG PASSWORD for {Sam} [{Label}]", sam, label);
-                return Task.FromResult<(bool, AdUserInfo?, string?)>((false, null, "Invalid credentials"));
+                return (false, null, "Invalid credentials");
             }
             catch (Exception ex)
             {
@@ -104,7 +115,7 @@ public class AdService : IAdService
             }
         }
 
-        return Task.FromResult<(bool, AdUserInfo?, string?)>((false, null, "AD bind failed"));
+        return (false, null, "AD bind failed");
     }
 
     public Task<(bool ok, string message)> TestConnectionAsync(AdConfig cfg)

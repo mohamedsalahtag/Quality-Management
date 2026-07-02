@@ -146,7 +146,9 @@ public class QualityOrdersController : Controller
 
         if (!isNew && sampleId.HasValue && sampleId.Value > 0)
         {
-            sample = (await _qos.GetSampleAsync(sampleId.Value)) ?? throw new InvalidOperationException("Sample not found.");
+            var loaded = await _qos.GetSampleAsync(sampleId.Value);
+            if (loaded == null) return NotFound();
+            sample = loaded;
             qo = await _qos.GetAsync(sample.QualityOrderId);
             if (qo == null) return NotFound();
             var mats = await _qos.GetMaterialsAsync(qo.QualityOrderId);
@@ -173,6 +175,10 @@ public class QualityOrdersController : Controller
         {
             return BadRequest("Provide either sampleId or qoId+qoMaterialId+isNew=true.");
         }
+
+        // Plant-scope gate (was missing): a plant-scoped Operator must not be able
+        // to read another plant's sample/material data by supplying an id.
+        if (await EnsureCanReadQoAsync(qo.QualityOrderId) is { } scopeBlock) return scopeBlock;
 
         // Enrich material with MARA for the form header subtitle.
         if (mat != null)
@@ -244,6 +250,8 @@ public class QualityOrdersController : Controller
         if (qoId == null) return NotFound();
         var qo = await _qos.GetAsync(qoId.Value);
         if (qo == null) return NotFound();
+        // Plant-scope gate (was missing).
+        if (await EnsureCanReadQoAsync(qo.QualityOrderId) is { } scopeBlock) return scopeBlock;
         var mats = await _qos.GetMaterialsAsync(qo.QualityOrderId);
         var mat = mats.FirstOrDefault(m => m.QoMaterialId == qoMaterialId);
         if (mat == null) return NotFound();
@@ -476,6 +484,8 @@ public class QualityOrdersController : Controller
     {
         var sample = await _qos.GetSampleAsync(id);
         if (sample == null) return NotFound();
+        // Plant-scope gate (was missing) on the standalone Sample page.
+        if (await EnsureCanReadQoAsync(sample.QualityOrderId) is { } scopeBlock) return scopeBlock;
         var qo = await _qos.GetAsync(sample.QualityOrderId);
         var materials = await _qos.GetMaterialsAsync(sample.QualityOrderId);
         var qoMaterial = materials.FirstOrDefault(m => m.QoMaterialId == sample.QoMaterialId);
@@ -596,6 +606,12 @@ public class QualityOrdersController : Controller
             sample.SizeOverridden = sample.SampleSize != materialDefaultSize;
         }
 
+        // Reject a non-positive per-sample size (mirrors the material-level
+        // override validation). A 0/negative size would otherwise be stored and
+        // force the unvalidated client-percentage fallback below.
+        if (sample.SampleSize.HasValue && sample.SampleSize.Value <= 0)
+            return (null, false, 0, "Sample size must be a positive whole number.");
+
         bool isNew;
         if (existing == null)
         {
@@ -697,7 +713,9 @@ public class QualityOrdersController : Controller
             }
             decimal pct;
             if (sampleSize > 0)                  pct = Math.Round(value / sampleSize * 100m, 4);
-            else if (decimal.TryParse(p, out var dp)) pct = dp;
+            // No valid denominator: fall back to the posted percentage but clamp
+            // it to [0,100] so a tampered/stray value can't skew the KPIs.
+            else if (decimal.TryParse(p, out var dp)) pct = Math.Clamp(dp, 0m, 100m);
             else                                 pct = 0m;
             defects.Add(new SampleDefect
             {
@@ -817,6 +835,10 @@ public class QualityOrdersController : Controller
                     return RedirectToAction(nameof(Details), new { id = qoFromForm });
                 return RedirectToAction(nameof(Index));
             }
+            // V31 edit-lock: samples may only be deleted while the QO is Open.
+            // Without this, inspection samples could be removed from an already
+            // Submitted/Closed order (after the PDF was issued / a claim decided).
+            if (await EnsureEditableRedirectAsync(s.QualityOrderId) is { } editBlock) return editBlock;
             var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
             await _qos.SoftDeleteSampleAsync(sampleId, user);
             TempData["Success"] = $"Sample #{s.SampleNo} deleted.";
@@ -840,6 +862,8 @@ public class QualityOrdersController : Controller
             var s = await _qos.GetSampleAsync(sampleId);
             if (s == null) return Json(new { ok = false, error = "Sample not found." });
             if (await EnsureCanReadQoAsync(s.QualityOrderId) is { } _) return Forbid();
+            // V31 edit-lock (see DeleteSample): Open-only.
+            if (await EnsureEditableAjaxAsync(s.QualityOrderId) is { } editBlock) return editBlock;
             var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
             await _qos.SoftDeleteSampleAsync(sampleId, user);
             var siblings = await _qos.ListSamplesAsync(s.QualityOrderId);

@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "AD/T5PIOfmM=",
+  "dgSpecHash": "qAOpbMJZirM=",
   "success": true,
-  "projectFilePath": "C:\\QualityManagemet\\app\\SharbatlyQMS.Migrate\\SharbatlyQMS.Migrate.csproj",
+  "projectFilePath": "Q:\\app\\SharbatlyQMS.Migrate\\SharbatlyQMS.Migrate.csproj",
   "expectedPackageFiles": [
     "C:\\Users\\mohamed.tag\\.nuget\\packages\\microsoft.bcl.cryptography\\9.0.13\\microsoft.bcl.cryptography.9.0.13.nupkg.sha512",
     "C:\\Users\\mohamed.tag\\.nuget\\packages\\microsoft.data.sqlclient\\7.0.1\\microsoft.data.sqlclient.7.0.1.nupkg.sha512",
@@ -26,7 +26,11 @@
     "C:\\Users\\mohamed.tag\\.nuget\\packages\\system.diagnostics.eventlog\\9.0.13\\system.diagnostics.eventlog.9.0.13.nupkg.sha512",
     "C:\\Users\\mohamed.tag\\.nuget\\packages\\system.identitymodel.tokens.jwt\\8.16.0\\system.identitymodel.tokens.jwt.8.16.0.nupkg.sha512",
     "C:\\Users\\mohamed.tag\\.nuget\\packages\\system.security.cryptography.pkcs\\9.0.13\\system.security.cryptography.pkcs.9.0.13.nupkg.sha512",
-    "C:\\Users\\mohamed.tag\\.nuget\\packages\\system.security.cryptography.protecteddata\\9.0.13\\system.security.cryptography.protecteddata.9.0.13.nupkg.sha512"
+    "C:\\Users\\mohamed.tag\\.nuget\\packages\\system.security.cryptography.protecteddata\\9.0.13\\system.security.cryptography.protecteddata.9.0.13.nupkg.sha512",
+    "C:\\Users\\mohamed.tag\\.nuget\\packages\\microsoft.netcore.app.ref\\9.0.16\\microsoft.netcore.app.ref.9.0.16.nupkg.sha512",
+    "C:\\Users\\mohamed.tag\\.nuget\\packages\\microsoft.windowsdesktop.app.ref\\9.0.16\\microsoft.windowsdesktop.app.ref.9.0.16.nupkg.sha512",
+    "C:\\Users\\mohamed.tag\\.nuget\\packages\\microsoft.aspnetcore.app.ref\\9.0.16\\microsoft.aspnetcore.app.ref.9.0.16.nupkg.sha512",
+    "C:\\Users\\mohamed.tag\\.nuget\\packages\\microsoft.netcore.app.host.win-x64\\9.0.16\\microsoft.netcore.app.host.win-x64.9.0.16.nupkg.sha512"
   ],
   "logs": []
 }

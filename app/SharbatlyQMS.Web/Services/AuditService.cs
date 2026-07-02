@@ -37,27 +37,45 @@ public class AuditService : IAuditService
         var newJson = newValues == null ? null : JsonSerializer.Serialize(newValues);
         if (actionCode == ActionCodes.Updated && oldJson == newJson) return;
 
-        await conn.ExecuteAsync(@"
+        await conn.ExecuteAsync(InsertSql,
+            BuildParams(entityType, entityId, actionCode, oldJson, newJson, actor),
+            transaction: tx);
+    }
+
+    public async Task WriteAsync(string entityType, long entityId, string actionCode,
+        object? oldValues, object? newValues, string actor)
+    {
+        var oldJson = oldValues == null ? null : JsonSerializer.Serialize(oldValues);
+        var newJson = newValues == null ? null : JsonSerializer.Serialize(newValues);
+        if (actionCode == ActionCodes.Updated && oldJson == newJson) return;
+
+        using var c = Open();
+        await c.OpenAsync();
+        await c.ExecuteAsync(InsertSql,
+            BuildParams(entityType, entityId, actionCode, oldJson, newJson, actor));
+    }
+
+    private const string InsertSql = @"
             INSERT INTO qms_audit_log
                 (entity_type, entity_id, action_code, old_values_json, new_values_json,
                  changed_at, changed_by, source_ip, source_user_agent, source_device_name)
             VALUES
                 (@entityType, @entityId, @actionCode, @oldJson, @newJson,
-                 SYSUTCDATETIME(), @actor, @ip, @ua, @device)",
-            new
-            {
-                entityType,
-                entityId,
-                actionCode,
-                oldJson,
-                newJson,
-                actor,
-                ip     = (object?)_ctx.RemoteIp   ?? DBNull.Value,
-                ua     = (object?)_ctx.UserAgent  ?? DBNull.Value,
-                device = (object?)_ctx.DeviceName ?? DBNull.Value
-            },
-            transaction: tx);
-    }
+                 SYSUTCDATETIME(), @actor, @ip, @ua, @device)";
+
+    private object BuildParams(string entityType, long entityId, string actionCode,
+        string? oldJson, string? newJson, string actor) => new
+    {
+        entityType,
+        entityId,
+        actionCode,
+        oldJson,
+        newJson,
+        actor,
+        ip     = (object?)_ctx.RemoteIp   ?? DBNull.Value,
+        ua     = (object?)_ctx.UserAgent  ?? DBNull.Value,
+        device = (object?)_ctx.DeviceName ?? DBNull.Value
+    };
 
     // ---- GetForRecordAsync (per-record history panel, FR-008) ----
 

@@ -37,7 +37,7 @@
             </span>
         }
     </td>
-    <td class="text-end small text-muted">@s.CreatedAt.ToLocalTime():g<br />@s.CreatedBy</td>
+    <td class="text-end small text-muted">@s.CreatedAt.ToLocalTime().ToString("g")<br />@s.CreatedBy</td>
     <td class="text-end">
         <button type="button" class="btn btn-sm btn-outline-info sample-photos"
                 data-sample-id="@s.SampleId" title="Photos">

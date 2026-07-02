@@ -26,15 +26,17 @@ public class AdminController : Controller
     private readonly ILogger<AdminController> _adminLog;
     private readonly ICatalogCache _catalogCache;
     private readonly IMaraService _mara;
+    private readonly IAuditService _audit;
 
     public AdminController(IDbService db, ISettingsService settings,
         ISapODataClient sapOData, ISapSyncService sapSync, IEmailService email,
         IAdService ad, IServiceScopeFactory scopeFactory, IWebHostEnvironment env,
-        ILogger<AdminController> adminLog, ICatalogCache catalogCache, IMaraService mara)
+        ILogger<AdminController> adminLog, ICatalogCache catalogCache, IMaraService mara,
+        IAuditService audit)
     {
         _db = db; _settings = settings; _sapOData = sapOData; _sapSync = sapSync;
         _email = email; _ad = ad; _scopeFactory = scopeFactory; _env = env; _adminLog = adminLog;
-        _catalogCache = catalogCache; _mara = mara;
+        _catalogCache = catalogCache; _mara = mara; _audit = audit;
     }
 
     [HttpGet]
@@ -290,6 +292,12 @@ public class AdminController : Controller
             ("sample_observation",     "DELETE FROM qms_sample_observation"),
             ("sample",                 "DELETE FROM qms_sample"),
             ("quality_order_material", "DELETE FROM qms_quality_order_material"),
+            // Claim tables reference qms_quality_order (FK_qms_claim_qo, NO ACTION),
+            // so they must be cleared before the quality_order delete or the purge
+            // throws an FK violation and rolls back whenever any claim exists.
+            ("claim_read_marker",      "DELETE FROM qms_claim_read_marker"),
+            ("claim_note",             "DELETE FROM qms_claim_note"),
+            ("claim",                  "DELETE FROM qms_claim"),
             ("quality_order",          "DELETE FROM qms_quality_order"),
             ("arrival_checklist",      "DELETE FROM qms_arrival_checklist"),
             ("arrival_item",           "DELETE FROM qms_arrival_item"),
@@ -299,19 +307,26 @@ public class AdminController : Controller
             ("image_link",             "DELETE FROM qms_image_link"),
             ("image_asset",            "DELETE FROM qms_image_asset"),
             ("status_history",         "DELETE FROM qms_status_history"),
-            ("report_log",             "DELETE FROM qms_report_log"),
-            ("audit_log",              "DELETE FROM qms_audit_log")
+            ("report_log",             "DELETE FROM qms_report_log")
+            // NOTE: qms_audit_log is deliberately NOT purged. The audit log is
+            // append-only by design (spec FR-006 — no delete surface, including
+            // SiteAdmin). Wiping operational data does not entitle us to erase the
+            // forensic record of who did what. The purge itself is recorded as an
+            // audit entry after the transaction commits (see below).
         };
 
         // Reseed IDENTITY counters back to 1 so new records start from #1.
+        // qms_audit_log is intentionally excluded: its rows survive the purge, so
+        // reseeding its identity would collide with existing audit_id values.
         var reseedTables = new[]
         {
             "qms_sample_defect","qms_sample_reading","qms_sample_observation","qms_sample",
             "qms_quality_order_material","qms_quality_order",
+            "qms_claim_read_marker","qms_claim_note","qms_claim",
             "qms_arrival_checklist","qms_arrival_item","qms_arrival_sap_snapshot",
             "qms_shipment_snapshot","qms_arrival",
             "qms_image_link","qms_image_asset",
-            "qms_status_history","qms_report_log","qms_audit_log"
+            "qms_status_history","qms_report_log"
         };
 
         // Reseed the auto-numbered sequences (arrival_no, shipment_no, quality_order_no).
@@ -341,6 +356,15 @@ public class AdminController : Controller
                 foreach (var seq in sequences)
                     await conn.ExecuteAsync($"ALTER SEQUENCE {seq} RESTART WITH 1", transaction: tx);
 
+                // The arrivals we just deleted left qms_sap_container_cache rows
+                // flagged has_arrival=1 with a now-dangling arrival_id. Nothing ever
+                // resets these, so without this the affected containers would stay
+                // permanently hidden from the Pending Containers queue after a purge.
+                await conn.ExecuteAsync(
+                    "UPDATE qms_sap_container_cache SET has_arrival = 0, arrival_id = NULL " +
+                    "WHERE has_arrival = 1 OR arrival_id IS NOT NULL",
+                    transaction: tx);
+
                 await tx.CommitAsync();
             }
             catch
@@ -369,6 +393,20 @@ public class AdminController : Controller
 
         _adminLog.LogWarning("Danger-Zone PurgeAll completed by {User}: {Rows} rows, {Files} files. Detail: {Detail}",
             who, totalDeleted, filesDeleted, string.Join(", ", perTable));
+
+        // Record the purge in the (preserved) audit log. Best-effort: a failure
+        // here must not mask a successful purge, so it's logged and swallowed.
+        try
+        {
+            await _audit.WriteAsync(EntityTypes.System, 0, ActionCodes.Purged,
+                oldValues: null,
+                newValues: new { rows = totalDeleted, files = filesDeleted, tables = perTable },
+                actor: who);
+        }
+        catch (Exception ex)
+        {
+            _adminLog.LogError(ex, "PurgeAll succeeded but writing the purge audit entry failed.");
+        }
 
         _catalogCache.Invalidate();
         TempData["Success"] = perTable.Count == 0

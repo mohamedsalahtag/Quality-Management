@@ -71,6 +71,17 @@ public static class EntityTypes
     public const string Claim                = "Claim";
     public const string ClaimNote            = "ClaimNote";
 
+    // Administrative / master-data entity types (added 2026-07-02 to close the
+    // audit-coverage gap: user-role, catalog, and configuration changes that the
+    // operational audit depends on were previously untracked).
+    public const string User                 = "User";
+    public const string Configuration        = "Configuration";
+    public const string DefectCatalog        = "DefectCatalog";
+    public const string DefectCategory       = "DefectCategory";
+    public const string ReadingType          = "ReadingType";
+    public const string SampleHeaderField    = "SampleHeaderField";
+    public const string System               = "System";
+
     // Note: material-size override events are recorded under
     // QualityOrderMaterial (with action_code='Override' or 'OverrideCleared')
     // for continuity with the existing audit rows already in qms_audit_log.
@@ -78,6 +89,9 @@ public static class EntityTypes
     // during implementation -- no behavioural difference, fewer entity types
     // to maintain.
 
+    // Operational entity types shown as the default filter-chip group on the
+    // global audit page (FR-018). Administrative types are tracked separately
+    // (Admin) so the operational chip group stays focused on the inspection flow.
     public static readonly string[] All =
     {
         Arrival, ArrivalItem, ArrivalChecklist,
@@ -86,8 +100,16 @@ public static class EntityTypes
         Claim, ClaimNote
     };
 
+    /// <summary>Administrative / master-data entity types (user, config, catalog, purge).</summary>
+    public static readonly string[] Admin =
+    {
+        User, Configuration, DefectCatalog, DefectCategory,
+        ReadingType, SampleHeaderField, System
+    };
+
     public static bool IsValid(string? type) =>
-        !string.IsNullOrEmpty(type) && Array.IndexOf(All, type) >= 0;
+        !string.IsNullOrEmpty(type) &&
+        (Array.IndexOf(All, type) >= 0 || Array.IndexOf(Admin, type) >= 0);
 }
 
 /// <summary>
@@ -120,12 +142,17 @@ public static class ActionCodes
     public const string Override           = "Override";
     public const string OverrideCleared    = "OverrideCleared";
 
+    // Administrative actions (added 2026-07-02)
+    public const string PasswordReset      = "PasswordReset";
+    public const string Purged             = "Purged";
+
     public static readonly string[] All =
     {
         Created, Updated, Deleted,
         Opened, Submitted, CancelSubmit, Closed, Reopened, Cancelled,
         ClaimRequest, PassedQC, Approved, Hold,
-        Override, OverrideCleared
+        Override, OverrideCleared,
+        PasswordReset, Purged
     };
 
     /// <summary>The simple-CRUD subset for the global filter chip group (FR-010).</summary>

@@ -244,21 +244,31 @@ public class QualityOrderService : IQualityOrderService
         // editable state, but the reopened_* audit fields still get
         // stamped so we know it was re-opened (and the status history
         // row below records the Closed -> Reopened transition).
+        // Every UPDATE is guarded with `AND status_code=@current` so that if a
+        // concurrent request already moved the QO out of `current` between our
+        // SELECT above and this write, our UPDATE affects 0 rows and we treat it
+        // as a conflict instead of blindly overwriting the other transition
+        // (which previously let two users both Finish/Cancel the same QO).
         var sql = (toStatus, current) switch
         {
             // First Initial->Open opening
-            ("Open", "Initial")       => "UPDATE qms_quality_order SET status_code='Open',     opened_at=SYSUTCDATETIME(), opened_by=@user WHERE quality_order_id=@qoId",
+            ("Open", "Initial")       => "UPDATE qms_quality_order SET status_code='Open',     opened_at=SYSUTCDATETIME(), opened_by=@user WHERE quality_order_id=@qoId AND status_code=@current",
             // Submitted -> Open: cancel-submit. Don't overwrite opened_at;
             // just stamp the status. The audit log + status history row
             // record who cancelled the submit and when.
-            ("Open", "Submitted")     => "UPDATE qms_quality_order SET status_code='Open' WHERE quality_order_id=@qoId",
-            ("Submitted", _)          => "UPDATE qms_quality_order SET status_code='Submitted' WHERE quality_order_id=@qoId",
-            ("Closed", _)             => "UPDATE qms_quality_order SET status_code='Closed',   closed_at=SYSUTCDATETIME(), closed_by=@user, close_reason=@reason WHERE quality_order_id=@qoId",
-            ("Reopened", _)           => "UPDATE qms_quality_order SET status_code='Open',     reopened_at=SYSUTCDATETIME(), reopened_by=@user, reopen_reason=@reason WHERE quality_order_id=@qoId",
-            ("Cancelled", _)          => "UPDATE qms_quality_order SET status_code='Cancelled' WHERE quality_order_id=@qoId",
+            ("Open", "Submitted")     => "UPDATE qms_quality_order SET status_code='Open' WHERE quality_order_id=@qoId AND status_code=@current",
+            ("Submitted", _)          => "UPDATE qms_quality_order SET status_code='Submitted' WHERE quality_order_id=@qoId AND status_code=@current",
+            ("Closed", _)             => "UPDATE qms_quality_order SET status_code='Closed',   closed_at=SYSUTCDATETIME(), closed_by=@user, close_reason=@reason WHERE quality_order_id=@qoId AND status_code=@current",
+            ("Reopened", _)           => "UPDATE qms_quality_order SET status_code='Open',     reopened_at=SYSUTCDATETIME(), reopened_by=@user, reopen_reason=@reason WHERE quality_order_id=@qoId AND status_code=@current",
+            ("Cancelled", _)          => "UPDATE qms_quality_order SET status_code='Cancelled' WHERE quality_order_id=@qoId AND status_code=@current",
             _ => throw new InvalidOperationException("Unknown target status.")
         };
-        await c.ExecuteAsync(sql, new { qoId, user, reason }, tx);
+        var affected = await c.ExecuteAsync(sql, new { qoId, user, reason, current }, tx);
+        if (affected != 1)
+        {
+            tx.Rollback();
+            return (false, "This Quality Order was changed by someone else. Please refresh and try again.");
+        }
         await c.ExecuteAsync(@"
             INSERT INTO qms_status_history (entity_type, entity_id, old_status, new_status, reason, changed_at, changed_by)
             VALUES ('QualityOrder', @qoId, @current, @toStatus, @reason, SYSUTCDATETIME(), @user)",

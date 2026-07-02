@@ -25,6 +25,17 @@ public interface IAuditService
         object? oldValues, object? newValues, string actor);
 
     /// <summary>
+    /// Self-contained audit write for administrative / master-data mutations
+    /// (user-role changes, catalog and configuration edits, the Danger-Zone
+    /// purge) that are single-statement operations not already wrapped in a
+    /// caller transaction. Opens its own connection. Use the transactional
+    /// overload above for operational mutations that MUST be atomic with their
+    /// business write (FR-007).
+    /// </summary>
+    Task WriteAsync(string entityType, long entityId, string actionCode,
+        object? oldValues, object? newValues, string actor);
+
+    /// <summary>
     /// Per-record history fetch (FR-008). Point lookup via the existing
     /// IX_qms_audit_log_entity index. Returns newest first.
     /// </summary>

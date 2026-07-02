@@ -140,8 +140,12 @@ public class AuditController : Controller
                 ws.Cell(rowIdx, 8).Value  = e.EntityType;
                 ws.Cell(rowIdx, 9).Value  = e.EntityId;
                 ws.Cell(rowIdx, 10).Value = e.ActionCode;
-                ws.Cell(rowIdx, 11).Value = e.OldValuesJson ?? "";
-                ws.Cell(rowIdx, 12).Value = e.NewValuesJson ?? "";
+                // Excel's hard cell limit is 32,767 chars; a large record
+                // snapshot (NVARCHAR(MAX)) would otherwise throw and abort the
+                // whole export. Truncate for display only — the DB keeps the
+                // verbatim value (FR-019 is a write-time guarantee).
+                ws.Cell(rowIdx, 11).Value = TruncateForCell(e.OldValuesJson);
+                ws.Cell(rowIdx, 12).Value = TruncateForCell(e.NewValuesJson);
                 rowIdx++;
             }
             ws.Columns().AdjustToContents();
@@ -159,5 +163,13 @@ public class AuditController : Controller
         {
             ReleaseExportSlot(user);
         }
+    }
+
+    // Excel cells cap at 32,767 characters. Cap below that and mark truncation.
+    private const int ExcelCellMax = 32760;
+    private static string TruncateForCell(string? value)
+    {
+        if (string.IsNullOrEmpty(value)) return "";
+        return value.Length <= ExcelCellMax ? value : value[..ExcelCellMax] + "…[truncated]";
     }
 }

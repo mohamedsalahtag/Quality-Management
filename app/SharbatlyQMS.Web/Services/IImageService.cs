@@ -10,4 +10,6 @@ public interface IImageService
     Task<int> UploadAsync(string ownerType, long ownerId, string category,
         IReadOnlyList<IFormFile> files, string uploadedBy);
     Task SoftDeleteLinkAsync(long imageLinkId, string deletedBy);
+    /// <summary>Resolves the (ownerType, ownerId) an image link is attached to, so callers can authorize a delete. Null if the link doesn't exist.</summary>
+    Task<(string ownerType, long ownerId)?> GetLinkOwnerAsync(long imageLinkId);
 }

@@ -86,7 +86,7 @@ else
                             (@(string.IsNullOrEmpty(e.SourceIp) ? "unknown IP" : e.SourceIp))
                         </span>
                     }
-                    <span class="ms-2">@e.ChangedAt.ToLocalTime():g</span>
+                    <span class="ms-2">@e.ChangedAt.ToLocalTime().ToString("g")</span>
                 </span>
             </div>
             @if (e.DiffRows.Count > 0)

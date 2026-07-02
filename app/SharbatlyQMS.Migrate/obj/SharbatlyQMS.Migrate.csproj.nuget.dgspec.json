@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "C:\\QualityManagemet\\app\\SharbatlyQMS.Migrate\\SharbatlyQMS.Migrate.csproj": {}
+    "Q:\\app\\SharbatlyQMS.Migrate\\SharbatlyQMS.Migrate.csproj": {}
   },
   "projects": {
-    "C:\\QualityManagemet\\app\\SharbatlyQMS.Migrate\\SharbatlyQMS.Migrate.csproj": {
+    "Q:\\app\\SharbatlyQMS.Migrate\\SharbatlyQMS.Migrate.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "C:\\QualityManagemet\\app\\SharbatlyQMS.Migrate\\SharbatlyQMS.Migrate.csproj",
+        "projectUniqueName": "Q:\\app\\SharbatlyQMS.Migrate\\SharbatlyQMS.Migrate.csproj",
         "projectName": "SharbatlyQMS.Migrate",
-        "projectPath": "C:\\QualityManagemet\\app\\SharbatlyQMS.Migrate\\SharbatlyQMS.Migrate.csproj",
+        "projectPath": "Q:\\app\\SharbatlyQMS.Migrate\\SharbatlyQMS.Migrate.csproj",
         "packagesPath": "C:\\Users\\mohamed.tag\\.nuget\\packages\\",
-        "outputPath": "C:\\QualityManagemet\\app\\SharbatlyQMS.Migrate\\obj\\",
+        "outputPath": "Q:\\app\\SharbatlyQMS.Migrate\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\mohamed.tag\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -60,6 +60,24 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
+          "downloadDependencies": [
+            {
+              "name": "Microsoft.AspNetCore.App.Ref",
+              "version": "[9.0.16, 9.0.16]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Host.win-x64",
+              "version": "[9.0.16, 9.0.16]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Ref",
+              "version": "[9.0.16, 9.0.16]"
+            },
+            {
+              "name": "Microsoft.WindowsDesktop.App.Ref",
+              "version": "[9.0.16, 9.0.16]"
+            }
+          ],
           "frameworkReferences": {
             "Microsoft.NETCore.App": {
               "privateAssets": "all"

@@ -152,6 +152,11 @@ else
     app.UseDeveloperExceptionPage();
 }
 
+// Friendly pages for non-success status codes (e.g. a 404 from a stale link or
+// a bad record id) instead of the browser's blank default. Re-executes the
+// pipeline into /Home/HttpError preserving the original status code.
+app.UseStatusCodePagesWithReExecute("/Home/HttpError", "?code={0}");
+
 app.UseStaticFiles();
 app.UseRouting();
 app.UseAuthentication();

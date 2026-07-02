@@ -23,6 +23,17 @@ public class ImageService : IImageService
         ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"
     };
 
+    // Whitelisted owner types. ownerType is used to build the on-disk storage
+    // path, so it must never contain caller-controlled path segments (e.g.
+    // "..\.."). Anything not in this set is rejected before touching the disk.
+    public static readonly HashSet<string> AllowedOwnerTypes = new(StringComparer.Ordinal)
+    {
+        "Arrival", "ArrivalChecklist", "Sample", "QualityOrderMaterial"
+    };
+
+    public static bool IsValidOwnerType(string? ownerType) =>
+        !string.IsNullOrEmpty(ownerType) && AllowedOwnerTypes.Contains(ownerType);
+
     private const long MaxFileSize = 10L * 1024 * 1024; // 10 MB
 
     private readonly string _cs;
@@ -86,6 +97,11 @@ public class ImageService : IImageService
         IReadOnlyList<IFormFile> files, string uploadedBy)
     {
         if (files == null || files.Count == 0) return 0;
+        // Reject unknown owner types before building any filesystem path — this
+        // is the guard that prevents a crafted ownerType (e.g. "..\..") from
+        // escaping wwwroot/uploads.
+        if (!IsValidOwnerType(ownerType))
+            throw new ArgumentException($"Unknown image owner type '{ownerType}'.", nameof(ownerType));
         // V31 (2026-06-20): qms_image_link.image_category is VARCHAR(40) NOT NULL.
         // ASP.NET model binding silently converts an empty "category=" form field
         // to null, which then violated the NOT NULL constraint on every upload --
@@ -114,6 +130,10 @@ public class ImageService : IImageService
         {
             if (p == null) continue;
 
+            // Asset + link inserts are wrapped in a transaction so a failure on
+            // the link insert can't leave an orphan asset row (the exact class of
+            // bug V33 had to backfill).
+            using var tx = c.BeginTransaction();
             var imageId = await c.ExecuteScalarAsync<long>(@"
                 INSERT INTO qms_image_asset
                     (storage_provider, original_file_name, content_type, file_size_bytes,
@@ -135,7 +155,7 @@ public class ImageService : IImageService
                     p.Width,
                     p.Height,
                     uploadedBy
-                });
+                }, tx);
 
             await c.ExecuteAsync(@"
                 INSERT INTO qms_image_link
@@ -144,7 +164,8 @@ public class ImageService : IImageService
                 VALUES
                     (@imageId, @ownerType, @ownerId, @category, 0,
                      NULL, 1, SYSUTCDATETIME(), @uploadedBy);",
-                new { imageId, ownerType, ownerId, category, uploadedBy });
+                new { imageId, ownerType, ownerId, category, uploadedBy }, tx);
+            tx.Commit();
             saved++;
         }
         return saved;
@@ -215,11 +236,34 @@ public class ImageService : IImageService
     public async Task SoftDeleteLinkAsync(long imageLinkId, string deletedBy)
     {
         using var c = Open();
-        await c.ExecuteAsync(@"
-            UPDATE qms_image_asset SET is_deleted = 1
-            WHERE image_id = (SELECT image_id FROM qms_image_link WHERE image_link_id = @imageLinkId);
-            DELETE FROM qms_image_link WHERE image_link_id = @imageLinkId;",
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+        // Capture the asset id before removing the link, then delete the link,
+        // then mark the asset deleted ONLY if no other link still references it —
+        // an image may be attached from more than one owner, and deleting one
+        // attachment must not hide it everywhere.
+        var imageId = await c.ExecuteScalarAsync<long?>(
+            "SELECT image_id FROM qms_image_link WHERE image_link_id = @imageLinkId",
+            new { imageLinkId }, tx);
+        await c.ExecuteAsync(
+            "DELETE FROM qms_image_link WHERE image_link_id = @imageLinkId;",
+            new { imageLinkId }, tx);
+        if (imageId != null)
+            await c.ExecuteAsync(@"
+                UPDATE qms_image_asset SET is_deleted = 1
+                WHERE image_id = @imageId
+                  AND NOT EXISTS (SELECT 1 FROM qms_image_link WHERE image_id = @imageId);",
+                new { imageId }, tx);
+        tx.Commit();
+    }
+
+    public async Task<(string ownerType, long ownerId)?> GetLinkOwnerAsync(long imageLinkId)
+    {
+        using var c = Open();
+        var row = await c.QuerySingleOrDefaultAsync<(string, long)?>(
+            "SELECT owner_type, owner_id FROM qms_image_link WHERE image_link_id = @imageLinkId",
             new { imageLinkId });
+        return row;
     }
 
     private static string ToHex(byte[] bytes)

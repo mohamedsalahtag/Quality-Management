@@ -510,9 +510,17 @@ public class ArrivalService : IArrivalService
         using var c = Open();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
-        await c.ExecuteAsync(@"
+        // Guard on status_code='Draft' so a concurrent Complete (or a Reopen that
+        // slipped in after our GetAsync) makes this affect 0 rows -> conflict,
+        // rather than writing a second Draft->Completed history/audit pair.
+        var completed = await c.ExecuteAsync(@"
             UPDATE qms_arrival SET status_code='Completed', completed_at=SYSUTCDATETIME(), completed_by=@user
-            WHERE arrival_id=@arrivalId", new { arrivalId, user }, tx);
+            WHERE arrival_id=@arrivalId AND status_code='Draft'", new { arrivalId, user }, tx);
+        if (completed != 1)
+        {
+            tx.Rollback();
+            return (false, "This arrival was changed by someone else. Please refresh and try again.");
+        }
         await c.ExecuteAsync(@"
             UPDATE qms_shipment_snapshot SET status_code='Confirmed' WHERE arrival_id=@arrivalId",
             new { arrivalId }, tx);
@@ -544,9 +552,17 @@ public class ArrivalService : IArrivalService
         using var c = Open();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
-        await c.ExecuteAsync(@"
+        // Guard on status_code='Completed' so this can't race a concurrent
+        // CompleteAsync/CreateForArrivalAsync and leave a QO attached to a Draft
+        // (editable) arrival.
+        var reopened = await c.ExecuteAsync(@"
             UPDATE qms_arrival SET status_code='Draft', completed_at=NULL, completed_by=NULL
-            WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
+            WHERE arrival_id=@arrivalId AND status_code='Completed'", new { arrivalId }, tx);
+        if (reopened != 1)
+        {
+            tx.Rollback();
+            return (false, "This arrival was changed by someone else. Please refresh and try again.");
+        }
         await c.ExecuteAsync(@"
             UPDATE qms_shipment_snapshot SET status_code='Draft' WHERE arrival_id=@arrivalId",
             new { arrivalId }, tx);
@@ -594,6 +610,42 @@ public class ArrivalService : IArrivalService
             WHERE  owner_type='Arrival' AND owner_id=@arrivalId",
             new { arrivalId }, tx);
 
+        // Cancelled QOs still reference this arrival (the active-QO guard above
+        // only blocks non-cancelled ones), so their subtree must be removed
+        // first or the final arrival delete hits the QO->arrival FK and the whole
+        // delete rolls back. Only cancelled QOs can be present at this point.
+        var qoIds = (await c.QueryAsync<long>(
+            "SELECT quality_order_id FROM qms_quality_order WHERE arrival_id=@arrivalId",
+            new { arrivalId }, tx)).ToList();
+        if (qoIds.Count > 0)
+        {
+            var sampleIds = (await c.QueryAsync<long>(
+                "SELECT sample_id FROM qms_sample WHERE quality_order_id IN @qoIds",
+                new { qoIds }, tx)).ToList();
+            if (sampleIds.Count > 0)
+            {
+                await c.ExecuteAsync("DELETE FROM qms_sample_defect      WHERE sample_id IN @sampleIds", new { sampleIds }, tx);
+                await c.ExecuteAsync("DELETE FROM qms_sample_reading     WHERE sample_id IN @sampleIds", new { sampleIds }, tx);
+                await c.ExecuteAsync("DELETE FROM qms_sample_observation WHERE sample_id IN @sampleIds", new { sampleIds }, tx);
+                await c.ExecuteAsync("DELETE FROM qms_image_link WHERE owner_type='Sample' AND owner_id IN @sampleIds", new { sampleIds }, tx);
+            }
+            await c.ExecuteAsync("DELETE FROM qms_sample WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
+
+            var matIds = (await c.QueryAsync<long>(
+                "SELECT qo_material_id FROM qms_quality_order_material WHERE quality_order_id IN @qoIds",
+                new { qoIds }, tx)).ToList();
+            if (matIds.Count > 0)
+                await c.ExecuteAsync("DELETE FROM qms_image_link WHERE owner_type='QualityOrderMaterial' AND owner_id IN @matIds", new { matIds }, tx);
+            await c.ExecuteAsync("DELETE FROM qms_quality_order_material WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
+
+            // Claims can't exist on a cancelled QO in normal flow, but the FK is
+            // NO ACTION so clear defensively before the QO delete.
+            await c.ExecuteAsync("DELETE FROM qms_claim_read_marker WHERE claim_id IN (SELECT claim_id FROM qms_claim WHERE quality_order_id IN @qoIds)", new { qoIds }, tx);
+            await c.ExecuteAsync("DELETE FROM qms_claim_note        WHERE claim_id IN (SELECT claim_id FROM qms_claim WHERE quality_order_id IN @qoIds)", new { qoIds }, tx);
+            await c.ExecuteAsync("DELETE FROM qms_claim             WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
+            await c.ExecuteAsync("DELETE FROM qms_quality_order     WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
+        }
+
         await c.ExecuteAsync("DELETE FROM qms_arrival_sap_snapshot  WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
         await c.ExecuteAsync("DELETE FROM qms_arrival_item          WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
         await c.ExecuteAsync("DELETE FROM qms_arrival_checklist     WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
@@ -615,6 +667,12 @@ public class ArrivalService : IArrivalService
             },
             newValues: null,
             actor: user);
+
+        // Release the container back to the Pending queue: nothing else resets
+        // has_arrival, so without this the container stays hidden after delete.
+        await c.ExecuteAsync(
+            "UPDATE qms_sap_container_cache SET has_arrival = 0, arrival_id = NULL WHERE arrival_id=@arrivalId",
+            new { arrivalId }, tx);
 
         await c.ExecuteAsync("DELETE FROM qms_arrival WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
 

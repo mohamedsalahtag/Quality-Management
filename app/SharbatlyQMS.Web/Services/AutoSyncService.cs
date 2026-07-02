@@ -18,7 +18,11 @@ public class AutoSyncService : BackgroundService
     private readonly ILogger<AutoSyncService> _log;
 
     private static readonly TimeSpan PollInterval      = TimeSpan.FromMinutes(1);
-    private static readonly TimeSpan SuppressionWindow = TimeSpan.FromMinutes(50);
+    // Must be >= 60 min: the hour-match window is a full hour, so a shorter
+    // suppression window lets a sync that completes early in the hour fire a
+    // second time later in the same hour. 60 min still allows a legitimate run
+    // in the next scheduled hour (elapsed reaches 60 exactly at the hour turn).
+    private static readonly TimeSpan SuppressionWindow = TimeSpan.FromMinutes(60);
 
     // Tracks endpoints whose sync is currently in flight so a long-running
     // SyncAsync (e.g. SAP fetching tens of thousands of rows) cannot be

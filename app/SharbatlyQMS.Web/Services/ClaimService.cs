@@ -96,7 +96,10 @@ public class ClaimService : IClaimService
         // (nothing to mark seen).
         using var c = Open();
         await c.ExecuteAsync(@"
-            MERGE qms_claim_read_marker AS tgt
+            -- HOLDLOCK closes the MERGE upsert race: opening the same claim in
+            -- two tabs at once could otherwise both take the NOT MATCHED branch
+            -- and throw a PK violation.
+            MERGE qms_claim_read_marker WITH (HOLDLOCK) AS tgt
             USING (
                 SELECT cl.claim_id, @user AS user_name
                 FROM   qms_claim cl
@@ -188,13 +191,23 @@ public class ClaimService : IClaimService
         else
         {
             claimId = existing.ClaimId;
-            await c.ExecuteAsync(@"
+            // Guard on decided_at IS NULL: if the Claim Manager committed a
+            // decision between our LoadClaimAsync above and this write, the
+            // UPDATE affects 0 rows and we abort — otherwise the QM status write
+            // would silently overwrite the CM's decision (leaving e.g. a
+            // "Passed QC" status alongside the CM's decision timestamp).
+            var qmAffected = await c.ExecuteAsync(@"
                 UPDATE qms_claim
                 SET    claim_status    = @toStatus,
                        last_changed_at = SYSUTCDATETIME(),
                        last_changed_by = @user
-                WHERE  claim_id = @claimId",
+                WHERE  claim_id = @claimId AND decided_at IS NULL",
                 new { claimId, toStatus, user }, tx);
+            if (qmAffected != 1)
+            {
+                tx.Rollback();
+                return (false, "The Claim Manager has already decided on this claim. Quality Manager can no longer change the status.");
+            }
         }
 
         await InsertNoteAsync(c, tx, claimId, note, ClaimNoteKind.StatusChange, toStatus, user, authorRole);
@@ -246,15 +259,23 @@ public class ClaimService : IClaimService
         if (!allowed)
             return (false, $"Claim is in status '{ClaimStatus.Label(existing.ClaimStatus)}' -- Claim Manager has nothing to decide.");
 
-        await c.ExecuteAsync(@"
+        // Guard on the status we loaded so a concurrent CM flip (or a QM revert)
+        // between LoadClaimAsync and this write is detected instead of silently
+        // last-writer-wins.
+        var cmAffected = await c.ExecuteAsync(@"
             UPDATE qms_claim
             SET    claim_status    = @toStatus,
                    last_changed_at = SYSUTCDATETIME(),
                    last_changed_by = @user,
                    decided_at      = COALESCE(decided_at, SYSUTCDATETIME()),
                    decided_by      = COALESCE(decided_by, @user)
-            WHERE  claim_id = @claimId",
-            new { claimId = existing.ClaimId, toStatus, user }, tx);
+            WHERE  claim_id = @claimId AND claim_status = @expected",
+            new { claimId = existing.ClaimId, toStatus, user, expected = existing.ClaimStatus }, tx);
+        if (cmAffected != 1)
+        {
+            tx.Rollback();
+            return (false, "This claim was changed by someone else. Please refresh and try again.");
+        }
 
         await InsertNoteAsync(c, tx, existing.ClaimId, note, ClaimNoteKind.StatusChange, toStatus, user, authorRole);
 

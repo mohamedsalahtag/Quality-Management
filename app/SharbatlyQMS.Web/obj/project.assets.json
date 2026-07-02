@@ -4194,11 +4194,11 @@
   "project": {
     "version": "1.0.0",
     "restore": {
-      "projectUniqueName": "C:\\QualityManagemet\\app\\SharbatlyQMS.Web\\SharbatlyQMS.Web.csproj",
+      "projectUniqueName": "Q:\\app\\SharbatlyQMS.Web\\SharbatlyQMS.Web.csproj",
       "projectName": "SharbatlyQMS.Web",
-      "projectPath": "C:\\QualityManagemet\\app\\SharbatlyQMS.Web\\SharbatlyQMS.Web.csproj",
+      "projectPath": "Q:\\app\\SharbatlyQMS.Web\\SharbatlyQMS.Web.csproj",
       "packagesPath": "C:\\Users\\mohamed.tag\\.nuget\\packages\\",
-      "outputPath": "C:\\QualityManagemet\\app\\SharbatlyQMS.Web\\obj\\",
+      "outputPath": "Q:\\app\\SharbatlyQMS.Web\\obj\\",
       "projectStyle": "PackageReference",
       "configFilePaths": [
         "C:\\Users\\mohamed.tag\\AppData\\Roaming\\NuGet\\NuGet.Config"
@@ -4283,6 +4283,24 @@
         ],
         "assetTargetFallback": true,
         "warn": true,
+        "downloadDependencies": [
+          {
+            "name": "Microsoft.AspNetCore.App.Ref",
+            "version": "[9.0.16, 9.0.16]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Host.win-x64",
+            "version": "[9.0.16, 9.0.16]"
+          },
+          {
+            "name": "Microsoft.NETCore.App.Ref",
+            "version": "[9.0.16, 9.0.16]"
+          },
+          {
+            "name": "Microsoft.WindowsDesktop.App.Ref",
+            "version": "[9.0.16, 9.0.16]"
+          }
+        ],
         "frameworkReferences": {
           "Microsoft.AspNetCore.App": {
             "privateAssets": "none"

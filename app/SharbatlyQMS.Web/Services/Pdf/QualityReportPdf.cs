@@ -176,15 +176,17 @@ public static class QualityReportPdf
                 // ever uploaded.
                 if (!string.IsNullOrWhiteSpace(d.LogoAbsolutePath) && System.IO.File.Exists(d.LogoAbsolutePath))
                 {
-                    e.Height(45).AlignLeft().Image(d.LogoAbsolutePath).FitArea();
+                    // Guard the image load: a corrupt/truncated/unsupported logo
+                    // file would otherwise throw during GeneratePdf and break
+                    // EVERY quality report (incl. supplier emails). Mirror the
+                    // ArrivalReportPdf fallback.
+                    try { e.Height(45).AlignLeft().Image(d.LogoAbsolutePath).FitArea(); return; }
+                    catch { /* fall through to placeholder */ }
                 }
-                else
-                {
-                    e.Width(45).Height(45)
-                        .Background(Accent)
-                        .AlignCenter().AlignMiddle()
-                        .Text("QMS").FontColor(Colors.White).FontSize(10).Bold();
-                }
+                e.Width(45).Height(45)
+                    .Background(Accent)
+                    .AlignCenter().AlignMiddle()
+                    .Text("QMS").FontColor(Colors.White).FontSize(10).Bold();
             });
             row.RelativeItem().AlignCenter().Column(c =>
             {

@@ -1,0 +1,22 @@
+@model int
+@{
+    var code = Model;
+    ViewData["Title"] = code == 404 ? "Page not found" : $"Error {code}";
+    var (icon, heading, message) = code switch
+    {
+        404 => ("bi-compass",            "Page not found",
+                "The page or record you were looking for doesn't exist. It may have been removed, or the link may be out of date."),
+        403 => ("bi-shield-lock",        "Access denied",
+                "You don't have permission to view this page. Contact your administrator if you believe this is a mistake."),
+        _   => ("bi-exclamation-octagon", $"Something went wrong ({code})",
+                "We couldn't complete your request. Please try again, and contact your administrator if the problem continues.")
+    };
+}
+<div class="text-center py-5">
+    <i class="bi @icon display-1 text-secondary"></i>
+    <h1 class="h3 mt-3">@heading</h1>
+    <p class="text-muted">@message</p>
+    <a asp-controller="Home" asp-action="Index" class="btn btn-primary mt-3">
+        <i class="bi bi-house me-1"></i>Back to dashboard
+    </a>
+</div>
