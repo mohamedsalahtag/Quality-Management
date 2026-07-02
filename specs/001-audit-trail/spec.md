@@ -6,6 +6,22 @@
 
 **Status**: Draft
 
+> **Implementation deviations (recorded 2026-07-02, during the code-review fix pass).**
+> The shipped implementation differs from the original spec below in these ways;
+> they are intentional and this note is the source of truth where they conflict:
+> - **No separate `Auditor` role.** It was introduced (V15) then retired (V16). The
+>   global audit log and Excel export are gated **SiteAdmin-only** (`AuthPolicies.AdminOnly`),
+>   not Manager/Auditor. FR-009/FR-011 are superseded accordingly.
+> - **No per-record history panel (FR-008 / contract E-2).** The per-entity panel was
+>   removed 2026-06-13; per-record history is reached by filtering the global
+>   `/Audit` page by entity type + id. `IAuditService.GetForRecordAsync` /
+>   `GetForCompositeRecordAsync` remain in code for that path but no `HistoryPanel`
+>   endpoint is exposed.
+> - **Append-only is enforced (FR-006).** The Danger-Zone "Purge All" no longer deletes
+>   `qms_audit_log` (fixed 2026-07-02); the purge itself is now audited.
+> - **Audit coverage extended (2026-07-02)** beyond the original operational entities to
+>   user/role, configuration, and image mutations, and the Danger-Zone purge.
+
 **Input**: User description: "Add an Audit Trail feature to the Quality Management System. Every time a user creates, updates, or deletes a quality record (inspections, defects, corrective actions), the system should log who made the change, what changed, the old value, the new value, and when it happened. Quality managers can view the full audit history for any record. They can filter the audit log by user, date range, record type, and action type (created/updated/deleted). The audit log is read-only — no one can edit or delete audit entries. Auditors (a separate role) can export the audit log to Excel for a selected date range."
 
 ## Clarifications

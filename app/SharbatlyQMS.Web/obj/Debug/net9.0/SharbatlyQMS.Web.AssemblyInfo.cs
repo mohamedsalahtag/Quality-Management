@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("SharbatlyQMS.Web")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+9b4747b3d90714a2a7fc9e743c890a6d144f3803")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e72ed9558e7d88b08a28bec7ad7ba7cfe438d802")]
 [assembly: System.Reflection.AssemblyProductAttribute("SharbatlyQMS.Web")]
 [assembly: System.Reflection.AssemblyTitleAttribute("SharbatlyQMS.Web")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

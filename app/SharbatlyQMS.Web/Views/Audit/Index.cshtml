@@ -18,15 +18,33 @@
 
     var entityChips = EntityTypes.All;
     var actionChips = ActionCodes.CrudOnly;
+
+    // Build a query string that carries EVERY active filter (incl. the
+    // entityTypes/actionCodes arrays and pageSize, which the old links dropped —
+    // so paging past page 1 or exporting silently widened the result set).
+    string BuildFilterQuery(bool withCursor)
+    {
+        var parts = new List<string>();
+        if (f.Users != null) foreach (var u in f.Users) parts.Add("users=" + Uri.EscapeDataString(u));
+        if (f.FromUtc.HasValue) parts.Add("fromUtc=" + Uri.EscapeDataString(f.FromUtc.Value.ToString("o")));
+        if (f.ToUtc.HasValue)   parts.Add("toUtc="   + Uri.EscapeDataString(f.ToUtc.Value.ToString("o")));
+        if (f.EntityTypes != null) foreach (var e in f.EntityTypes) parts.Add("entityTypes=" + Uri.EscapeDataString(e));
+        if (f.ActionCodes != null) foreach (var a in f.ActionCodes) parts.Add("actionCodes=" + Uri.EscapeDataString(a));
+        if (f.PageSize != 25) parts.Add("pageSize=" + f.PageSize);
+        if (withCursor && Model.NextCursorTime.HasValue)
+        {
+            parts.Add("cursorTime=" + Uri.EscapeDataString(Model.NextCursorTime.Value.ToString("o")));
+            if (Model.NextCursorId.HasValue) parts.Add("cursorId=" + Model.NextCursorId.Value);
+        }
+        return parts.Count > 0 ? "?" + string.Join("&", parts) : "";
+    }
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0"><i class="bi bi-shield-shaded me-1 text-primary"></i>Audit Log</h1>
     @if (canExport)
     {
-        <a class="btn btn-outline-success" asp-action="Export"
-           asp-route-fromUtc="@(f.FromUtc?.ToString("o"))"
-           asp-route-toUtc="@(f.ToUtc?.ToString("o"))">
+        <a class="btn btn-outline-success" href="@(Url.Action("Export") + BuildFilterQuery(false))">
             <i class="bi bi-file-earmark-excel me-1"></i>Export to Excel
         </a>
     }
@@ -362,14 +380,7 @@
     {
         <div class="card-footer text-center py-2">
             <a class="btn btn-sm btn-outline-primary"
-               asp-action="Index"
-               asp-all-route-data="@(new Dictionary<string,string?> {
-                   { "users",        f.Users != null ? string.Join(",", f.Users) : null },
-                   { "fromUtc",      f.FromUtc?.ToString("o") },
-                   { "toUtc",        f.ToUtc?.ToString("o") },
-                   { "cursorTime",   Model.NextCursorTime?.ToString("o") },
-                   { "cursorId",     Model.NextCursorId?.ToString() }
-               })">
+               href="@(Url.Action("Index") + BuildFilterQuery(true))">
                 Load more <i class="bi bi-chevron-down ms-1"></i>
             </a>
         </div>

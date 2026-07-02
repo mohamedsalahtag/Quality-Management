@@ -5,6 +5,12 @@ description: "Task list for the Audit Trail feature (001-audit-trail)"
 
 # Tasks: Audit Trail
 
+> **Note (2026-07-02):** Some tasks below are marked complete for work that was
+> later removed or changed (per-record history panel T023–T028; the `Auditor`
+> role). See the "Implementation deviations" note at the top of `spec.md` for the
+> authoritative current state — SiteAdmin-only global audit, no per-record panel,
+> append-only enforced, audit coverage extended to admin/config/user/image changes.
+
 **Input**: Design documents from `/specs/001-audit-trail/`
 **Prerequisites**: [plan.md](plan.md), [spec.md](spec.md), [research.md](research.md), [data-model.md](data-model.md), [contracts/audit-endpoints.md](contracts/audit-endpoints.md), [quickstart.md](quickstart.md)
 **Tests**: NOT requested in the spec — test tasks are omitted per the `/speckit-tasks` rules.

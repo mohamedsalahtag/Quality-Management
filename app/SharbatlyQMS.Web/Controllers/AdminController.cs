@@ -118,6 +118,9 @@ public class AdminController : Controller
             IsActive     = true,
             CreatedBy    = GetCurrentUserId()
         });
+        var createdUser = await _db.GetUserByUsernameAsync(info.Username);
+        await AuditAdminAsync(EntityTypes.User, createdUser?.UserId ?? 0, ActionCodes.Created,
+            null, new { info.Username, role, plantCode });
         TempData["Success"] = plantCode != null
             ? $"User '{info.Username}' added as {role} scoped to plant {plantCode}."
             : $"User '{info.Username}' added with role {role}.";
@@ -169,6 +172,7 @@ public class AdminController : Controller
             return RedirectToAction(nameof(Users));
         }
 
+        var beforeRole = u.Role; var beforePlant = u.PlantCode;
         u.FullName   = fullName;
         u.Email      = email;
         u.Department = department;
@@ -180,6 +184,9 @@ public class AdminController : Controller
                             ? plantCode
                             : null;
         await _db.UpdateUserAsync(u);
+        await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Updated,
+            new { role = beforeRole, plantCode = beforePlant },
+            new { role = u.Role, plantCode = u.PlantCode });
         TempData["Success"] = $"User '{u.Username}' updated.";
         return RedirectToAction(nameof(Users));
     }
@@ -197,6 +204,9 @@ public class AdminController : Controller
         }
         u.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);
         await _db.UpdateUserAsync(u);
+        // Record that a reset happened (never the password itself).
+        await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.PasswordReset,
+            null, new { u.Username });
         TempData["Success"] = $"Password reset for '{u.Username}'.";
         return RedirectToAction(nameof(Users));
     }
@@ -214,6 +224,8 @@ public class AdminController : Controller
         var u = await _db.GetUserByIdAsync(userId);
         if (u == null) return NotFound();
         await _db.SetUserActiveAsync(userId, !u.IsActive, current);
+        await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Updated,
+            new { isActive = u.IsActive }, new { isActive = !u.IsActive });
         TempData["Success"] = $"User '{u.Username}' is now {(!u.IsActive ? "active" : "disabled")}.";
         return RedirectToAction(nameof(Users));
     }
@@ -231,6 +243,9 @@ public class AdminController : Controller
         var u = await _db.GetUserByIdAsync(userId);
         if (u == null) return NotFound();
         var ok = await _db.TryDeleteUserAsync(userId);
+        if (ok)
+            await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Deleted,
+                new { u.Username, u.Role, u.PlantCode }, null);
         TempData[ok ? "Success" : "Error"] = ok
             ? $"User '{u.Username}' deleted."
             : $"User '{u.Username}' is referenced elsewhere - disable instead.";
@@ -253,7 +268,12 @@ public class AdminController : Controller
             if (id == current) { skippedSelf++; continue; }
             var u = await _db.GetUserByIdAsync(id);
             if (u == null) continue;
-            if (await _db.TryDeleteUserAsync(id)) deleted++;
+            if (await _db.TryDeleteUserAsync(id))
+            {
+                deleted++;
+                await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Deleted,
+                    new { u.Username, u.Role, u.PlantCode }, null);
+            }
             else blockedByFk++;
         }
         var parts = new List<string> { $"{deleted} deleted" };
@@ -429,6 +449,8 @@ public class AdminController : Controller
     public async Task<IActionResult> SaveSapSettings(SapEndpointConfig sap)
     {
         await _settings.SaveSapConfigAsync(sap, GetCurrentUserId());
+        // Audit the change (section only — never the credentials themselves).
+        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null, new { section = "SAP OData" });
         TempData["Success"] = "SAP OData settings saved.";
         return RedirectToAction(nameof(Settings), new { activeTab = "sap" });
     }
@@ -438,6 +460,7 @@ public class AdminController : Controller
     public async Task<IActionResult> SaveSmtpSettings(SmtpConfig smtp)
     {
         await _settings.SaveSmtpConfigAsync(smtp, GetCurrentUserId());
+        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null, new { section = "SMTP" });
         TempData["Success"] = "SMTP settings saved.";
         return RedirectToAction(nameof(Settings), new { activeTab = "smtp" });
     }
@@ -451,6 +474,7 @@ public class AdminController : Controller
         // and the default model binder matches the parameter name as the prefix.
         // A different parameter name (e.g. "thumb") silently binds to defaults.
         await _settings.SaveThumbnailConfigAsync(thumbnails, GetCurrentUserId());
+        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null, new { section = "Thumbnails" });
         TempData["Success"] = "Thumbnail settings saved.";
         return RedirectToAction(nameof(Settings), new { activeTab = "thumbnails" });
     }
@@ -460,6 +484,7 @@ public class AdminController : Controller
     public async Task<IActionResult> SaveAlertSettings(AlertConfig alerts)
     {
         await _settings.SaveAlertConfigAsync(alerts, GetCurrentUserId());
+        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null, new { section = "Alert thresholds" });
         TempData["Success"] = "Alert thresholds saved.";
         return RedirectToAction(nameof(Settings), new { activeTab = "alerts" });
     }
@@ -474,6 +499,8 @@ public class AdminController : Controller
         if (cfg.PollingMinutes < 5)    cfg.PollingMinutes = 5;
         if (cfg.PollingMinutes > 1440) cfg.PollingMinutes = 1440;
         await _settings.SaveContainerPollConfigAsync(cfg, GetCurrentUserId());
+        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null,
+            new { section = "Container polling", cfg.PollingMinutes });
         TempData["Success"] = "Pending Containers pulling saved.";
         return RedirectToAction(nameof(Settings), new { activeTab = "sap" });
     }
@@ -1494,6 +1521,17 @@ public class AdminController : Controller
     {
         var claim = User.FindFirst(ClaimTypes.NameIdentifier);
         return int.TryParse(claim?.Value, out var id) ? id : 0;
+    }
+
+    // Best-effort audit for administrative / master-data mutations. Uses the
+    // self-contained (non-transactional) audit overload; a failure here is
+    // logged and swallowed so it never blocks the admin action.
+    private async Task AuditAdminAsync(string entityType, long entityId, string action,
+        object? oldValues, object? newValues)
+    {
+        var actor = User.FindFirstValue(ClaimTypes.Name) ?? "unknown";
+        try { await _audit.WriteAsync(entityType, entityId, action, oldValues, newValues, actor); }
+        catch (Exception ex) { _adminLog.LogError(ex, "Admin audit write failed for {Entity} {Action}", entityType, action); }
     }
 }
 
