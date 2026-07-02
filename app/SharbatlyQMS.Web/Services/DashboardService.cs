@@ -90,13 +90,28 @@ public class DashboardService : IDashboardService
                     WHERE  has_arrival = 0
                 ) AS p)                                                                              AS PendingContainers;
 
-            -- 5) Avg defect % (closed QOs, 30d)
-            SELECT AVG(CAST(sd.defect_percentage AS DECIMAL(9,4)))
-            FROM   qms_sample_defect sd
-            JOIN   qms_sample        s  ON s.sample_id        = sd.sample_id
-            JOIN   qms_quality_order qo ON qo.quality_order_id = s.quality_order_id
-            WHERE  qo.status_code = 'Closed'
-              AND  qo.closed_at >= DATEADD(day, -30, SYSUTCDATETIME());
+            -- 5) Avg defect % (closed QOs, 30d).
+            -- Computed as total defective units / total inspected units, NOT as
+            -- AVG(defect_percentage). The old average-of-percentages was distorted:
+            -- it divided by the catalog size (adding a defect type lowered the KPI
+            -- with no quality change) and over-weighted heavily-sampled QOs. This
+            -- weights by sample size and is independent of catalog size.
+            SELECT CASE WHEN SUM(x.inspected) > 0
+                        THEN SUM(x.defective) * 100.0 / SUM(x.inspected)
+                        ELSE NULL END
+            FROM (
+                SELECT s.sample_id,
+                       MAX(CAST(s.sample_size AS DECIMAL(18,4))) AS inspected,
+                       SUM(CAST(sd.defect_value AS DECIMAL(18,4))) AS defective
+                FROM   qms_sample        s
+                JOIN   qms_quality_order qo ON qo.quality_order_id = s.quality_order_id
+                LEFT JOIN qms_sample_defect sd ON sd.sample_id = s.sample_id
+                WHERE  qo.status_code = 'Closed'
+                  AND  qo.closed_at >= DATEADD(day, -30, SYSUTCDATETIME())
+                  AND  s.is_deleted = 0
+                  AND  s.sample_size > 0
+                GROUP BY s.sample_id
+            ) x;
 
             -- 6) Open arrivals (Draft) top 10 newest
             SELECT TOP 10

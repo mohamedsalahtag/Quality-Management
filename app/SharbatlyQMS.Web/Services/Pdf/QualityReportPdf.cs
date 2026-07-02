@@ -153,11 +153,15 @@ public static class QualityReportPdf
                     col.Item().ShowEntire().Element(c =>
                         RenderMaterialCard(c, first.Material, first.MaterialHeaderValues, d.HeaderFieldScopeById));
 
-                    // ShowEntire keeps each sample card whole: if it doesn't
-                    // fit on the current page, QuestPDF moves the entire card
-                    // to the next page instead of splitting it mid-section.
+                    // Do NOT ShowEntire the whole sample card: with a large
+                    // defect catalog (many category sections + readings) a single
+                    // card can exceed one page, and ShowEntire on an over-tall
+                    // element throws DocumentLayoutException — which failed EVERY
+                    // report for that QO (including supplier emails). Letting the
+                    // card split across pages is preferable to a crash; the
+                    // internal sub-sections still lay out cleanly.
                     foreach (var s in grp)
-                        col.Item().ShowEntire().Element(c => RenderSampleDetail(c, d, s));
+                        col.Item().Element(c => RenderSampleDetail(c, d, s));
                 }
             }
         });

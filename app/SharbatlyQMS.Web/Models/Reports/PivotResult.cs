@@ -22,6 +22,14 @@ public class PivotResult
     public decimal[][]         RowTotals     { get; set; } = Array.Empty<decimal[]>();
     public decimal[][]         ColTotals     { get; set; } = Array.Empty<decimal[]>();
     public decimal[]           GrandTotals   { get; set; } = Array.Empty<decimal>();
+    /// <summary>
+    /// Per-measure flag: is a roll-up total mathematically meaningful for this
+    /// measure's aggregation? SUM/COUNT (additive), MIN and MAX roll up
+    /// correctly; AVG and COUNT_DISTINCT do NOT (you cannot average averages or
+    /// sum distinct counts across groups), so their totals are suppressed rather
+    /// than shown wrong.
+    /// </summary>
+    public bool[]              MeasureTotalsValid { get; set; } = Array.Empty<bool>();
     public int                 RowsScanned   { get; set; }
     public bool                Truncated     { get; set; }
 }

@@ -193,12 +193,36 @@ public class PivotService : IPivotService
             .ToDictionary(t => t.k, t => t.i, StringArrayComparer.Instance);
 
         var cells = new List<PivotCell>(rows.Count);
-        // Per-(axis,measure) totals.
-        var rowTotalsArr = new decimal[rowKeyList.Count][];
-        for (int i = 0; i < rowKeyList.Count; i++) rowTotalsArr[i] = new decimal[measureCount];
-        var colTotalsArr = new decimal[Math.Max(colKeyList.Count, 1)][];
-        for (int i = 0; i < colTotalsArr.Length; i++) colTotalsArr[i] = new decimal[measureCount];
-        var grandTotals  = new decimal[measureCount];
+
+        // Per-measure roll-up rule. SUM/COUNT are additive; MIN/MAX roll up as
+        // min/max of the group values (min-of-mins = overall min, likewise max).
+        // AVG and COUNT_DISTINCT CANNOT be derived from the already-aggregated
+        // group values (averaging averages / summing distinct counts is wrong),
+        // so their totals are suppressed via MeasureTotalsValid=false instead of
+        // being shown as a misleading sum. (Fixes the previous unconditional +=.)
+        var aggs = measureSpecs.Select(ms => ms.Agg).ToArray();
+        var totalsValid = aggs.Select(a =>
+            a is PivotAggregations.Sum or PivotAggregations.Count
+              or PivotAggregations.Min or PivotAggregations.Max).ToArray();
+
+        // Nullable accumulators so MIN/MAX start empty rather than at 0.
+        var rowAcc = new decimal?[rowKeyList.Count][];
+        for (int i = 0; i < rowKeyList.Count; i++) rowAcc[i] = new decimal?[measureCount];
+        var colAcc = new decimal?[Math.Max(colKeyList.Count, 1)][];
+        for (int i = 0; i < colAcc.Length; i++) colAcc[i] = new decimal?[measureCount];
+        var grandAcc = new decimal?[measureCount];
+
+        void Reduce(decimal?[] acc, int m, decimal v)
+        {
+            acc[m] = aggs[m] switch
+            {
+                PivotAggregations.Min => acc[m] is { } x ? Math.Min(x, v) : v,
+                PivotAggregations.Max => acc[m] is { } x ? Math.Max(x, v) : v,
+                // Additive; non-rollup aggs still accumulate a sum but it is
+                // never surfaced (totalsValid=false), so no harm.
+                _                     => (acc[m] ?? 0m) + v,
+            };
+        }
 
         foreach (var rc in rows)
         {
@@ -207,12 +231,20 @@ public class PivotService : IPivotService
             cells.Add(new PivotCell { RowIndex = ri, ColIndex = ci, Values = rc.Values });
             for (int m = 0; m < measureCount; m++)
             {
-                var v = rc.Values[m] ?? 0m;
-                rowTotalsArr[ri][m] += v;
-                colTotalsArr[ci][m] += v;
-                grandTotals[m]      += v;
+                if (rc.Values[m] is not { } v) continue;
+                Reduce(rowAcc[ri], m, v);
+                Reduce(colAcc[ci], m, v);
+                Reduce(grandAcc,   m, v);
             }
         }
+
+        // Flatten nullable accumulators to the decimal[][] contract (null -> 0;
+        // suppression is signalled separately by MeasureTotalsValid).
+        static decimal[][] Flatten(decimal?[][] acc) =>
+            acc.Select(row => row.Select(v => v ?? 0m).ToArray()).ToArray();
+        var rowTotalsArr = Flatten(rowAcc);
+        var colTotalsArr = Flatten(colAcc);
+        var grandTotals  = grandAcc.Select(v => v ?? 0m).ToArray();
 
         // When colKeyList is empty the colTotalsArr we created (length 1) is
         // logical noise -- match the public contract by emitting an empty
@@ -236,6 +268,7 @@ public class PivotService : IPivotService
             RowTotals   = rowTotalsArr,
             ColTotals   = colTotalsArr,
             GrandTotals = grandTotals,
+            MeasureTotalsValid = totalsValid,
             RowsScanned = rows.Count,
             Truncated   = truncated,
         };

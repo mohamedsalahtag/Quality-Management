@@ -30,6 +30,9 @@ public class ReportsController : Controller
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<ReportsController> _log;
 
+    // Hard cap on rows in a single flat-defects Excel export to bound memory.
+    private const int MaxExportRows = 250_000;
+
     public ReportsController(IQualityOrderService qos, IArrivalService arrivals,
         IImageService images, ISettingsService settings, IMaraService mara,
         IVendorService vendors, IEmailService email,
@@ -580,30 +583,29 @@ public class ReportsController : Controller
         var matHeaderCodes    = new List<string>();
         var sampleHeaderCodes = new List<string>();
         var readingCodes      = new List<string>();
-        int rowIdx = 0;
-        bool headersWritten = false;
+        var matSeen = new HashSet<string>(); var smpSeen = new HashSet<string>(); var rdSeen = new HashSet<string>();
+        bool exportTruncated = false;
 
+        // Buffer rows FIRST and collect the full dynamic-column key set across
+        // ALL rows before writing anything. Previously the header was written
+        // from row 1's keys and rewritten mid-stream when a later row introduced
+        // a new code — which shifted the header but NOT the already-written data
+        // rows, silently misaligning their values. Buffering makes the column
+        // map final before the first cell is written. Bounded by MaxExportRows.
+        var buffered = new List<FlatDefectRow>();
         await foreach (var r in _qos.StreamFlatDefectRowsAsync(filter, ct))
         {
-            if (!headersWritten)
-            {
-                matHeaderCodes.AddRange(r.MaterialHeaderValues.Keys);
-                sampleHeaderCodes.AddRange(r.SampleHeaderValues.Keys);
-                readingCodes.AddRange(r.Readings.Keys);
-                WriteHeaderRow(ws, staticLabels, matHeaderCodes, sampleHeaderCodes, readingCodes);
-                headersWritten = true;
-                rowIdx = 2;
-            }
-            else
-            {
-                foreach (var k in r.MaterialHeaderValues.Keys) if (!matHeaderCodes.Contains(k))
-                { matHeaderCodes.Add(k); WriteHeaderRow(ws, staticLabels, matHeaderCodes, sampleHeaderCodes, readingCodes); }
-                foreach (var k in r.SampleHeaderValues.Keys) if (!sampleHeaderCodes.Contains(k))
-                { sampleHeaderCodes.Add(k); WriteHeaderRow(ws, staticLabels, matHeaderCodes, sampleHeaderCodes, readingCodes); }
-                foreach (var k in r.Readings.Keys) if (!readingCodes.Contains(k))
-                { readingCodes.Add(k); WriteHeaderRow(ws, staticLabels, matHeaderCodes, sampleHeaderCodes, readingCodes); }
-            }
+            if (buffered.Count >= MaxExportRows) { exportTruncated = true; break; }
+            foreach (var k in r.MaterialHeaderValues.Keys) if (matSeen.Add(k)) matHeaderCodes.Add(k);
+            foreach (var k in r.SampleHeaderValues.Keys)   if (smpSeen.Add(k)) sampleHeaderCodes.Add(k);
+            foreach (var k in r.Readings.Keys)             if (rdSeen.Add(k))  readingCodes.Add(k);
+            buffered.Add(r);
+        }
 
+        WriteHeaderRow(ws, staticLabels, matHeaderCodes, sampleHeaderCodes, readingCodes);
+        int rowIdx = 2;
+        foreach (var r in buffered)
+        {
             int col = 1;
             ws.Cell(rowIdx, col++).Value = r.ArrivalNo;
             ws.Cell(rowIdx, col++).Value = r.Plant;
@@ -680,20 +682,27 @@ public class ReportsController : Controller
             rowIdx++;
         }
 
-        if (!headersWritten)
+        if (exportTruncated)
         {
-            // Empty result -- still write headers so the file is well-formed.
-            WriteHeaderRow(ws, staticLabels, matHeaderCodes, sampleHeaderCodes, readingCodes);
+            // Make the truncation unmissable rather than silently returning a
+            // partial file that looks complete.
+            ws.Cell(rowIdx, 1).Value =
+                $"NOTE: export truncated at {MaxExportRows:N0} rows. Narrow your filter (e.g. a shorter PO-date range) to get the full result.";
+            ws.Row(rowIdx).Style.Font.SetBold();
+            ws.Row(rowIdx).Style.Font.FontColor = XLColor.Red;
         }
         ws.Row(1).Style.Font.Bold = true;
         ws.SheetView.FreezeRows(1);
         ws.Columns().AdjustToContents();
 
-        using var ms = new MemoryStream();
+        // Stream the workbook straight to the response instead of copying it into
+        // a byte[] (ToArray doubled peak memory for large exports). FileStreamResult
+        // disposes the stream once the response is written.
+        var ms = new MemoryStream();
         wb.SaveAs(ms);
         ms.Position = 0;
         var fileName = $"qms-flat-defects-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
-        return File(ms.ToArray(),
+        return File(ms,
             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             fileName);
         }
@@ -903,6 +912,17 @@ public class ReportsController : Controller
         var cellMap = new Dictionary<(int, int), decimal?[]>(r.Cells.Length);
         foreach (var c in r.Cells) cellMap[(c.RowIndex, c.ColIndex)] = c.Values;
 
+        // A roll-up total is only meaningful for additive / min / max measures;
+        // AVG and COUNT_DISTINCT are suppressed (blank) rather than shown wrong.
+        bool ValidTotal(int m) => r.MeasureTotalsValid == null
+                               || r.MeasureTotalsValid.Length <= m
+                               || r.MeasureTotalsValid[m];
+        void SetTotalCell(IXLCell cell, decimal v, string? fmt, int m)
+        {
+            if (ValidTotal(m)) SetMeasureCell(cell, v, fmt);
+            else cell.Value = "";
+        }
+
         int outRow = firstDataRow;
         for (int ri = 0; ri < r.RowKeys.Length; ri++)
         {
@@ -913,8 +933,8 @@ public class ReportsController : Controller
             if (colKeyCount == 0)
             {
                 for (int m = 0; m < M; m++)
-                    SetMeasureCell(ws.Cell(outRow, dataColStart + m),
-                        r.RowTotals[ri][m], r.Measures[m].Format);
+                    SetTotalCell(ws.Cell(outRow, dataColStart + m),
+                        r.RowTotals[ri][m], r.Measures[m].Format, m);
             }
             else
             {
@@ -932,7 +952,7 @@ public class ReportsController : Controller
                 for (int m = 0; m < M; m++)
                 {
                     var cell = ws.Cell(outRow, totalStart + m);
-                    SetMeasureCell(cell, r.RowTotals[ri][m], r.Measures[m].Format);
+                    SetTotalCell(cell, r.RowTotals[ri][m], r.Measures[m].Format, m);
                     cell.Style.Font.SetBold();
                 }
             }
@@ -945,12 +965,12 @@ public class ReportsController : Controller
             ws.Cell(outRow, 1).Value = "Total";
             for (int ci = 0; ci < colKeyCount; ci++)
                 for (int m = 0; m < M; m++)
-                    SetMeasureCell(ws.Cell(outRow, dataColStart + ci * M + m),
-                        r.ColTotals[ci][m], r.Measures[m].Format);
+                    SetTotalCell(ws.Cell(outRow, dataColStart + ci * M + m),
+                        r.ColTotals[ci][m], r.Measures[m].Format, m);
             int totalStart = dataColStart + colKeyCount * M;
             for (int m = 0; m < M; m++)
-                SetMeasureCell(ws.Cell(outRow, totalStart + m),
-                    r.GrandTotals[m], r.Measures[m].Format);
+                SetTotalCell(ws.Cell(outRow, totalStart + m),
+                    r.GrandTotals[m], r.Measures[m].Format, m);
             var trange = ws.Range(outRow, 1, outRow, totalCols);
             trange.Style.Font.SetBold();
             trange.Style.Fill.BackgroundColor = XLColor.FromHtml("#E9ECEF");

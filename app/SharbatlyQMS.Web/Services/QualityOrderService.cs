@@ -541,7 +541,16 @@ public class QualityOrderService : IQualityOrderService
                    rt.reading_name  ReadingName,
                    rt.value_kind    ValueKind
             FROM   qms_sample_reading r
-            JOIN   qms_reading_type   rt ON rt.reading_type_code = r.reading_type_code
+            -- Collapse the reading-type catalog to ONE row per code: the same
+            -- code can exist in multiple material groups (per-group namespace),
+            -- and a plain JOIN fanned each physical reading out N times.
+            JOIN   (SELECT reading_type_code,
+                           MIN(reading_name) AS reading_name,
+                           MIN(value_kind)   AS value_kind,
+                           MIN(sort_order)   AS sort_order
+                    FROM   qms_reading_type
+                    GROUP  BY reading_type_code) rt
+                   ON rt.reading_type_code = r.reading_type_code
             WHERE  r.sample_id = @sampleId
             ORDER  BY rt.sort_order", new { sampleId });
         return rows.ToList();
@@ -564,7 +573,15 @@ public class QualityOrderService : IQualityOrderService
                    rt.reading_name  ReadingName,
                    rt.value_kind    ValueKind
             FROM   qms_sample_reading r
-            JOIN   qms_reading_type   rt ON rt.reading_type_code = r.reading_type_code
+            -- See GetReadingsAsync: dedupe the reading-type catalog to one row
+            -- per code so a multi-group code doesn't fan out each reading.
+            JOIN   (SELECT reading_type_code,
+                           MIN(reading_name) AS reading_name,
+                           MIN(value_kind)   AS value_kind,
+                           MIN(sort_order)   AS sort_order
+                    FROM   qms_reading_type
+                    GROUP  BY reading_type_code) rt
+                   ON rt.reading_type_code = r.reading_type_code
             WHERE  r.sample_id IN @ids
             ORDER  BY r.sample_id, rt.sort_order", new { ids });
         return rows.ToLookup(r => r.SampleId);
@@ -1460,13 +1477,15 @@ public class QualityOrderService : IQualityOrderService
             JOIN   qms_arrival a                ON a.arrival_id       = ai.arrival_id
             LEFT JOIN qms_shipment_snapshot ss  ON ss.arrival_id      = a.arrival_id
             OUTER APPLY (
-                -- The cache's natural key is wider than (container_no, bol_no, ebeln);
-                -- pick any one matching row so the seed list has 1 row per sample.
+                -- The cache's natural key is wider than (container_no, bol_no, ebeln).
+                -- Pick the newest matching row DETERMINISTICALLY so PoDate/Sto/dates
+                -- are reproducible across runs (matches vw_qms_flat_defects, V35).
                 SELECT TOP 1 c2.sto, c2.doc_date, c2.arrival_date, c2.receive_date
                 FROM   qms_sap_container_cache c2
                 WHERE  c2.container_no = a.container_no
                   AND  c2.bol_no       = a.bol_no
                   AND  c2.ebeln        = a.ebeln
+                ORDER  BY c2.doc_date DESC, c2.sto
             ) cc
             WHERE  s.is_deleted = 0
               AND (@qoId          IS NULL OR qo.quality_order_id = @qoId)

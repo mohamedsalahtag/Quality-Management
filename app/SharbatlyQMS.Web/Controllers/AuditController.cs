@@ -28,6 +28,9 @@ public class AuditController : Controller
     private static readonly ConcurrentDictionary<string, DateTime> _exportsInFlight = new();
     private static readonly TimeSpan ExportSlotMaxAge = TimeSpan.FromMinutes(5);
 
+    // Soft cap (~spec.md) on rows per audit export to bound memory.
+    private const int MaxAuditExportRows = 50_000;
+
     public AuditController(IAuditService audit)
     {
         _audit = audit;
@@ -128,8 +131,10 @@ public class AuditController : Controller
             ws.Row(1).Style.Font.Bold = true;
 
             var rowIdx = 2;
+            var exportTruncated = false;
             await foreach (var e in _audit.ExportAsync(filter, ct))
             {
+                if (rowIdx - 2 >= MaxAuditExportRows) { exportTruncated = true; break; }
                 ws.Cell(rowIdx, 1).Value  = e.AuditId;
                 ws.Cell(rowIdx, 2).Value  = e.ChangedAt.ToString("yyyy-MM-dd HH:mm:ss");
                 ws.Cell(rowIdx, 3).Value  = e.ChangedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss");
@@ -148,14 +153,29 @@ public class AuditController : Controller
                 ws.Cell(rowIdx, 12).Value = TruncateForCell(e.NewValuesJson);
                 rowIdx++;
             }
+
+            if (rowIdx == 2)
+            {
+                // E-1 edge case: empty range. Return a clear note rather than a
+                // headers-only file that looks like an error.
+                ws.Cell(2, 1).Value = "No audit entries in the selected date range.";
+            }
+            else if (exportTruncated)
+            {
+                ws.Cell(rowIdx, 1).Value =
+                    $"NOTE: export truncated at {MaxAuditExportRows:N0} rows. Narrow the date range for the full result.";
+                ws.Row(rowIdx).Style.Font.SetBold();
+            }
             ws.Columns().AdjustToContents();
 
-            using var ms = new MemoryStream();
+            // Stream to the response instead of ToArray() to avoid a second full
+            // in-memory copy of the workbook.
+            var ms = new MemoryStream();
             wb.SaveAs(ms);
             ms.Position = 0;
 
             var fileName = $"qms-audit-{filter.FromUtc:yyyyMMdd}-to-{filter.ToUtc:yyyyMMdd}.xlsx";
-            return File(ms.ToArray(),
+            return File(ms,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 fileName);
         }

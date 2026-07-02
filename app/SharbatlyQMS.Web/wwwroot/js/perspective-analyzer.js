@@ -594,13 +594,20 @@
                 : "";
             // V34.3: when there are 2+ measures, render the grand totals as
             // "label: value" pairs so the user can see each at a glance.
+            // Only show a grand total for measures where it is meaningful
+            // (additive/min/max); AVG and COUNT_DISTINCT are omitted.
+            var tv = result.measureTotalsValid || [];
             var grandStr;
             if (M === 1) {
-                grandStr = "Grand total: " + formatValue(result.grandTotals[0], measureFormat(result.measures[0], cfg.format));
+                grandStr = tv[0] === false
+                    ? ""
+                    : "Grand total: " + formatValue(result.grandTotals[0], measureFormat(result.measures[0], cfg.format));
             } else {
-                grandStr = "Grand totals: " + result.measures.map(function (m, mi) {
-                    return m.label + " " + formatValue(result.grandTotals[mi], measureFormat(m, cfg.format));
-                }).join(" · ");
+                var parts = result.measures.map(function (m, mi) {
+                    return tv[mi] === false ? null
+                        : m.label + " " + formatValue(result.grandTotals[mi], measureFormat(m, cfg.format));
+                }).filter(function (x) { return x !== null; });
+                grandStr = parts.length ? "Grand totals: " + parts.join(" · ") : "";
             }
             $meta.textContent = "Result: " + result.rowKeys.length + " rows × "
                 + (result.colKeys.length || 1) + " cols × "
@@ -739,6 +746,14 @@
         }
         html.push("</thead><tbody>");
 
+        // Roll-up totals are only meaningful for additive/min/max measures.
+        // AVG and COUNT_DISTINCT come back with measureTotalsValid[mi]===false;
+        // render an em-dash instead of a misleading number.
+        function totalCell(mi, m, value) {
+            if (result.measureTotalsValid && result.measureTotalsValid[mi] === false)
+                return "<span class='text-muted' title='No meaningful total for this aggregation'>—</span>";
+            return formatValue(value, measureFormat(m, cfg.format));
+        }
         rk.forEach(function (rkey, ri) {
             html.push("<tr>");
             rkey.forEach(function (part) { html.push("<td>" + escapeHtml(part) + "</td>"); });
@@ -762,7 +777,7 @@
                     });
                 });
                 ms.forEach(function (m, mi) {
-                    html.push("<td class='text-end fw-bold'>" + formatValue(result.rowTotals[ri][mi], measureFormat(m, cfg.format)) + "</td>");
+                    html.push("<td class='text-end fw-bold'>" + totalCell(mi, m, result.rowTotals[ri][mi]) + "</td>");
                 });
             }
             html.push("</tr>");
@@ -773,11 +788,11 @@
                 html.push("<td>" + (i2 === 0 ? "Total" : "") + "</td>");
             result.colTotals.forEach(function (colT) {
                 ms.forEach(function (m, mi) {
-                    html.push("<td class='text-end'>" + formatValue(colT[mi], measureFormat(m, cfg.format)) + "</td>");
+                    html.push("<td class='text-end'>" + totalCell(mi, m, colT[mi]) + "</td>");
                 });
             });
             ms.forEach(function (m, mi) {
-                html.push("<td class='text-end'>" + formatValue(result.grandTotals[mi], measureFormat(m, cfg.format)) + "</td>");
+                html.push("<td class='text-end'>" + totalCell(mi, m, result.grandTotals[mi]) + "</td>");
             });
             html.push("</tr>");
         }

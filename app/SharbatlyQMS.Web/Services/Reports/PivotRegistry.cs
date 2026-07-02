@@ -87,8 +87,12 @@ public static class PivotRegistry
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
             new PivotMeasure("DefectRate",     "Defect % (calc)", "DefectRate",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
+            // SUM removed (2026-07-02): the view grain is one row per sample×defect,
+            // so a sample with N defects would contribute its sample_size N times,
+            // inflating SUM(SampleSize). Avg/Min/Max remain (still defect-weighted,
+            // but not additively wrong).
             new PivotMeasure("SampleSize",     "Sample size",     "SampleSize",
-                new[] { PivotAggregations.Sum, PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
+                new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
             new PivotMeasure("TransitDays",    "Transit days",    "TransitDays",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
             new PivotMeasure("Samples",        "Sample count",    "SampleId",
