@@ -44,6 +44,7 @@ public class AccountController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken, AllowAnonymous]
+    [Microsoft.AspNetCore.RateLimiting.EnableRateLimiting("login")]
     public async Task<IActionResult> Login(LoginViewModel model)
     {
         var adCfg = await _settings.GetAdConfigAsync();

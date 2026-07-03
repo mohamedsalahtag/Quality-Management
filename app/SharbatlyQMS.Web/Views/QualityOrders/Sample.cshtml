@@ -163,7 +163,9 @@
                 refreshDefectTotal(form, clamped);
             };
             const bump = delta => {
-                const cur = parseInt(input.value, 10);
+                // parseFloat (not parseInt) so stepping a decimal value keeps its
+                // fraction — matches the QO Details drawer stepper.
+                const cur = parseFloat(input.value);
                 let next = Math.max(0, (isNaN(cur) ? 0 : cur) + delta);
                 next = clampToRemaining(next);
                 input.value = next;

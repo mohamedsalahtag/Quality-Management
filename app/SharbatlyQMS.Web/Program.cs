@@ -23,6 +23,25 @@ builder.Services.AddControllersWithViews(opt =>
     opt.Filters.AddService<AuditContextActionFilter>();
 });
 
+// Brute-force protection on the login endpoint (H-11). Fixed 5-minute window
+// partitioned by client IP: an attacker hammering the local BCrypt fallback is
+// throttled after a handful of tries, while a whole office behind one NAT still
+// gets a generous budget. Partitioning by IP (not username) avoids letting an
+// attacker lock a specific user out by guessing their name.
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.AddPolicy("login", httpContext =>
+        System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: httpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window      = TimeSpan.FromMinutes(5),
+                QueueLimit  = 0
+            }));
+});
+
 builder.Services.AddScoped<IDbService, DbService>();
 builder.Services.AddScoped<ISettingsService, SettingsService>();
 builder.Services.AddScoped<IEmailService, EmailService>();
@@ -159,6 +178,7 @@ app.UseStatusCodePagesWithReExecute("/Home/HttpError", "?code={0}");
 
 app.UseStaticFiles();
 app.UseRouting();
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 

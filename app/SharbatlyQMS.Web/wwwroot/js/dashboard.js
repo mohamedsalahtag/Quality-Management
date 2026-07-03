@@ -253,6 +253,9 @@
                 rotation: -90,
                 circumference: 180,
                 cutout: '70%',
+                // Reserve space below the half-doughnut so the "Avg defect %"
+                // caption drawn under the arc isn't clipped at the canvas edge.
+                layout: { padding: { bottom: 26 } },
                 plugins: { legend: { display: false }, tooltip: { enabled: false } }
             },
             plugins: [centerPlugin]

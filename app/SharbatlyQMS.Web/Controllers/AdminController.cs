@@ -197,9 +197,9 @@ public class AdminController : Controller
     {
         var u = await _db.GetUserByIdAsync(userId);
         if (u == null) return NotFound();
-        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 6)
+        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 10)
         {
-            TempData["Error"] = "Password must be at least 6 characters.";
+            TempData["Error"] = "Password must be at least 10 characters.";
             return RedirectToAction(nameof(Users));
         }
         u.PasswordHash = BCrypt.Net.BCrypt.HashPassword(newPassword);

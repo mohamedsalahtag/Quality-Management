@@ -604,6 +604,14 @@ public class ReportsController : Controller
 
         WriteHeaderRow(ws, staticLabels, matHeaderCodes, sampleHeaderCodes, readingCodes);
         int rowIdx = 2;
+        // Write a date as a typed date cell (so Excel sorts/filters/pivots it
+        // natively) instead of text. Advances the shared col counter.
+        void SetDate(int row, ref int c, DateTime? d, string fmt = "yyyy-mm-dd")
+        {
+            var cell = ws.Cell(row, c++);
+            if (d.HasValue) { cell.Value = d.Value; cell.Style.DateFormat.Format = fmt; }
+        }
+
         foreach (var r in buffered)
         {
             int col = 1;
@@ -614,18 +622,18 @@ public class ReportsController : Controller
             ws.Cell(rowIdx, col++).Value = r.BolNo;
             ws.Cell(rowIdx, col++).Value = r.Ebeln;
             ws.Cell(rowIdx, col++).Value = r.Sto;
-            ws.Cell(rowIdx, col++).Value = r.PoDate?.ToString("yyyy-MM-dd");
-            ws.Cell(rowIdx, col++).Value = r.LoadingDate?.ToString("yyyy-MM-dd");
-            ws.Cell(rowIdx, col++).Value = r.ShippingDate?.ToString("yyyy-MM-dd");
-            ws.Cell(rowIdx, col++).Value = r.ArrivalDate?.ToString("yyyy-MM-dd");
-            ws.Cell(rowIdx, col++).Value = r.ReceiveDate?.ToString("yyyy-MM-dd");
+            SetDate(rowIdx, ref col, r.PoDate);
+            SetDate(rowIdx, ref col, r.LoadingDate);
+            SetDate(rowIdx, ref col, r.ShippingDate);
+            SetDate(rowIdx, ref col, r.ArrivalDate);
+            SetDate(rowIdx, ref col, r.ReceiveDate);
             ws.Cell(rowIdx, col++).Value = (int?)r.TransitDays;
             ws.Cell(rowIdx, col++).Value = r.VendorNo;
             ws.Cell(rowIdx, col++).Value = r.VendorName;
             ws.Cell(rowIdx, col++).Value = r.QualityOrderNo;
             ws.Cell(rowIdx, col++).Value = r.QoStatus;
             ws.Cell(rowIdx, col++).Value = r.QoStatusDisplay;
-            ws.Cell(rowIdx, col++).Value = r.QoCreatedAt?.ToString("yyyy-MM-dd HH:mm");
+            SetDate(rowIdx, ref col, r.QoCreatedAt, "yyyy-mm-dd hh:mm");
             ws.Cell(rowIdx, col++).Value = r.MaterialNo;
             ws.Cell(rowIdx, col++).Value = r.MaterialDesc;
             ws.Cell(rowIdx, col++).Value = r.MaterialGroup;
@@ -654,7 +662,7 @@ public class ReportsController : Controller
             ws.Cell(rowIdx, col++).Value = r.DateCode;
             ws.Cell(rowIdx, col++).Value = r.LabelValue;
             ws.Cell(rowIdx, col++).Value = r.LotNo;
-            ws.Cell(rowIdx, col++).Value = r.SampleCreatedAt.ToString("yyyy-MM-dd HH:mm");
+            SetDate(rowIdx, ref col, r.SampleCreatedAt, "yyyy-mm-dd hh:mm");
             ws.Cell(rowIdx, col++).Value = r.SampleCreatedBy;
             ws.Cell(rowIdx, col++).Value = r.DefectCode;
             ws.Cell(rowIdx, col++).Value = r.DefectName;

@@ -31,7 +31,7 @@ public class ChangePasswordVm
     [Required]
     public string CurrentPassword { get; set; } = "";
 
-    [Required, StringLength(100, MinimumLength = 6, ErrorMessage = "Password must be at least 6 characters.")]
+    [Required, StringLength(100, MinimumLength = 10, ErrorMessage = "Password must be at least 10 characters.")]
     public string NewPassword { get; set; } = "";
 
     [Required, Compare(nameof(NewPassword), ErrorMessage = "Passwords do not match.")]
