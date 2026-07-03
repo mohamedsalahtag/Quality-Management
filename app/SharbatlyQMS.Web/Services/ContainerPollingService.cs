@@ -28,6 +28,9 @@ public class ContainerPollingService : BackgroundService
 
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(30);
     private const int DefaultIntervalMinutes      = 60;
+    // After a failed pull, wait at least this long before retrying (capped by the
+    // configured interval) so a SAP outage can't trigger a pull every tick.
+    private const int FailureBackoffMinutes       = 15;
 
     private readonly IServiceProvider _services;
     private readonly ILogger<ContainerPollingService> _log;
@@ -90,20 +93,28 @@ public class ContainerPollingService : BackgroundService
 
         var intervalMinutes = cfg.PollingMinutes > 0 ? cfg.PollingMinutes : DefaultIntervalMinutes;
 
-        // Cursor: when did the last successful pull finish?
+        // Cursor: when did the last pull ATTEMPT finish, and did it succeed?
+        // Using the last attempt (not the last success) is what stops the retry
+        // storm: during a SAP outage the last-success cursor never advances, so
+        // the old check fired every tick. After a failure we wait a back-off
+        // window instead of the full interval so a transient outage still
+        // recovers reasonably, without hammering SAP every 30s.
         var cs = config.GetConnectionString("Default")!;
-        DateTime? lastCompletedUtc;
+        DateTime? lastCompletedUtc = null;
+        bool lastOk = true;
         using (var c = new SqlConnection(cs))
         {
-            lastCompletedUtc = await c.ExecuteScalarAsync<DateTime?>(@"
-                SELECT TOP 1 completed_at
+            var row = await c.QueryFirstOrDefaultAsync(@"
+                SELECT TOP 1 completed_at AS Completed, success AS Success
                 FROM   qms_sap_sync_log
-                WHERE  endpoint_key = @EndpointKey AND success = 1
+                WHERE  endpoint_key = @EndpointKey AND completed_at IS NOT NULL
                 ORDER  BY completed_at DESC",
                 new { EndpointKey });
+            if (row != null) { lastCompletedUtc = (DateTime?)row.Completed; lastOk = (bool)row.Success; }
         }
+        var gateMinutes = lastOk ? intervalMinutes : Math.Min(intervalMinutes, FailureBackoffMinutes);
         if (lastCompletedUtc.HasValue &&
-            DateTime.UtcNow - lastCompletedUtc.Value < TimeSpan.FromMinutes(intervalMinutes))
+            DateTime.UtcNow - lastCompletedUtc.Value < TimeSpan.FromMinutes(gateMinutes))
             return; // not due yet
 
         if (!_inFlight.TryAdd(EndpointKey, 1))

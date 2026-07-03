@@ -240,6 +240,25 @@ public class QualityOrderService : IQualityOrderService
         if ((toStatus == "Reopened" || toStatus == "Cancelled") && string.IsNullOrWhiteSpace(reason))
             return (false, $"Reason is required to {toStatus.ToLowerInvariant()}.");
 
+        // Re-assert the "every material has at least one sample" precondition
+        // INSIDE this transaction for Submit/Finish. The controller checks it
+        // too, but only transactionally here is it safe against a sample being
+        // deleted between that check and this commit.
+        if (toStatus is "Submitted" or "Closed")
+        {
+            var unsampled = await c.QuerySingleAsync<int>(@"
+                SELECT COUNT(*) FROM qms_quality_order_material m
+                WHERE m.quality_order_id = @qoId
+                  AND NOT EXISTS (SELECT 1 FROM qms_sample s
+                                  WHERE s.qo_material_id = m.qo_material_id AND s.is_deleted = 0)",
+                new { qoId }, tx);
+            if (unsampled > 0)
+            {
+                tx.Rollback();
+                return (false, "Every material must have at least one sample before submitting or finishing.");
+            }
+        }
+
         // Reopen physically lands as 'Open' so there's only one
         // editable state, but the reopened_* audit fields still get
         // stamped so we know it was re-opened (and the status history
@@ -269,10 +288,15 @@ public class QualityOrderService : IQualityOrderService
             tx.Rollback();
             return (false, "This Quality Order was changed by someone else. Please refresh and try again.");
         }
+        // Record the PHYSICAL new status in the timeline (Reopen lands as 'Open'),
+        // so the history chain stays continuous — the next transition's old_status
+        // ('Open') matches this row's new_status. The domain "Reopened" semantics
+        // are preserved in the audit action below and in the reopened_* columns.
+        var physicalNew = toStatus == "Reopened" ? "Open" : toStatus;
         await c.ExecuteAsync(@"
             INSERT INTO qms_status_history (entity_type, entity_id, old_status, new_status, reason, changed_at, changed_by)
-            VALUES ('QualityOrder', @qoId, @current, @toStatus, @reason, SYSUTCDATETIME(), @user)",
-            new { qoId, current, toStatus, reason, user }, tx);
+            VALUES ('QualityOrder', @qoId, @current, @physicalNew, @reason, SYSUTCDATETIME(), @user)",
+            new { qoId, current, physicalNew, reason, user }, tx);
 
         // T018 (US1) -- Audit trail: capture the status transition as one
         // domain action (Opened / Closed / Reopened / Cancelled) rather than

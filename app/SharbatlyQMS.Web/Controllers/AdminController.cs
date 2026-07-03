@@ -822,6 +822,9 @@ public class AdminController : Controller
                 new { defectId, materialGroup, defectCode, defectName, defectCategory, valueType, isActive, sortOrder });
             TempData["Success"] = "Defect updated.";
         }
+        await AuditAdminAsync(EntityTypes.DefectCatalog, defectId <= 0 ? 0 : defectId,
+            defectId <= 0 ? ActionCodes.Created : ActionCodes.Updated,
+            null, new { materialGroup, defectCode, defectName, defectCategory, valueType, isActive, sortOrder });
         _catalogCache.Invalidate();
         return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
     }
@@ -850,6 +853,9 @@ public class AdminController : Controller
         var n = await c.ExecuteAsync("DELETE FROM qms_defect_catalog WHERE defect_id = @defectId", new { defectId });
 
         TempData[n > 0 ? "Success" : "Error"] = n > 0 ? "Defect deleted." : "Defect not found.";
+        if (n > 0)
+            await AuditAdminAsync(EntityTypes.DefectCatalog, defectId, ActionCodes.Deleted,
+                new { defectId, materialGroup }, null);
         _catalogCache.Invalidate();
         return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
     }
@@ -921,6 +927,9 @@ public class AdminController : Controller
                 new { categoryId, categoryName, sortOrder, colorHex, isActive });
             TempData["Success"] = "Category updated.";
         }
+        await AuditAdminAsync(EntityTypes.DefectCategory, categoryId <= 0 ? 0 : categoryId,
+            categoryId <= 0 ? ActionCodes.Created : ActionCodes.Updated,
+            null, new { categoryName, sortOrder, colorHex, isActive });
         _catalogCache.Invalidate();
         return RedirectToAction(nameof(DefectCategories));
     }
@@ -947,6 +956,7 @@ public class AdminController : Controller
         }
         await c.ExecuteAsync("DELETE FROM qms_defect_category WHERE category_id = @categoryId", new { categoryId });
         TempData["Success"] = $"Category '{name}' deleted.";
+        await AuditAdminAsync(EntityTypes.DefectCategory, categoryId, ActionCodes.Deleted, new { categoryId, name }, null);
         _catalogCache.Invalidate();
         return RedirectToAction(nameof(DefectCategories));
     }
@@ -1084,6 +1094,9 @@ public class AdminController : Controller
                 new { readingTypeId, groupOrGlobal, readingTypeCode, readingName, valueKind, defaultUnit, isActive, sortOrder, isMandatory, displayMode });
             TempData["Success"] = "Reading type updated.";
         }
+        await AuditAdminAsync(EntityTypes.ReadingType, readingTypeId <= 0 ? 0 : readingTypeId,
+            readingTypeId <= 0 ? ActionCodes.Created : ActionCodes.Updated,
+            null, new { groupOrGlobal, readingTypeCode, readingName, valueKind, isActive, isMandatory });
         _catalogCache.Invalidate();
         return RedirectToAction(nameof(ReadingTypes), new { materialGroup });
     }
@@ -1118,6 +1131,8 @@ public class AdminController : Controller
         var n = await c.ExecuteAsync("DELETE FROM qms_reading_type WHERE reading_type_id = @readingTypeId", new { readingTypeId });
 
         TempData[n > 0 ? "Success" : "Error"] = n > 0 ? "Reading type deleted." : "Reading type not found.";
+        if (n > 0)
+            await AuditAdminAsync(EntityTypes.ReadingType, readingTypeId, ActionCodes.Deleted, new { readingTypeId, materialGroup }, null);
         _catalogCache.Invalidate();
         return RedirectToAction(nameof(ReadingTypes), new { materialGroup });
     }
@@ -1211,6 +1226,9 @@ public class AdminController : Controller
                 new { fieldId, fieldCode, fieldName, valueKind, defaultUnit, isActive, isMandatory, sortOrder, scope });
             TempData["Success"] = "Sample header field updated.";
         }
+        await AuditAdminAsync(EntityTypes.SampleHeaderField, fieldId <= 0 ? 0 : fieldId,
+            fieldId <= 0 ? ActionCodes.Created : ActionCodes.Updated,
+            null, new { fieldCode, fieldName, valueKind, isActive, isMandatory, scope });
         _catalogCache.Invalidate();
         return RedirectToAction(nameof(SampleHeaders));
     }
@@ -1255,6 +1273,9 @@ public class AdminController : Controller
         {
             TempData["Error"] = "Field not found.";
         }
+        if (n > 0)
+            await AuditAdminAsync(EntityTypes.SampleHeaderField, fieldId, ActionCodes.Deleted,
+                new { fieldId, wipedValues }, null);
         _catalogCache.Invalidate();
         return RedirectToAction(nameof(SampleHeaders));
     }
