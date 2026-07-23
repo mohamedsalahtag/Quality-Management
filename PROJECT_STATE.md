@@ -81,6 +81,16 @@ Reason for the stack: all four reusable packs already target this exact combinat
 - **LAN URL for end users:** **`http://192.168.3.17:5244`**
 - **Uploaded inspection photos** live in `deploy\SharbatlyQMS\wwwroot\uploads` (~4.6 GB / 3,000+ files) and documents in `deploy\SharbatlyQMS\App_Data\documents`. **These are production data that live outside SQL** — any host move must copy them, or existing reports lose their images. `deploy\SharbatlyQMS\keys\` holds the DataProtection key (auth cookies / antiforgery); copy it too or every session is invalidated.
 
+> ⚠️ **Production photo data sits INSIDE the publish output directory.** That is fragile by design: the deploy target and the user-data store are the same folder. `dotnet publish` and `Republish.ps1` were both explicitly tested (2026-07-23) and do **not** delete the extra files — but during the 2026-07-23 migration 2,816 of the 3,006 copied photos disappeared from the new host between the initial copy and the first republish, and **the cause was never identified** (publish was ruled out by direct experiment; no code path outside the admin "PURGE ALL" action deletes upload files). They were restored from .15 and re-verified. **After any deploy, check the count** — it should match .15 until that host is decommissioned:
+>
+> ```powershell
+> Invoke-Command -ComputerName KSAJEDSVAIP001 -ScriptBlock {
+>   (Get-ChildItem 'C:\QualityManagemet\deploy\SharbatlyQMS\wwwroot\uploads' -Recurse -File).Count
+> }   # expect 3006+ and ~4,585 MB
+> ```
+>
+> Moving `uploads` out of the publish output (and serving it from a fixed path outside the deploy folder) would remove this whole class of risk and is worth doing before .15 is retired.
+
 ### Old host (192.168.3.15) — still running, pending decommission
 
 The previous deployment at `\\192.168.3.15\C$\Websites\QualityManagemet` is **still live on port 5244 against the same database**. It was deliberately left running on 2026-07-23 so the new host could be validated first. While both run:
