@@ -3,19 +3,20 @@ namespace SharbatlyQMS.Web.Services;
 /// <summary>
 /// Resolves where uploaded inspection photos physically live.
 ///
-/// They used to sit in <c>wwwroot/uploads</c> -- i.e. inside the publish output
-/// directory. That is unsafe: <c>dotnet publish</c> re-runs the static web
-/// assets step whenever the build actually produces new output, and that step
-/// prunes files under wwwroot that the project does not know about. On
-/// 2026-07-23 it silently deleted 2,816 of 3,006 production photos, twice --
-/// once during the host migration and again on the first deploy that carried
-/// real code changes. (A publish with no rebuild leaves them alone, which is
-/// why it looked intermittent.)
+/// They used to sit in <c>wwwroot/uploads</c> -- inside the publish output
+/// directory -- which makes production data a casualty of anything that
+/// rebuilds or replaces the deploy folder: a clean publish, a wiped output
+/// directory, or swapping in one of the deploy\rollback-* snapshots. Those
+/// snapshots run to ~4 GB each precisely because the photos were inside them.
 ///
-/// Keeping the photos outside the publish target removes the failure mode
-/// rather than working around it. Set <see cref="ConfigKey"/> to an absolute
-/// path outside the deploy folder. When it is unset the historical
-/// wwwroot/uploads location is used, so development machines need no config.
+/// Set <see cref="ConfigKey"/> to an absolute path outside the deploy folder.
+/// When it is unset the historical wwwroot/uploads location is used, so
+/// development machines need no configuration.
+///
+/// Note: photos went missing twice during the 2026-07-23 migration and this
+/// comment previously blamed the publish pipeline. That was incorrect -- they
+/// had been deleted by hand. dotnet publish and Republish.ps1 were both tested
+/// with the full set in place and preserved it.
 /// </summary>
 public static class UploadStorage
 {

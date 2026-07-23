@@ -97,15 +97,15 @@ The tidier setup is a dedicated `QMS_App` login with `DEFAULT_SCHEMA = qms`, whi
 - **URL binding (Kestrel):** `http://0.0.0.0:5244` (set via `appsettings.Production.json`)
 - **Firewall:** Windows Defender Firewall rule "SharbatlyQMS HTTP 5244" — Inbound, TCP 5244, Domain + Private profiles.
 - **LAN URL for end users:** **`http://192.168.3.17:5244`**
-- **Uploaded inspection photos** live in `deploy\SharbatlyQMS\wwwroot\uploads` (~4.6 GB / 3,000+ files) and documents in `deploy\SharbatlyQMS\App_Data\documents`. **These are production data that live outside SQL** — any host move must copy them, or existing reports lose their images. `deploy\SharbatlyQMS\keys\` holds the DataProtection key (auth cookies / antiforgery); copy it too or every session is invalidated.
+- **Uploaded inspection photos** live in **`C:\QualityManagemet\data\uploads`** (~4.6 GB / 3,006 files) and documents in `deploy\SharbatlyQMS\App_Data\documents`. **These are production data that live outside SQL** — any host move must copy them, or existing reports lose their images. `deploy\SharbatlyQMS\keys\` holds the DataProtection key (auth cookies / antiforgery); copy it too or every session is invalidated.
 
-> ✅ **RESOLVED 2026-07-23 — photos no longer live in the publish output.**
+> **Photos are stored outside the publish output (2026-07-23).**
 >
-> They are now stored at **`C:\QualityManagemet\data\uploads`**, set via `QMS:UploadsPhysicalRoot` in `appsettings.Production.json` and served at the unchanged `/uploads/...` URLs by a second static-file provider in `Program.cs`. See `Services/UploadStorage.cs`.
+> Path is set by `QMS:UploadsPhysicalRoot` in `appsettings.Production.json`; they are served at the unchanged `/uploads/...` URLs by a second static-file provider in `Program.cs`. See `Services/UploadStorage.cs`.
 >
-> **Root cause, for the record.** `wwwroot/uploads` sat inside the publish target. `dotnet publish` re-runs the static-web-assets step whenever the build actually produces new output, and that step prunes files under `wwwroot` the project does not know about — deleting 2,816 of 3,006 production photos. It looked intermittent because a publish with **no** rebuild leaves them alone: an early experiment with unchanged code passed, which is why the first investigation wrongly cleared `dotnet publish`. It reproduced immediately on the next deploy that carried real code changes.
+> **On the two disappearances during the migration:** photos vanished twice that day and an earlier version of this file blamed `dotnet publish` pruning `wwwroot`. **That diagnosis was wrong — Mohamed had deleted them manually.** `dotnet publish` and `Republish.ps1` were both tested directly with all 3,006 files in place and preserved every one; there is no evidence the deploy pipeline ever removed a photo.
 >
-> Verified after the fix: a full `Republish.ps1` with changed code left all 3,006 files untouched.
+> The relocation was therefore not a bug fix. It is kept because storing user data inside a deploy target is fragile on its own merits — a clean publish, a wiped deploy folder, or a rollback-folder swap would each take the photos with it (the `deploy\rollback-*` snapshots on .15 are ~4 GB each for exactly that reason).
 
 ### Old host (192.168.3.15) — still running, pending decommission
 
