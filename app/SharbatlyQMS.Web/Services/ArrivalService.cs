@@ -129,6 +129,90 @@ public class ArrivalService : IArrivalService
         return rows.ToList();
     }
 
+    // V36 (2026-07-07): arrival custom fields. A field is "applicable" to an
+    // arrival when its material group appears on at least one line item.
+    public async Task<IReadOnlyList<ArrivalCustomField>> GetCustomFieldsAsync(long arrivalId)
+    {
+        using var c = Open();
+        var rows = await c.QueryAsync<ArrivalCustomField>(@"
+            SELECT f.field_id       FieldId,
+                   f.field_name     FieldName,
+                   f.value_kind     ValueKind,
+                   f.material_group MaterialGroup,
+                   f.sort_order     SortOrder,
+                   f.is_active      IsActive,
+                   v.text_value     TextValue,
+                   v.numeric_value  NumericValue,
+                   v.date_value     DateValue
+            FROM   qms_arrival_field f
+            LEFT JOIN qms_arrival_field_value v
+                   ON v.field_id = f.field_id AND v.arrival_id = @arrivalId
+            WHERE  f.is_active = 1
+              AND  f.material_group IN (
+                       SELECT DISTINCT material_group FROM qms_arrival_item
+                       WHERE arrival_id = @arrivalId AND material_group IS NOT NULL)
+            ORDER  BY f.sort_order, f.field_name", new { arrivalId });
+        return rows.ToList();
+    }
+
+    public async Task SaveCustomFieldValuesAsync(long arrivalId,
+        IReadOnlyDictionary<int, string?> rawValues, string updatedBy)
+    {
+        // Re-derive the applicable set server-side so a crafted POST can't
+        // attach values for fields that don't belong to this arrival.
+        var applicable = await GetCustomFieldsAsync(arrivalId);
+        using var c = Open();
+        foreach (var f in applicable)
+        {
+            if (!rawValues.TryGetValue(f.FieldId, out var raw)) continue;
+            raw = raw?.Trim();
+            if (string.IsNullOrEmpty(raw))
+            {
+                await c.ExecuteAsync(@"
+                    DELETE FROM qms_arrival_field_value
+                    WHERE arrival_id = @arrivalId AND field_id = @fieldId",
+                    new { arrivalId, fieldId = f.FieldId });
+                continue;
+            }
+            string?   text = null;
+            decimal?  num  = null;
+            DateTime? date = null;
+            switch (f.ValueKind)
+            {
+                case "Numeric":
+                    if (!decimal.TryParse(raw, System.Globalization.NumberStyles.Number,
+                            System.Globalization.CultureInfo.InvariantCulture, out var d))
+                        continue;                       // silently skip unparseable input
+                    num = d;
+                    break;
+                case "Date":
+                    if (!DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.None, out var dt))
+                        continue;
+                    date = dt.Date;
+                    break;
+                case "YesNo":
+                    text = raw is "Yes" or "No" ? raw : null;
+                    if (text == null) continue;
+                    break;
+                default:
+                    text = raw.Length > 400 ? raw[..400] : raw;
+                    break;
+            }
+            await c.ExecuteAsync(@"
+                MERGE qms_arrival_field_value AS t
+                USING (SELECT @arrivalId AS arrival_id, @fieldId AS field_id) AS s
+                   ON t.arrival_id = s.arrival_id AND t.field_id = s.field_id
+                WHEN MATCHED THEN UPDATE SET
+                    text_value = @text, numeric_value = @num, date_value = @date,
+                    updated_at = SYSUTCDATETIME(), updated_by = @updatedBy
+                WHEN NOT MATCHED THEN INSERT
+                    (arrival_id, field_id, text_value, numeric_value, date_value, updated_by)
+                    VALUES (@arrivalId, @fieldId, @text, @num, @date, @updatedBy);",
+                new { arrivalId, fieldId = f.FieldId, text, num, date, updatedBy });
+        }
+    }
+
     public async Task<ArrivalChecklist?> GetChecklistAsync(long arrivalId)
     {
         using var c = Open();
@@ -630,6 +714,12 @@ public class ArrivalService : IArrivalService
                 await c.ExecuteAsync("DELETE FROM qms_image_link WHERE owner_type='Sample' AND owner_id IN @sampleIds", new { sampleIds }, tx);
             }
             await c.ExecuteAsync("DELETE FROM qms_sample WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
+            // qms_report_log holds an FK to quality_order, so a QO that has ever
+            // produced a PDF (printed or e-mailed) blocked the delete below with
+            // FK_qms_report_log_quality_order_id. It was missing from this
+            // cascade, which made "Delete arrival" fail for any inspection that
+            // had been reported on.
+            await c.ExecuteAsync("DELETE FROM qms_report_log WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
 
             var matIds = (await c.QueryAsync<long>(
                 "SELECT qo_material_id FROM qms_quality_order_material WHERE quality_order_id IN @qoIds",

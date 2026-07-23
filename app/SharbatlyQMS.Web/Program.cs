@@ -247,3 +247,10 @@ app.MapControllerRoute(
     pattern: "{controller=Home}/{action=Index}/{id?}");
 
 app.Run();
+
+/// <summary>
+/// Exposed so the test project can boot the real application through
+/// WebApplicationFactory. Top-level statements otherwise compile to an internal
+/// Program class that the tests cannot reference.
+/// </summary>
+public partial class Program { }

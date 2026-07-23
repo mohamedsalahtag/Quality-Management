@@ -218,6 +218,21 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-07-23 (pre-production verification suite; two defects found and fixed)
+
+`app\SharbatlyQMS.Tests` grew from 2 unit-test files into a real safety net, because the migration needed proof beyond "the pages load". Run it with `dotnet test app\SharbatlyQMS.Tests`.
+
+- **`QmsAppFactory`** boots the actual application in-process (`WebApplicationFactory`) against the live `Sharbatly_MIS`, forced to the Production environment so it uses the same connection string as the service. Only two things are substituted: authentication (a stub handler issues the claims `AccountController` would, since a test cannot bind to AD) and the hosted background services (removed, so a test run does not trigger a SAP pull).
+- **`PageSmokeTests`** loads every significant screen and asserts it renders. This is the check that matters after a schema move: a page whose query names a moved column fails only when someone opens it.
+- **`WorkflowTests`** drives one whole inspection through the real services — arrival → checklist → complete → quality order → sample → readings → defects → photo upload → submit → PDF — then deletes everything it created. It writes to the live database on purpose; audit rows are append-only and are left behind.
+
+**Two defects this found, neither of which page-loading would have caught:**
+
+1. **Missing sequences and view (migration gap).** `M02` was generated from `sys.tables`, so the three `seq_qms_*_no` sequences and `vw_qms_flat_defects` never came across. **Arrival creation would have failed on day one** with `Invalid object name 'seq_qms_arrival_no'`. Fixed by `M07`. Sequences must live in `dbo` — SQL Server does not allow a synonym for a sequence.
+2. **`ArrivalService.DeleteAsync` could not delete a reported-on arrival (pre-existing).** The cascade covered 15 child tables but not `qms_report_log`, which holds an FK to the quality order, so deleting any arrival whose QO had ever produced a PDF failed on `FK_qms_report_log_quality_order_id`. Present in the retired system too. One line added to the existing cascade.
+
+**A caution for anyone cleaning up test data:** sample ids restart from 1 in this database, so `uploads\Sample\1..3` now contain *production* photos from the retired system as well. Delete test images by their exact `qms_image_asset.storage_url`, never by removing the owner folder — doing the latter destroyed 34 live photos during this work (restored from .15).
+
 ### 2026-07-23 (QMS moved onto the shared Sharbatly_MIS database)
 
 QMS was re-pointed from its private `SharbatlyQMS` database to **`Sharbatly_MIS` on KSAJEDSVSQL003**, shared with the SCM app. The driver was duplication: QMS kept its own users, its own roles, and its own copy of the SAP material master — 33,774 rows sitting beside `dbo.Mara`'s 33,785, the same SAP data synced twice. Historical transactions were deliberately not migrated.
