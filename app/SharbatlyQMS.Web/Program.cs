@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
+using Microsoft.Extensions.FileProviders;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services;
 
@@ -52,6 +53,9 @@ builder.Services.AddScoped<IAuditContext, AuditContext>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<AuditContextActionFilter>();
 builder.Services.AddScoped<IImageService, ImageService>();
+// V39 (2026-07-15): document (non-image) attachments. Separate from IImageService
+// because documents are stored outside wwwroot and served only via an authenticated action.
+builder.Services.AddScoped<IDocumentService, DocumentService>();
 builder.Services.AddScoped<IMaraService, MaraService>();
 builder.Services.AddScoped<IVendorService, VendorService>();
 builder.Services.AddScoped<ICatalogCache, CatalogCache>();
@@ -124,6 +128,49 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
         opt.Cookie.SecurePolicy = CookieSecurePolicy.SameAsRequest;
         opt.Cookie.MaxAge       = TimeSpan.FromDays(30);
         opt.Cookie.HttpOnly     = true;
+
+        // V36.1 (2026-07-07): revalidate the cookie against the Users table at
+        // most every 5 minutes per session. The Role claim is baked into the
+        // cookie at login; without this, a promotion/demotion doesn't take
+        // effect (and a DISABLED account keeps working) until the 30-day
+        // sliding cookie finally dies or the user happens to re-login.
+        // Discovered via abdulrahman.alatiq: promoted to SiteAdmin but stuck
+        // on a June-25 cookie, so the Admin menu never appeared.
+        opt.Events.OnValidatePrincipal = async ctx =>
+        {
+            const string stampKey = ".lastValidated";
+            var stamp = ctx.Properties.GetString(stampKey);
+            if (stamp != null
+                && DateTimeOffset.TryParse(stamp, null, System.Globalization.DateTimeStyles.RoundtripKind, out var at)
+                && DateTimeOffset.UtcNow - at < TimeSpan.FromMinutes(5))
+                return;
+
+            var idClaim = ctx.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            var db = ctx.HttpContext.RequestServices.GetRequiredService<IDbService>();
+            var user = int.TryParse(idClaim, out var userId)
+                ? await db.GetUserByIdAsync(userId)
+                : null;
+            if (user == null || !user.IsActive)
+            {
+                // Deleted or deactivated: kill the session immediately.
+                ctx.RejectPrincipal();
+                await ctx.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+                return;
+            }
+            var identity = ctx.Principal!.Identity as System.Security.Claims.ClaimsIdentity;
+            var cookieRole = ctx.Principal.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
+            if (identity != null && cookieRole != user.Role)
+            {
+                // Role changed since login: swap the claim so menus and
+                // [Authorize] policies see the current role on this request.
+                var old = identity.FindFirst(System.Security.Claims.ClaimTypes.Role);
+                if (old != null) identity.RemoveClaim(old);
+                identity.AddClaim(new System.Security.Claims.Claim(
+                    System.Security.Claims.ClaimTypes.Role, user.Role));
+            }
+            ctx.Properties.SetString(stampKey, DateTimeOffset.UtcNow.ToString("O"));
+            ctx.ShouldRenew = true;   // persist the refreshed claims + stamp
+        };
     });
 
 builder.Services.AddAuthorization(opt =>
@@ -177,6 +224,19 @@ else
 app.UseStatusCodePagesWithReExecute("/Home/HttpError", "?code={0}");
 
 app.UseStaticFiles();
+
+// Inspection photos are stored outside the publish output so a deploy cannot
+// delete them (see UploadStorage). They still have to answer on the same
+// /uploads/... URLs already recorded in qms_image_asset, so they get their own
+// file provider here.
+var uploadsRoot = UploadStorage.Root(app.Environment, app.Configuration);
+Directory.CreateDirectory(uploadsRoot);
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new PhysicalFileProvider(uploadsRoot),
+    RequestPath  = UploadStorage.RequestPath
+});
+
 app.UseRouting();
 app.UseRateLimiter();
 app.UseAuthentication();

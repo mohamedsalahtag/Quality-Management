@@ -81,6 +81,10 @@ public class ReportsController : Controller
         var targetH = Math.Max(90,  thumb.PdfHeight * 2);
         var images = await PreprocessImagesAsync(await _images.ListAsync("Arrival", id), targetW, targetH);
 
+        // V36: admin-defined arrival fields (material-group-gated) print in
+        // the identity block after Seal Number.
+        var customFields = await _arrivals.GetCustomFieldsAsync(id);
+
         var data = new SharbatlyQMS.Web.Services.Pdf.ArrivalReportData
         {
             Arrival          = arrival,
@@ -89,6 +93,7 @@ public class ReportsController : Controller
             Branding         = branding,
             LogoAbsolutePath = logoPath,
             Images           = images,
+            CustomFields     = customFields.ToList(),
             ThumbnailW       = thumb.PdfWidth,
             ThumbnailH       = thumb.PdfHeight,
             ThumbCover       = thumb.FitMode.Equals("Cover", StringComparison.OrdinalIgnoreCase),
@@ -381,6 +386,12 @@ public class ReportsController : Controller
     private string ToAbsolute(string webPath)
     {
         var rel = webPath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar);
+        // Inspection photos are served from outside wwwroot (see UploadStorage),
+        // so /uploads/... has to be rebased onto that root or the PDF renders
+        // with missing images.
+        const string uploads = "uploads";
+        if (rel.StartsWith(uploads + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            return Path.Combine(UploadStorage.Root(_env, _config), rel[(uploads.Length + 1)..]);
         return Path.Combine(_env.WebRootPath, rel);
     }
 
@@ -759,6 +770,12 @@ public class ReportsController : Controller
             report     = rpt.Key,
             dimensions = rpt.Dimensions.Select(d => new { key = d.Key, display = d.Display }),
             measures   = rpt.Measures  .Select(m => new { key = m.Key, display = m.Display, aggs = m.AllowedAggs }),
+            // V36 -- every dimension can also act as a COUNT / COUNT_DISTINCT
+            // measure (Excel-style). Separate property so stale cached clients
+            // simply ignore it. Registered measures win key collisions.
+            fieldMeasures = rpt.Dimensions
+                .Where(d => !rpt.Measures.Any(m => string.Equals(m.Key, d.Key, StringComparison.OrdinalIgnoreCase)))
+                .Select(d => new { key = d.Key, display = d.Display, aggs = PivotAggregations.FieldAggs }),
             renderers  = PivotRegistry.Renderers,
         });
     }

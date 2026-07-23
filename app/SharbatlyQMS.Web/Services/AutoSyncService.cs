@@ -63,6 +63,11 @@ public class AutoSyncService : BackgroundService
 
         foreach (var key in SyncableEndpoints.All)
         {
+            // Retired since the Sharbatly_MIS move -- skip before touching
+            // settings so a stale "auto sync enabled" flag can't log a failure
+            // on every poll.
+            if (SyncableEndpoints.IsRetired(key)) continue;
+
             try
             {
                 var cfg = await settings.GetEndpointSyncAsync(key);

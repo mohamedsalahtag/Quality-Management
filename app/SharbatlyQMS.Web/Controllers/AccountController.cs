@@ -73,24 +73,25 @@ public class AccountController : Controller
                 var user = await _db.GetUserByUsernameAsync(canonical);
                 if (user == null)
                 {
-                    if (!adCfg.AutoCreateOnLogin)
+                    // Identity is shared with the SCM app now, so a missing
+                    // profile is never resolved by inventing a portal.User row.
+                    // Auto-create degrades to "grant the default quality role to
+                    // an account the portal already knows".
+                    if (!adCfg.AutoCreateOnLogin ||
+                        !await _db.TryGrantDefaultAccessAsync(canonical))
                     {
                         ModelState.AddModelError("",
-                            "Your AD account is recognised but no local profile exists. Ask an administrator to create one.");
+                            "Your AD account is recognised but you have no quality-system access. Ask an administrator to grant it.");
                         return View(model);
                     }
-                    user = new User
+                    user = await _db.GetUserByUsernameAsync(canonical);
+                    if (user == null)
                     {
-                        Username     = canonical,
-                        FullName     = string.IsNullOrWhiteSpace(adInfo.FullName) ? canonical : adInfo.FullName,
-                        Email        = adInfo.Email,
-                        Department   = adInfo.Department,
-                        PasswordHash = "",                    // AD-managed; no local password
-                        Role         = UserRoles.Viewer,      // least privilege; admin promotes
-                        IsActive     = true
-                    };
-                    user.UserId = await _db.CreateUserAsync(user);
-                    _logger.LogInformation("Auto-created local profile for AD user {User}", canonical);
+                        ModelState.AddModelError("",
+                            "Your AD account is recognised but you have no quality-system access. Ask an administrator to grant it.");
+                        return View(model);
+                    }
+                    _logger.LogInformation("Granted default QMS access to existing portal user {User}", canonical);
                 }
                 if (!user.IsActive)
                 {
@@ -102,38 +103,18 @@ public class AccountController : Controller
                 return RedirectAfterLogin(model);
             }
             // adErr is logged inside AdService -- we don't reveal AD-specific
-            // failure reasons to the client. Fall through to local check so
-            // the bootstrap admin (BCrypt) always retains a recovery path.
+            // failure reasons to the client.
             _logger.LogDebug("AD authentication for {User} failed: {Err}", model.Username, adErr);
         }
 
-        // 2. Local BCrypt fallback. The seed admin and any pre-AD users use
-        //    this path. Normalize for the same reason.
-        var local = await _db.GetUserByUsernameAsync(SamOnly(model.Username));
-        if (local == null)
-        {
-            ModelState.AddModelError("", "Invalid credentials or account not registered.");
-            return View(model);
-        }
-        if (!local.IsActive)
-        {
-            ModelState.AddModelError("", "Your account has been disabled. Contact the administrator.");
-            return View(model);
-        }
-        // AD-only accounts have an empty PasswordHash -- skip the BCrypt
-        // verify call so it doesn't throw on empty input.
-        bool authenticated = !string.IsNullOrEmpty(local.PasswordHash)
-            && BCrypt.Net.BCrypt.Verify(model.Password, local.PasswordHash);
-
-        if (!authenticated)
-        {
-            ModelState.AddModelError("", "Invalid credentials.");
-            return View(model);
-        }
-
-        await IssueCookieAsync(local, model.RememberMe);
-        _logger.LogInformation("User {User} signed in locally", local.Username);
-        return RedirectAfterLogin(model);
+        // 2. No local fallback. Passwords in the shared portal.User table use a
+        //    different scheme (varbinary hash + salt + algo) that QMS never
+        //    evaluates, and the BCrypt seed-admin back-door was removed on
+        //    2026-05-13. Active Directory is the only way in.
+        ModelState.AddModelError("", adCfg.IsConfigured
+            ? "Invalid credentials."
+            : "Active Directory is not configured, so sign-in is unavailable. Contact the administrator.");
+        return View(model);
     }
 
     private async Task IssueCookieAsync(User user, bool rememberMe)
@@ -159,6 +140,13 @@ public class AccountController : Controller
                     ? (user.PlantCode ?? "")
                     : "")
         };
+
+        // user.Role is the highest-ranked role only. portal.UserRole can hold a
+        // peer role too (ClaimManager beside Manager), so emit every one of
+        // them -- RequireRole matches any single role claim.
+        foreach (var extra in await _db.GetUserRolesAsync(user.UserId))
+            if (!string.Equals(extra, user.Role, StringComparison.OrdinalIgnoreCase))
+                claims.Add(new Claim(ClaimTypes.Role, extra));
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         var props = new AuthenticationProperties

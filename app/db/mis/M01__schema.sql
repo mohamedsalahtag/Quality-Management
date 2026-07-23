@@ -1,0 +1,41 @@
+-- ============================================================================
+--  SharbatlyQMS on Sharbatly_MIS  -  M01  -  Schema
+-- ============================================================================
+--  Target: Sharbatly_MIS on KSAJEDSVSQL003 (SQL Server 2016 SP1 - no STRING_AGG).
+--
+--  QMS moves off its private SharbatlyQMS database and shares Sharbatly_MIS
+--  with the SCM app. All QMS-owned tables live in the [qms] schema so the
+--  module's footprint is enumerable in one query:
+--      SELECT * FROM sys.tables WHERE schema_id = SCHEMA_ID('qms');
+--
+--  ---------------------------------------------------------------------------
+--  NAME RESOLUTION (why M05 creates synonyms)
+--  ---------------------------------------------------------------------------
+--  The app's SQL refers to tables unqualified ("FROM qms_arrival"). SQL Server
+--  resolves those against the connecting principal's DEFAULT_SCHEMA, then dbo.
+--
+--  The ideal setup is a dedicated least-privilege login whose default schema is
+--  [qms]. That needs a server-level CREATE LOGIN, which SAP_User does NOT have
+--  (it is db_owner only, with no securityadmin/sysadmin rights). So until a DBA
+--  runs the block below, the app connects as SAP_User (default schema dbo) and
+--  M05 maps every name into dbo via synonyms. Both routes leave the real tables
+--  in [qms]; only the resolution path differs.
+--
+--  OPTIONAL - for a sysadmin to run later. After this, repoint the app's
+--  connection string at QMS_App and drop the M05 synonyms.
+--
+--     CREATE LOGIN QMS_App WITH PASSWORD = '<choose-a-strong-password>';
+--     USE Sharbatly_MIS;
+--     CREATE USER QMS_App FOR LOGIN QMS_App WITH DEFAULT_SCHEMA = qms;
+--     GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::qms TO QMS_App;
+--     GRANT SELECT ON dbo.Mara         TO QMS_App;
+--     GRANT SELECT ON dbo.SAP_Vendors  TO QMS_App;
+--     GRANT SELECT, INSERT, UPDATE ON portal.[User]      TO QMS_App;
+--     GRANT SELECT, INSERT, DELETE ON portal.UserRole    TO QMS_App;
+--     GRANT SELECT, INSERT, DELETE ON portal.UserPlant   TO QMS_App;
+--     GRANT SELECT, INSERT, UPDATE ON portal.SystemSetting TO QMS_App;
+--     GRANT SELECT ON portal.Role TO QMS_App;
+-- ============================================================================
+
+IF SCHEMA_ID('qms') IS NULL
+    EXEC('CREATE SCHEMA qms');

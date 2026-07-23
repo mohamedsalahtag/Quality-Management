@@ -55,19 +55,37 @@ Reason for the stack: all four reusable packs already target this exact combinat
 
 ---
 
-## 4. Database
+## 4. Database — shared `Sharbatly_MIS` (since 2026-07-23)
 
-- **Server:** `192.168.3.10` (SQL Server on the office LAN)
-- **Database:** `SharbatlyQMS`
-- **Login:** `linkserver` / `P@ssw0rd`
-- **Connection string** (in `appsettings.json`):
-  ```
-  Server=192.168.3.10;Database=SharbatlyQMS;User ID=linkserver;Password=P@ssw0rd;
-  TrustServerCertificate=True;Persist Security Info=True;Connect Timeout=15;
-  ConnectRetryCount=5;ConnectRetryInterval=3;Pooling=True;Min Pool Size=1;Max Pool Size=200
-  ```
-- **Migrations** live in `app\db\V01__pack_schema.sql` … `V12__role_overhaul.sql` and are applied by the `SharbatlyQMS.Migrate` console tool.
-- **`verify.sql`** is a one-shot diagnostic query, not a migration.
+QMS no longer owns a private database. It shares **`Sharbatly_MIS` on `KSAJEDSVSQL003` (192.168.3.27)** with the SCM app at `S:\` (which runs on 192.168.3.14), so there is one identity store, one role model and one SAP catalogue across both systems.
+
+- **Login:** `SAP_User` / `SAP_User` (db_owner) — the same login the SCM app uses.
+- **SQL Server 2016 SP1 (13.0.4001)** — **no `STRING_AGG`**; use `STUFF + FOR XML PATH`.
+- **Migrations:** `app\db\mis\M01…M06`, applied with the `SharbatlyQMS.Migrate` tool.
+  The historical `app\db\V01…V39` scripts describe the retired `SharbatlyQMS` database and are kept for reference only.
+
+### What QMS owns vs. what it shares
+
+| QMS concern | Where it lives now |
+| --- | --- |
+| 33 quality tables (`qms_arrival`, `qms_sample`, …) | schema **`qms`**, names unchanged |
+| Users / identity | **`portal.User`** (+ `qms.UserProfile` for QMS-only fields) |
+| Roles | **`portal.Role` / `portal.UserRole`** as `QcViewer … QcAdmin` |
+| Operator plant restriction | **`portal.UserPlant`** |
+| SAP material master | **`dbo.Mara`** via view `qms.MaterialCatalog` (+ `qms.MaterialExtra` for `brand`) |
+| SAP vendor master | **`dbo.SAP_Vendors`** via view `qms.VendorCatalog` |
+| Settings | **`portal.SystemSetting`**, keys prefixed `qms.` |
+| Audit log, status history, container cache | stay QMS-specific in `qms` — see §8 for why |
+
+**Name resolution.** The app writes unqualified SQL (`FROM qms_arrival`). It connects as `SAP_User`, whose default schema is `dbo`, so `M05` creates a `dbo` **synonym** for every `qms` object. `dbo.qms_sap_material_cache` and `dbo.qms_sap_vendor_cache` deliberately point at the two views, so existing read queries work untouched while writes are impossible — the material/vendor sync jobs are retired (`SyncableEndpoints.Retired`).
+
+The tidier setup is a dedicated `QMS_App` login with `DEFAULT_SCHEMA = qms`, which makes the synonyms redundant. `SAP_User` has no server-level rights to create it; the exact statements for a DBA are in `app\db\mis\M01__schema.sql`.
+
+**Row-Level Security.** `portal.*` carries extensive RLS (vendor isolation via `SESSION_CONTEXT`). None of it applies to the tables QMS touches. Note that querying an RLS table without `SESSION_CONTEXT` returns **0 rows, not an error** — `SELECT COUNT(*) FROM portal.Demand` reading 0 is normal and is not data loss; check `sys.partitions` for the true count.
+
+### Retired database
+
+`SharbatlyQMS` on `192.168.3.10` (login `linkserver`) is **untouched and still intact** — it is the rollback path. Nothing was written to it during the migration.
 
 ---
 
@@ -81,15 +99,13 @@ Reason for the stack: all four reusable packs already target this exact combinat
 - **LAN URL for end users:** **`http://192.168.3.17:5244`**
 - **Uploaded inspection photos** live in `deploy\SharbatlyQMS\wwwroot\uploads` (~4.6 GB / 3,000+ files) and documents in `deploy\SharbatlyQMS\App_Data\documents`. **These are production data that live outside SQL** — any host move must copy them, or existing reports lose their images. `deploy\SharbatlyQMS\keys\` holds the DataProtection key (auth cookies / antiforgery); copy it too or every session is invalidated.
 
-> ⚠️ **Production photo data sits INSIDE the publish output directory.** That is fragile by design: the deploy target and the user-data store are the same folder. `dotnet publish` and `Republish.ps1` were both explicitly tested (2026-07-23) and do **not** delete the extra files — but during the 2026-07-23 migration 2,816 of the 3,006 copied photos disappeared from the new host between the initial copy and the first republish, and **the cause was never identified** (publish was ruled out by direct experiment; no code path outside the admin "PURGE ALL" action deletes upload files). They were restored from .15 and re-verified. **After any deploy, check the count** — it should match .15 until that host is decommissioned:
+> ✅ **RESOLVED 2026-07-23 — photos no longer live in the publish output.**
 >
-> ```powershell
-> Invoke-Command -ComputerName KSAJEDSVAIP001 -ScriptBlock {
->   (Get-ChildItem 'C:\QualityManagemet\deploy\SharbatlyQMS\wwwroot\uploads' -Recurse -File).Count
-> }   # expect 3006+ and ~4,585 MB
-> ```
+> They are now stored at **`C:\QualityManagemet\data\uploads`**, set via `QMS:UploadsPhysicalRoot` in `appsettings.Production.json` and served at the unchanged `/uploads/...` URLs by a second static-file provider in `Program.cs`. See `Services/UploadStorage.cs`.
 >
-> Moving `uploads` out of the publish output (and serving it from a fixed path outside the deploy folder) would remove this whole class of risk and is worth doing before .15 is retired.
+> **Root cause, for the record.** `wwwroot/uploads` sat inside the publish target. `dotnet publish` re-runs the static-web-assets step whenever the build actually produces new output, and that step prunes files under `wwwroot` the project does not know about — deleting 2,816 of 3,006 production photos. It looked intermittent because a publish with **no** rebuild leaves them alone: an early experiment with unchanged code passed, which is why the first investigation wrongly cleared `dotnet publish`. It reproduced immediately on the next deploy that carried real code changes.
+>
+> Verified after the fix: a full `Republish.ps1` with changed code left all 3,006 files untouched.
 
 ### Old host (192.168.3.15) — still running, pending decommission
 
@@ -201,6 +217,21 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 ---
 
 ## 8. Decisions log (newest first)
+
+### 2026-07-23 (QMS moved onto the shared Sharbatly_MIS database)
+
+QMS was re-pointed from its private `SharbatlyQMS` database to **`Sharbatly_MIS` on KSAJEDSVSQL003**, shared with the SCM app. The driver was duplication: QMS kept its own users, its own roles, and its own copy of the SAP material master — 33,774 rows sitting beside `dbo.Mara`'s 33,785, the same SAP data synced twice. Historical transactions were deliberately not migrated.
+
+- **Reused rather than re-created:** `portal.User` (identity), `portal.Role`/`UserRole` (roles), `portal.UserPlant` (plant), `dbo.Mara` (materials), `dbo.SAP_Vendors` (vendors), `portal.SystemSetting` (settings). See §4 for the mapping.
+- **Dropped as dead code:** `EmailGroups`, `EmailGroupMembers`, `EmailGroupAddresses`, `GroupMailConfig`, `AlertRules` — zero references anywhere in the codebase.
+- **Kept QMS-specific, deliberately:** `qms_audit_log` (portal's is Demand/vendor-scoped and has no device-name/user-agent columns), `qms_status_history` (portal's is hard-keyed to `DemandId` + a `StatusTransition` FK), `qms_sap_container_cache` (`portal.PoDemandList` is PO-line level and lacks container/BOL/batch numbers and arrival dates).
+- **Roles are namespaced `Qc*`.** `portal.Role` already had `Operator` and `Supervisor` for the SCM *production* module; reusing those names would have handed every production operator access to quality inspections. Verified after migration: no pre-existing user gained a quality role, and none of the 15 users QMS added holds any SCM role.
+- **Identity is shared, so QMS treats it as read-mostly.** It owns a user's role, profile and plant; it never edits or deletes `portal.User` beyond creating genuinely new people. "Disable" writes `qms.UserProfile.DisabledAt` so QMS access is revoked without locking the person out of SCM, and "delete" revokes the Qc roles rather than removing the shared row.
+- **Login is AD-only now.** The BCrypt local fallback was removed: `portal.User` stores a different password scheme (varbinary hash + salt + algo) that QMS never evaluates. Auto-create-on-login no longer invents rows in the shared store — it only grants the default `QcViewer` role to someone the portal already knows.
+- **Material/vendor sync retired.** `dbo.Mara` is now owned solely by the SCM app's `maraSync`. If that stops running, QMS's catalogue goes stale too — the two apps now share that dependency. `brand` (16,217 materials) has no column in `dbo.Mara` and is preserved in `qms.MaterialExtra`.
+- **Data carried over:** 8 catalogues (548 defects, 29 reading types, 5 categories, 28 material-group mappings, 8 sample header fields, 2 arrival fields, 7 saved perspectives), 16,217 brands, 55 settings, and 21 of 22 user role assignments. `admin` was intentionally not recreated — it was the legacy local seed account, not a person.
+- **Verified:** SCM's 25 settings, 147 role assignments, 26 roles, 143 tables and 33,785 Mara rows all unchanged; the SCM app still serves. The QMS app pulled 10,666 container rows from SAP and wrote them into the new database on first run, proving the full round trip.
+- **Rollback:** restore `appsettings.Production.json.pre-mis-backup` and restart. The old database was never written to.
 
 ### 2026-07-23 (production moved off the dev box onto the dedicated server 192.168.3.17)
 

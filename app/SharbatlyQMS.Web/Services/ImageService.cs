@@ -38,6 +38,7 @@ public class ImageService : IImageService
 
     private readonly string _cs;
     private readonly IWebHostEnvironment _env;
+    private readonly IConfiguration _config;
     private readonly ISettingsService _settings;
     private readonly ILogger<ImageService> _log;
 
@@ -46,7 +47,7 @@ public class ImageService : IImageService
     {
         _cs = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
-        _env = env; _settings = settings; _log = log;
+        _env = env; _config = config; _settings = settings; _log = log;
     }
 
     private SqlConnection Open() => new(_cs);
@@ -110,7 +111,7 @@ public class ImageService : IImageService
         category ??= "";
 
         var thumbCfg = await _settings.GetThumbnailConfigAsync();
-        var ownerDir = Path.Combine(_env.WebRootPath, "uploads", ownerType, ownerId.ToString());
+        var ownerDir = Path.Combine(UploadStorage.Root(_env, _config), ownerType, ownerId.ToString());
         var thumbDir = Path.Combine(ownerDir, "thumbs");
         Directory.CreateDirectory(ownerDir);
         Directory.CreateDirectory(thumbDir);

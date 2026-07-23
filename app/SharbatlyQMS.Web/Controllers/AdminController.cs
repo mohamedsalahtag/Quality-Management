@@ -396,7 +396,8 @@ public class AdminController : Controller
 
         // Delete image files on disk so wwwroot/uploads/ matches the empty DB.
         // Best-effort: any locked file is skipped; the DB is the source of truth.
-        var uploadsRoot = Path.Combine(_env.WebRootPath, "uploads");
+        var uploadsRoot = UploadStorage.Root(_env,
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>());
         var filesDeleted = 0;
         if (Directory.Exists(uploadsRoot))
         {
@@ -1031,9 +1032,9 @@ public class AdminController : Controller
         if (valueKind != "Numeric" && valueKind != "Text") valueKind = "Numeric";
 
         // Whitelist the display_mode; matches the CK_qms_reading_type_display_mode
-        // CHECK constraint added in V18. Fall back to a sensible default if
-        // a stale form posts something unknown.
-        var allowedModes = new[] { "text", "count", "sum", "sum_over_size", "formula" };
+        // CHECK constraint (V18, extended with 'avg' in V38). Fall back to a
+        // sensible default if a stale form posts something unknown.
+        var allowedModes = new[] { "text", "count", "sum", "avg", "sum_over_size", "formula" };
         if (string.IsNullOrWhiteSpace(displayMode) || !allowedModes.Contains(displayMode))
             displayMode = valueKind == "Text" ? "text" : "sum";
 
@@ -1278,6 +1279,140 @@ public class AdminController : Controller
                 new { fieldId, wipedValues }, null);
         _catalogCache.Invalidate();
         return RedirectToAction(nameof(SampleHeaders));
+    }
+
+    // ---- Arrival Fields (V36, Parameters menu) ------------------------
+    //
+    // Admin-defined extra fields on an Arrival, each linked to exactly one
+    // material group. The arrival Details page renders a field only when the
+    // arrival's line items contain that group; the value also prints in the
+    // Arrival Checklist PDF identity block after Seal Number.
+    [HttpGet]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> ArrivalFields()
+    {
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        var rows = await c.QueryAsync<ArrivalCustomField>(@"
+            SELECT f.field_id       FieldId,
+                   f.field_name     FieldName,
+                   f.value_kind     ValueKind,
+                   f.material_group MaterialGroup,
+                   f.sort_order     SortOrder,
+                   f.is_active      IsActive,
+                   CAST(CASE WHEN EXISTS (
+                            SELECT 1 FROM qms_arrival_field_value v
+                            WHERE v.field_id = f.field_id)
+                            THEN 1 ELSE 0 END AS BIT) IsInUse
+            FROM   qms_arrival_field f
+            ORDER  BY f.sort_order, f.field_name");
+
+        // Material-group dropdown: MARA cache first, fall back to groups seen
+        // on arrival items so the page works even when the cache is cold.
+        var maraGroups = await _mara.ListMaterialGroupsAsync();
+        IReadOnlyList<MaraGroup> groups = maraGroups;
+        if (groups.Count == 0)
+        {
+            var fallback = (await c.QueryAsync<string>(@"
+                SELECT DISTINCT material_group FROM qms_arrival_item
+                WHERE material_group IS NOT NULL AND material_group <> ''")).ToList();
+            groups = fallback.Select(g => new MaraGroup { Code = g, Name = null }).ToList();
+        }
+        ViewBag.MaterialGroups = groups;
+        return View(rows.ToList());
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> SaveArrivalField(int fieldId, string fieldName,
+        string valueKind, string materialGroup, int sortOrder, bool isActive)
+    {
+        if (string.IsNullOrWhiteSpace(fieldName) || string.IsNullOrWhiteSpace(materialGroup))
+        {
+            TempData["Error"] = "Field name and material group are required.";
+            return RedirectToAction(nameof(ArrivalFields));
+        }
+        // Whitelist matches the CK constraint added in V36.
+        if (!ArrivalCustomField.ValueKinds.Contains(valueKind)) valueKind = "Text";
+
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        // Friendlier message than the raw UQ_qms_arrival_field_name_group 2627.
+        var conflictId = await c.ExecuteScalarAsync<int?>(@"
+            SELECT TOP 1 field_id FROM qms_arrival_field
+            WHERE field_name = @fieldName AND material_group = @materialGroup
+              AND field_id <> @fieldId",
+            new { fieldName, materialGroup, fieldId });
+        if (conflictId.HasValue)
+        {
+            TempData["Error"] = $"A field named '{fieldName}' already exists for material group {materialGroup}.";
+            return RedirectToAction(nameof(ArrivalFields));
+        }
+
+        var user = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "system";
+        if (fieldId <= 0)
+        {
+            await c.ExecuteAsync(@"
+                INSERT INTO qms_arrival_field
+                    (field_name, value_kind, material_group, sort_order, is_active, created_by)
+                VALUES (@fieldName, @valueKind, @materialGroup, @sortOrder, @isActive, @user)",
+                new { fieldName, valueKind, materialGroup, sortOrder, isActive, user });
+            TempData["Success"] = $"Arrival field '{fieldName}' added for material group {materialGroup}.";
+        }
+        else
+        {
+            await c.ExecuteAsync(@"
+                UPDATE qms_arrival_field SET
+                    field_name=@fieldName, value_kind=@valueKind, material_group=@materialGroup,
+                    sort_order=@sortOrder, is_active=@isActive
+                WHERE field_id=@fieldId",
+                new { fieldId, fieldName, valueKind, materialGroup, sortOrder, isActive });
+            TempData["Success"] = "Arrival field updated.";
+        }
+        await AuditAdminAsync(EntityTypes.ArrivalField, fieldId <= 0 ? 0 : fieldId,
+            fieldId <= 0 ? ActionCodes.Created : ActionCodes.Updated,
+            null, new { fieldName, valueKind, materialGroup, sortOrder, isActive });
+        return RedirectToAction(nameof(ArrivalFields));
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> DeleteArrivalField(int fieldId)
+    {
+        // Same policy as Sample Header Fields: deletion is allowed even when
+        // in use — the confirm dialog warns that stored values are wiped —
+        // and the value rows go in the same transaction.
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+
+        var wipedValues = await c.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM qms_arrival_field_value WHERE field_id = @fieldId",
+            new { fieldId }, tx);
+        await c.ExecuteAsync(
+            "DELETE FROM qms_arrival_field_value WHERE field_id = @fieldId",
+            new { fieldId }, tx);
+        var n = await c.ExecuteAsync(
+            "DELETE FROM qms_arrival_field WHERE field_id = @fieldId",
+            new { fieldId }, tx);
+        tx.Commit();
+
+        if (n > 0)
+        {
+            TempData["Success"] = wipedValues > 0
+                ? $"Arrival field deleted (and {wipedValues} stored value(s) removed across arrivals)."
+                : "Arrival field deleted.";
+            await AuditAdminAsync(EntityTypes.ArrivalField, fieldId, ActionCodes.Deleted,
+                new { fieldId, wipedValues }, null);
+        }
+        else
+        {
+            TempData["Error"] = "Field not found.";
+        }
+        return RedirectToAction(nameof(ArrivalFields));
     }
 
     // ---- Mail template (Parameters menu) -----------------------------

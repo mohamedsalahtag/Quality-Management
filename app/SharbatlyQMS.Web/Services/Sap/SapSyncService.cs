@@ -17,6 +17,18 @@ public static class SyncableEndpoints
 
     public static readonly string[] All = { MaterialMaster, VendorMaster };
     public static bool IsValid(string? key) => key != null && Array.IndexOf(All, key) >= 0;
+
+    /// <summary>
+    /// Endpoints QMS no longer pulls for itself. Since the move onto
+    /// Sharbatly_MIS the material and vendor masters are read straight from
+    /// dbo.Mara and dbo.SAP_Vendors, which the SCM app syncs and owns.
+    /// qms_sap_material_cache / qms_sap_vendor_cache are now views over those
+    /// tables, so a sync would have nothing to write to.
+    /// The keys stay listed in <see cref="All"/> so the SAP settings tab can
+    /// still show and test the URLs.
+    /// </summary>
+    public static readonly string[] Retired = { MaterialMaster, VendorMaster };
+    public static bool IsRetired(string? key) => key != null && Array.IndexOf(Retired, key) >= 0;
 }
 
 public interface ISapSyncService
@@ -50,6 +62,16 @@ public class SapSyncService : ISapSyncService
     {
         if (!SyncableEndpoints.IsValid(endpointKey))
             return (false, 0, $"Endpoint '{endpointKey}' is not syncable.");
+
+        if (SyncableEndpoints.IsRetired(endpointKey))
+        {
+            const string why =
+                "This sync is retired. The material and vendor masters now come " +
+                "straight from Sharbatly_MIS (dbo.Mara / dbo.SAP_Vendors), which the " +
+                "SCM app keeps up to date, so QMS no longer holds its own copy.";
+            _log.LogInformation("SAP sync {Endpoint} skipped: retired after the Sharbatly_MIS move.", endpointKey);
+            return (false, 0, why);
+        }
 
         var sap = await _settings.GetSapConfigAsync();
         var url = endpointKey switch
@@ -291,6 +313,7 @@ public class SapSyncService : ISapSyncService
         dt.Columns.Add("base_unit_name",         typeof(string));
         dt.Columns.Add("sap_created_on",         typeof(DateTime));
         dt.Columns.Add("sap_created_by",         typeof(string));
+        dt.Columns.Add("brand",                  typeof(string));
 
         foreach (var (key, row) in rows)
         {
@@ -329,7 +352,9 @@ public class SapSyncService : ISapSyncService
                 NullIfEmpty(Get("Base_Unit", "BASE_UNIT", "BaseUnit", "Meins", "MEINS")),
                 NullIfEmpty(Get("Base_Unit_Name", "BASE_UNIT_NAME", "BaseUnitName")),
                 (object?)createdOn ?? DBNull.Value,
-                NullIfEmpty(Get("Created_By", "CREATED_BY", "CreatedBy")));
+                NullIfEmpty(Get("Created_By", "CREATED_BY", "CreatedBy")),
+                // Brand: newly added to the material-master feed (2026-07-08).
+                NullIfEmpty(Get("Brand", "BRAND", "Brand_Name", "BRAND_NAME", "BrandName")));
         }
 
         using var c = new SqlConnection(_cs);
@@ -366,7 +391,8 @@ public class SapSyncService : ISapSyncService
                 base_unit              VARCHAR(10)   NULL,
                 base_unit_name         NVARCHAR(40)  NULL,
                 sap_created_on         DATETIME2     NULL,
-                sap_created_by         NVARCHAR(40)  NULL);", transaction: tx);
+                sap_created_by         NVARCHAR(40)  NULL,
+                brand                  NVARCHAR(100) NULL);", transaction: tx);
 
         using (var bulk = new SqlBulkCopy(c, SqlBulkCopyOptions.Default, tx)
         {
@@ -412,6 +438,7 @@ public class SapSyncService : ISapSyncService
                 base_unit_name        = s.base_unit_name,
                 sap_created_on        = s.sap_created_on,
                 sap_created_by        = s.sap_created_by,
+                brand                 = s.brand,
                 synced_at             = SYSUTCDATETIME()
             WHEN NOT MATCHED THEN INSERT (
                 material_no, material_desc, major_category, major_category_desc,
@@ -419,14 +446,14 @@ public class SapSyncService : ISapSyncService
                 origin_name, procurement_type, procurement_type_name, variety_id, variety_name,
                 class_id, class_name, size_id, size_name, material_weight, material_weight_name,
                 old_material_code, weight, weight_unit, material_type, base_unit, base_unit_name,
-                sap_created_on, sap_created_by)
+                sap_created_on, sap_created_by, brand)
             VALUES (
                 s.material_no, s.material_desc, s.major_category, s.major_category_desc,
                 s.sub_major_category, s.overhead, s.material_group, s.material_group_desc, s.origin_id,
                 s.origin_name, s.procurement_type, s.procurement_type_name, s.variety_id, s.variety_name,
                 s.class_id, s.class_name, s.size_id, s.size_name, s.material_weight, s.material_weight_name,
                 s.old_material_code, s.weight, s.weight_unit, s.material_type, s.base_unit, s.base_unit_name,
-                s.sap_created_on, s.sap_created_by);
+                s.sap_created_on, s.sap_created_by, s.brand);
             DROP TABLE {stage};", transaction: tx, commandTimeout: 240);
 
         tx.Commit();
