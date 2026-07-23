@@ -2,7 +2,7 @@
 
 > **For any AI agent (Claude Code, OpenAI Codex, Cursor, ChatGPT, GitHub Copilot, ...) picking up this project: read this file first.** It captures the live state of the QMS web application — what is built, where it runs, the decisions that shaped it, and the files that contain the authoritative truth.
 
-Last updated: **2026-06-20** (Perspective Analyzer — server-side SQL pivot + saved/shared/default perspectives layered on the data hub).
+Last updated: **2026-07-23** (production moved to the dedicated server KSAJEDSVAIP001 / 192.168.3.17; this copy of the repo is now the source of truth).
 
 ---
 
@@ -24,7 +24,8 @@ Last updated: **2026-06-20** (Perspective Analyzer — server-side SQL pivot + s
 
 | Concern | Path |
 | --- | --- |
-| Working repository root | `C:\QualityManagemet\` (note the typo — the folder name is **QualityManagemet**, not QualityManagement) |
+| Working repository root | `C:\QualityManagemet\` **on server KSAJEDSVAIP001 (192.168.3.17)** — the source of truth since 2026-07-23. Mapped as `W:\` from Mohamed's PC. (Note the typo — the folder name is **QualityManagemet**, not QualityManagement.) |
+| Legacy repo copy (do not edit) | `\\192.168.3.15\C$\Websites\QualityManagemet` (mapped `Q:\`) — the previous host; kept running temporarily, see §5 |
 | Web app source | `app\SharbatlyQMS.Web\` |
 | DB migration tool source | `app\SharbatlyQMS.Migrate\` |
 | Solution file | `app\SharbatlyQMS.slnx` |
@@ -72,13 +73,34 @@ Reason for the stack: all four reusable packs already target this exact combinat
 
 ## 5. Production deployment (LIVE)
 
-- **Host:** This same Windows 11 Pro PC (the dev box). One-machine deployment for v1.
-- **Windows Service:** `SharbatlyQMS` — Automatic startup, auto-restart on failure (5 s / 5 s / 10 s).
+- **Host:** **KSAJEDSVAIP001 — 192.168.3.17**, Windows Server 2022 Standard, .NET 9 SDK 9.0.315. Same box that runs the IT HelpDesk app (service "IT HelpDesk", port 5000) — QMS uses port 5244, no conflict.
+- **Windows Service:** `SharbatlyQMS` — Automatic startup, LocalSystem, auto-restart on failure (5 s / 5 s / 10 s).
 - **Binary:** `C:\QualityManagemet\deploy\SharbatlyQMS\SharbatlyQMS.Web.exe`
 - **URL binding (Kestrel):** `http://0.0.0.0:5244` (set via `appsettings.Production.json`)
 - **Firewall:** Windows Defender Firewall rule "SharbatlyQMS HTTP 5244" — Inbound, TCP 5244, Domain + Private profiles.
-- **LAN URL for end users:** **`http://192.168.3.192:5244`** (192.168.3.x subnet — same network as the SQL server).
-- **Local URL on this PC:** `http://localhost:5244`.
+- **LAN URL for end users:** **`http://192.168.3.17:5244`**
+- **Uploaded inspection photos** live in `deploy\SharbatlyQMS\wwwroot\uploads` (~4.6 GB / 3,000+ files) and documents in `deploy\SharbatlyQMS\App_Data\documents`. **These are production data that live outside SQL** — any host move must copy them, or existing reports lose their images. `deploy\SharbatlyQMS\keys\` holds the DataProtection key (auth cookies / antiforgery); copy it too or every session is invalidated.
+
+### Old host (192.168.3.15) — still running, pending decommission
+
+The previous deployment at `\\192.168.3.15\C$\Websites\QualityManagemet` is **still live on port 5244 against the same database**. It was deliberately left running on 2026-07-23 so the new host could be validated first. While both run:
+
+- Background jobs (email/alerts) fire from **both** hosts.
+- New photo uploads land on whichever host served the request, so the two `wwwroot\uploads` folders diverge.
+
+**To finish the cutover:** re-sync photos (`robocopy Q:\deploy\SharbatlyQMS\wwwroot\uploads W:\deploy\SharbatlyQMS\wwwroot\uploads /E /MT:16`), then `Stop-Service SharbatlyQMS` + set it to Disabled on .15.
+
+### Deploying / operating remotely (no RDP needed)
+
+The server accepts PowerShell remoting. Use the **hostname**, not the IP — Kerberos auth fails on IPs.
+
+```powershell
+# republish after code changes (build + publish must run ON the server —
+# publishing from the W:\ SMB share drops Razor views and breaks the site)
+Invoke-Command -ComputerName KSAJEDSVAIP001 -ScriptBlock {
+  & 'C:\QualityManagemet\deploy\Republish.ps1'
+}
+```
 
 ### Operating the service (any elevated PowerShell)
 
@@ -169,6 +191,119 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 ---
 
 ## 8. Decisions log (newest first)
+
+### 2026-07-23 (production moved off the dev box onto the dedicated server 192.168.3.17)
+
+QMS was running on a workstation-class host. It now runs on **KSAJEDSVAIP001 (192.168.3.17)**, Windows Server 2022 — the same server that already hosts the IT HelpDesk app, so the deployment mirrors that proven pattern: repo on the server, publish locally on the server, run as a Windows Service behind a firewall rule.
+
+- **What was copied:** the repo source (incl. `.git`) to `C:\QualityManagemet\`, plus the three pieces of production state that live outside SQL — `wwwroot\uploads` (4.58 GB / 3,006 photos), `App_Data\documents`, and `keys\` (DataProtection). The `deploy\rollback-*` snapshots (~21 GB of dev history) were deliberately **not** copied.
+- **Published on the server, not over the share.** `dotnet publish` run over SMB drops the compiled Razor views and the site 500s on every page — the same trap hit on HelpDesk. Always publish via `Invoke-Command` to the hostname.
+- **Database unchanged** — still `192.168.3.10\SharbatlyQMS`. Nothing about the data tier moved; verified reachable from the new host.
+- **Both hosts left running.** The old .15 instance was intentionally not stopped, pending validation of the new one. See §5 for the divergence risk and the steps to finish the cutover.
+- **Verified:** service Running, `http://192.168.3.17:5244/Account/Login` → 200, a migrated inspection photo served → 200, "Service started successfully" in the Application event log. The only warning is the pre-existing, non-fatal `AD ListUsers … referral was returned` (login is bind-only and unaffected).
+- **This repo copy is now the source of truth**; the `Q:\` copy on .15 is legacy and should not be edited.
+
+### 2026-07-20 (QO submit/finish without samples now requires a mandatory reason)
+
+User request: allow submitting a Quality Order even when some materials have no samples, but pop up a notification listing those materials and force the user to confirm **with a mandatory reason**. This extends the V38 (2026-07-08) bypassable warning, which had a "Submit anyway" button but captured no justification.
+
+- **No schema change.** The transition pipeline (`QualityOrderService.Transition`) already writes its `reason` argument into `qms_status_history.reason` and the audit log (`new_values_json.reason`); Submit simply passed `null` before. Routing the bypass reason through the existing param records it in both places — the same home as the cancel-submit / close / reopen reasons.
+- **The bypass modal now carries a mandatory reason textarea** (`Views/QualityOrders/Details.cshtml`). The `<form>` was moved to wrap the modal body + footer so the textarea's HTML5 `required` fires from the "Submit/Finish anyway" button. Both Submit and Close post the justification under `name="reason"`; for Close it also pre-fills any finish reason already entered. `maxlength=500`, helper text notes it's recorded in the audit trail.
+- **Reason is enforced server-side, not just in the UI** — two layers: (1) `QualityOrdersController.Submit`/`Close` re-open the warning modal with an error if `bypassNoSamples=true` arrives with a blank reason; (2) `Transition` itself rejects a blank reason whenever `bypassNoSamples` is set for a Submitted/Closed target, so a crafted POST that skips the modal still can't bypass without a justification. Verified: a direct POST with an empty reason leaves the QO Open.
+- **Files.** MODIFIED: `Services/IQualityOrderService.cs` (`SubmitAsync` gains `string? reason = null`), `Services/QualityOrderService.cs` (`SubmitAsync` forwards reason; `Transition` gains the mandatory-bypass-reason guard), `Controllers/QualityOrdersController.cs` (`Submit` gains `reason` + guard, `Close` gains the matching guard), `Views/QualityOrders/Details.cshtml` (bypass modal reason textarea). No migration.
+- **Verified** on LIVE prod (192.168.3.15:5244) against QO-2026-000012 (Open, 1 unsampled material), 11/11 Playwright+HTTP checks: modal auto-opens listing the unsampled material, empty reason is blocked client-side (and the crafted-POST server guard keeps the QO Open), and once a reason is given the QO goes Submitted with the reason persisted in `qms_status_history` **and** the audit log (`{"status_code":"Submitted","reason":"..."}`). Deployed via the remote path (snapshot `Q:\deploy\rollback-bypassreason-20260720\`); QO 12 restored to Open and all test rows/user removed afterward.
+
+### 2026-07-20 (Quality Orders list — materials "quick peek" hover)
+
+User request: on the Quality Orders list, add a hover "quick peek" of the materials inside each QO, exactly like the Pending Containers page. Purely additive, no schema change (read-only over existing tables).
+
+- **Mechanism reused verbatim from Pending Containers** (`Views/Arrivals/Pending.cshtml`): a Bootstrap tooltip with `data-bs-toggle="tooltip" data-bs-html="true"`, the full material list baked into `data-bs-title` server-side (HTML-encoded), first material + `+N more` badge shown inline. **No new JS** — `site.js` already auto-inits every `[data-bs-toggle="tooltip"]` on load and re-inits on tablekit paging via its MutationObserver (the QO Plant badge already relied on this).
+- **Data path — one query, two result sets, no N+1.** `QualityOrderService.ListAsync` now runs a `QueryMultipleAsync`: the existing QO-header query, then a second SELECT of `qms_quality_order_material m JOIN qms_arrival_item ai` (material_no, material_desc, ai.quantity, ai.uom) filtered to the **same** QO set via a subquery reusing the shared `QoListWhere` constant, stitched onto each header with `ToLookup(QualityOrderId)`. Deliberately did **not** loop the existing single-QO `GetMaterialsAsync` per row (would be N+1 over a 50-row page), and used a lightweight `QoMaterialLine` (4 fields) rather than hydrating the full 24-column `QualityOrderMaterial` × up to 100+ materials × 50 rows.
+- **Files.** MODIFIED: `Models/QualityOrder.cs` (new `QoMaterialLine` type + `LineCount`/`MaterialLines` rollup on `QualityOrder`, populated only by `ListAsync`), `Services/QualityOrderService.cs` (`QoListWhere` constant + `ListAsync` two-set query + stitch), `Views/QualityOrders/Index.cshtml` (new non-sortable **Materials** column after Arrival, `.qo-peek`/`.qo-tip` CSS block cloned from Pending's `.pp-peek`, empty-state `colspan` 12→13, "No materials" placeholder for QOs with none). `ListAsync` has a single caller (`QualityOrdersController.Index`), so the extra result set burdens nothing else.
+- **Verified** on LIVE prod (192.168.3.15:5244) with a 12-check Playwright run, all passing: Materials header present, 17 peek cells rendered, QO-2026-000012 (11 materials) shows first material + `+10 more`, `data-bs-title` carries all 11 `<li>`, and hovering renders the visible dark Bootstrap tooltip listing all 11 with quantity/UoM spans. Screenshot confirmed the look matches Pending Containers. Deployed via the remote path (snapshot `Q:\deploy\rollback-qopeek-20260720\`); temp smoke user removed.
+
+### 2026-07-15 (V39 — document attachments on Arrivals: PDF / Word / Excel / CSV / TXT / MSG / ZIP)
+
+User request: arrivals could only carry photos; inspectors also need real business documents (supplier invoices, packing lists, certificates, claim letters, temperature-logger exports). New **Documents** tab on Arrival Details, beside Images.
+
+- **Separate pipeline, not an extension of the image one** (user decision: separate tab). `_ImageGalleryGrid.cshtml` renders `<img>` for EVERY `qms_image_link` row of an owner and `ReportsController.PreprocessImagesAsync` feeds each to ImageSharp — a PDF in `qms_image_link` would show as a broken thumbnail on the Arrival/Sample/QO galleries. A separate table meant **zero changes to the image path**, so Samples/QO photo upload could not regress. Schema `V39__arrival_documents.sql` (applied 2026-07-15): single `qms_document` table with generic `owner_type` (Arrival|QualityOrder|Sample, CHECK-constrained) + filtered index on `(owner_type, owner_id) WHERE is_deleted = 0`. The asset/link split was deliberately **not** copied — it exists so one photo can hang off several galleries; documents have no such need.
+- **Documents are stored OUTSIDE wwwroot and served only by an authenticated action** (user decision). This is the one place V39 deliberately diverges from the image design: `wwwroot/uploads/` is served by `UseStaticFiles()` with **no auth at all**, so any image URL yields bytes to anonymous callers. Fine for a pallet photo, not for a supplier invoice. Layout is `{QMS:DocumentRoot}/{ownerType}/{ownerId}/{guid}{ext}`, default `App_Data/documents` under the **content** root; `storage_path` is stored relative so the root stays movable. `GET /Documents/Download/{id}` re-checks auth + plant scope, re-derives Content-Type from a **server-side extension→MIME map** (never the stored client-supplied `content_type`), and always sends `Content-Disposition: attachment` so a crafted `.txt`/`.msg` can't render as HTML in our origin.
+- **Two distinct gates — the easy thing to get wrong.** `GateEditAsync` (upload/delete) requires Arrival = **Draft** + OperatorOrAbove + plant scope. `GateReadAsync` (download) requires **only** plant scope, so a Completed arrival's invoice stays readable by any authenticated user incl. Viewer. Delete re-resolves the true owner from `documentId` and gates against that (IDOR defense, as `ImagesController` does).
+- **Rejections are reported, not silent.** `UploadAsync` returns `(saved, rejected[])` and the grid renders a warning naming each rejected file and why. The image path only logs-and-drops, so a user sees a lower count and reads it as a bug — deliberately not copied. Limits: `QMS:MaxDocumentSizeMB` (25) and `QMS:DocumentRoot` are **actually read**, unlike the pre-existing `QMS:ImageUploadRoot` / `ThumbnailRoot` / `MaxImageSizeMB` keys, which are **dead config nothing consumes** (left alone; worth deleting or wiring up separately).
+- **Known bug found, deliberately NOT inherited (still open on the Images tab):** `Views/Arrivals/Details.cshtml` builds the image gallery with `Editable = canEdit` and a comment claiming photos stay editable after close — but `ImagesController.GateOwnerAsync` rejects any non-Draft arrival. On a **Completed** arrival the Images tab therefore renders an upload form + delete buttons where every attempt fails with "Arrival is Completed; photos can only be changed while it is in Draft." The Documents tab uses `draft && canEdit` so view and controller agree. **Fixing the Images tab is still outstanding** — either relax the controller or tighten the view.
+- **Files.** NEW: `app/db/V39__arrival_documents.sql`, `Services/IDocumentService.cs` + `DocumentService.cs`, `Controllers/DocumentsController.cs`, `ViewModels/DocumentListVm.cs` (+ `DocumentDisplay.FormatBytes` / `IconClass` — neither helper existed anywhere), `Views/Shared/_DocumentList.cshtml` + `_DocumentListGrid.cshtml`, `wwwroot/js/document-list-ajax.js`. MODIFIED: `Views/Arrivals/Details.cshtml` (nav tab + pane only), `Views/Shared/_Layout.cshtml` (script tag), `Program.cs` (DI), `appsettings.json` (2 live keys). The arrival PDF report is untouched. QO/Sample document tabs are not shipped, though `owner_type` allows them later.
+- **Verified** on LIVE prod (192.168.3.15:5244) with a 40-check Playwright + HTTP smoke run, all passing: upload of real PDF+XLSX (correct icon/size/category/uploader, tab stays active = AJAX), byte-identical download under the original filename, `.exe` + 26 MB file both rejected **by name with reasons**, soft delete (row `is_deleted=1`, file kept), Completed arrival read-only in UI **and** server-side, plus the security gates that justify the design: anonymous download → 302 to login with **no bytes**, wrong-plant Operator → denied, same-plant Operator → 200, Viewer → download yes / upload POST refused, crafted `ownerType="..\.."` → 400, documents **404 under /uploads**. Files confirmed on disk at `App_Data/documents/Arrival/16/{guid}.pdf` with nothing leaked into `wwwroot`. Audit shows `Arrival/Created` + `Arrival/Deleted` naming the file. All test users/rows/files torn down afterwards.
+- **Deployment note (important).** `deploy\Republish.ps1` defaults to `-Project C:\QualityManagemet\...` — the **stale local decoy**, not production. V39 was shipped via the remote path: `sc.exe \\192.168.3.15 stop SharbatlyQMS` → snapshot to `Q:\deploy\rollback-v39-20260715\` → `dotnet publish Q:\app\SharbatlyQMS.Web\SharbatlyQMS.Web.csproj -c Release -o Q:\deploy\SharbatlyQMS` → `sc.exe \\192.168.3.15 start SharbatlyQMS`. `App_Data/documents` survives republish (`dotnet publish -o` does not delete existing files) — but a future `robocopy /MIR`-style deploy **would wipe uploaded documents**; keep that in mind or move `QMS:DocumentRoot` outside the deploy folder.
+
+### 2026-07-08 (V38 — styled dialogs app-wide + bypassable QO submit warning)
+
+Two user requests. (1) All native browser alert()/confirm() popups ("192.168.3.15:5244 says …") replaced with a branded Bootstrap modal system: new `wwwroot/js/dialogs.js` (loaded from _Layout) provides `appDialogs.confirm/alert` plus declarative `data-confirm` / `data-confirm-title` / `data-confirm-ok` / `data-confirm-danger` attributes on forms and links. The submit interceptor runs in capture phase and, on acceptance, re-dispatches via `requestSubmit()` with a one-shot pass-through flag so downstream AJAX submit handlers (image gallery) keep working. All 19 view usages + perspective-analyzer.js + image-gallery-ajax.js converted (JS files keep a native fallback when dialogs.js isn't loaded). (2) The QO "Cannot submit: materials have no samples" hard block is now a **bypassable warning**: `Submit`/`Close` take `bypassNoSamples`; on first refusal the Details page auto-opens a warning modal listing the unsampled materials with "Submit/Finish anyway" (re-posts with the flag) or "Cancel — add samples first". Close mirrors Submit so a bypassed-submit QO can still be finished; the Close reason is carried through TempData into the bypass re-post.
+
+### 2026-07-07 (V36.2 — additional fields save with the checklist; V37 — PO quantity in the data hub)
+
+Two user requests. (1) The V36 "Additional fields" card on arrival Details had its own save button; the user wants ONE save. The card now lives INSIDE the checklist `<form>` (before the sticky Save-checklist button) and `ArrivalsController.SaveChecklist` persists the `cf_{fieldId}` inputs in the same submit (`ReadCustomFieldInputs` helper); the dedicated `SaveArrivalFields` action was removed. (2) PO quantity: `V37__flat_defects_po_quantity.sql` (applied 2026-07-07) re-creates `vw_qms_flat_defects` with `ai.quantity AS PoQuantity`; registered as pivot measure "PO quantity" with **AVG/MIN/MAX only** (same grain rationale as SampleSize — repeats per defect row, SUM would overcount); Data hub grid gains a "PO Qty" column (`ArrivalItemQuantity` + Uom, already streamed); the Excel export already carried Quantity.
+
+### 2026-07-07 (V36.1 — cookie revalidation: role changes / deactivation now propagate within 5 minutes)
+
+User report: `abdulrahman.alatiq` is SiteAdmin in the Users table but saw no Admin menu. Root cause: the Role claim is baked into the 30-day sliding auth cookie at login and was never re-checked — he had been riding a June-25 cookie (LastLogin 6/25, yet audit shows activity 6/29), so a later promotion never reached his session. Worse symmetric case: demotions and **account deactivation** also didn't take effect until the cookie died. Fix: `OnValidatePrincipal` in Program.cs re-checks the Users row at most every 5 minutes per session (stamp stored in cookie AuthenticationProperties): deleted/inactive → `RejectPrincipal` + sign-out; role drift → Role claim swapped in place; `ShouldRenew` persists the refresh. Immediate remedy for the reported user: log out / log in once (or wait ≤5 min after this deploy).
+
+### 2026-07-07 (V36 — Arrival custom fields, material-group-gated)
+
+New feature: admin-defined extra fields on an Arrival, each linked to exactly ONE material group (user decision), with a per-field value kind of Text / Numeric / Date / YesNo (user decision). A field renders on the arrival Details page (Overview tab, "Additional fields" card) only when the arrival's `qms_arrival_item` rows contain that material group, and its value prints in the Arrival Checklist PDF identity block **after Seal Number** (the user asked for "after swal number" — no SWAL field exists anywhere in the codebase; Seal Number is the matching identity-block row).
+
+Schema `V36__arrival_custom_fields.sql` (applied 2026-07-07): `qms_arrival_field` catalog + `qms_arrival_field_value` EAV values (one column per kind, `UQ (arrival_id, field_id)`, FK cascade from `qms_arrival`), modeled on the Sample Header Field system (V20). Managed from **Parameters > Arrival Fields** (`AdminController.ArrivalFields/SaveArrivalField/DeleteArrivalField`, ManagerOrAdmin, audit entity `ArrivalField`, delete cascades values with an explicit warning like Sample Headers). Arrival side: `IArrivalService.GetCustomFieldsAsync/SaveCustomFieldValuesAsync` (server re-derives the applicable set on save so crafted POSTs can't attach foreign fields; blank input deletes the value row), `ArrivalsController.SaveArrivalFields` (OperatorOrAbove + plant-scope + `CanEditArrival`, inputs named `cf_{fieldId}`). Material-group dropdown uses `_mara.ListMaterialGroupsAsync()` with a `qms_arrival_item` DISTINCT fallback.
+
+### 2026-06-21 (Perspective Analyzer XLSX — drop freeze panes entirely after user review)
+
+After getting the freeze-panes plumbing to actually work in Excel (the BOM fix below), the user opened the file and reported: *"design is good but freezing panes is making it look very bad, only restores good form when I unfreeze panes."* The horizontal/vertical freeze split bars Excel draws across the sheet clutter the layout for a report that's typically short enough to skim.
+
+Decision: drop freeze panes entirely. Removed `FreezeRows`, `FreezeColumns`, `TopLeftCellAddress` calls + the `FixPaneFreezeState` post-processor + the `IndexOf` helper from `BuildPivotWorkbook`. `AdjustToContents(headerTopRow, lastUsedRow)` with min/max column-width clamps remain (they fixed the cramped material-code columns and aren't freeze-related). The number-format auto-detection (clean integer vs. up-to-2-decimals) also stays.
+
+Files touched: `Controllers/ReportsController.cs` — `BuildPivotWorkbook` shortened by ~50 lines; the freeze post-processor methods are deleted.
+
+Verified by live download: `sheetViews` block now reads `<x:sheetView workbookViewId="0" />` (no `<pane>` child); `openpyxl.freeze_panes == None`. File opens in Excel with every row/column scrollable — what the user wanted.
+
+### 2026-06-21 (Perspective Analyzer XLSX — second pass: byte-level post-processor preserves UTF-8 BOM so Excel honours `state="frozen"`)
+
+First pass shipped a String-based post-processor that rewrote `state="frozenSplit"` → `state="frozen"` and verified the XML attribute looked right. openpyxl loaded the file and reported `freeze_panes = D7`. But Excel still rendered the pane as a split — scrolling past row 6 left no frozen header.
+
+Root cause (second pass): `ClosedXML` writes `xl/worksheets/sheet1.xml` with a UTF-8 BOM (the literal bytes `0xEF 0xBB 0xBF` at the start). My first post-processor decoded via `StreamReader(Encoding.UTF8)` (correctly strips the BOM) and re-wrote via `StreamWriter(new UTF8Encoding(false))` (deliberately omits the BOM). Result: the new entry was valid UTF-8 without the BOM. **openpyxl tolerated this; Excel did not** — without the BOM at the start of sheet1.xml, Excel silently downgrades the `state="frozen"` to a "split" rendering.
+
+Fix: replaced the post-processor with a **byte-level** search-and-replace. Read the raw bytes of the entry, do a binary search for the ASCII sequence `state="frozenSplit"` (no decoding), splice in `state="frozen"` (5 bytes shorter), write the resulting bytes back unchanged. BOM, line endings, encoding declaration — all preserved.
+
+Verified by `requests` → `zipfile` round-trip:
+- `raw[:3].hex()` = `efbbbf` (UTF-8 BOM preserved).
+- `sheetViews` block contains `<x:pane … state="frozen" />`, no `"frozenSplit"`.
+- `openpyxl` reads `ws.freeze_panes == "D7"`.
+
+Files touched: `Controllers/ReportsController.cs` — `FixPaneFreezeState` rewritten with a byte-level `IndexOf + Buffer.BlockCopy` splice. No other surface changed.
+
+### 2026-06-21 (Perspective Analyzer XLSX — fix freeze panes + integer formatting + column widths)
+
+User opened a downloaded `pivot-flat_defects-…xlsx` and reported three real formatting bugs.
+
+- **Freeze panes weren't holding.** Root cause: ClosedXML 0.105 writes `<pane … state="frozenSplit" />` whenever BOTH `FreezeRows` and `FreezeColumns` are set, instead of `state="frozen"`. Excel renders `frozenSplit` as draggable split bars (you can scroll past the headers), not as a real freeze. Confirmed by inspecting the raw `xl/worksheets/sheet1.xml` of a live export. Fix: `BuildPivotWorkbook` keeps the two ClosedXML freeze calls, then a small post-processing pass `FixPaneFreezeState` opens the saved `MemoryStream` as a `ZipArchive` and rewrites `state="frozenSplit"` → `state="frozen"` in `sheet1.xml`. Verified via a scripted Playwright download: the pane element now says `state="frozen"` and Excel locks the column header + row-dim columns when you scroll.
+- **Integers showed a trailing dot.** Root cause: the `auto` number-format string was `#,##0.##`. Excel's format spec emits the literal `.` even when no decimals follow, so `2` rendered as `2.`. Fix: per-cell branch in `SetMeasureCell` — if `v == Math.Truncate(v)` use `#,##0` (clean integer); else use `#,##0.##` (up to 2 decimals). The other formats (`int`, `dec1`, `dec2`, `percent`) are user-explicit and stay untouched. Verified in the live styles.xml — the test export defined only `#,##0`, no `#,##0.##` was needed because every defect count was an integer.
+- **Column widths too narrow.** Root cause: `ws.Columns().AdjustToContents()` measured EVERY used row, including the merged 13-pt bold title in row 1 that spans every column. The averaging biased widths down so material codes like `ORVAGGEG04065CAF30` got truncated. Fix: call the range-bounded overload `AdjustToContents(headerTopRow, lastUsedRow)` so widths fit the column-header row + data only; the merged title overflows visually as expected (it's merged across all data columns anyway). Plus clamp to `min 10 / max 60` so tiny labels (`BU01`) still get a comfortable column and one extreme outlier doesn't blow out the layout.
+- **Files touched.** MODIFIED: `Controllers/ReportsController.cs` — `SetMeasureCell` (auto-format split), `BuildPivotWorkbook` (TopLeftCellAddress + bounded AdjustToContents + min/max clamps + the new private `FixPaneFreezeState` post-processor).
+- **Verified.** `dotnet build` clean. Republished local + remote at 2026-06-21. Drove `POST /Reports/PivotExcel` via `requests`, downloaded the bytes, unzipped, inspected `xl/worksheets/sheet1.xml`: pane element now says `state="frozen"`; styles.xml carries `#,##0` (the clean integer format) instead of `#,##0.##`. `http://192.168.3.15:5244/Account/Login` → HTTP 200 throughout.
+
+### 2026-06-20 (Help & User Guide — English + Arabic, User + Admin, in PDF / Word / PowerPoint / HTML)
+
+End-user and admin documentation built from a single Markdown Help Hub, rendered by the `app-help-authoring` skill into every format the team uses.
+
+- **Source of truth.** `docs/help/help-source.md` (English, ~1500 lines) + `docs/help/help-source.ar.md` (Arabic user-only, ~440 lines). Both reference the same screenshots and the same `{{site_url}}` placeholder filled at build time. The skill's contract is one hub edits per audience/language; outputs are regenerated.
+- **Editions.** English builds two — **User** (everyday staff; admin-only screens + `For Admins` callouts stripped) and **Admin** (everything). Arabic builds the User edition only (admin docs are not translated). English User + Arabic User HTML sites cross-link via a language switcher.
+- **Real screen captures.** All 22 page screenshots taken from the live app at `http://192.168.3.15:5244` via Playwright with the `axuser` AD account. A one-off script (`docs/help/_capture_details.py`, gitignored) scraped real Arrival / QO / Sample IDs to capture the details / sample form / photos drawer pages that need a record ID in the URL.
+- **HTML sites get live search + collapsible FAQ + glossary cards + RTL switcher** from the skill's renderer — no hand-coding.
+- **The Arabic hub uses Arabic body text but keeps the metadata keys `**Route:**`, `**Who uses it:**`, `**Screenshot:**` and every on-screen button label in English** (e.g. `اضغط على **Sign in**`). The parser only recognises English structural keys, and users find buttons by their actual on-screen English labels.
+- **Built artefacts** (under `docs/help/output/`, gitignored):
+    - `Sharbatly-QMS-User.pdf` / `.docx` / `.pptx` + `help-site-user/`  (English, ~1.5–2 MB each)
+    - `Sharbatly-QMS-Admin.pdf` / `.docx` / `.pptx` + `help-site-admin/` (English, 2–3.4 MB)
+    - `Sharbatly-QMS-User-AR.pdf` / `.docx` / `.pptx` + `help-site-user-ar/` (Arabic RTL, 1.5–2.6 MB)
+- **Files touched.** NEW: `docs/help/help-source.md`, `docs/help/help-source.ar.md`, `docs/help/assets/screenshots/*.png` (22 PNGs), `docs/help/_capture_details.py` (one-off helper, gitignored). MODIFIED: `.gitignore` (ignores generated bundles + the capture helper).
+- **Verified.** Build script reported zero failures across both passes. Final image counts per HTML site: User English 14, Admin English 22, User Arabic 14 (the User editions correctly omit the 8 admin-only screens). DOCX/PPTX/PDF all grew from text-only sizes (~50 KB) to image-bearing sizes (1.5–3.4 MB), confirming images embedded.
+- **To rebuild after future feature work.** Edit the hub(s) → re-run `python build_help.py --hub docs/help/help-source.md --site-url http://192.168.3.15:5244 --alt-langs "العربية:../help-site-user-ar/index.html"` and the AR sibling command. Re-capture screenshots only when UI changes.
 
 ### 2026-06-20 (Perspective Analyzer — multi-measure ("Σ Values" zone) + polished XLSX export)
 
