@@ -492,6 +492,17 @@ public class AdminController : Controller
 
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.AdminOnly)]
+    public async Task<IActionResult> SaveReportSettings(ReportConfig report)
+    {
+        await _settings.SaveReportConfigAsync(report ?? new ReportConfig(), GetCurrentUserId());
+        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null,
+            new { section = "Report options", timeBarBasis = report?.TimeBarBasis });
+        TempData["Success"] = "Report options saved.";
+        return RedirectToAction(nameof(Settings), new { activeTab = "report" });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.AdminOnly)]
     public async Task<IActionResult> SaveContainerPollSettings(ContainerPollConfig containerPoll)
     {
         var cfg = containerPoll ?? new ContainerPollConfig();
@@ -1447,6 +1458,7 @@ public class AdminController : Controller
             Smtp         = await _settings.GetSmtpConfigAsync(),
             Thumbnails   = await _settings.GetThumbnailConfigAsync(),
             Alerts       = await _settings.GetAlertConfigAsync(),
+            Report       = await _settings.GetReportConfigAsync(),
             Branding     = await _settings.GetBrandingConfigAsync(),
             Ad           = ad,
             MaterialSync = await _settings.GetEndpointSyncAsync(SyncableEndpoints.MaterialMaster),
@@ -1697,6 +1709,7 @@ public class SettingsVm
     public SmtpConfig        Smtp         { get; set; } = new();
     public ThumbnailConfig   Thumbnails   { get; set; } = new();
     public AlertConfig       Alerts       { get; set; } = new();
+    public ReportConfig      Report       { get; set; } = new();
     public BrandingConfig    Branding     { get; set; } = new();
     public AdConfig          Ad           { get; set; } = new();
     public EndpointSyncConfig  MaterialSync  { get; set; } = new() { EndpointKey = SyncableEndpoints.MaterialMaster };

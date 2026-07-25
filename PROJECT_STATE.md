@@ -218,6 +218,16 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-07-25 (arrival discharge date, switchable Time Bar basis, trimmed QO report)
+
+Three arrival/report changes, all backward-compatible (the app is already in live use — real operators have created arrivals against Sharbatly_MIS):
+
+- **Discharge date** — a new inspector-entered date on the shipment snapshot (`qms_shipment_snapshot.discharge_date`, migration `M08`, nullable), shown on the arrival page next to the read-only SAP arrival date. Editable like the unloading/pull-out dates; carried through `ShipmentSnapshot`, `GetShipmentAsync`, `SaveShipmentAsync` (incl. the audit diff).
+- **Time Bar basis** — the QO report's Time Bar (days from a shipment date to the QO finish date) now counts from the **discharge date by default**, switchable to the arrival date at Admin → Settings → **Report** (`Report.TimeBarBasis`, values `Discharge`|`Arrival`, via `ReportConfig`/`TimeBarBases`). The report labels which basis it used, e.g. "Time Bar (Discharge)".
+- **Trimmed QO report** — six fields are suppressed on the printed report: packing material, date code, pallet number, grower, PUC, lot number. They are still **collected** during inspection; only the PDF hides them. Implemented in `QualityReportPdf` as a normalised-name exclusion set (`HiddenReportFields` / `IsHiddenReportField`) applied across the material card, sample header grid, and both readings grids — so every spelling variant (header field "Pallet No", reading "Pallet No.", code "PALLET_NO") is caught. To restore a field, remove its normalised form from that set.
+
+Tests: `ReportFieldVisibilityTests` locks the hide/show predicate; `ReportSettingsTests` round-trips the Time Bar basis; `WorkflowTests` now saves and reloads a discharge date. Suite is 65 green.
+
 ### 2026-07-23 (pre-production verification suite; two defects found and fixed)
 
 `app\SharbatlyQMS.Tests` grew from 2 unit-test files into a real safety net, because the migration needed proof beyond "the pages load". Run it with `dotnet test app\SharbatlyQMS.Tests`.

@@ -249,6 +249,7 @@ public class ArrivalService : IArrivalService
                    internal_shipment_no InternalShipmentNo,
                    loading_date LoadingDate, sailing_date SailingDate,
                    examination_date ExaminationDate, arrival_date ArrivalDate,
+                   discharge_date DischargeDate,
                    unloading_date UnloadingDate, inspection_date InspectionDate,
                    transit_days TransitDays, time_bar TimeBar,
                    loading_port LoadingPort, loading_country LoadingCountry,
@@ -547,6 +548,7 @@ public class ArrivalService : IArrivalService
         // inspector-entered fields below are editable.
         var oldRow = await c.QuerySingleOrDefaultAsync(@"
             SELECT unloading_date    AS UnloadingDate,
+                   discharge_date    AS DischargeDate,
                    pullout_date      AS PullOutDate,
                    time_bar          AS TimeBar,
                    arrival_place     AS ArrivalPlace,
@@ -559,7 +561,8 @@ public class ArrivalService : IArrivalService
 
         await c.ExecuteAsync(@"
             UPDATE qms_shipment_snapshot SET
-              unloading_date = @UnloadingDate, time_bar = @TimeBar,
+              unloading_date = @UnloadingDate, discharge_date = @DischargeDate,
+              time_bar = @TimeBar,
               arrival_place = @ArrivalPlace, pullout_date = @PullOutDate,
               time_bar_exceeded = @TimeBarExceeded, inspection_point = @InspectionPoint,
               joint_survey = @JointSurvey
@@ -574,7 +577,7 @@ public class ArrivalService : IArrivalService
             oldValues: oldRow,
             newValues: new
             {
-                ss.UnloadingDate, ss.PullOutDate, ss.TimeBar, ss.ArrivalPlace,
+                ss.UnloadingDate, ss.DischargeDate, ss.PullOutDate, ss.TimeBar, ss.ArrivalPlace,
                 ss.InspectionPoint, ss.TimeBarExceeded, ss.JointSurvey
             },
             actor: updatedBy);

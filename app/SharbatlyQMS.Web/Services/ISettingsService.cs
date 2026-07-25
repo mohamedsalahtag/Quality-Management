@@ -33,6 +33,10 @@ public interface ISettingsService
     Task<AlertConfig> GetAlertConfigAsync();
     Task SaveAlertConfigAsync(AlertConfig cfg, int? updatedBy);
 
+    // ---- Report options (QO report) ----
+    Task<ReportConfig> GetReportConfigAsync();
+    Task SaveReportConfigAsync(ReportConfig cfg, int? updatedBy);
+
     // ---- SAP Container polling (Pending Containers feature) ----
     Task<ContainerPollConfig> GetContainerPollConfigAsync();
     Task SaveContainerPollConfigAsync(ContainerPollConfig cfg, int? updatedBy);
@@ -146,6 +150,11 @@ public static class SettingKeys
     public const string QoMailSubject = "Mail.QualityReport.Subject";
     public const string QoMailBody    = "Mail.QualityReport.Body";
     public const string QoMailEnabled = "Mail.QualityReport.Enabled";   // "true" / "false"
+
+    // QO report options.
+    //   TimeBarBasis: which date the report Time Bar counts from to the QO
+    //   finish date. "Discharge" (default) or "Arrival".
+    public const string TimeBarBasis       = "Report.TimeBarBasis";
 
     // Active Directory (LDAP bind-only). Configured by SiteAdmin from
     // Admin -> AD Settings.
@@ -338,6 +347,23 @@ public class ThumbnailConfig
     public int    PdfWidth     { get; set; } = 120;
     public int    PdfHeight    { get; set; } = 90;
     public string FitMode      { get; set; } = "Cover";
+}
+
+public class ReportConfig
+{
+    /// <summary>Which date the QO report Time Bar counts from to the QO finish
+    /// date. One of <see cref="TimeBarBases"/>. Defaults to Discharge.</summary>
+    public string TimeBarBasis { get; set; } = TimeBarBases.Discharge;
+}
+
+/// <summary>Allowed values for <see cref="ReportConfig.TimeBarBasis"/>.</summary>
+public static class TimeBarBases
+{
+    public const string Discharge = "Discharge";
+    public const string Arrival   = "Arrival";
+
+    public static bool IsValid(string? v) =>
+        v == Discharge || v == Arrival;
 }
 
 public class AlertConfig

@@ -125,6 +125,16 @@ public class WorkflowTests : IClassFixture<QmsAppFactory>
             Assert.NotNull(checklist);
             Assert.Equal("SEAL-TEST", checklist!.SealNo);
 
+            // Discharge date (2026-07-25 feature): inspector-entered, round-trips
+            // through the shipment snapshot and drives the report Time Bar.
+            var shipment = await arrivals.GetShipmentAsync(arrivalId);
+            Assert.NotNull(shipment);
+            shipment!.DischargeDate = new DateTime(2026, 7, 20);
+            await arrivals.SaveShipmentAsync(shipment, TestUser);
+
+            var reloaded = await arrivals.GetShipmentAsync(arrivalId);
+            Assert.Equal(new DateTime(2026, 7, 20), reloaded!.DischargeDate);
+
             var (compOk, compErr) = await arrivals.CompleteAsync(arrivalId, TestUser);
             Assert.True(compOk, $"could not complete the arrival: {compErr}");
 

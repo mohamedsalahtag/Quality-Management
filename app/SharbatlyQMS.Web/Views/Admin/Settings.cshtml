@@ -43,6 +43,11 @@
         </button>
     </li>
     <li class="nav-item">
+        <button class="@TabClass("report")" data-bs-toggle="tab" data-bs-target="#tab-report" type="button">
+            <i class="bi bi-file-earmark-text me-1"></i>Report
+        </button>
+    </li>
+    <li class="nav-item">
         <button class="@TabClass("syncstatus")" data-bs-toggle="tab" data-bs-target="#tab-syncstatus" type="button">
             <i class="bi bi-arrow-repeat me-1"></i>Sync Status
         </button>
@@ -395,7 +400,10 @@
     }
     async function sapSync(endpointKey, resultId) {
         var result = document.getElementById(resultId);
-        if (!confirm('Run a full sync now for ' + endpointKey + '? This may take a few minutes for large catalogues.')) return;
+        var proceed = await appDialogs.confirm(
+            'Run a full sync now for ' + endpointKey + '? This may take a few minutes for large catalogues.',
+            { title: 'Run SAP sync', okText: 'Run sync' });
+        if (!proceed) return;
         try {
             var token = _csrfToken();
             var resp = await fetch('@Url.Action("SyncSapEndpointAjax")', {
@@ -582,7 +590,7 @@
                     </form>
                     @if (Model.Branding.HasLogo)
                     {
-                        <form asp-action="RemoveCompanyLogo" method="post" onsubmit="return confirm('Remove the current logo? The placeholder will be used until a new one is uploaded.');">
+                        <form asp-action="RemoveCompanyLogo" method="post" data-confirm="Remove the current logo? The placeholder will be used until a new one is uploaded." data-confirm-danger data-confirm-ok="Remove">
                             @Html.AntiForgeryToken()
                             <button type="submit" class="btn btn-outline-danger btn-sm">
                                 <i class="bi bi-trash me-1"></i>Remove current logo
@@ -725,7 +733,7 @@
                         Current upload: <code>@Model.Branding.FaviconCustomFilename</code>
                     </small>
                     <form asp-action="RemoveCustomFavicon" method="post" class="ms-auto"
-                          onsubmit="return confirm('Remove your uploaded image? If it is currently active, the default icon will be restored.');">
+                          data-confirm="Remove your uploaded image? If it is currently active, the default icon will be restored." data-confirm-danger data-confirm-ok="Remove">
                         @Html.AntiForgeryToken()
                         <button type="submit" class="btn btn-outline-danger btn-sm">
                             <i class="bi bi-trash me-1"></i>Remove uploaded image
@@ -928,6 +936,46 @@
     </div>
 </div>
 
+@* ===================== Report options ===================== *@
+<div class="@TabPaneClass("report")" id="tab-report">
+    <div class="card">
+        <div class="card-header bg-primary text-white"><i class="bi bi-file-earmark-text me-1"></i>Quality Order report</div>
+        <div class="card-body">
+            <form asp-action="SaveReportSettings" method="post" class="row g-3">
+                @Html.AntiForgeryToken()
+                <div class="col-md-8">
+                    <label class="form-label">Time Bar basis</label>
+                    <p class="text-muted small mb-2">
+                        The Time Bar on the report is the number of days from this date to the date the
+                        Quality Order was finished.
+                    </p>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="TimeBarBasis" id="tbb-discharge"
+                               value="@TimeBarBases.Discharge"
+                               checked="@(Model.Report.TimeBarBasis == TimeBarBases.Discharge)" />
+                        <label class="form-check-label" for="tbb-discharge">
+                            <strong>Discharge date</strong> — count from the discharge date entered on the arrival.
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="TimeBarBasis" id="tbb-arrival"
+                               value="@TimeBarBases.Arrival"
+                               checked="@(Model.Report.TimeBarBasis == TimeBarBases.Arrival)" />
+                        <label class="form-check-label" for="tbb-arrival">
+                            <strong>Arrival date</strong> — count from the SAP arrival date.
+                        </label>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save me-1"></i>Save report options
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 @* ===================== Sync Status / Auto Sync ===================== *@
 <div class="@TabPaneClass("syncstatus")" id="tab-syncstatus">
     <div class="card mb-3">
@@ -1121,7 +1169,8 @@
             </div>
 
             <form asp-action="PurgeAll" method="post" id="purge-form" class="border border-danger rounded p-3 bg-light"
-                  onsubmit="return confirm('FINAL WARNING\n\nThis will delete EVERY Arrival, Quality Order, sample, defect, observation, reading, image, and audit log entry. Sequence numbers will reset to 1.\n\nThere is no undo. Continue?');">
+                  data-confirm="FINAL WARNING&#10;&#10;This will delete EVERY Arrival, Quality Order, sample, defect, observation, reading, image, and audit log entry. Sequence numbers will reset to 1.&#10;&#10;There is no undo. Continue?"
+                  data-confirm-title="Purge all data" data-confirm-danger data-confirm-ok="Purge everything">
                 @Html.AntiForgeryToken()
                 <label for="purgeConfirm" class="form-label">
                     To enable the button, type <code>PURGE ALL</code> below (case-sensitive):

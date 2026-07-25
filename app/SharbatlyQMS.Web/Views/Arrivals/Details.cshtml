@@ -5,6 +5,8 @@
     var items     = ViewBag.Items     as IReadOnlyList<ArrivalItem> ?? new List<ArrivalItem>();
     var checklist = ViewBag.Checklist as ArrivalChecklist           ?? new ArrivalChecklist { ArrivalId = Model.ArrivalId };
     var shipment  = ViewBag.Shipment  as ShipmentSnapshot;
+    // V36: admin-defined fields applicable to this arrival's material groups.
+    var customFields = ViewBag.CustomFields as IReadOnlyList<ArrivalCustomField> ?? new List<ArrivalCustomField>();
     var draft     = Model.StatusCode == ArrivalStatus.Draft;
     var role      = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     // V31 (2026-06-20): Supervisor included in canEdit (OperatorOrAbove now
@@ -76,7 +78,8 @@
         @if (draft && canEdit)
         {
             <form asp-action="Complete" asp-route-id="@Model.ArrivalId" method="post"
-                  onsubmit="return confirm('Complete this arrival? After completion the checklist becomes read-only and a Quality Order can be opened.');">
+                  data-confirm="Complete this arrival? After completion the checklist becomes read-only and a Quality Order can be opened."
+                  data-confirm-title="Complete arrival" data-confirm-ok="Complete">
                 @Html.AntiForgeryToken()
                 <button type="submit" class="btn btn-success">
                     <i class="bi bi-check-circle me-1"></i>Complete arrival
@@ -185,6 +188,7 @@
     <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-summary"><i class="bi bi-info-circle me-1"></i>Summary</button></li>
     <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-materials"><i class="bi bi-list-ul me-1"></i>Materials (@items.Count)</button></li>
     <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-images"><i class="bi bi-images me-1"></i>Images</button></li>
+    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-documents"><i class="bi bi-paperclip me-1"></i>Documents</button></li>
 </ul>
 
 <div class="tab-content">
@@ -213,18 +217,19 @@
                 <div class="card-header"><i class="bi bi-clipboard-check me-1"></i>Inspection summary</div>
                 <div class="card-body">
                     <dl class="row mb-0 small">
-                        <dt class="col-sm-5">Seal #</dt><dd class="col-sm-7">@checklist.SealNo</dd>
+                        <dt class="col-sm-5">Seal #</dt><dd class="col-sm-7">@(string.Join(", ", (checklist.SealNo ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim())))</dd>
                         <dt class="col-sm-5">Seal intact</dt><dd class="col-sm-7">@YN(checklist.SealIntact)</dd>
                         <dt class="col-sm-5">External damage</dt><dd class="col-sm-7">@YN(checklist.ExternalDamageExists)</dd>
                         <dt class="col-sm-5">Visual cargo OK</dt><dd class="col-sm-7">@YN(checklist.VisualCargoAcceptable)</dd>
                         <dt class="col-sm-5">Set / Display temp</dt><dd class="col-sm-7">@checklist.SetTemperature / @checklist.DisplayTemperature °C</dd>
                         <dt class="col-sm-5">Pulp F/M/B</dt><dd class="col-sm-7">@checklist.PulpTempFront / @checklist.PulpTempMiddle / @checklist.PulpTempBack °C</dd>
-                        <dt class="col-sm-5">Logger serial</dt><dd class="col-sm-7">@checklist.DataLoggerSerial</dd>
+                        <dt class="col-sm-5">Logger serial</dt><dd class="col-sm-7">@(string.Join(", ", (checklist.DataLoggerSerial ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim())))</dd>
                     </dl>
                 </div>
             </div>
         </div>
     </div>
+
 </div>
 
 @* ===== Shipment ===== *@
@@ -257,6 +262,9 @@
                             <input type="date" class="form-control" value="@shipment?.ExaminationDate?.ToString("yyyy-MM-dd")" disabled /></div>
                         <div class="col-md-3"><label class="form-label">Arrival date</label>
                             <input type="date" class="form-control" value="@shipment?.ArrivalDate?.ToString("yyyy-MM-dd")" disabled /></div>
+                        <div class="col-md-3"><label class="form-label">Discharge date</label>
+                            <input name="DischargeDate" type="date" class="form-control" value="@shipment?.DischargeDate?.ToString("yyyy-MM-dd")" />
+                            <small class="text-muted">Basis for the report Time Bar</small></div>
 
                         <div class="col-md-3"><label class="form-label">Unloading date</label>
                             <input name="UnloadingDate" type="date" class="form-control" value="@shipment?.UnloadingDate?.ToString("yyyy-MM-dd")" /></div>
@@ -448,9 +456,23 @@
                     </div>
                     <div class="card-body py-2">
                         <div class="row g-2 align-items-center mb-2">
-                            <label class="col-4 col-md-3 col-form-label small">Seal No</label>
+                            <label class="col-4 col-md-3 col-form-label small">Seal No <span class="text-muted">(up to 4)</span></label>
                             <div class="col-8 col-md-9">
-                                <input name="SealNo" class="form-control form-control-sm" value="@checklist.SealNo" />
+                                @{
+                                    var sealParts = (checklist.SealNo ?? "")
+                                        .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                                        .Select(x => x.Trim()).ToList();
+                                }
+                                <div class="row g-1">
+                                    @for (int i = 0; i < 4; i++)
+                                    {
+                                        <div class="col-6 col-md-3">
+                                            <input name="SealNos" class="form-control form-control-sm" maxlength="40"
+                                                   placeholder="Seal @(i + 1)"
+                                                   value="@(i < sealParts.Count ? sealParts[i] : "")" />
+                                        </div>
+                                    }
+                                </div>
                             </div>
                         </div>
                         <table class="table table-borderless table-sm align-middle mb-0 checklist-qa">
@@ -575,9 +597,23 @@
                             </tbody>
                         </table>
                         <div class="row g-2 align-items-center mb-2">
-                            <label class="col-5 col-form-label small">Logger serial</label>
+                            <label class="col-5 col-form-label small">Logger serial <span class="text-muted">(up to 4)</span></label>
                             <div class="col-7">
-                                <input name="DataLoggerSerial" class="form-control form-control-sm" value="@checklist.DataLoggerSerial" />
+                                @{
+                                    var loggerParts = (checklist.DataLoggerSerial ?? "")
+                                        .Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                                        .Select(x => x.Trim()).ToList();
+                                }
+                                <div class="row g-1">
+                                    @for (int i = 0; i < 4; i++)
+                                    {
+                                        <div class="col-6">
+                                            <input name="LoggerSerials" class="form-control form-control-sm" maxlength="60"
+                                                   placeholder="Serial @(i + 1)"
+                                                   value="@(i < loggerParts.Count ? loggerParts[i] : "")" />
+                                        </div>
+                                    }
+                                </div>
                             </div>
                         </div>
                         <div class="row g-2 align-items-center mb-2">
@@ -629,6 +665,55 @@
 
         </fieldset>
 
+        @* ===== V36.2: Additional fields (admin-defined, material-group-gated).
+             Lives INSIDE the checklist form so the single "Save checklist"
+             button persists them (user request: no dedicated save button).
+             SaveChecklist reads the cf_{fieldId} inputs from Request.Form.
+             Values print on the checklist PDF identity block after Seal
+             Number. ===== *@
+        @if (customFields.Count > 0)
+        {
+            <div class="card mt-3">
+                <div class="card-header">
+                    <i class="bi bi-input-cursor-text me-1"></i>Additional fields
+                    <small class="text-muted ms-2">Defined in Parameters &rsaquo; Arrival Fields for this arrival's material groups. Saved with the checklist; printed on the checklist PDF.</small>
+                </div>
+                <div class="card-body">
+                    <fieldset @(canEditArrival ? "" : "disabled")>
+                        <div class="row g-3">
+                            @foreach (var cf in customFields)
+                            {
+                                <div class="col-md-3">
+                                    <label class="form-label">@cf.FieldName
+                                        <span class="badge bg-info text-dark ms-1" title="Shown because this arrival contains material group @cf.MaterialGroup">@cf.MaterialGroup</span>
+                                    </label>
+                                    @switch (cf.ValueKind)
+                                    {
+                                        case "Numeric":
+                                            <input name="cf_@cf.FieldId" type="number" step="any" class="form-control" value="@cf.InputValue" />
+                                            break;
+                                        case "Date":
+                                            <input name="cf_@cf.FieldId" type="date" class="form-control" value="@cf.InputValue" />
+                                            break;
+                                        case "YesNo":
+                                            <select name="cf_@cf.FieldId" class="form-select">
+                                                <option value="" selected="@(string.IsNullOrEmpty(cf.TextValue))">—</option>
+                                                <option value="Yes" selected="@(cf.TextValue == "Yes")">Yes</option>
+                                                <option value="No" selected="@(cf.TextValue == "No")">No</option>
+                                            </select>
+                                            break;
+                                        default:
+                                            <input name="cf_@cf.FieldId" class="form-control" maxlength="400" value="@cf.InputValue" />
+                                            break;
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </fieldset>
+                </div>
+            </div>
+        }
+
         @if (canEditArrival)
         {
             <div class="d-flex gap-2 sticky-bottom bg-body py-2 border-top">
@@ -642,6 +727,7 @@
             </div>
         }
     </form>
+
 </div>
 
 @* Per-entity audit panel removed 2026-06-13. Filter the master audit log
@@ -754,6 +840,25 @@
         };
     }
     <partial name="_ImageGallery" model="arrivalGalleryVm" />
+</div>
+
+@* ===== Documents (V39) ===== *@
+<div class="tab-pane fade" id="tab-documents">
+    @{
+        var arrivalDocsVm = new SharbatlyQMS.Web.ViewModels.DocumentListVm
+        {
+            OwnerType = "Arrival",
+            OwnerId   = Model.ArrivalId,
+            // `draft && canEdit` mirrors exactly what DocumentsController.GateEditAsync
+            // enforces. Do NOT copy the images tab's bare `canEdit` above: that renders
+            // an upload form on a Completed arrival where every attempt is rejected
+            // server-side. Downloads stay available here regardless of status.
+            Editable  = draft && canEdit,
+            Ajax      = true,
+            Categories = new[] { "Invoice", "PackingList", "Certificate", "ClaimDocument", "TemperatureLog", "Other" }
+        };
+    }
+    <partial name="_DocumentList" model="arrivalDocsVm" />
 </div>
 
 </div>

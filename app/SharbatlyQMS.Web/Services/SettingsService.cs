@@ -179,6 +179,22 @@ public class SettingsService : ISettingsService
         await _db.SetConfigAsync(SettingKeys.AlertDefectPctYellow,  cfg.DefectPctYellow.ToString(CultureInfo.InvariantCulture),  updatedBy);
     }
 
+    // ---- Report options ----
+    public async Task<ReportConfig> GetReportConfigAsync()
+    {
+        var raw = await _db.GetConfigAsync(SettingKeys.TimeBarBasis);
+        return new ReportConfig
+        {
+            TimeBarBasis = TimeBarBases.IsValid(raw) ? raw! : TimeBarBases.Discharge
+        };
+    }
+
+    public async Task SaveReportConfigAsync(ReportConfig cfg, int? updatedBy)
+    {
+        var basis = TimeBarBases.IsValid(cfg.TimeBarBasis) ? cfg.TimeBarBasis : TimeBarBases.Discharge;
+        await _db.SetConfigAsync(SettingKeys.TimeBarBasis, basis, updatedBy);
+    }
+
     // ---- SAP Container polling ----
     public async Task<ContainerPollConfig> GetContainerPollConfigAsync()
     {

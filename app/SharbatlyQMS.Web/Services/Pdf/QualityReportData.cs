@@ -51,6 +51,11 @@ public class QualityReportData
     public int    ThumbnailH   { get; set; } = 90;
     public bool   ThumbCover   { get; set; } = true;
 
+    /// <summary>Which shipment date the Time Bar counts from: one of
+    /// <see cref="TimeBarBases"/>. Defaults to Discharge. Set by
+    /// ReportsController from the Report.TimeBarBasis setting.</summary>
+    public string TimeBarBasis { get; set; } = TimeBarBases.Discharge;
+
     /// <summary>
     /// Absolute file-system path to the company logo configured under
     /// Site Configuration → Branding. Populated by ReportsController; the

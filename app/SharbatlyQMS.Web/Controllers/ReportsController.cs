@@ -247,6 +247,8 @@ public class ReportsController : Controller
         if (!string.IsNullOrWhiteSpace(branding.CompanyName)) data.CompanyName   = branding.CompanyName;
         if (!string.IsNullOrWhiteSpace(branding.FooterLine))  data.CompanyFooter = branding.FooterLine;
 
+        data.TimeBarBasis = (await _settings.GetReportConfigAsync()).TimeBarBasis;
+
         var arrival = await _arrivals.GetAsync(qo.ArrivalId);
         if (arrival != null) data.Arrival = arrival;
         data.Shipment  = await _arrivals.GetShipmentAsync(qo.ArrivalId);

@@ -118,6 +118,10 @@ public class ShipmentSnapshot
     public DateTime?  SailingDate         { get; set; }
     public DateTime?  ExaminationDate     { get; set; }
     public DateTime?  ArrivalDate         { get; set; }
+    /// <summary>Inspector-entered date the container was discharged. Shown next
+    /// to ArrivalDate on the arrival page and the default basis for the report
+    /// Time Bar (see SettingKeys.TimeBarBasis).</summary>
+    public DateTime?  DischargeDate       { get; set; }
     public DateTime?  UnloadingDate       { get; set; }
     public DateTime?  InspectionDate      { get; set; }
     public short?     TransitDays         { get; set; }
