@@ -218,6 +218,21 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-07-25 (Report Builder — user-composed Excel reports)
+
+A new `/Reports/ReportBuilder` (Supervisor+) lets users design their own tabular reports and export professional Excel. It is built almost entirely on the existing flat-view pipeline — the data layer needed nothing new.
+
+- **Reuses:** `vw_qms_flat_defects` + `StreamFlatDefectRowsAsync` (one row per sample×defect, all arrival/PO/shipment/material/sample/defect fields + reading/header bags); `FlatDefectFilter` (already had container/BOL/PO/supplier); and `qms_perspective` + `PerspectiveService` for save/edit/delete/browse + private/shared, under a new `report_key = 'report_builder'`. No migration.
+- **New code (all under `Services/Reports/` unless noted):**
+  - `ReportBuilderRegistry` — whitelist of static fields (key→`FlatDefectRow` projector + type). Same injection guard as `PivotRegistry`: HTTP carries keys, never SQL. Dynamic keys are prefixed `d:`/`r:`/`sh:`/`mh:`/`calc:`/`blank:`.
+  - `ReportFormula` — a tiny safe arithmetic evaluator (`+ - * / ( )`, number literals, `[Column]` refs) for calculated columns. No SQL/reflection/eval; null column or ÷0 → empty cell.
+  - `ReportBuilderExporter` — streams the flat rows, **groups by `SampleId`** (one Excel row per sample), projects the design's columns, and writes ClosedXML: title, a **header block** (fields marked `placement:header`, distinct value(s) or "(multiple)"), a styled/frozen/autofiltered data grid with typed cells, and a **totals row** (per-column sum/avg toggle).
+  - Models `ReportBuilderDefinition`/`ReportColumn` (the `config_json` shape).
+  - `ReportsController` endpoints: `ReportBuilder` (designer), `ReportBuilderPalette` (defects/readings/headers for a group), `ReportBuilderVendors` + `ReportBuilderContainers` (**supplier→container cascade**), `ReportBuilderValidateFormula`, `ReportBuilderPreview`, `ReportBuilderExport`.
+  - UI: `Views/Reports/ReportBuilder.cshtml` + `wwwroot/js/report-builder.js` (drag/click palette → layout, per-column Header/Column toggle, defect count/%, totals none/sum/avg, live-validated formula box, save/load/delete, browse+preview+export). Modelled on `perspective-analyzer.js`.
+- **Design decisions (confirmed with the user):** row grain = one sample; defect column = count with a per-column % toggle; calc = safe arithmetic over columns; designs stored in `qms_perspective`.
+- **Tests (87 green):** `ReportFormulaTests` (arithmetic/precedence/÷0/null/rejects malformed); `WorkflowTests` now builds a design (container as header, a defect column + a calc %, a totals row) and re-opens the `.xlsx` to assert the header block, one-row-per-sample data and totals; `PageSmokeTests` covers the designer + palette + vendors endpoints.
+
 ### 2026-07-25 (arrival discharge date, switchable Time Bar basis, trimmed QO report)
 
 Three arrival/report changes, all backward-compatible (the app is already in live use — real operators have created arrivals against Sharbatly_MIS):

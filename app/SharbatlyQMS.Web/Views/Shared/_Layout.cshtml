@@ -41,7 +41,7 @@
     var curAct = ViewContext.RouteData.Values["action"] as string ?? "";
     bool NavOn(string ctl) => string.Equals(curCtl, ctl, StringComparison.OrdinalIgnoreCase);
     bool ActOn(string act) => string.Equals(curAct, act, StringComparison.OrdinalIgnoreCase);
-    var paramActions = new[] { "DefectCatalog", "DefectCategories", "ReadingTypes", "SampleHeaders", "MailTemplate" };
+    var paramActions = new[] { "DefectCatalog", "DefectCategories", "ReadingTypes", "SampleHeaders", "ArrivalFields", "MailTemplate" };
     var paramsOn     = NavOn("Admin") && paramActions.Contains(curAct, StringComparer.OrdinalIgnoreCase);
     var adminOn      = (NavOn("Admin") && (ActOn("Settings") || ActOn("Users"))) || NavOn("Audit");
 }
@@ -123,6 +123,11 @@
                                     <i class="bi bi-grid-3x3-gap me-1"></i>Data hub
                                 </a>
                             </li>
+                            <li class="nav-item">
+                                <a class="nav-link" asp-controller="Reports" asp-action="ReportBuilder">
+                                    <i class="bi bi-table me-1"></i>Report builder
+                                </a>
+                            </li>
                         }
                         @if (canSeeParameters)
                         {
@@ -138,6 +143,7 @@
                                     <li><a class="dropdown-item @(ActOn("DefectCategories") ? "active" : "")" asp-controller="Admin" asp-action="DefectCategories"><i class="bi bi-palette me-1"></i>Defect Categories</a></li>
                                     <li><a class="dropdown-item @(ActOn("ReadingTypes") ? "active" : "")" asp-controller="Admin" asp-action="ReadingTypes"><i class="bi bi-rulers me-1"></i>Reading Types</a></li>
                                     <li><a class="dropdown-item @(ActOn("SampleHeaders") ? "active" : "")" asp-controller="Admin" asp-action="SampleHeaders"><i class="bi bi-card-heading me-1"></i>Sample Headers</a></li>
+                                    <li><a class="dropdown-item @(ActOn("ArrivalFields") ? "active" : "")" asp-controller="Admin" asp-action="ArrivalFields"><i class="bi bi-input-cursor-text me-1"></i>Arrival Fields</a></li>
                                     <li><a class="dropdown-item @(ActOn("MailTemplate") ? "active" : "")" asp-controller="Admin" asp-action="MailTemplate"><i class="bi bi-envelope-paper me-1"></i>Mail Template</a></li>
                                 </ul>
                             </li>
@@ -286,6 +292,7 @@
     <script src="~/lib/jquery/dist/jquery.min.js"></script>
     <script src="~/lib/bootstrap/dist/js/bootstrap.bundle.min.js"></script>
     <script src="~/js/theme-pack.js" asp-append-version="true"></script>
+    <script src="~/js/dialogs.js" asp-append-version="true"></script>
     <script src="~/js/site.js" asp-append-version="true"></script>
     <script src="~/js/tablekit.js" asp-append-version="true"></script>
     @* Auto-dismiss any alert tagged with `data-auto-dismiss="<ms>"`. Lives
@@ -315,6 +322,7 @@
        the page (including ones injected later into the sample drawer via
        innerHTML, where inline <script> tags would not run). *@
     <script src="~/js/image-gallery-ajax.js" defer></script>
+    <script src="~/js/document-list-ajax.js" defer></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

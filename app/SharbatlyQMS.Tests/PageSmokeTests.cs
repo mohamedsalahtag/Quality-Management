@@ -41,6 +41,9 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         "/Reports/FlatDefects",
         "/Reports/Perspectives?report=flat_defects",
         "/Reports/PivotSchema?report=flat_defects",
+        "/Reports/ReportBuilder",
+        "/Reports/ReportBuilderPalette?materialGroup=APPLE",
+        "/Reports/ReportBuilderVendors",
     };
 
     [Theory]

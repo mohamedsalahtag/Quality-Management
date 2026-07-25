@@ -26,6 +26,7 @@ public class ReportsController : Controller
     private readonly IEmailService _email;
     private readonly IPivotService _pivot;
     private readonly IPerspectiveService _perspectives;
+    private readonly IReportBuilderExporter _reportBuilder;
     private readonly IConfiguration _config;
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<ReportsController> _log;
@@ -37,12 +38,14 @@ public class ReportsController : Controller
         IImageService images, ISettingsService settings, IMaraService mara,
         IVendorService vendors, IEmailService email,
         IPivotService pivot, IPerspectiveService perspectives,
+        IReportBuilderExporter reportBuilder,
         IConfiguration config, IWebHostEnvironment env, ILogger<ReportsController> log)
     {
         _qos = qos; _arrivals = arrivals; _images = images;
         _settings = settings; _mara = mara;
         _vendors = vendors; _email = email;
         _pivot = pivot; _perspectives = perspectives;
+        _reportBuilder = reportBuilder;
         _config = config; _env = env; _log = log;
     }
 
@@ -1173,4 +1176,171 @@ public class ReportsController : Controller
     /// <summary>Manager / SiteAdmin gate for saving with scope='shared'.</summary>
     private bool CanShare() =>
         User.IsInRole(UserRoles.Manager) || User.IsInRole(UserRoles.SiteAdmin);
+
+    // ===================================================================
+    // Report Builder (2026-07-25) -- user-composed Excel reports.
+    //
+    // GET  /Reports/ReportBuilder                       designer page
+    // GET  /Reports/ReportBuilderPalette?materialGroup= palette for a group (JSON)
+    // GET  /Reports/ReportBuilderVendors                distinct suppliers (JSON)
+    // GET  /Reports/ReportBuilderContainers?vendorNo=   supplier->container cascade
+    // POST /Reports/ReportBuilderValidateFormula        live formula validator
+    // POST /Reports/ReportBuilderPreview                first-N-rows preview (JSON)
+    // POST /Reports/ReportBuilderExport                 xlsx download
+    //
+    // Saved designs reuse the Perspectives CRUD with report=report_builder.
+    // Auth: SupervisorOrAbove, same as the other data-hub reports.
+    // ===================================================================
+    [HttpGet]
+    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    public async Task<IActionResult> ReportBuilder()
+    {
+        ViewBag.MaterialGroups = await _mara.ListMaterialGroupsAsync();
+        ViewBag.CanShare       = CanShare();
+        ViewBag.ReportKey      = ReportBuilderRegistry.ReportKey;
+        ViewBag.StaticFields   = ReportBuilderRegistry.StaticFields
+            .Select(f => new { key = f.Key, label = f.Label, type = f.Type.ToString(),
+                               numeric = f.Type == ReportFieldType.Number })
+            .ToList();
+        return View();
+    }
+
+    [HttpGet]
+    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    public async Task<IActionResult> ReportBuilderPalette(string? materialGroup, CancellationToken ct)
+    {
+        var g = (materialGroup ?? "").Trim();
+        using var c = new SqlConnection(_config.GetConnectionString("Default"));
+        await c.OpenAsync(ct);
+
+        var defects = string.IsNullOrEmpty(g)
+            ? Enumerable.Empty<dynamic>()
+            : await c.QueryAsync(@"
+                SELECT defect_id AS id, defect_code AS code, defect_name AS name, defect_category AS category
+                FROM   qms_defect_catalog
+                WHERE  material_group = @g AND is_active = 1
+                ORDER  BY defect_category, defect_name", new { g });
+
+        var readings = string.IsNullOrEmpty(g)
+            ? Enumerable.Empty<dynamic>()
+            : await c.QueryAsync(@"
+                SELECT reading_type_code AS code, reading_name AS name, value_kind AS valueKind, default_unit AS unit
+                FROM   qms_reading_type
+                WHERE  is_active = 1 AND (material_group = @g OR material_group IS NULL OR material_group = '')
+                ORDER  BY sort_order, reading_name", new { g });
+
+        var headers = await c.QueryAsync(@"
+            SELECT field_code AS code, field_name AS name, scope AS scope, value_kind AS valueKind, default_unit AS unit
+            FROM   qms_sample_header_field
+            WHERE  is_active = 1
+            ORDER  BY sort_order, field_name");
+
+        return Json(new
+        {
+            statics         = StaticFieldList(),
+            defects,
+            readings,
+            sampleHeaders   = headers.Where(h => !string.Equals((string?)h.scope, "Material", StringComparison.OrdinalIgnoreCase)),
+            materialHeaders = headers.Where(h => string.Equals((string?)h.scope, "Material", StringComparison.OrdinalIgnoreCase)),
+        });
+    }
+
+    private static List<object> StaticFieldList() =>
+        ReportBuilderRegistry.StaticFields
+            .Select(f => (object)new { key = f.Key, label = f.Label, type = f.Type.ToString(),
+                                       numeric = f.Type == ReportFieldType.Number })
+            .ToList();
+
+    [HttpGet]
+    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    public async Task<IActionResult> ReportBuilderVendors(CancellationToken ct)
+    {
+        using var c = new SqlConnection(_config.GetConnectionString("Default"));
+        await c.OpenAsync(ct);
+        var rows = await c.QueryAsync(@"
+            SELECT DISTINCT VendorNo AS vendorNo, VendorName AS vendorName
+            FROM   dbo.vw_qms_flat_defects
+            WHERE  VendorNo IS NOT NULL AND VendorNo <> ''
+            ORDER  BY VendorName");
+        return Json(rows);
+    }
+
+    [HttpGet]
+    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    public async Task<IActionResult> ReportBuilderContainers(string? vendorNo, CancellationToken ct)
+    {
+        var v = string.IsNullOrWhiteSpace(vendorNo) ? null : vendorNo.Trim();
+        using var c = new SqlConnection(_config.GetConnectionString("Default"));
+        await c.OpenAsync(ct);
+        var rows = await c.QueryAsync(@"
+            SELECT DISTINCT ContainerNo AS containerNo, BolNo AS bolNo, Ebeln AS ebeln
+            FROM   dbo.vw_qms_flat_defects
+            WHERE  ContainerNo IS NOT NULL AND ContainerNo <> ''
+              AND  (@v IS NULL OR VendorNo = @v)
+            ORDER  BY ContainerNo", new { v });
+        return Json(rows);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    public IActionResult ReportBuilderValidateFormula([FromBody] FormulaValidateRequest req)
+    {
+        if (req == null) return BadRequest(new { error = "Empty request" });
+        var res = ReportFormula.Validate(req.Formula, req.Columns ?? new());
+        return Json(new { ok = res.Ok, error = res.Error });
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    public async Task<IActionResult> ReportBuilderPreview([FromBody] ReportBuilderRequest req, CancellationToken ct)
+    {
+        var (def, _) = await ResolveDefinitionAsync(req, ct);
+        if (def == null) return BadRequest(new { error = "No report design supplied." });
+        ApplyGroupToFilter(def, req.Filter);
+        var preview = await _reportBuilder.PreviewAsync(def, req.Filter, 100, ct);
+        return Json(preview);
+    }
+
+    [HttpPost]
+    [ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    public async Task<IActionResult> ReportBuilderExport([FromBody] ReportBuilderRequest req, CancellationToken ct)
+    {
+        var (def, name) = await ResolveDefinitionAsync(req, ct);
+        if (def == null) return BadRequest(new { error = "No report design supplied." });
+        if (def.Columns.Count == 0) return BadRequest(new { error = "The report has no columns." });
+        ApplyGroupToFilter(def, req.Filter);
+
+        var reportName = !string.IsNullOrWhiteSpace(req.Name) ? req.Name! : (name ?? "Report");
+        var bytes = await _reportBuilder.BuildAsync(def, reportName, req.Filter, ct);
+        var safe  = string.Join("_", reportName.Split(Path.GetInvalidFileNameChars()));
+        var fileName = $"{safe}-{DateTime.UtcNow:yyyyMMdd-HHmm}.xlsx";
+        return File(bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", fileName);
+    }
+
+    /// <summary>Loads the design from a saved perspective id, else uses the inline
+    /// one. Returns (definition, name).</summary>
+    private async Task<(ReportBuilderDefinition? def, string? name)> ResolveDefinitionAsync(
+        ReportBuilderRequest req, CancellationToken ct)
+    {
+        if (req == null) return (null, null);
+        if (req.PerspectiveId.HasValue)
+        {
+            var user = User.Identity?.Name ?? "";
+            var dto  = await _perspectives.GetAsync(req.PerspectiveId.Value, user, ct);
+            if (dto == null) return (null, null);
+            return (ReportBuilderDefinition.FromJson(dto.ConfigJson), dto.Name);
+        }
+        return (req.Definition, req.Name);
+    }
+
+    /// <summary>The report is always scoped to its design's material group unless
+    /// the browse filter set one explicitly.</summary>
+    private static void ApplyGroupToFilter(ReportBuilderDefinition def, FlatDefectFilter filter)
+    {
+        if (string.IsNullOrWhiteSpace(filter.MaterialGroup) && !string.IsNullOrWhiteSpace(def.MaterialGroup))
+            filter.MaterialGroup = def.MaterialGroup;
+    }
 }

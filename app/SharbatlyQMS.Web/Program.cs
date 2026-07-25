@@ -65,6 +65,8 @@ builder.Services.AddScoped<SharbatlyQMS.Web.Services.Reports.IPivotService,
                            SharbatlyQMS.Web.Services.Reports.PivotService>();
 builder.Services.AddScoped<SharbatlyQMS.Web.Services.Reports.IPerspectiveService,
                            SharbatlyQMS.Web.Services.Reports.PerspectiveService>();
+builder.Services.AddScoped<SharbatlyQMS.Web.Services.Reports.IReportBuilderExporter,
+                           SharbatlyQMS.Web.Services.Reports.ReportBuilderExporter>();
 #pragma warning disable CA1416 // AdService uses System.DirectoryServices (Windows-only); host runs on Windows.
 builder.Services.AddScoped<IAdService, AdService>();
 #pragma warning restore CA1416

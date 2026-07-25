@@ -4,8 +4,11 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using ClosedXML.Excel;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Reports;
 using SharbatlyQMS.Web.Services;
+using SharbatlyQMS.Web.Services.Reports;
 using SharbatlyQMS.Web.Services.Sap;
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
@@ -216,6 +219,33 @@ public class WorkflowTests : IClassFixture<QmsAppFactory>
             var bytes = await pdf.Content.ReadAsByteArrayAsync();
             Assert.True(bytes.Length > 1000, $"PDF suspiciously small ({bytes.Length} bytes)");
             Assert.Equal(0x25, bytes[0]); // '%' - a real PDF starts %PDF
+
+            // ---- 8. Report Builder export (2026-07-25) -----------------------
+            // Design: Container as a header field, Material + Sample as columns,
+            // the recorded defect as a count column with a total, and a calc %.
+            var exporter = sp.GetRequiredService<IReportBuilderExporter>();
+            var design = new ReportBuilderDefinition
+            {
+                MaterialGroup = material.Grp,
+                Columns = new List<ReportColumn>
+                {
+                    new() { Key = "ContainerNo", Kind = ColumnKinds.Static, Label = "Container", Placement = ColumnPlacements.Header },
+                    new() { Key = "MaterialNo",  Kind = ColumnKinds.Static, Label = "Material",  Placement = ColumnPlacements.Column },
+                    new() { Key = "SampleSize",  Kind = ColumnKinds.Static, Label = "Sample Size", Placement = ColumnPlacements.Column },
+                    new() { Key = $"d:{defectId}", Kind = ColumnKinds.Defect, Label = "Defect", Placement = ColumnPlacements.Column, DefectValue = DefectValueModes.Count, Total = ColumnTotals.Sum },
+                    new() { Key = "calc:1", Kind = ColumnKinds.Calc, Label = "Defect %", Placement = ColumnPlacements.Column, Formula = "[Defect] / [Sample Size] * 100", Total = ColumnTotals.Avg },
+                }
+            };
+            var xlsx = await exporter.BuildAsync(design, "WorkflowTest",
+                new FlatDefectFilter { MaterialGroup = material.Grp, ContainerNo = row.ContainerNo }, default);
+            Assert.True(xlsx.Length > 500, "export xlsx suspiciously small");
+
+            using var wb = new XLWorkbook(new MemoryStream(xlsx));
+            var ws = wb.Worksheet(1);
+            var texts = ws.CellsUsed().Select(cl => cl.GetString()).ToList();
+            Assert.Contains(row.ContainerNo, texts);      // header block value
+            Assert.Contains(material.No, texts);          // one data row per sample
+            Assert.Contains("Total", texts);              // totals row present
         }
         finally
         {
