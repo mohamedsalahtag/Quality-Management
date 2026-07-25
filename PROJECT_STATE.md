@@ -218,6 +218,16 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-07-26 (analyzer field coverage + categorised/always-visible field list)
+
+Three improvements to the reporting field lists, driven by the request "once I select a field I can't select it again; make all fields available (e.g. Time Bar); categorise or sort them".
+
+- **Perspective Analyzer field list no longer hides a used field.** `renderAvailable` in `perspective-analyzer.js` previously dropped any dimension already placed in rows/cols (`if (used[d.key]) return;`). Now every field stays listed — greyed with an "in rows/cols" badge — and its Rows/Cols buttons move it from its current zone via the existing `moveDim`. A **sort control** (Group by category / A–Z) is injected next to the search box.
+- **Flat view extended (`M09`)** with the fields the analyzer lacked: `DischargeDate`, `QoOpenedAt/ClosedAt/CreatedAt`, **`TimeBarDischarge` / `TimeBarArrival`** (days from the basis date to the QO finish), `NetWeight`, `MaterialSize`, and per-sample detail (grower/pallet/pack/date/lot/label/packaging + created by). The 42 existing columns are unchanged.
+- **`PivotRegistry`** gained a `Category` on every dimension (Supplier & PO / Material / Quality Order / Sample / Defect / Dates & Time), plus the new dimensions and the **Time Bar** + Net Weight measures. `PivotSchema` now emits `category`. The Report Builder palette (already grouped by kind) now also sorts each group A–Z.
+
+The Report Builder never had the "can't select again" limit — a palette field can be added any number of times.
+
 ### 2026-07-25 (Report Builder — user-composed Excel reports)
 
 A new `/Reports/ReportBuilder` (Supervisor+) lets users design their own tabular reports and export professional Excel. It is built almost entirely on the existing flat-view pipeline — the data layer needed nothing new.

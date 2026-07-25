@@ -13,7 +13,19 @@ namespace SharbatlyQMS.Web.Services.Reports;
 /// the SELECT / GROUP BY so it must be a constant string here -- NEVER
 /// concatenate user input into a SqlColumn.
 /// </summary>
-public sealed record PivotDimension(string Key, string Display, string SqlExpression);
+/// <summary>A pivot dimension. <paramref name="Category"/> groups it in the
+/// analyzer's field list (the UI can also sort A-Z within/across groups).</summary>
+public sealed record PivotDimension(string Key, string Display, string SqlExpression, string Category = "General");
+
+public static class PivotCategories
+{
+    public const string SupplierPo = "Supplier & PO";
+    public const string Material    = "Material";
+    public const string QualityOrder= "Quality Order";
+    public const string Sample      = "Sample";
+    public const string Defect      = "Defect";
+    public const string Dates       = "Dates & Time";
+}
 
 public sealed record PivotMeasure(string Key, string Display, string SqlInner, string[] AllowedAggs);
 
@@ -34,6 +46,11 @@ public static class PivotAggregations
 
     public static readonly string[] All = { Sum, Avg, Min, Max, Count, CountDistinct };
 
+    /// <summary>V36 -- the only aggregations valid for a text dimension used
+    /// as a measure (Excel-style "count of field" values). MIN/MAX of text
+    /// cannot flow through the decimal result pipeline, so they are excluded.</summary>
+    public static readonly string[] FieldAggs = { Count, CountDistinct };
+
     public static bool IsValid(string a) => Array.IndexOf(All, a) >= 0;
 }
 
@@ -44,40 +61,57 @@ public static class PivotRegistry
         ViewName: "dbo.vw_qms_flat_defects",
         Dimensions: new []
         {
-            // ---- Arrival / PO context ----
-            new PivotDimension("Plant",            "Plant",            "Plant"),
-            new PivotDimension("StorageLocation",  "Storage Loc.",     "StorageLocation"),
-            new PivotDimension("VendorName",       "Supplier",         "VendorName"),
-            new PivotDimension("VendorNo",         "Vendor No",        "VendorNo"),
-            new PivotDimension("ContainerNo",      "Container",        "ContainerNo"),
-            new PivotDimension("BolNo",            "BOL",              "BolNo"),
-            new PivotDimension("Ebeln",            "PO (Ebeln)",       "Ebeln"),
+            // ---- Supplier / PO context ----
+            new PivotDimension("Plant",            "Plant",            "Plant",            PivotCategories.SupplierPo),
+            new PivotDimension("StorageLocation",  "Storage Loc.",     "StorageLocation",  PivotCategories.SupplierPo),
+            new PivotDimension("VendorName",       "Supplier",         "VendorName",       PivotCategories.SupplierPo),
+            new PivotDimension("VendorNo",         "Vendor No",        "VendorNo",         PivotCategories.SupplierPo),
+            new PivotDimension("ContainerNo",      "Container",        "ContainerNo",      PivotCategories.SupplierPo),
+            new PivotDimension("BolNo",            "BOL",              "BolNo",            PivotCategories.SupplierPo),
+            new PivotDimension("Ebeln",            "PO (Ebeln)",       "Ebeln",            PivotCategories.SupplierPo),
+            new PivotDimension("Sto",              "STO",              "Sto",              PivotCategories.SupplierPo),
             // ---- Material (MARA-merged) ----
-            new PivotDimension("MaterialNo",       "Material No",      "MaterialNo"),
-            new PivotDimension("MaterialGroup",    "Material group",   "MaterialGroup"),
-            new PivotDimension("MajorCategory",    "Major category",   "MajorCategory"),
-            new PivotDimension("SubMajorCategory", "Sub-major cat.",   "SubMajorCategory"),
-            new PivotDimension("Variety",          "Variety",          "Variety"),
-            new PivotDimension("MaterialClass",    "Class",            "MaterialClass"),
-            new PivotDimension("Origin",           "Origin",           "Origin"),
-            new PivotDimension("Brand",            "Brand",            "Brand"),
-            new PivotDimension("PackType",         "Pack Type",        "PackType"),
-            // ---- QO + Sample ----
-            new PivotDimension("QualityOrderNo",   "QO Number",        "QualityOrderNo"),
-            new PivotDimension("QoStatus",         "QO status",        "QoStatus"),
-            new PivotDimension("SampleScope",      "Sample scope",     "SampleScope"),
+            new PivotDimension("MaterialNo",       "Material No",      "MaterialNo",       PivotCategories.Material),
+            new PivotDimension("MaterialDesc",     "Material Desc.",   "MaterialDesc",     PivotCategories.Material),
+            new PivotDimension("MaterialGroup",    "Material group",   "MaterialGroup",    PivotCategories.Material),
+            new PivotDimension("MaterialGroupDesc","Material group desc.", "MaterialGroupDesc", PivotCategories.Material),
+            new PivotDimension("MajorCategory",    "Major category",   "MajorCategory",    PivotCategories.Material),
+            new PivotDimension("SubMajorCategory", "Sub-major cat.",   "SubMajorCategory", PivotCategories.Material),
+            new PivotDimension("Variety",          "Variety",          "Variety",          PivotCategories.Material),
+            new PivotDimension("MaterialClass",    "Class",            "MaterialClass",    PivotCategories.Material),
+            new PivotDimension("Origin",           "Origin",           "Origin",           PivotCategories.Material),
+            new PivotDimension("Brand",            "Brand",            "Brand",            PivotCategories.Material),
+            new PivotDimension("PackType",         "Pack Type",        "PackType",         PivotCategories.Material),
+            new PivotDimension("MaterialSize",     "Material Size",    "MaterialSize",     PivotCategories.Material),
+            // ---- Quality order ----
+            new PivotDimension("QualityOrderNo",   "QO Number",        "QualityOrderNo",   PivotCategories.QualityOrder),
+            new PivotDimension("QoStatus",         "QO status",        "QoStatus",         PivotCategories.QualityOrder),
+            // ---- Sample ----
+            new PivotDimension("SampleScope",      "Sample scope",     "SampleScope",      PivotCategories.Sample),
+            new PivotDimension("Grower",           "Grower",           "Grower",           PivotCategories.Sample),
+            new PivotDimension("PalletNo",         "Pallet No",        "PalletNo",         PivotCategories.Sample),
+            new PivotDimension("GrowerPallet",     "Grower Pallet",    "GrowerPallet",     PivotCategories.Sample),
+            new PivotDimension("PackCode",         "Pack Code",        "PackCode",         PivotCategories.Sample),
+            new PivotDimension("DateCode",         "Date Code",        "DateCode",         PivotCategories.Sample),
+            new PivotDimension("LabelValue",       "Label",            "LabelValue",       PivotCategories.Sample),
+            new PivotDimension("LotNo",            "Lot No",           "LotNo",            PivotCategories.Sample),
+            new PivotDimension("PackagingMaterial","Packaging Material","PackagingMaterial", PivotCategories.Sample),
+            new PivotDimension("SampleCreatedBy",  "Inspected By",     "SampleCreatedBy",  PivotCategories.Sample),
             // ---- Defect ----
-            new PivotDimension("DefectCode",       "Defect code",      "DefectCode"),
-            new PivotDimension("DefectName",       "Defect",           "DefectName"),
-            new PivotDimension("DefectCategory",   "Defect category",  "DefectCategory"),
-            new PivotDimension("SeverityCode",     "Severity",         "SeverityCode"),
-            // ---- Time buckets ----
-            new PivotDimension("PoYear",           "PO year",          "CAST(YEAR(PoDate) AS VARCHAR(4))"),
-            new PivotDimension("PoMonth",          "PO month",         "FORMAT(PoDate, 'yyyy-MM')"),
-            new PivotDimension("PoQuarter",        "PO quarter",       "CAST(YEAR(PoDate) AS VARCHAR(4)) + '-Q' + CAST(DATEPART(QUARTER, PoDate) AS VARCHAR(1))"),
-            new PivotDimension("ArrivalMonth",     "Arrival month",    "FORMAT(ArrivalDate, 'yyyy-MM')"),
-            new PivotDimension("ReceiveMonth",     "Receive month",    "FORMAT(ReceiveDate, 'yyyy-MM')"),
-            new PivotDimension("ShippingMonth",    "Shipping month",   "FORMAT(ShippingDate, 'yyyy-MM')"),
+            new PivotDimension("DefectCode",       "Defect code",      "DefectCode",       PivotCategories.Defect),
+            new PivotDimension("DefectName",       "Defect",           "DefectName",       PivotCategories.Defect),
+            new PivotDimension("DefectCategory",   "Defect category",  "DefectCategory",   PivotCategories.Defect),
+            new PivotDimension("SeverityCode",     "Severity",         "SeverityCode",     PivotCategories.Defect),
+            // ---- Dates & time buckets ----
+            new PivotDimension("PoYear",           "PO year",          "CAST(YEAR(PoDate) AS VARCHAR(4))", PivotCategories.Dates),
+            new PivotDimension("PoMonth",          "PO month",         "FORMAT(PoDate, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("PoQuarter",        "PO quarter",       "CAST(YEAR(PoDate) AS VARCHAR(4)) + '-Q' + CAST(DATEPART(QUARTER, PoDate) AS VARCHAR(1))", PivotCategories.Dates),
+            new PivotDimension("ArrivalMonth",     "Arrival month",    "FORMAT(ArrivalDate, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("DischargeDate",    "Discharge date",   "FORMAT(DischargeDate, 'yyyy-MM-dd')", PivotCategories.Dates),
+            new PivotDimension("DischargeMonth",   "Discharge month",  "FORMAT(DischargeDate, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("ReceiveMonth",     "Receive month",    "FORMAT(ReceiveDate, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("ShippingMonth",    "Shipping month",   "FORMAT(ShippingDate, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("QoClosedMonth",    "QO finished month","FORMAT(QoClosedAt, 'yyyy-MM')", PivotCategories.Dates),
         },
         Measures: new []
         {
@@ -93,7 +127,19 @@ public static class PivotRegistry
             // but not additively wrong).
             new PivotMeasure("SampleSize",     "Sample size",     "SampleSize",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
+            // V37 (2026-07-07): PO line quantity from qms_arrival_item. Same
+            // grain caveat as SampleSize — it repeats per defect row — so no SUM.
+            new PivotMeasure("PoQuantity",     "PO quantity",     "PoQuantity",
+                new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
             new PivotMeasure("TransitDays",    "Transit days",    "TransitDays",
+                new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
+            // Time Bar (days) = discharge/arrival date -> QO finish (closed) date.
+            // Same grain caveat as SampleSize (repeats per defect row), so no SUM.
+            new PivotMeasure("TimeBarDischarge","Time Bar (discharge)", "TimeBarDischarge",
+                new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
+            new PivotMeasure("TimeBarArrival", "Time Bar (arrival)",   "TimeBarArrival",
+                new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
+            new PivotMeasure("NetWeight",      "Net weight",      "NetWeight",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
             new PivotMeasure("Samples",        "Sample count",    "SampleId",
                 new[] { PivotAggregations.CountDistinct }),

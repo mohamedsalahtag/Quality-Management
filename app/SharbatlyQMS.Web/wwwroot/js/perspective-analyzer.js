@@ -1,3 +1,7 @@
+// V36 (2026-07-04). Perspective Analyzer client.
+// - V36: vertical field wells (rows/cols chips stack like Excel), drop-position
+//   indicator while dragging, and Excel-style field measures: any text field
+//   can be added to Values with COUNT / COUNT_DISTINCT.
 // V34 (2026-06-20). Perspective Analyzer client.
 // - Talks to /Reports/PivotSchema, /Reports/Pivot, /Reports/Perspectives,
 //   SavePerspective, SetDefaultPerspective, DeletePerspective.
@@ -11,6 +15,25 @@
 
     var card = document.getElementById("perspectiveCard");
     if (!card) return;
+
+    // V36: vertical field wells + drop indicator. Injected from JS (same
+    // pattern as the V35 Live/Swap controls) so the layout and the Y-based
+    // drop logic below always ship together, even on wwwroot-only deploys.
+    (function injectV36Css() {
+        if (document.getElementById("pivotV36Css")) return;
+        var st = document.createElement("style");
+        st.id = "pivotV36Css";
+        st.textContent =
+            "#perspectiveCard #rowsZone, #perspectiveCard #colsZone {" +
+            "  display: flex; flex-direction: column; align-items: stretch; gap: .25rem; }" +
+            "#perspectiveCard #rowsZone .pivot-chip, #perspectiveCard #colsZone .pivot-chip {" +
+            "  display: flex; margin: 0; border-radius: .375rem; }" +
+            "#perspectiveCard #rowsZone .pivot-chip .chip-x," +
+            "#perspectiveCard #colsZone .pivot-chip .chip-x { margin-left: auto; }" +
+            "#perspectiveCard .pivot-chip.drop-before { box-shadow: 0 -3px 0 0 #0d6efd; }" +
+            "#perspectiveCard .pivot-zone.drop-at-end { box-shadow: inset 0 -3px 0 0 #0d6efd; }";
+        document.head.appendChild(st);
+    })();
 
     var REPORT      = card.getAttribute("data-report");
     var FILTER_QS   = card.getAttribute("data-filter-query") || "";
@@ -89,6 +112,16 @@
     var pageFilter   = null;     // memoised parse of FILTER_QS
     var lastReqBody  = null;     // last PivotRequest sent (used for XLSX POST)
 
+    // V35: live mode. Every config change schedules a debounced re-run; a
+    // sequence counter + AbortController make rapid changes race-safe (only
+    // the newest request may paint the result).
+    var runSeq    = 0;
+    var runAbort  = null;
+    var autoTimer = null;
+    var AUTO_KEY  = "pivotLiveRun";
+    var autoRun   = true;
+    try { autoRun = localStorage.getItem(AUTO_KEY) !== "0"; } catch (e) { }
+
     // -- antiforgery helper ----------------------------------------------
     function antiForgeryToken() {
         var t = document.querySelector('#perspectiveAfForm input[name="__RequestVerificationToken"]');
@@ -145,6 +178,14 @@
                 measureAggs[m.key] = m.aggs;
                 measuresByKey[m.key] = m;
             });
+            // V36: field measures — any dimension usable as COUNT /
+            // COUNT_DISTINCT. `|| []` keeps this JS safe against an older
+            // server that doesn't emit fieldMeasures yet.
+            (s.fieldMeasures || []).forEach(function (f) {
+                if (measuresByKey[f.key]) return;    // registered measures win
+                measuresByKey[f.key] = { key: f.key, display: f.display, aggs: f.aggs, isField: true };
+                measureAggs[f.key] = f.aggs;
+            });
             s.renderers.forEach(function (r) {
                 $renderer.appendChild(new Option(r, r));
             });
@@ -178,33 +219,76 @@
         colsSel.forEach(function (d) { used[d.key] = "cols"; });
         return used;
     }
+    // "category" (grouped) or "alpha" (flat A-Z). A field already placed in
+    // rows/cols STAYS listed here (greyed, with an "in rows/cols" badge) instead
+    // of vanishing, so every field is always visible and re-selectable.
+    var sortMode = "category";
+    var CATEGORY_ORDER = ["Supplier & PO", "Material", "Quality Order", "Sample", "Defect", "Dates & Time", "General"];
+
+    function ensureSortControl() {
+        if (document.getElementById("dimSort") || !$search || !$search.parentNode) return;
+        var sel = document.createElement("select");
+        sel.id = "dimSort";
+        sel.className = "form-select form-select-sm mt-1";
+        sel.innerHTML = '<option value="category">Group by category</option>' +
+                        '<option value="alpha">Sort A–Z</option>';
+        sel.addEventListener("change", function () { sortMode = sel.value; renderAvailable($search.value); });
+        $search.parentNode.insertBefore(sel, $search.nextSibling);
+    }
+
+    function availableItem(d, used) {
+        var usedZone = used[d.key];
+        var row = document.createElement("div");
+        row.className = "available-item" + (usedZone ? " opacity-50" : "");
+        row.setAttribute("draggable", "true");
+        row.setAttribute("data-key", d.key);
+        row.setAttribute("data-zone", usedZone || "available");
+        row.innerHTML =
+          '<span><i class="bi bi-grip-vertical text-muted me-1"></i>' + escapeHtml(d.display) +
+          (usedZone ? ' <span class="badge bg-secondary ms-1">in ' + usedZone + '</span>' : '') + '</span>' +
+          '<span class="ai-btns">' +
+            '<button type="button" class="btn btn-sm btn-outline-warning me-1" title="Add to Rows" data-target="rows"><i class="bi bi-arrow-bar-right"></i> Rows</button>' +
+            '<button type="button" class="btn btn-sm btn-outline-primary"      title="Add to Cols" data-target="cols"><i class="bi bi-arrow-bar-down"></i> Cols</button>' +
+          '</span>';
+        row.addEventListener("dragstart", onChipDragStart);
+        row.addEventListener("dragend",   onChipDragEnd);
+        row.querySelectorAll("button[data-target]").forEach(function (b) {
+            b.addEventListener("click", function (ev) {
+                ev.stopPropagation();
+                moveDim(d.key, used[d.key] || "available", b.getAttribute("data-target"), -1);
+            });
+        });
+        return row;
+    }
+
     function renderAvailable(filterText) {
+        ensureSortControl();
         $available.innerHTML = "";
         var used = dimUsedKeys();
         var q = (filterText || "").trim().toLowerCase();
-        (schema && schema.dimensions || []).forEach(function (d) {
-            if (used[d.key]) return;                                // mutual exclusion
-            if (q && d.display.toLowerCase().indexOf(q) < 0
-                  && d.key.toLowerCase().indexOf(q) < 0) return;
-            var row = document.createElement("div");
-            row.className = "available-item";
-            row.setAttribute("draggable", "true");
-            row.setAttribute("data-key", d.key);
-            row.innerHTML =
-              '<span><i class="bi bi-grip-vertical text-muted me-1"></i>' + escapeHtml(d.display) + '</span>' +
-              '<span class="ai-btns">' +
-                '<button type="button" class="btn btn-sm btn-outline-warning me-1" title="Add to Rows" data-target="rows"><i class="bi bi-arrow-bar-right"></i> Rows</button>' +
-                '<button type="button" class="btn btn-sm btn-outline-primary"      title="Add to Cols" data-target="cols"><i class="bi bi-arrow-bar-down"></i> Cols</button>' +
-              '</span>';
-            row.addEventListener("dragstart", onChipDragStart);
-            row.addEventListener("dragend",   onChipDragEnd);
-            row.querySelectorAll("button[data-target]").forEach(function (b) {
-                b.addEventListener("click", function (ev) {
-                    ev.stopPropagation();
-                    moveDim(d.key, "available", b.getAttribute("data-target"), -1);
-                });
-            });
-            $available.appendChild(row);
+        var dims = (schema && schema.dimensions || []).filter(function (d) {
+            if (!q) return true;
+            return d.display.toLowerCase().indexOf(q) >= 0 || d.key.toLowerCase().indexOf(q) >= 0;
+        });
+
+        if (sortMode === "alpha") {
+            dims.slice().sort(function (a, b) { return a.display.localeCompare(b.display); })
+                .forEach(function (d) { $available.appendChild(availableItem(d, used)); });
+            return;
+        }
+
+        var byCat = {};
+        dims.forEach(function (d) { var c = d.category || "General"; (byCat[c] = byCat[c] || []).push(d); });
+        Object.keys(byCat).sort(function (a, b) {
+            var ia = CATEGORY_ORDER.indexOf(a), ib = CATEGORY_ORDER.indexOf(b);
+            return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+        }).forEach(function (c) {
+            var h = document.createElement("div");
+            h.className = "text-muted small fw-semibold mt-2 mb-1 border-bottom";
+            h.textContent = c;
+            $available.appendChild(h);
+            byCat[c].sort(function (a, b) { return a.display.localeCompare(b.display); })
+                .forEach(function (d) { $available.appendChild(availableItem(d, used)); });
         });
     }
     function renderZone(zoneEl, list, zoneKey) {
@@ -247,6 +331,7 @@
             if (fromIdx < dest) dest -= 1;
             list.splice(dest, 0, item);
             renderZone(toZone === "rows" ? $rowsZone : $colsZone, list, toZone);
+            scheduleAutoRun();
             return;
         }
         // Remove from source.
@@ -264,6 +349,7 @@
         renderAvailable($search.value);
         renderZone($rowsZone, rowsSel, "rows");
         renderZone($colsZone, colsSel, "cols");
+        scheduleAutoRun();
     }
 
     // -- drag and drop ---------------------------------------------------
@@ -283,6 +369,24 @@
         $rowsZone.classList.remove("drag-over");
         $colsZone.classList.remove("drag-over");
         $available.classList.remove("drag-over");
+        $valuesZone.classList.remove("drag-over");
+        clearDropIndicators();
+    }
+    // V36: both wells stack vertically, so insertion is always by Y-midpoint.
+    // Returns the chip index the drop would insert BEFORE, or -1 for append.
+    function computeInsertIndex(el, ev) {
+        var chips = Array.prototype.slice.call(el.querySelectorAll(".pivot-chip"));
+        for (var i = 0; i < chips.length; i++) {
+            var r = chips[i].getBoundingClientRect();
+            if (ev.clientY < (r.top + r.height / 2)) return i;
+        }
+        return -1;
+    }
+    function clearDropIndicators() {
+        document.querySelectorAll("#perspectiveCard .pivot-chip.drop-before")
+            .forEach(function (c) { c.classList.remove("drop-before"); });
+        document.querySelectorAll("#perspectiveCard .pivot-zone.drop-at-end")
+            .forEach(function (z) { z.classList.remove("drop-at-end"); });
     }
     function setupDropZone(el, zoneKey) {
         el.addEventListener("dragover", function (ev) {
@@ -290,6 +394,13 @@
             ev.preventDefault();
             el.classList.add("drag-over");
             ev.dataTransfer.dropEffect = "move";
+            // Paint the drop-position indicator. Clear-then-set on every
+            // dragover tick — dragleave is unreliable over child chips.
+            clearDropIndicators();
+            var idx = computeInsertIndex(el, ev);
+            var chips = el.querySelectorAll(".pivot-chip");
+            if (idx >= 0 && chips[idx]) chips[idx].classList.add("drop-before");
+            else if (chips.length > 0) el.classList.add("drop-at-end");
         });
         el.addEventListener("dragleave", function (ev) {
             if (ev.target === el) el.classList.remove("drag-over");
@@ -297,18 +408,9 @@
         el.addEventListener("drop", function (ev) {
             ev.preventDefault();
             el.classList.remove("drag-over");
+            clearDropIndicators();
             if (!dragState) return;
-            // Find insertion index from the cursor's x-coord relative to chips.
-            var insertIdx = -1;
-            var chips = Array.prototype.slice.call(el.querySelectorAll(".pivot-chip"));
-            for (var i = 0; i < chips.length; i++) {
-                var r = chips[i].getBoundingClientRect();
-                var horizontal = (zoneKey === "cols");
-                var mid = horizontal ? (r.left + r.width / 2) : (r.top + r.height / 2);
-                var pos = horizontal ? ev.clientX : ev.clientY;
-                if (pos < mid) { insertIdx = i; break; }
-            }
-            moveDim(dragState.key, dragState.from, zoneKey, insertIdx);
+            moveDim(dragState.key, dragState.from, zoneKey, computeInsertIndex(el, ev));
         });
     }
     setupDropZone($rowsZone, "rows");
@@ -495,17 +597,22 @@
     });
 
     // -- run pivot -------------------------------------------------------
-    function runPivot() {
+    function runPivot(auto) {
         var cfg = readConfig();
         if (cfg.rows.length === 0 && cfg.cols.length === 0) {
-            showMessage("Pick at least one row or column dimension to pivot on.", "warning");
+            if (!auto) showMessage("Pick at least one row or column dimension to pivot on.", "warning");
             return;
         }
         if (!cfg.measures || cfg.measures.length === 0) {
-            showMessage("Add at least one measure in the Values zone.", "warning");
+            if (!auto) showMessage("Add at least one measure in the Values zone.", "warning");
             return;
         }
         hideMessage();
+        // Supersede any in-flight run: bump the sequence and abort the old
+        // fetch so a slow older response can never overwrite a newer one.
+        var seq = ++runSeq;
+        if (runAbort) { try { runAbort.abort(); } catch (e) { } }
+        runAbort = (typeof AbortController !== "undefined") ? new AbortController() : null;
         $btnRun.disabled = true;
         $btnRun.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Running…';
         var body = {
@@ -526,10 +633,12 @@
         fetch("/Reports/Pivot", {
             method:  "POST",
             headers: jsonHeaders(),
-            body:    JSON.stringify(body)
+            body:    JSON.stringify(body),
+            signal:  runAbort ? runAbort.signal : undefined
         })
         .then(parseResponse)
         .then(function (result) {
+            if (seq !== runSeq) return;          // superseded by a newer run
             var originalRows = result.rowKeys.length;
             var M = (result.measures || []).length;
             // V34.3: a row is "zero-total" only when every measure's row total
@@ -621,16 +730,77 @@
             $btnExport.disabled = false;
         })
         .catch(function (e) {
+            if (seq !== runSeq || (e && e.name === "AbortError")) return;
             showMessage("Pivot failed: " + e.message, "danger");
             $output.innerHTML = "";
             $btnExport.disabled = true;
         })
         .finally(function () {
+            if (seq !== runSeq) return;          // a newer run owns the button
             $btnRun.disabled = false;
             $btnRun.innerHTML = '<i class="bi bi-play me-1"></i>Run';
         });
     }
-    $btnRun.addEventListener("click", runPivot);
+    // The click handler must not forward the event object into runPivot's
+    // `auto` parameter, so wrap it.
+    $btnRun.addEventListener("click", function () { runPivot(false); });
+
+    // -- V35 live mode -----------------------------------------------------
+    // Any structural change (chips, measures, options, scope) schedules a
+    // debounced run so the result follows the drag-and-drop immediately.
+    // Incomplete configs are skipped silently instead of nagging.
+    function scheduleAutoRun() {
+        if (!autoRun) return;
+        clearTimeout(autoTimer);
+        autoTimer = setTimeout(function () {
+            var cfg = readConfig();
+            if (cfg.rows.length === 0 && cfg.cols.length === 0) return;
+            if (!cfg.measures || cfg.measures.length === 0) return;
+            runPivot(true);
+        }, 350);
+    }
+    // The Live toggle + Swap-axes button are injected from JS (not the Razor
+    // partial) so they also light up on deployments that only refresh wwwroot.
+    var $btnSwap = document.createElement("button");
+    $btnSwap.type = "button";
+    $btnSwap.id = "btnSwapAxes";
+    $btnSwap.className = "btn btn-outline-secondary btn-sm";
+    $btnSwap.title = "Swap the Rows and Columns lists";
+    $btnSwap.innerHTML = '<i class="bi bi-arrow-left-right me-1"></i>Swap axes';
+    $btnReset.insertAdjacentElement("afterend", $btnSwap);
+    $btnSwap.addEventListener("click", function () {
+        var tmp = rowsSel; rowsSel = colsSel; colsSel = tmp;
+        renderZone($rowsZone, rowsSel, "rows");
+        renderZone($colsZone, colsSel, "cols");
+        scheduleAutoRun();
+    });
+    var $liveWrap = document.createElement("div");
+    $liveWrap.className = "form-check form-switch d-inline-flex align-items-center mb-0";
+    $liveWrap.title = "Re-run automatically whenever fields, measures, filters or options change";
+    $liveWrap.innerHTML =
+        '<input class="form-check-input me-1" type="checkbox" id="pivotLiveToggle">' +
+        '<label class="form-check-label small" for="pivotLiveToggle">Live <i class="bi bi-lightning-charge text-warning"></i></label>';
+    $btnSwap.insertAdjacentElement("afterend", $liveWrap);
+    var $liveToggle = $liveWrap.querySelector("#pivotLiveToggle");
+    $liveToggle.checked = autoRun;
+    $liveToggle.addEventListener("change", function () {
+        autoRun = $liveToggle.checked;
+        try { localStorage.setItem(AUTO_KEY, autoRun ? "1" : "0"); } catch (e) { }
+        if (autoRun) scheduleAutoRun();
+    });
+    // Option changes: topN / hide-zeros / scope need a fresh query; format and
+    // heat shading are render-time only, so just repaint the last result.
+    $topN.addEventListener("input", scheduleAutoRun);
+    $hideZero.addEventListener("change", function () { scheduleAutoRun(); });
+    $heatmap.addEventListener("change", function () {
+        if (lastResult) renderResult(lastResult, readConfig());
+    });
+    $format.addEventListener("change", function () {
+        if (lastResult) renderResult(lastResult, readConfig());
+    });
+    document.querySelectorAll('input[name="pivotScope"]').forEach(function (r) {
+        r.addEventListener("change", function () { scheduleAutoRun(); });
+    });
     $btnReset.addEventListener("click", function () {
         rowsSel = []; colsSel = []; drills = [];
         // Reset measures to a single chip = first registered measure.
@@ -699,7 +869,8 @@
             for (var i = 0; i < matrix.length; i++)
                 for (var j = 0; j < matrix[i].length; j++)
                     for (var mi = 0; mi < M; mi++) {
-                        var v = matrix[i][j][mi];
+                        var cell = matrix[i][j];
+                        var v = cell ? cell[mi] : null;
                         if (v == null) continue;
                         if (v < heatRange[mi].min) heatRange[mi].min = v;
                         if (v > heatRange[mi].max) heatRange[mi].max = v;
@@ -760,7 +931,7 @@
             var rkAttr = ' data-row-key="' + escapeHtml(JSON.stringify(rkey)) + '"';
             if (ck.length === 0) {
                 ms.forEach(function (m, mi) {
-                    var v = result.rowTotals[ri][mi];
+                    var v = (result.rowTotals[ri] || [])[mi];
                     var style = heatStyleFor(cfg, v, heatRange[mi]);
                     html.push('<td class="text-end heat"' + style + rkAttr + ' data-col-key="[]" title="Click to drill into this row">'
                         + formatValue(v, measureFormat(m, cfg.format)) + "</td>");
@@ -769,7 +940,8 @@
                 ck.forEach(function (ckey, ci) {
                     var ckAttr = ' data-col-key="' + escapeHtml(JSON.stringify(ckey)) + '"';
                     ms.forEach(function (m, mi) {
-                        var v = matrix[ri][ci][mi];
+                        var cell = matrix[ri][ci];
+                        var v = cell ? cell[mi] : null;
                         var style = heatStyleFor(cfg, v, heatRange[mi]);
                         html.push('<td class="text-end heat"' + style + rkAttr + ckAttr
                             + ' title="Click to drill into this cell">'
@@ -777,7 +949,7 @@
                     });
                 });
                 ms.forEach(function (m, mi) {
-                    html.push("<td class='text-end fw-bold'>" + totalCell(mi, m, result.rowTotals[ri][mi]) + "</td>");
+                    html.push("<td class='text-end fw-bold'>" + totalCell(mi, m, (result.rowTotals[ri] || [])[mi]) + "</td>");
                 });
             }
             html.push("</tr>");
@@ -872,7 +1044,7 @@
                     fill: cfg.renderer === "Area" ? "tozeroy" : undefined,
                     name: measure.label,
                     x: yLabels.length > 0 ? yLabels : ["(all)"],
-                    y: rk.map(function (_, ri) { return result.rowTotals[ri][mi]; })
+                    y: rk.map(function (_, ri) { return (result.rowTotals[ri] || [])[mi]; })
                 }];
             } else {
                 data = ck.map(function (k, ci) { return traceShape(ci, k.join(" / ")); });
@@ -952,7 +1124,7 @@
     });
     $btnConfirm.addEventListener("click", function () {
         var name = $saveName.value.trim();
-        if (!name) { alert("Name is required."); return; }
+        if (!name) { uiAlert("Name is required.", "warning"); return; }
         var scope = (document.querySelector('input[name="saveScope"]:checked') || {}).value || "private";
         var idVal = $saveId.value ? parseInt($saveId.value, 10) : null;
         var cfg = readConfig();
@@ -978,7 +1150,7 @@
                 updateButtonState();
             });
         })
-        .catch(function (e) { alert("Save failed: " + e.message); });
+        .catch(function (e) { uiAlert("Save failed: " + e.message); });
     });
     $btnDef.addEventListener("click", function () {
         if (!current) return;
@@ -992,11 +1164,13 @@
         })
         .then(parseResponse)
         .then(function () { return listPerspectives(); })
-        .catch(function (e) { alert("Set-default failed: " + e.message); });
+        .catch(function (e) { uiAlert("Set-default failed: " + e.message); });
     });
-    $btnDel.addEventListener("click", function () {
+    $btnDel.addEventListener("click", async function () {
         if (!current) return;
-        if (!confirm("Delete perspective \"" + current.name + "\"?")) return;
+        var ok = await uiConfirm("Delete perspective \"" + current.name + "\"?",
+            { danger: true, okText: "Delete" });
+        if (!ok) return;
         var body = new URLSearchParams();
         body.append("id", current.id);
         body.append("__RequestVerificationToken", antiForgeryToken());
@@ -1010,7 +1184,7 @@
             current = null; $select.value = ""; updateButtonState();
             return listPerspectives();
         })
-        .catch(function (e) { alert("Delete failed: " + e.message); });
+        .catch(function (e) { uiAlert("Delete failed: " + e.message); });
     });
 
     // -- export pivot to Excel (XLSX via server) ------------------------
@@ -1045,7 +1219,7 @@
             document.body.appendChild(a); a.click();
             setTimeout(function () { URL.revokeObjectURL(url); a.remove(); }, 0);
         })
-        .catch(function (e) { alert("Excel export failed: " + e.message); })
+        .catch(function (e) { uiAlert("Excel export failed: " + e.message); })
         .finally(function () {
             $btnExport.disabled = false;
             $btnExport.innerHTML = oldHtml;
@@ -1058,6 +1232,16 @@
         return String(s).replace(/[&<>"']/g, function (c) {
             return { "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c];
         });
+    }
+    // V38: route popups through the styled app dialogs when available
+    // (dialogs.js is loaded from the layout); fall back to the native ones.
+    function uiAlert(msg, kind) {
+        if (window.appDialogs) window.appDialogs.alert(msg, { kind: kind || "error" });
+        else alert(msg);
+    }
+    function uiConfirm(msg, opts) {
+        if (window.appDialogs) return window.appDialogs.confirm(msg, opts || {});
+        return Promise.resolve(confirm(msg));
     }
     function showMessage(text, kind) {
         $msg.className = "alert alert-" + (kind || "info") + " py-2 small mb-2";
@@ -1097,6 +1281,7 @@
                 if (ev.target.classList.contains("chip-x")) {
                     measuresSel.splice(idx, 1);
                     renderValuesZone();
+                    scheduleAutoRun();
                     return;
                 }
                 openMeasurePicker(idx);
@@ -1119,12 +1304,32 @@
         $valuesZone.classList.remove("drag-over");
     }
     $valuesZone.addEventListener("dragover", function (ev) {
-        if (valueDragState == null) return;
+        // V36: also accept a dimension chip dragged from Available/Rows/Cols —
+        // dropping it adds an Excel-style "distinct count of field" measure.
+        if (valueDragState == null && !dragState) return;
         ev.preventDefault();
         $valuesZone.classList.add("drag-over");
         ev.dataTransfer.dropEffect = "move";
     });
     $valuesZone.addEventListener("drop", function (ev) {
+        if (valueDragState == null && dragState) {
+            ev.preventDefault();
+            $valuesZone.classList.remove("drag-over");
+            var def = measuresByKey[dragState.key];
+            if (!def) return;
+            var exists = measuresSel.some(function (m) {
+                return m.key === def.key && m.agg === "COUNT_DISTINCT";
+            });
+            if (!exists) {
+                measuresSel.push({
+                    key: def.key, display: def.display,
+                    agg: "COUNT_DISTINCT", format: "int", label: null
+                });
+                renderValuesZone();
+                scheduleAutoRun();
+            }
+            return;
+        }
         if (valueDragState == null) return;
         ev.preventDefault();
         $valuesZone.classList.remove("drag-over");
@@ -1140,13 +1345,29 @@
         var moved = measuresSel.splice(fromIdx, 1)[0];
         measuresSel.splice(insertIdx, 0, moved);
         renderValuesZone();
+        scheduleAutoRun();
     });
 
     function openMeasurePicker(editIdx) {
         $measureSelect.innerHTML = "";
+        // V36: group the picker like Excel — numeric measures first, then
+        // every field as a countable value.
+        var ogM = document.createElement("optgroup");
+        ogM.label = "Measures";
         (schema && schema.measures || []).forEach(function (m) {
-            $measureSelect.appendChild(new Option(m.display, m.key));
+            ogM.appendChild(new Option(m.display, m.key));
         });
+        $measureSelect.appendChild(ogM);
+        var fields = (schema && schema.fieldMeasures) || [];
+        if (fields.length > 0) {
+            var ogF = document.createElement("optgroup");
+            ogF.label = "Fields (count of)";
+            fields.forEach(function (f) {
+                if (measuresByKey[f.key] && !measuresByKey[f.key].isField) return;
+                ogF.appendChild(new Option(f.display, f.key));
+            });
+            $measureSelect.appendChild(ogF);
+        }
         if (editIdx != null && measuresSel[editIdx]) {
             var existing = measuresSel[editIdx];
             $measureSelect.value = existing.key;
@@ -1173,14 +1394,20 @@
     }
     $measureSelect.addEventListener("change", function () {
         populateMeasureAgg($measureSelect.value, null);
+        // V36: counting a field always yields an integer — preselect the int
+        // format when the user is adding (don't clobber an explicit edit).
+        var def = measuresByKey[$measureSelect.value];
+        if (def && def.isField && $measureEditingIdx.value === "") {
+            $measureFormat.value = "int";
+        }
     });
     $btnAddMeasure.addEventListener("click", function () { openMeasurePicker(null); });
     $btnApplyMeasure.addEventListener("click", function () {
         var key = $measureSelect.value;
         var def = measuresByKey[key];
-        if (!def) { alert("Pick a measure."); return; }
+        if (!def) { uiAlert("Pick a measure.", "warning"); return; }
         var agg = $measureAgg.value;
-        if (!agg) { alert("Pick an aggregation."); return; }
+        if (!agg) { uiAlert("Pick an aggregation.", "warning"); return; }
         var entry = {
             key: def.key, display: def.display,
             agg: agg,
@@ -1188,12 +1415,23 @@
             label:  $measureLabelInput.value.trim() || null
         };
         var idxStr = $measureEditingIdx.value;
-        if (idxStr !== "" && measuresSel[parseInt(idxStr, 10)]) {
-            measuresSel[parseInt(idxStr, 10)] = entry;
+        var editingIdx = idxStr !== "" ? parseInt(idxStr, 10) : -1;
+        // V36: the server dedupes identical key+agg pairs, so adding a
+        // duplicate chip would silently diverge from the result — replace the
+        // existing chip instead.
+        var dupIdx = measuresSel.findIndex(function (m, i) {
+            return i !== editingIdx && m.key === entry.key && m.agg === entry.agg;
+        });
+        if (editingIdx >= 0 && measuresSel[editingIdx]) {
+            measuresSel[editingIdx] = entry;
+            if (dupIdx >= 0) measuresSel.splice(dupIdx, 1);
+        } else if (dupIdx >= 0) {
+            measuresSel[dupIdx] = entry;
         } else {
             measuresSel.push(entry);
         }
         renderValuesZone();
+        scheduleAutoRun();
         bootstrap.Modal.getOrCreateInstance($measureModal).hide();
     });
 

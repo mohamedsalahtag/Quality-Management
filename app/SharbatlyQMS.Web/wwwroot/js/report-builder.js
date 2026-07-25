@@ -95,9 +95,18 @@
         return d;
     }
 
+    function byName(a, b) { return String(a.name || a.label || "").localeCompare(String(b.name || b.label || "")); }
+
     function renderPalette() {
         var host = $("rbPalette");
         host.innerHTML = "";
+
+        // Each group is already a category; sort its items A-Z for scanability.
+        palette.statics.sort(function (a, b) { return String(a.label).localeCompare(String(b.label)); });
+        palette.defects.sort(byName);
+        palette.readings.sort(byName);
+        palette.sampleHeaders.sort(byName);
+        palette.materialHeaders.sort(byName);
 
         host.appendChild(groupTitle("Arrival / PO / Shipment / Sample fields"));
         palette.statics.forEach(function (f) {

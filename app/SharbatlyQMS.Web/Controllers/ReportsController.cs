@@ -773,7 +773,7 @@ public class ReportsController : Controller
         return Json(new
         {
             report     = rpt.Key,
-            dimensions = rpt.Dimensions.Select(d => new { key = d.Key, display = d.Display }),
+            dimensions = rpt.Dimensions.Select(d => new { key = d.Key, display = d.Display, category = d.Category }),
             measures   = rpt.Measures  .Select(m => new { key = m.Key, display = m.Display, aggs = m.AllowedAggs }),
             // V36 -- every dimension can also act as a COUNT / COUNT_DISTINCT
             // measure (Excel-style). Separate property so stale cached clients
