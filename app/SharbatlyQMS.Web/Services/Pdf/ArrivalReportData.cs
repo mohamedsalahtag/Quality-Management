@@ -19,6 +19,11 @@ public class ArrivalReportData
     /// an appendix at the end of the PDF when non-empty.</summary>
     public List<ImageRef> Images { get; set; } = new();
 
+    /// <summary>V36: admin-defined fields applicable to this arrival (linked
+    /// material group present on the line items). Rendered in the identity
+    /// block right after Seal Number.</summary>
+    public List<ArrivalCustomField> CustomFields { get; set; } = new();
+
     /// <summary>PDF thumbnail dimensions from <c>ThumbnailConfig</c>; used by
     /// the appendix grid. Pixel values, converted to points at render time.</summary>
     public int    ThumbnailW { get; set; } = 120;

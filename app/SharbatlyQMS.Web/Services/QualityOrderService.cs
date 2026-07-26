@@ -44,21 +44,55 @@ public class QualityOrderService : IQualityOrderService
         FROM   qms_quality_order qo
         LEFT   JOIN qms_arrival  a ON a.arrival_id = qo.arrival_id";
 
+    // Shared WHERE for the list. Kept as a constant so the header query and the
+    // materials roll-up query (below) filter to exactly the same set of QOs.
+    private const string QoListWhere = @"
+        WHERE  (@status IS NULL OR qo.status_code = @status)
+          AND  (@plant  IS NULL OR a.plant        = @plant)
+          AND  (@search IS NULL OR
+                qo.quality_order_no LIKE '%' + @search + '%' OR
+                a.container_no      LIKE '%' + @search + '%' OR
+                a.bol_no            LIKE '%' + @search + '%' OR
+                a.ebeln             LIKE '%' + @search + '%' OR
+                a.vendor_name       LIKE '%' + @search + '%' OR
+                qo.created_by       LIKE '%' + @search + '%')";
+
     public async Task<IReadOnlyList<QualityOrder>> ListAsync(string? status, string? search, string? plant = null)
     {
         using var c = Open();
-        var rows = await c.QueryAsync<QualityOrder>(QoSelect + @"
-            WHERE  (@status IS NULL OR qo.status_code = @status)
-              AND  (@plant  IS NULL OR a.plant        = @plant)
-              AND  (@search IS NULL OR
-                    qo.quality_order_no LIKE '%' + @search + '%' OR
-                    a.container_no      LIKE '%' + @search + '%' OR
-                    a.bol_no            LIKE '%' + @search + '%' OR
-                    a.ebeln             LIKE '%' + @search + '%' OR
-                    a.vendor_name       LIKE '%' + @search + '%' OR
-                    qo.created_by       LIKE '%' + @search + '%')
-            ORDER BY qo.created_at DESC", new { status, search, plant });
-        return rows.ToList();
+        // Two result sets in one round trip (same pattern as the Pending
+        // Containers list): the QO headers, then every material line for those
+        // same QOs, stitched in memory so the list can show a materials "quick
+        // peek" hover without an N+1 query per row.
+        using var grid = await c.QueryMultipleAsync(
+            QoSelect + QoListWhere + @"
+            ORDER BY qo.created_at DESC;
+
+            SELECT m.quality_order_id QualityOrderId,
+                   m.material_no      MaterialNo,
+                   m.material_desc    MaterialDesc,
+                   ai.quantity        Quantity,
+                   ai.uom             Uom
+            FROM   qms_quality_order_material m
+            JOIN   qms_arrival_item ai ON ai.arrival_item_id = m.arrival_item_id
+            WHERE  m.quality_order_id IN (
+                       SELECT qo.quality_order_id
+                       FROM   qms_quality_order qo
+                       LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id"
+                       + QoListWhere + @")
+            ORDER BY m.quality_order_id, m.qo_material_id;",
+            new { status, search, plant });
+
+        var rows  = (await grid.ReadAsync<QualityOrder>()).ToList();
+        var lines = (await grid.ReadAsync<QoMaterialLine>()).ToList();
+
+        var byQo = lines.ToLookup(l => l.QualityOrderId);
+        foreach (var r in rows)
+        {
+            r.MaterialLines = byQo[r.QualityOrderId].ToList();
+            r.LineCount     = r.MaterialLines.Count;
+        }
+        return rows;
     }
 
     /// <summary>QO inherits plant from its arrival header (qms_arrival.plant,
@@ -204,7 +238,7 @@ public class QualityOrderService : IQualityOrderService
     // Submit (V31, 2026-06-20): operator marks data entry complete. Locks the
     // QO against further edits until a Supervisor either finishes (->Closed)
     // or cancel-submits (->Open) for fixes.
-    public Task<(bool ok, string? error)> SubmitAsync(long qoId, string user) => Transition(qoId, user, null, "Submitted", new[] { "Open" });
+    public Task<(bool ok, string? error)> SubmitAsync(long qoId, string user, bool bypassNoSamples = false, string? reason = null) => Transition(qoId, user, reason, "Submitted", new[] { "Open" }, bypassNoSamples);
     // Cancel-submit (V31, 2026-06-20): Supervisor returns a Submitted QO to
     // Open so the operator can correct it. Reason is optional but recorded.
     public Task<(bool ok, string? error)> CancelSubmitAsync(long qoId, string user, string? reason) =>
@@ -213,7 +247,7 @@ public class QualityOrderService : IQualityOrderService
     // Supervisor/Manager review step is mandatory between operator entry and
     // finished state. Existing legacy 'Open' QOs cannot be closed directly any
     // more -- they must transit through Submit first.
-    public Task<(bool ok, string? error)> CloseAsync(long qoId, string user, string? reason)  => Transition(qoId, user, reason, "Closed",   new[] { "Submitted" });
+    public Task<(bool ok, string? error)> CloseAsync(long qoId, string user, string? reason, bool bypassNoSamples = false)  => Transition(qoId, user, reason, "Closed",   new[] { "Submitted" }, bypassNoSamples);
     // Reopen folds back into Open -- the user explicitly didn't want a
     // separate "Reopened" status. Audit columns (reopened_at / by /
     // reason) still record that the QO was re-opened.
@@ -222,7 +256,7 @@ public class QualityOrderService : IQualityOrderService
     // be cancelled outright without a Supervisor having to first cancel-submit.
     public Task<(bool ok, string? error)> CancelAsync(long qoId, string user, string? reason) => Transition(qoId, user, reason, "Cancelled",new[] { "Initial", "Open", "Submitted" });
 
-    private async Task<(bool ok, string? error)> Transition(long qoId, string user, string? reason, string toStatus, string[] fromStatuses)
+    private async Task<(bool ok, string? error)> Transition(long qoId, string user, string? reason, string toStatus, string[] fromStatuses, bool bypassNoSamples = false)
     {
         using var c = Open();
         await c.OpenAsync();
@@ -240,11 +274,20 @@ public class QualityOrderService : IQualityOrderService
         if ((toStatus == "Reopened" || toStatus == "Cancelled") && string.IsNullOrWhiteSpace(reason))
             return (false, $"Reason is required to {toStatus.ToLowerInvariant()}.");
 
+        // Bypassing the "every material must have a sample" rule demands a
+        // mandatory justification, recorded in the status history + audit trail.
+        // Enforced here (not just in the controller) so a crafted post can't
+        // skip the reason.
+        if (bypassNoSamples && (toStatus is "Submitted" or "Closed") && string.IsNullOrWhiteSpace(reason))
+            return (false, $"A reason is required to {(toStatus == "Closed" ? "finish" : "submit")} with materials that have no samples.");
+
         // Re-assert the "every material has at least one sample" precondition
         // INSIDE this transaction for Submit/Finish. The controller checks it
         // too, but only transactionally here is it safe against a sample being
         // deleted between that check and this commit.
-        if (toStatus is "Submitted" or "Closed")
+        // V38: skipped when the user explicitly accepted the bypass warning
+        // (the controller only passes bypassNoSamples=true from that modal).
+        if (!bypassNoSamples && toStatus is "Submitted" or "Closed")
         {
             var unsampled = await c.QuerySingleAsync<int>(@"
                 SELECT COUNT(*) FROM qms_quality_order_material m
@@ -1283,22 +1326,12 @@ public class QualityOrderService : IQualityOrderService
             var groupSampleIds = groupSamples.Select(s => s.SampleId).ToHashSet();
             var sumSize      = groupSamples.Sum(s => s.SampleSize ?? 0);
 
-            // Gross = Σ (arrival_item.quantity × qoMaterial.NetWeight).
-            // Both halves can be null (legacy rows) -- treat as 0.
-            decimal sumGross = 0m;
+            // PO Quantity = Σ arrival_item.quantity across the group's
+            // materials. Shown on the summary only when the group rolls up
+            // more than one material.
+            decimal sumPoQty = 0m;
             foreach (var m in mats)
-            {
-                var qty = qtyByMaterial.TryGetValue(m.QoMaterialId, out var q) ? (q ?? 0m) : 0m;
-                var w   = m.NetWeight ?? 0m;
-                sumGross += qty * w;
-            }
-
-            // Tara = Σ TARA reading.numeric_value for samples in this group.
-            decimal sumTara = sampleReadings
-                .Where(r => groupSampleIds.Contains(r.SampleId)
-                            && string.Equals(r.ReadingTypeCode, "TARA", StringComparison.OrdinalIgnoreCase)
-                            && r.NumericValue.HasValue)
-                .Sum(r => r.NumericValue!.Value);
+                sumPoQty += qtyByMaterial.TryGetValue(m.QoMaterialId, out var q) ? (q ?? 0m) : 0m;
 
             var summary = new MaterialGroupSummary
             {
@@ -1309,8 +1342,7 @@ public class QualityOrderService : IQualityOrderService
                 Grade             = string.IsNullOrEmpty(g.Key.Grade)   ? null : g.Key.Grade,
                 MajorCategory     = mats.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.MajorCategory))?.MajorCategory,
                 SumSampleSize     = sumSize,
-                SumGross          = sumGross,
-                SumTara           = sumTara,
+                SumPoQuantity     = sumPoQty,
                 MaterialCount     = mats.Count,
                 SampleCount       = groupSamples.Count
             };
@@ -1397,6 +1429,14 @@ public class QualityOrderService : IQualityOrderService
                                 .Where(r => r.NumericValue.HasValue)
                                 .Sum(r => r.NumericValue!.Value)
                                 .ToString("0.##"),
+                    // avg = Σ numeric ÷ sample count in the group (e.g. Gross /
+                    // Net weight shown as the per-sample average). Uses the
+                    // group's sample count as the divisor, blank when zero.
+                    "avg" => groupSamples.Count > 0
+                                ? (rowsForType.Where(r => r.NumericValue.HasValue)
+                                              .Sum(r => r.NumericValue!.Value) / groupSamples.Count)
+                                    .ToString("0.##")
+                                : "",
                     "sum_over_size" => sumSize > 0
                                 ? ((rowsForType.Where(r => r.NumericValue.HasValue)
                                                 .Sum(r => r.NumericValue!.Value) / sumSize) * 100m)

@@ -107,6 +107,9 @@ public class QualityOrdersController : Controller
         // Per-sample header values (incl. Material-scoped values copied down)
         // so the sample-table rows show live Grower/Pallet/Lot/Date-code.
         var sampleHeaders = await _qos.GetSampleHeaderValuesBatchAsync(samples.Select(s => s.SampleId));
+        // Some material groups store Grower/Date Code/Brix/Firmness as reading
+        // types, not header fields — the preview row falls back to these.
+        var sampleReadings = await _qos.GetReadingsBatchAsync(samples.Select(s => s.SampleId));
 
         // V31: material-header completeness map for the "Add sample" gate.
         // qoMaterialId -> true when every mandatory Material-scoped header
@@ -123,6 +126,7 @@ public class QualityOrdersController : Controller
         ViewBag.Samples             = samples;
         ViewBag.PhotoCounts         = photoCounts;
         ViewBag.SampleHeaders       = sampleHeaders;
+        ViewBag.SampleReadings      = sampleReadings;
         ViewBag.HeaderComplete      = headerComplete;
         ViewBag.Editable            = editable;
         ViewBag.SendMailEnabled     = mailTemplate.Enabled;
@@ -210,6 +214,13 @@ public class QualityOrdersController : Controller
             ExistingHeader   = sample.SampleId > 0
                                   ? await _qos.GetSampleHeaderValuesAsync(sample.SampleId)
                                   : Array.Empty<SampleHeaderValue>(),
+            // Material-scoped fields are now editable inline in the sample form
+            // (they update the material + every sample on save).
+            MaterialHeaderFields = (await _cat.GetActiveSampleHeaderFieldsAsync())
+                                  .Where(f => f.Scope == "Material").ToList(),
+            MaterialHeaderValues = mat != null
+                                  ? await _qos.GetMaterialHeaderValuesAsync(mat.QoMaterialId)
+                                  : Array.Empty<MaterialHeaderValue>(),
             Categories       = await _cat.GetActiveCategoriesAsync(),
             Editable         = qo.StatusCode == QualityOrderStatus.Open
         };
@@ -363,18 +374,36 @@ public class QualityOrdersController : Controller
     }
 
     /// <summary>V31 (2026-06-20): operator marks data entry complete. Locks the
-    /// QO until a Supervisor finishes or cancel-submits it.</summary>
+    /// QO until a Supervisor finishes or cancel-submits it.
+    /// V38 (2026-07-08): the "all materials sampled" precondition became a
+    /// bypassable warning — the Details page shows a styled popup listing the
+    /// unsampled materials with a "Submit anyway" button that re-posts with
+    /// <paramref name="bypassNoSamples"/> = true.</summary>
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
-    public async Task<IActionResult> Submit(long id)
+    public async Task<IActionResult> Submit(long id, bool bypassNoSamples = false, string? reason = null)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
-        if (await CheckAllMaterialsSampledAsync(id) is { } err)
+        if (!bypassNoSamples && await CheckAllMaterialsSampledAsync(id) is { } err)
         {
-            TempData["Error"] = "Cannot submit: " + err;
+            TempData["BypassWarning"] = err;
+            TempData["BypassAction"]  = "Submit";
             return RedirectToAction(nameof(Details), new { id });
         }
-        return await TransitionAsync(id, (qos, user, _) => qos.SubmitAsync(id, user), null);
+        // Bypassing the no-samples rule requires a written justification. Re-open
+        // the warning modal (with the message + a nudge) instead of proceeding.
+        if (bypassNoSamples && string.IsNullOrWhiteSpace(reason))
+        {
+            TempData["BypassWarning"] = await CheckAllMaterialsSampledAsync(id)
+                ?? "Some materials on this order have no samples.";
+            TempData["BypassAction"]  = "Submit";
+            TempData["Error"] = "A reason is required to submit with materials that have no samples.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+        // Only carry the reason when it's the bypass justification.
+        return await TransitionAsync(id,
+            (qos, user, r) => qos.SubmitAsync(id, user, bypassNoSamples, r),
+            bypassNoSamples ? reason : null);
     }
 
     /// <summary>V31 (2026-06-20): Supervisor returns a Submitted QO to Open so
@@ -393,15 +422,28 @@ public class QualityOrdersController : Controller
     /// though the Submit step should have enforced it earlier.</summary>
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
-    public async Task<IActionResult> Close(long id, string? reason)
+    public async Task<IActionResult> Close(long id, string? reason, bool bypassNoSamples = false)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
-        if (await CheckAllMaterialsSampledAsync(id) is { } err)
+        // V38: bypassable, mirroring Submit — otherwise a QO submitted with the
+        // bypass could never be finished by the supervisor.
+        if (!bypassNoSamples && await CheckAllMaterialsSampledAsync(id) is { } err)
         {
-            TempData["Error"] = "Cannot finish: " + err;
+            TempData["BypassWarning"] = err;
+            TempData["BypassAction"]  = "Close";
+            TempData["BypassReason"]  = reason;
             return RedirectToAction(nameof(Details), new { id });
         }
-        return await TransitionAsync(id, (qos, user, r) => qos.CloseAsync(id, user, r), reason);
+        // Finishing while bypassing the no-samples rule also requires a reason.
+        if (bypassNoSamples && string.IsNullOrWhiteSpace(reason))
+        {
+            TempData["BypassWarning"] = await CheckAllMaterialsSampledAsync(id)
+                ?? "Some materials on this order have no samples.";
+            TempData["BypassAction"]  = "Close";
+            TempData["Error"] = "A reason is required to finish with materials that have no samples.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+        return await TransitionAsync(id, (qos, user, r) => qos.CloseAsync(id, user, r, bypassNoSamples), reason);
     }
 
     [HttpPost, ValidateAntiForgeryToken]
@@ -459,15 +501,9 @@ public class QualityOrdersController : Controller
     {
         if (await EnsureCanReadQoAsync(qualityOrderId) is { } block) return block;
         if (await EnsureEditableRedirectAsync(qualityOrderId) is { } block2) return block2;
-        // V31 (2026-06-20): refuse if the material's mandatory header fields
-        // are not all filled. The UI also disables + pulses the button, but
-        // the server is authoritative against hand-crafted POSTs.
-        var headerComplete = await _qos.GetMaterialHeaderCompleteMapAsync(qualityOrderId);
-        if (headerComplete.TryGetValue(qoMaterialId, out var ok) && !ok)
-        {
-            TempData["Error"] = "Fill the material's mandatory header fields before adding samples.";
-            return RedirectToAction(nameof(Details), new { id = qualityOrderId });
-        }
+        // 2026-07-26: material header completeness is no longer a gate for adding
+        // a sample — the operator maintains material details from inside the
+        // sample form instead. (The previous V31 hard block was removed.)
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var sampleId = await _qos.CreateSampleAsync(new Sample
         {
@@ -500,7 +536,12 @@ public class QualityOrdersController : Controller
         var headerFields   = (await _cat.GetActiveSampleHeaderFieldsAsync())
                                 .Where(f => f.Scope == "Sample").ToList();
         var existingHeader = await _qos.GetSampleHeaderValuesAsync(id);
+        var materialFields = (await _cat.GetActiveSampleHeaderFieldsAsync())
+                                .Where(f => f.Scope == "Material").ToList();
+        var materialValues = await _qos.GetMaterialHeaderValuesAsync(sample.QoMaterialId);
 
+        ViewBag.MaterialHeaderFields = materialFields;
+        ViewBag.MaterialHeaderValues = materialValues;
         ViewBag.QualityOrder    = qo;
         ViewBag.QoMaterial      = qoMaterial;
         ViewBag.ReadingTypes    = readingTypes;
@@ -754,6 +795,33 @@ public class QualityOrdersController : Controller
         }
         await _qos.SaveSampleHeaderValuesAsync(sample.SampleId, headerValues, user);
 
+        // 2026-07-26: Material-scoped header values are now editable inline in the
+        // sample form (mheader_<CODE> inputs). Saving a sample also saves the
+        // material details and propagates them to every sample of this material,
+        // so an operator can maintain material details from any sample and never
+        // lose track of them. Only touch the material values when the form
+        // actually carried them (guards any caller that doesn't render them).
+        var materialFields = headerFields.Where(f => f.Scope == "Material").ToList();
+        if (materialFields.Any(f => form.ContainsKey($"mheader_{f.FieldCode}")))
+        {
+            var materialValues = new List<MaterialHeaderValue>();
+            foreach (var mf in materialFields)
+            {
+                var raw = form[$"mheader_{mf.FieldCode}"].ToString();
+                if (string.IsNullOrWhiteSpace(raw)) continue;
+                var mv = new MaterialHeaderValue { QoMaterialId = resolvedQoMatId, FieldId = mf.FieldId };
+                switch (mf.ValueKind)
+                {
+                    case "Numeric": if (decimal.TryParse(raw, out var mdec)) mv.NumericValue = mdec; break;
+                    case "Date":    if (DateTime.TryParse(raw, out var mdt)) mv.DateValue = mdt.Date; break;
+                    default:        mv.TextValue = raw.Trim(); break;
+                }
+                if (mv.NumericValue.HasValue || mv.DateValue.HasValue || !string.IsNullOrEmpty(mv.TextValue))
+                    materialValues.Add(mv);
+            }
+            await _qos.SaveMaterialHeaderValuesAsync(resolvedQoMatId, materialValues, user);
+        }
+
         // Count of active samples on the parent material -- used by the AJAX
         // response so the client can update the card-header badge in place.
         var siblings = await _qos.ListSamplesAsync(sample.QualityOrderId);
@@ -803,7 +871,8 @@ public class QualityOrdersController : Controller
         {
             Sample = fresh,
             Editable = true,
-            HeaderValues = await _qos.GetSampleHeaderValuesAsync(saved.SampleId)
+            HeaderValues = await _qos.GetSampleHeaderValuesAsync(saved.SampleId),
+            Readings     = await _qos.GetReadingsAsync(saved.SampleId)
         };
         var rowHtml = await this.RenderPartialToStringAsync("_SampleRow", rowVm);
         return Json(new

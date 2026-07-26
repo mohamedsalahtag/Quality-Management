@@ -1,0 +1,89 @@
+@using SharbatlyQMS.Web.Services
+@using SharbatlyQMS.Web.ViewModels
+@model DocumentListVm
+@inject IDocumentService DocSvc
+@{
+    var docs = await DocSvc.ListAsync(Model.OwnerType, Model.OwnerId);
+    var returnUrl = Context.Request.Path + Context.Request.QueryString;
+    var rejected = ViewData["DocUploadErrors"] as IReadOnlyList<string> ?? Array.Empty<string>();
+}
+
+@if (rejected.Count > 0)
+{
+    <div class="alert alert-warning alert-dismissible fade show">
+        <i class="bi bi-exclamation-triangle me-1"></i>
+        <strong>@rejected.Count file(s) were not saved:</strong>
+        <ul class="mb-0 mt-1 small">
+            @foreach (var r in rejected)
+            {
+                <li>@r</li>
+            }
+        </ul>
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    </div>
+}
+
+@if (docs.Count == 0)
+{
+    <div class="alert alert-light text-center text-muted">
+        <i class="bi bi-paperclip me-1"></i>No documents uploaded yet.
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0">
+            <thead>
+                <tr>
+                    <th style="width:2.5rem"></th>
+                    <th>File</th>
+                    <th>Category</th>
+                    <th class="text-end">Size</th>
+                    <th>Uploaded by</th>
+                    <th>Uploaded</th>
+                    <th style="width:6rem"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var d in docs)
+                {
+                    <tr data-document-id="@d.DocumentId">
+                        <td class="text-center">
+                            <i class="bi @DocumentDisplay.IconClass(d.OriginalName) fs-5 text-secondary"></i>
+                        </td>
+                        <td class="text-truncate" style="max-width:22rem" title="@d.OriginalName">@d.OriginalName</td>
+                        <td>@(string.IsNullOrEmpty(d.Category) ? "—" : d.Category)</td>
+                        <td class="text-end text-nowrap">@DocumentDisplay.FormatBytes(d.FileSizeBytes)</td>
+                        <td>@d.UploadedBy</td>
+                        <td class="text-nowrap">@d.UploadedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                        <td>
+                            <div class="d-flex gap-1 justify-content-end">
+                                @* Download is authenticated + plant-scoped, so it stays available
+                                   to every reader even when the arrival is no longer editable. *@
+                                <a asp-controller="Documents" asp-action="Download" asp-route-id="@d.DocumentId"
+                                   class="btn btn-sm btn-outline-primary" title="Download @d.OriginalName">
+                                    <i class="bi bi-download"></i>
+                                </a>
+                                @if (Model.Editable)
+                                {
+                                    <form asp-controller="Documents" asp-action="Delete" method="post"
+                                          data-confirm="Remove @d.OriginalName?" data-confirm-danger data-confirm-ok="Remove"
+                                          class="dl-delete-form d-inline">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="documentId" value="@d.DocumentId" />
+                                        <input type="hidden" name="ownerType" value="@Model.OwnerType" />
+                                        <input type="hidden" name="ownerId" value="@Model.OwnerId" />
+                                        <input type="hidden" name="returnUrl" value="@returnUrl" />
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}

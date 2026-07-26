@@ -203,11 +203,16 @@ public class ArrivalsController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> Create(string containerNo, string bolNo, string po)
     {
-        if (string.IsNullOrWhiteSpace(containerNo) || string.IsNullOrWhiteSpace(bolNo) || string.IsNullOrWhiteSpace(po))
+        // BOL is optional: some containers arrive without a bill of lading. The
+        // shipment identity is still (container, BOL, PO) -- a missing BOL is
+        // normalised to "" so it matches the empty BOL stored on those SAP rows
+        // (qms_sap_container_cache.bol_no is NOT NULL and holds '' for them).
+        if (string.IsNullOrWhiteSpace(containerNo) || string.IsNullOrWhiteSpace(po))
         {
-            TempData["Error"] = "Container number, BOL, and PO are required.";
+            TempData["Error"] = "Container number and PO are required.";
             return RedirectToAction(nameof(Search));
         }
+        bolNo = (bolNo ?? "").Trim();
 
         // Block duplicate arrivals for the same (container, BOL, PO). The same
         // container can recur under a different BOL/PO, so all three must match.
@@ -244,7 +249,8 @@ public class ArrivalsController : Controller
             });
             matched = rows.Where(r =>
                 string.Equals(r.ContainerNo, containerNo, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(r.BolNo,       bolNo,       StringComparison.OrdinalIgnoreCase) &&
+                // Treat null/"" BOLs as equal so BOL-less shipments still match.
+                string.Equals(r.BolNo ?? "", bolNo,       StringComparison.OrdinalIgnoreCase) &&
                 string.Equals(r.Ebeln,       po,          StringComparison.OrdinalIgnoreCase)).ToList();
         }
 
@@ -300,8 +306,12 @@ public class ArrivalsController : Controller
         ViewBag.Items     = items;
         ViewBag.Checklist = await _arrivals.GetChecklistAsync(id) ?? new ArrivalChecklist { ArrivalId = id };
         ViewBag.Shipment  = await _arrivals.GetShipmentAsync(id);
+        // V36: admin-defined fields whose material group appears on this
+        // arrival's line items (empty list = the card isn't rendered).
+        ViewBag.CustomFields = await _arrivals.GetCustomFieldsAsync(id);
         return View(arrival);
     }
+
 
     [HttpPost, ValidateAntiForgeryToken]
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
@@ -319,9 +329,50 @@ public class ArrivalsController : Controller
             return RedirectToAction(nameof(Details), new { id = checklist.ArrivalId });
         }
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        // Seal numbers and record-logger serials are entered as up to 4
+        // discrete inputs (SealNos / LoggerSerials). Collapse the non-empty
+        // ones, capped at 4, into the single newline-delimited column each is
+        // stored in. Overrides whatever the single-value model binding set.
+        checklist.SealNo          = JoinMultiInput("SealNos", 4);
+        checklist.DataLoggerSerial = JoinMultiInput("LoggerSerials", 4);
         await _arrivals.SaveChecklistAsync(checklist, user);
+        // V36.2: the "Additional fields" card lives inside the checklist form
+        // (single Save button, per user request) — persist its cf_{fieldId}
+        // inputs in the same submit. The service re-derives the applicable
+        // field set, so foreign ids are ignored.
+        var cfValues = ReadCustomFieldInputs();
+        if (cfValues.Count > 0)
+            await _arrivals.SaveCustomFieldValuesAsync(checklist.ArrivalId, cfValues, user);
         TempData["Success"] = "Checklist saved.";
         return RedirectToAction(nameof(Details), new { id = checklist.ArrivalId });
+    }
+
+    /// <summary>Collapse a repeated form field (e.g. the up-to-4 seal / logger
+    /// serial inputs) into a single newline-delimited string: trims each value,
+    /// drops blanks and duplicates-by-position, and caps the count. Returns null
+    /// when nothing was entered so the column stores NULL rather than "".</summary>
+    private string? JoinMultiInput(string name, int max)
+    {
+        var values = Request.Form[name]
+            .Select(v => (v ?? "").Trim())
+            .Where(v => v.Length > 0)
+            .Take(max)
+            .ToList();
+        return values.Count == 0 ? null : string.Join("\n", values);
+    }
+
+    /// <summary>V36: collect the <c>cf_{fieldId}</c> custom-field inputs from
+    /// the posted form.</summary>
+    private Dictionary<int, string?> ReadCustomFieldInputs()
+    {
+        var values = new Dictionary<int, string?>();
+        foreach (var key in Request.Form.Keys)
+        {
+            if (!key.StartsWith("cf_", StringComparison.Ordinal)) continue;
+            if (!int.TryParse(key.AsSpan(3), out var fieldId)) continue;
+            values[fieldId] = Request.Form[key].ToString();
+        }
+        return values;
     }
 
     [HttpPost, ValidateAntiForgeryToken]

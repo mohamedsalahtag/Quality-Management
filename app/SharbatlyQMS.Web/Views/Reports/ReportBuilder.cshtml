@@ -68,6 +68,7 @@
                     <span class="fw-semibold small">Available fields</span>
                     <span>
                         <button id="rbAddCalc" class="btn btn-outline-success btn-sm py-0">+ Calculated</button>
+                        <button id="rbAddTotal" class="btn btn-outline-primary btn-sm py-0">+ Total</button>
                         <button id="rbAddEmpty" class="btn btn-outline-secondary btn-sm py-0">+ Empty</button>
                     </span>
                 </div>
@@ -153,6 +154,26 @@
     #reportBuilder .rb-kind { font-size:.65rem; padding:.05rem .3rem; border-radius:999px; background:#e9ecef; color:#495057; }
     #reportBuilder .rb-formula { font-family:monospace; font-size:.75rem; min-width:14rem; }
     #reportBuilder .rb-formula.invalid { border-color:#dc3545; background:#fff5f5; }
+    /* Calc builder */
+    #reportBuilder .rb-calc { flex:1 1 100%; margin-top:.25rem; }
+    #reportBuilder .rb-calc-tools { display:flex; flex-wrap:wrap; align-items:center; gap:.25rem; margin-bottom:.25rem; }
+    #reportBuilder .rb-calc-lbl { font-size:.7rem; color:#6c757d; text-transform:uppercase; letter-spacing:.03em; }
+    #reportBuilder .rb-calc-tools .rb-op { font-size:.8rem; line-height:1; padding:.1rem .45rem; border:1px solid #ced4da; border-radius:.25rem; background:#f8f9fa; cursor:pointer; }
+    #reportBuilder .rb-calc-tools .rb-op:hover { background:#e2e6ea; }
+    #reportBuilder .rb-calc-tools .rb-numval { width:5.5rem; }
+    #reportBuilder .rb-calc-tools .rb-addnum,
+    #reportBuilder .rb-calc-tools .rb-clearf { font-size:.72rem; line-height:1; padding:.15rem .4rem; border:1px solid #ced4da; border-radius:.25rem; background:#fff; cursor:pointer; }
+    #reportBuilder .rb-calc-hint { font-size:.68rem; color:#8a94a0; margin-top:.15rem; }
+    #reportBuilder .rb-formula.rb-drop-hot { border-color:#0d6efd; background:#e7f1ff; }
+    /* Total builder */
+    #reportBuilder .rb-total-build { flex:1 1 100%; margin-top:.25rem; }
+    #reportBuilder .rb-total-drop { min-height:2rem; display:flex; flex-wrap:wrap; align-items:center; gap:.3rem; padding:.3rem .4rem; border:1px dashed #c9ced3; border-radius:.375rem; background:#fafbfc; }
+    #reportBuilder .rb-total-drop.rb-drop-hot { border-color:#0d6efd; background:#e7f1ff; }
+    #reportBuilder .rb-total-empty { font-size:.72rem; color:#8a94a0; }
+    #reportBuilder .rb-member { display:inline-flex; align-items:center; gap:.2rem; font-size:.75rem; padding:.1rem .4rem; border-radius:999px; background:#e7f1ff; border:1px solid #b6d4fe; color:#084298; }
+    #reportBuilder .rb-member-x { cursor:pointer; opacity:.6; }
+    #reportBuilder .rb-member-x:hover { opacity:1; color:#dc3545; }
+    #reportBuilder .rb-total-sum { font-size:.72rem; color:#495057; margin-top:.2rem; font-family:monospace; }
 </style>
 
 <script src="~/js/report-builder.js" asp-append-version="true"></script>

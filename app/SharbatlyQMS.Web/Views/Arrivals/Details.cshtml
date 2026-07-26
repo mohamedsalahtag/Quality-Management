@@ -849,11 +849,10 @@
         {
             OwnerType = "Arrival",
             OwnerId   = Model.ArrivalId,
-            // `draft && canEdit` mirrors exactly what DocumentsController.GateEditAsync
-            // enforces. Do NOT copy the images tab's bare `canEdit` above: that renders
-            // an upload form on a Completed arrival where every attempt is rejected
-            // server-side. Downloads stay available here regardless of status.
-            Editable  = draft && canEdit,
+            // Documents can be attached/removed in any status (per user request),
+            // mirroring the images tab's bare `canEdit`. DocumentsController.GateEditAsync
+            // no longer status-gates either, so the upload form here always works.
+            Editable  = canEdit,
             Ajax      = true,
             Categories = new[] { "Invoice", "PackingList", "Certificate", "ClaimDocument", "TemperatureLog", "Other" }
         };

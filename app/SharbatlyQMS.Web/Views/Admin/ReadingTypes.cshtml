@@ -16,6 +16,7 @@
         "text"          => "Text join",
         "count"         => "Count",
         "sum"           => "Sum",
+        "avg"           => "Average",
         "sum_over_size" => "% of Σ size",
         "formula"       => "Formula",
         _               => m
@@ -124,7 +125,7 @@
                             else
                             {
                                 <form asp-action="DeleteReadingType" method="post" class="d-inline"
-                                      onsubmit="return confirm('Delete reading type @r.ReadingTypeCode (@r.ReadingName)? This cannot be undone.');">
+                                      data-confirm="Delete reading type @r.ReadingTypeCode (@r.ReadingName)? This cannot be undone." data-confirm-danger data-confirm-ok="Delete">
                                     @Html.AntiForgeryToken()
                                     <input type="hidden" name="readingTypeId" value="@r.ReadingTypeId" />
                                     <input type="hidden" name="materialGroup" value="@filterGroup" />
@@ -189,6 +190,7 @@
                             <option value="text">Text join — distinct values, comma-separated</option>
                             <option value="count">Count — number of samples with a value</option>
                             <option value="sum">Sum — total of numeric values</option>
+                            <option value="avg">Average — Σ value ÷ sample count (e.g. Gross / Net weight)</option>
                             <option value="sum_over_size">% of Σ size — (Σ value ÷ Σ sample size) × 100</option>
                             <option value="formula">Formula — placeholder, renders as “—” for now</option>
                         </select>

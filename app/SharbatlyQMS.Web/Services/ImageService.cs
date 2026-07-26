@@ -198,10 +198,6 @@ public class ImageService : IImageService
         await using (var stream = File.Create(fullPath))
             await file.CopyToAsync(stream);
 
-        string sha;
-        await using (var fs = File.OpenRead(fullPath))
-            sha = ToHex(SHA256.HashData(fs));
-
         int width = 0, height = 0;
         string? thumbUrl = null;
         try
@@ -209,24 +205,66 @@ public class ImageService : IImageService
             using var img = await SharpImage.LoadAsync(fullPath);
             width  = img.Width;
             height = img.Height;
+
+            // Thumbnail from a CLONE so the full-resolution image survives for the
+            // space-saving re-encode below.
             var thumbPath = Path.Combine(thumbDir, safeName);
-            img.Mutate(x => x.Resize(new ResizeOptions
+            using (var thumb = img.Clone(x => x.Resize(new ResizeOptions
             {
                 Mode = ResizeMode.Max,
                 Size = new SixLabors.ImageSharp.Size(thumbW, thumbH)
-            }));
-            img.Save(thumbPath);
+            })))
+                thumb.Save(thumbPath);
             thumbUrl = $"/uploads/{ownerType}/{ownerId}/thumbs/{safeName}";
+
+            // Space saver (2026-07-26): phone/camera photos arrive up to 5 MB.
+            // Cap the STORED original at MaxStoredDimension px and re-encode at a
+            // high but efficient quality — visually lossless for inspection use,
+            // and still far higher-res than any report or screen needs (the QO
+            // report only samples ~480px per cell), yet it cuts storage ~80-90%.
+            // Animated GIFs are left untouched to preserve animation.
+            if (ext != ".gif")
+            {
+                const int MaxStoredDimension = 2500;
+                if (Math.Max(width, height) > MaxStoredDimension)
+                    img.Mutate(x => x.Resize(new ResizeOptions
+                    {
+                        Mode = ResizeMode.Max,
+                        Size = new SixLabors.ImageSharp.Size(MaxStoredDimension, MaxStoredDimension)
+                    }));
+                switch (ext)
+                {
+                    case ".jpg":
+                    case ".jpeg":
+                        img.Save(fullPath, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 85 });
+                        break;
+                    case ".webp":
+                        img.Save(fullPath, new SixLabors.ImageSharp.Formats.Webp.WebpEncoder { Quality = 85 });
+                        break;
+                    case ".png":
+                        img.Save(fullPath, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+                        break;
+                    // .bmp: leave the original bytes (rare; keeps the extension valid).
+                }
+                width  = img.Width;
+                height = img.Height;
+            }
         }
         catch (Exception ex)
         {
-            _log.LogWarning(ex, "Thumbnail generation failed for {File}", safeName);
+            _log.LogWarning(ex, "Image processing (thumbnail/compress) failed for {File}", safeName);
         }
+
+        // SHA + size are taken from the FINAL stored file (after compression).
+        string sha;
+        await using (var fs = File.OpenRead(fullPath))
+            sha = ToHex(SHA256.HashData(fs));
+        long storedSize = new FileInfo(fullPath).Length;
 
         return new PreparedUpload(
             OriginalFileName: file.FileName,
             ContentType: file.ContentType,
-            FileSize: file.Length,
+            FileSize: storedSize,
             StorageUrl: $"/uploads/{ownerType}/{ownerId}/{safeName}",
             ThumbnailUrl: thumbUrl,
             Sha: sha,

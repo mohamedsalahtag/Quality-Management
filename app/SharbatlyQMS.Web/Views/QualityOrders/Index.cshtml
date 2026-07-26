@@ -6,6 +6,30 @@
     var search = ViewBag.Search as string;
 }
 
+<style>
+    /* Materials "quick peek": first material inline + a "+N more" badge; the
+       full list lives in a Bootstrap tooltip so the row stays on one line but
+       the reviewer can hover to read every material. Mirrors the Pending
+       Containers page. Tooltips are auto-initialised site-wide by site.js. */
+    .qo-peek         { display: flex; align-items: center; gap: .35rem;
+                       max-width: 320px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .qo-peek .qo-name{ text-overflow: ellipsis; overflow: hidden; }
+    /* The tooltip body is HTML so we can lay the material list out cleanly. */
+    .tooltip-inner   { max-width: 460px; text-align: left; }
+    .qo-tip          { margin: 0; padding: 0; list-style: none; font-size: .8rem; }
+    .qo-tip li       { padding: 2px 0; border-bottom: 1px dashed rgba(255,255,255,.18); }
+    .qo-tip li:last-child { border-bottom: 0; }
+    .qo-tip .qo-tip-qty { opacity: .8; margin-left: .35rem; }
+    /* Smaller, denser table so more data fits on small screens without
+       shrinking the actual values away. */
+    .qo-index-table { font-size: .8rem; }
+    .qo-index-table > :not(caption) > * > * { padding-top: .35rem; padding-bottom: .35rem; }
+    .qo-index-table .badge { font-size: .68rem; }
+    .qo-peek { max-width: 240px; }
+    @@media (max-width: 991.98px) { .qo-index-table { font-size: .74rem; } }
+    @@media (max-width: 575.98px) { .qo-index-table { font-size: .7rem; } .qo-peek { max-width: 150px; } }
+</style>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0"><i class="bi bi-clipboard-data me-1"></i>Quality Orders</h1>
 </div>
@@ -43,7 +67,7 @@
 
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="50">
+        <table class="table table-hover align-middle mb-0 qo-index-table" data-tablekit data-page-size="50">
             <thead class="table-light">
                 <tr>
                     <th data-sort>QO Number</th>
@@ -53,10 +77,10 @@
                     <th data-sort>Plant</th>
                     <th data-sort>Supplier</th>
                     <th data-sort>Arrival</th>
+                    <th>Materials</th>
                     <th data-sort>Status</th>
                     <th data-sort>Created</th>
                     <th data-sort>Created By</th>
-                    <th data-sort>Closed</th>
                     <th class="text-end">Actions</th>
                 </tr>
             </thead>
@@ -78,6 +102,20 @@
                             "Cancelled" => ("dark",      "Cancelled"),
                             _           => ("secondary", q.StatusCode)
                         };
+                        var firstMat = q.MaterialLines.FirstOrDefault();
+                        var extraMat = q.MaterialLines.Count - 1;
+                        // Full material list for the hover tooltip: one <li> per
+                        // material with code, description and (if present) qty/UoM.
+                        // Material NAME only (no code) + qty/UoM when present.
+                        var matTip = "<ul class='qo-tip'>" +
+                            string.Concat(q.MaterialLines.Select(ml =>
+                                "<li>" +
+                                    System.Net.WebUtility.HtmlEncode(ml.MaterialDesc ?? "(no description)") +
+                                    (ml.Quantity.HasValue && ml.Quantity.Value > 0
+                                        ? "<span class='qo-tip-qty'>" + ml.Quantity.Value.ToString("0.##") + " " + System.Net.WebUtility.HtmlEncode(ml.Uom ?? "") + "</span>"
+                                        : "") +
+                                "</li>")) +
+                            "</ul>";
                         <tr>
                             <td><code>@q.QualityOrderNo</code></td>
                             <td><code>@q.ContainerNo</code></td>
@@ -101,10 +139,31 @@
                                     <i class="bi bi-box-arrow-in-down me-1"></i>@q.ArrivalNo
                                 </a>
                             </td>
+                            <td>
+                                @if (firstMat == null)
+                                {
+                                    <span class="text-muted small fst-italic">No materials</span>
+                                }
+                                else
+                                {
+                                    <div class="qo-peek"
+                                         data-bs-toggle="tooltip"
+                                         data-bs-html="true"
+                                         data-bs-placement="bottom"
+                                         data-bs-title="@matTip"
+                                         title="@matTip">
+                                        @* Material name only — no material code — to keep the preview short. *@
+                                        <span class="qo-name">@(string.IsNullOrWhiteSpace(firstMat.MaterialDesc) ? "(no description)" : firstMat.MaterialDesc)</span>
+                                        @if (extraMat > 0)
+                                        {
+                                            <span class="badge bg-primary-subtle text-primary-emphasis">+@extraMat more</span>
+                                        }
+                                    </div>
+                                }
+                            </td>
                             <td><span class="badge bg-@cls">@label</span></td>
                             <td>@q.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
                             <td>@q.CreatedBy</td>
-                            <td>@(q.ClosedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
                             <td class="text-end text-nowrap">
                                 <a asp-action="Details" asp-route-id="@q.QualityOrderId"
                                    class="btn btn-sm btn-outline-primary" title="Open Quality Order">

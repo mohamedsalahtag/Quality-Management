@@ -943,8 +943,12 @@ public static class QualityReportPdf
                     {
                         try
                         {
-                            if (d.ThumbCover) box.Image(img.InlineBytes).FitUnproportionally();
-                            else              box.AlignCenter().AlignMiddle().Image(img.InlineBytes).FitArea();
+                            // UseOriginalImage(): embed our already-resized, high-
+                            // quality JPEG as-is instead of letting QuestPDF
+                            // re-rasterise it down to 72 DPI (the cause of the
+                            // blurry report photos). Same display box — more pixels.
+                            if (d.ThumbCover) box.Image(img.InlineBytes).UseOriginalImage().FitUnproportionally();
+                            else              box.AlignCenter().AlignMiddle().Image(img.InlineBytes).UseOriginalImage().FitArea();
                         }
                         catch
                         {

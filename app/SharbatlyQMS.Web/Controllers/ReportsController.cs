@@ -80,8 +80,10 @@ public class ReportsController : Controller
         // server references) and small. 2x the configured PDF dimensions gives
         // QuestPDF headroom for crisp rendering when the reader zooms in.
         // Preprocessing runs in parallel via PreprocessImages.
-        var targetW = Math.Max(120, thumb.PdfWidth  * 2);
-        var targetH = Math.Max(90,  thumb.PdfHeight * 2);
+        // 4x the display box (to match QuestPDF's 288 DPI = 4x72) so the embedded
+        // photo stays sharp at the same printed size and when zoomed. (2026-07-26)
+        var targetW = Math.Max(240, thumb.PdfWidth  * 4);
+        var targetH = Math.Max(180, thumb.PdfHeight * 4);
         var images = await PreprocessImagesAsync(await _images.ListAsync("Arrival", id), targetW, targetH);
 
         // V36: admin-defined arrival fields (material-group-gated) print in
@@ -294,8 +296,10 @@ public class ReportsController : Controller
         // suppliers. 2x the configured PDF dimensions gives QuestPDF headroom
         // for crisp on-screen and print zoom.
         var thumb = await _settings.GetThumbnailConfigAsync();
-        var targetW = Math.Max(120, thumb.PdfWidth  * 2);
-        var targetH = Math.Max(90,  thumb.PdfHeight * 2);
+        // 4x the display box (to match QuestPDF's 288 DPI = 4x72) so the embedded
+        // photo stays sharp at the same printed size and when zoomed. (2026-07-26)
+        var targetW = Math.Max(240, thumb.PdfWidth  * 4);
+        var targetH = Math.Max(180, thumb.PdfHeight * 4);
 
         var samples = await _qos.ListSamplesAsync(qo.QualityOrderId);
 
@@ -449,7 +453,7 @@ public class ReportsController : Controller
                 Size = new SixLabors.ImageSharp.Size(targetW, targetH)
             }));
             using var ms = new MemoryStream();
-            src.Save(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 80 });
+            src.Save(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 90 });
             return new SharbatlyQMS.Web.Services.Pdf.ImageRef
             {
                 InlineBytes  = ms.ToArray(),

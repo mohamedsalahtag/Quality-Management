@@ -91,7 +91,7 @@
                             else
                             {
                                 <form asp-action="DeleteDefect" method="post" class="d-inline"
-                                      onsubmit="return confirm('Delete defect @d.DefectCode (@d.DefectName)? This cannot be undone.');">
+                                      data-confirm="Delete defect @d.DefectCode (@d.DefectName)? This cannot be undone." data-confirm-danger data-confirm-ok="Delete">
                                     @Html.AntiForgeryToken()
                                     <input type="hidden" name="defectId" value="@d.DefectId" />
                                     <input type="hidden" name="materialGroup" value="@filterGroup" />

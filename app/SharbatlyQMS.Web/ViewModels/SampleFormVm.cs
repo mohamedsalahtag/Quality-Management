@@ -28,9 +28,12 @@ public class SampleFormVm
     public IReadOnlyList<SampleHeaderField>  HeaderFields    { get; set; } = Array.Empty<SampleHeaderField>();
     public IReadOnlyList<SampleHeaderValue>  ExistingHeader  { get; set; } = Array.Empty<SampleHeaderValue>();
 
-    // Material-scoped header values inherited from the parent material
-    // (entered on the Material details panel). Shown read-only for context;
-    // not editable here. Sample Size is inherited too — see QoMaterial.SampleSize.
+    // Material-scoped header fields + their current values. Rendered as an
+    // EDITABLE "Material details" card inside every sample (2026-07-26): the
+    // values are shared by the whole material, so filling them from any sample
+    // updates the material and every other sample. Keeps material details in
+    // front of the operator so they aren't forgotten.
+    public IReadOnlyList<SampleHeaderField>   MaterialHeaderFields { get; set; } = Array.Empty<SampleHeaderField>();
     public IReadOnlyList<MaterialHeaderValue> MaterialHeaderValues { get; set; } = Array.Empty<MaterialHeaderValue>();
 
     // Defect category master (V22+) — drives the dynamic per-category defect

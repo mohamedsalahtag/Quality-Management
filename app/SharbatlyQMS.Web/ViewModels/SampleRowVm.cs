@@ -12,6 +12,11 @@ public class SampleRowVm
     /// (including Material-scoped values copied down) rather than the frozen
     /// legacy columns on qms_sample.</summary>
     public IReadOnlyList<SampleHeaderValue> HeaderValues { get; set; } = Array.Empty<SampleHeaderValue>();
+    /// <summary>The sample's readings. Some material groups store attributes like
+    /// Grower / Date Code / Brix / Firmness as reading TYPES rather than header
+    /// fields, so the preview row falls back to these when no header value exists
+    /// (2026-07-26).</summary>
+    public IReadOnlyList<SampleReading> Readings { get; set; } = Array.Empty<SampleReading>();
     /// <summary>V31 (2026-06-20): photo count for this sample (qms_image_link
     /// rows with owner_type='Sample'). Renders the camera badge on the row.</summary>
     public int PhotoCount { get; set; }

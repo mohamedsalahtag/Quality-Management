@@ -87,10 +87,13 @@ public class ArrivalService : IArrivalService
 
     public async Task<Arrival?> FindByShipmentAsync(string containerNo, string bolNo, string? po)
     {
-        if (string.IsNullOrWhiteSpace(containerNo) || string.IsNullOrWhiteSpace(bolNo)) return null;
+        if (string.IsNullOrWhiteSpace(containerNo)) return null;
+        // BOL is optional. Normalise null/"" on both sides so a BOL-less shipment
+        // still dedups against an existing BOL-less arrival (stored as NULL or '').
+        bolNo = (bolNo ?? "").Trim();
         using var c = Open();
         return await c.QueryFirstOrDefaultAsync<Arrival>(ArrivalSelect + @"
-            WHERE a.container_no = @containerNo AND a.bol_no = @bolNo
+            WHERE a.container_no = @containerNo AND ISNULL(a.bol_no, '') = @bolNo
               AND (@po IS NULL OR a.ebeln = @po)
             ORDER BY a.created_at DESC",
             new { containerNo, bolNo, po });

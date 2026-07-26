@@ -107,14 +107,9 @@ The tidier setup is a dedicated `QMS_App` login with `DEFAULT_SCHEMA = qms`, whi
 >
 > The relocation was therefore not a bug fix. It is kept because storing user data inside a deploy target is fragile on its own merits — a clean publish, a wiped deploy folder, or a rollback-folder swap would each take the photos with it (the `deploy\rollback-*` snapshots on .15 are ~4 GB each for exactly that reason).
 
-### Old host (192.168.3.15) — still running, pending decommission
+### Old host (192.168.3.15 — KSAJEDSVAIT001) — DECOMMISSIONED 2026-07-26
 
-The previous deployment at `\\192.168.3.15\C$\Websites\QualityManagemet` is **still live on port 5244 against the same database**. It was deliberately left running on 2026-07-23 so the new host could be validated first. While both run:
-
-- Background jobs (email/alerts) fire from **both** hosts.
-- New photo uploads land on whichever host served the request, so the two `wwwroot\uploads` folders diverge.
-
-**To finish the cutover:** re-sync photos (`robocopy Q:\deploy\SharbatlyQMS\wwwroot\uploads W:\deploy\SharbatlyQMS\wwwroot\uploads /E /MT:16`), then `Stop-Service SharbatlyQMS` + set it to Disabled on .15.
+The previous deployment at `\\KSAJEDSVAIT001\C$\Websites\QualityManagemet` (192.168.3.15) has been **retired**: its `SharbatlyQMS` service is **Stopped + StartType=Disabled** and the host no longer answers on port 5244. It had been left running since 2026-07-23 for validation, and a user was confusingly still able to reach its stale build. Before stopping it, its live photos (`deploy\SharbatlyQMS\wwwroot\uploads`) were synced into the .17 store (`C:\QualityManagemet\data\uploads`) additively (robocopy `/E /XC /XN /XO` — 2 host-only files recovered, nothing overwritten). **192.168.3.17 (KSAJEDSVAIP001) is now the single live host.** The old files remain on .15's disk (nothing deleted), so the retirement is reversible: `Set-Service SharbatlyQMS -StartupType Automatic; Start-Service SharbatlyQMS` on KSAJEDSVAIT001.
 
 ### Deploying / operating remotely (no RDP needed)
 
@@ -217,6 +212,49 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 ---
 
 ## 8. Decisions log (newest first)
+
+### 2026-07-26 (PDF image quality + upload compression + tablet touch ergonomics)
+
+- **Sharper photos in the QO/Arrival PDF reports.** Two causes were fixed: (1) the report pre-shrank each photo to only 2× its display box (`ReportsController.TryPreprocess`) at JPEG q80 — now **4×** the box at **q90**; (2) QuestPDF was re-rasterising embedded images down to 72 DPI — the report image embeds now call **`.UseOriginalImage()`** (both `QualityReportPdf` and `ArrivalReportPdf`) so our high-res JPEG is embedded as-is. Net: same printed size, ~4× the pixels, and it stays crisp when the reader zooms the PDF. (Interactive tap-to-zoom isn't a PDF capability; zooming the viewer is the practical equivalent now that the images are hi-res.)
+- **Uploads are compressed to save disk.** `ImageService.PrepareFileAsync` now re-encodes the STORED original: capped at **2500 px** longest side and re-encoded (JPEG/WebP q85, PNG optimised; GIF left untouched for animation). Visually lossless for inspection and still far higher-res than any report/screen needs, but cuts new-upload storage ~80–90%. SHA + stored size are taken from the final compressed file.
+- **One-time batch re-compression of existing photos (done 2026-07-27).** Ran a server-side pass (System.Drawing, 2500 px / q85, temp-file + validity + smaller-than-original guard, atomic replace) over the existing JPEG originals in `C:\QualityManagemet\data\uploads`: **5,197.9 MB → 1,149.0 MB (~4.0 GB reclaimed)**, all 1,811 files intact, 0 failures. Thumbnails untouched. DB `width_px/height_px/file_size_bytes` were left as-is (not used for rendering) so they are now approximate for pre-existing rows.
+- **Tablet touch ergonomics.** The app already had the responsive foundation (viewport meta, `navbar-expand-md` collapse, `.table-responsive` on data tables). Added a `site.css` layer scoped to **`@media (pointer: coarse)`** only — larger min tap targets on buttons/inputs/nav/checkboxes and spaced-out action clusters — so 10" tablets are comfortable while **mouse-driven laptops are completely unaffected**.
+
+### 2026-07-26 (sample preview reads readings + Firmness/Brix columns + orphan-photo cleanup)
+
+- **Samples preview row now reflects reading-based attributes.** For some material groups (e.g. BANANA) Grower / Date Code / Lot / Pallet / Brix / Firmness are configured as **reading types** (codes like `Grower`, `Date Code`, `Brix`, `FIRMNESS`), not header fields — and their codes differ from the header codes (`PALLET_NO` vs `Pallet No.`). The preview row (`_SampleRow`) previously only read header values, so e.g. a grower entered as a reading showed blank. `_SampleRow` now resolves each column via a candidate-code list, checking **header values first, then readings** (case-insensitive), first non-empty wins. `SampleRowVm` gained `Readings`; `Details` passes `GetReadingsBatchAsync`, and `SaveSampleAjax` passes `GetReadingsAsync`.
+- **Added Firmness + Brix columns** to the samples preview table (`Details.cshtml` thead + empty-row colspan 8→10).
+- **Orphan sample-photo cleanup.** `C:\QualityManagemet\data\uploads\Sample` had 214 folders (7.2 GB); 120 were orphans whose folder id has no row in `qms_sample` (leftovers from deleted samples / the old server). Deleted those 120 (**~2.0 GB freed**); the 94 folders backing real samples were kept. Deletion criterion: numeric folder name AND id not in `qms_sample`.
+
+### 2026-07-26 (sample header 3-column + QO Index list: name-only + smaller font)
+
+- **Sample header size control → true 3-column layout.** `_SampleForm.cshtml` header is now a CSS grid `1fr auto 1fr` (title | size | spacer) so the Sample size control sits dead-centre and can't overlap the title (replaces the absolute-centre hack). The size control got a polished translucent "pill" (label + rounded input) on the blue bar; collapses to `1fr auto` under 576px.
+- **QO Index list (`Index.cshtml`) — material NAME only + smaller font.** The Materials column preview and its hover list no longer show the material code (`qo-no` / `qo-tip-no` removed) — the preview reads just the description, so it's shorter. The table got a `.qo-index-table` class dropping the font to `.8rem` (→ `.74`/`.7` on tablet/phone) with tighter cell padding so more data fits on small screens.
+- **Reverted the earlier mis-targeted Details.cshtml edits.** An earlier pass had removed the material code + unified fonts on the QO *Details* page; that was the wrong page. Details is restored (material code shown again, `.qo-detail` font wrapper removed, the Size/Qty header badges + Quantity body cell removed, `_MaterialForm` subtitle code restored). The name-only + smaller-font intent now lives on the Index list where the user wanted it.
+
+### 2026-07-26 (Material details inline in every sample + compact sample form)
+
+Reworked how Material-scoped header fields are maintained so operators stop forgetting them.
+
+- **Material details are now editable inside every sample form** (`_SampleForm.cshtml`, `mheader_<CODE>` inputs), pre-filled from the material's current values. Saving a sample also saves the material details and propagates them to all samples of that material (`SaveSampleCoreAsync` → `SaveMaterialHeaderValuesAsync`). So the operator can maintain material details from any sample and every other sample (past or future) reflects them. A "Not filled in / Filled" badge + amber card makes an unmaintained material obvious. These inputs are intentionally **not** `required` — they never block a sample save. The old per-material Material details modal still works and edits the same values.
+- **No more hard stop.** The material-card "Add sample" button is always available now; the "Fill material header to add samples" swap was removed, and `CreateSample`'s server gate on `GetMaterialHeaderCompleteMapAsync` was dropped. The material card shows a soft "Details incomplete" badge instead.
+- **Compacted the sample form.** Sample Size moved from a full grid cell (+2 helper lines) into a compact inline control in the Sample header card header (kept the `.sample-size-input` class + `data-sample-size` hook the defect-% JS needs). Removed guideline tooltips/helper texts ("(inspected qty)", default/override helper lines, required/auto `title=` tooltips, the Photos "drag & drop…" hint) and tightened card/section spacing — so adding the Material details card doesn't grow the form.
+- Plumbing: `SampleFormVm.MaterialHeaderFields` added; populated in `SamplePanel` and the standalone `Sample` action/`Sample.cshtml`.
+
+### 2026-07-26 (Reports menu grouping + Report Builder calc/total UX + QO docs button color)
+
+- **Reports nav consolidated.** `_Layout.cshtml` — the two top-level items (Data hub → `Reports/FlatDefects`, Report builder → `Reports/ReportBuilder`) are now one **Reports** dropdown holding both. Still Supervisor+.
+- **Report Builder — drag-and-drop calculated columns.** `report-builder.js`: a calc column now has a visual builder — drag a palette field onto the formula box (it is auto-added as a data column and its `[Label]` inserted), operator buttons (+ − × ÷ and parens), and a numeric-value insert. The raw formula input stays editable for power users, and the existing server formula engine (`ReportFormula`, label-based) is unchanged, so old saved reports keep working.
+- **Report Builder — new "Total" column kind.** New `ColumnKinds.Total` + `ReportColumn.Members` (list of palette **keys**). Drop numeric fields into the Total column's zone; the row value is their sum. Server (`ReportBuilderExporter.ProjectSample` + new `ValueForKey`) resolves each member **by key straight from the row**, so a Total can sum fields that are not themselves shown as columns. Total columns are numeric (get the sum/avg totals-row option). Members are keys (not labels) to survive column renames; the client resolves labels for display via `labelForKey`.
+- **QO Documents button** is now pale yellow (`.qo-docs-btn`) to stand out in the QO header.
+
+### 2026-07-26 (QO document attachments + optional BOL on arrival create)
+
+Two small feature/bug items requested together.
+
+- **Quality Order documents.** The QO Details page now has a **Documents** card (mirrors the arrival Documents tab) using the shared `_DocumentList` partial with `OwnerType="QualityOrder"`. The document backend was already generic — `DocumentService.AllowedOwnerTypes` already whitelisted `"QualityOrder"` — so the only code needed was a real gate: `DocumentsController` now injects `IQualityOrderService` and its `GateEditAsync`/`GateReadAsync` handle the `"QualityOrder"` owner type. Previously QO fell through to the ungated `default` branch, so this also closes a gap.
+- **Documents are status-independent (both Arrival and QO).** Per user request, documents can be attached/removed **regardless of the record's status**. `DocumentsController.GateEditAsync` no longer status-gates either owner type — only the `OperatorOrAbove` policy + plant scope apply (new `QoPlantGateAsync` for QO). The views set the doc list `Editable = canEdit` (role-only; QO's `canEdit` is still forced false in claim context, so the upload form stays hidden there). This intentionally replaces the earlier arrival rule where documents were Draft-only. Downloads remain available to any in-plant reader in every status.
+- **BOL is now optional when creating an arrival.** `ArrivalsController.Create` used to hard-require container **+ BOL + PO**, which blocked containers that arrive with no bill of lading (user-reported error "Container number, BOL, and PO are required."). It now requires only **container + PO**; BOL is normalised to `""`. The SAP-match filter compares `r.BolNo ?? ""` so BOL-less shipments still match (the cache stores `''` for them — `qms_sap_container_cache.bol_no` is NOT NULL). `ArrivalService.FindByShipmentAsync` was relaxed to dedup with `ISNULL(a.bol_no,'') = @bolNo` so two BOL-less arrivals for the same container+PO are still blocked. `qms_arrival.bol_no` is nullable, so no schema change.
 
 ### 2026-07-26 (analyzer field coverage + categorised/always-visible field list)
 

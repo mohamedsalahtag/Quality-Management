@@ -91,7 +91,7 @@ public class MaraService : IMaraService
                     material_group_desc   AS MaterialGroupDesc,
                     COALESCE(NULLIF(major_category_desc,''), NULLIF(major_category,'')) AS MajorCategory,
                     sub_major_category    AS SubMajorCategory,
-                    NULL                  AS Brand,       -- not in this CDS view; populated only if a future sync adds it
+                    brand                 AS Brand,       -- V38 (2026-07-08): brand column now synced from the material-master feed
                     NULL                  AS PackType,    -- ditto
                     NULL                  AS PackCode,    -- ditto
                     weight                AS NetWeight

@@ -86,7 +86,7 @@
                                     : $"Delete sample header field {f.FieldCode} ({f.FieldName})? This cannot be undone.";
                             }
                             <form asp-action="DeleteSampleHeaderField" method="post" class="d-inline"
-                                  onsubmit="return confirm('@Html.Raw(System.Text.Encodings.Web.JavaScriptEncoder.Default.Encode(confirmMsg))');">
+                                  data-confirm="@confirmMsg" data-confirm-danger data-confirm-ok="Delete">
                                 @Html.AntiForgeryToken()
                                 <input type="hidden" name="fieldId" value="@f.FieldId" />
                                 <button type="submit"

@@ -38,6 +38,13 @@ body {
   border-radius: 0.375rem;
 }
 
+/* Menu (top navbar) text: one step smaller than the body font. Covers the nav
+   links and their dropdown items so the whole menu reads at one size. */
+.navbar-nav .nav-link,
+.navbar .dropdown-item {
+  font-size: 0.9rem;
+}
+
 /* tablekit: sortable headers + pager */
 .tk-sortable {
   cursor: pointer;
@@ -87,6 +94,27 @@ input[type="number"]::-webkit-outer-spin-button {
   border-color: #0d6efd;
 }
 .photo-dropzone input[type="file"] { display: none; }
+
+/* ---- Tablet / touch ergonomics (2026-07-26) ----------------------------
+   Everything here is scoped to touch devices via (pointer: coarse), so a
+   mouse-driven laptop is completely unaffected — only tablets/phones get the
+   larger, easier tap targets. This keeps the 10" tablet comfortable without
+   changing the laptop layout. */
+@media (pointer: coarse) {
+  .btn                                     { min-height: 40px; }
+  .btn-sm                                  { min-height: 34px; }
+  .form-control, .form-select              { min-height: 40px; }
+  .form-control-sm, .form-select-sm        { min-height: 34px; }
+  .nav-link                                { padding-top: .55rem; padding-bottom: .55rem; }
+  .dropdown-item                           { padding-top: .5rem;  padding-bottom: .5rem; }
+  .form-check-input                        { width: 1.2em; height: 1.2em; }
+  /* Space out inline action-button clusters (table rows, card headers) so
+     neighbouring icons aren't a mis-tap away. */
+  .table td .btn + .btn,
+  .d-flex.gap-2 > .btn                     { margin-left: .15rem; }
+  /* Larger touch scrollbar hint for horizontally-scrolling tables. */
+  .table-responsive                        { -webkit-overflow-scrolling: touch; }
+}
 
 input[type="number"] {
   -moz-appearance: textfield;

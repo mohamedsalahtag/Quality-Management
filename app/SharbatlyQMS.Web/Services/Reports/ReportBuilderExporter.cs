@@ -112,6 +112,24 @@ public class ReportBuilderExporter : IReportBuilderExporter
                     val = ReportFormula.Evaluate(col.Formula, numeric);
                     break;
 
+                case ColumnKinds.Total:
+                    // Sum the dragged-in value fields, referenced by their palette
+                    // KEY (d:/r:/sh:/mh: or a static key). Resolving by key means a
+                    // Total works whether or not those fields are also shown as
+                    // columns. Missing / non-numeric members are skipped; if none
+                    // resolve the total is null (empty cell) rather than 0.
+                    if (col.Members is { Count: > 0 })
+                    {
+                        double sum = 0; bool any = false;
+                        foreach (var mk in col.Members)
+                        {
+                            var mv = ValueForKey(mk, rep, group);
+                            if (mv.HasValue) { sum += mv.Value; any = true; }
+                        }
+                        val = any ? sum : (object?)null;
+                    }
+                    break;
+
                 case ColumnKinds.Empty:
                     val = null;
                     break;
@@ -274,6 +292,34 @@ public class ReportBuilderExporter : IReportBuilderExporter
     private static string Strip(string key, string prefix)
         => key.StartsWith(prefix, StringComparison.Ordinal) ? key[prefix.Length..] : key;
 
+    /// <summary>Resolves the numeric value of a palette field for a sample, by its
+    /// key (the same prefixed keys the palette drag emits). Used by Total columns
+    /// so a summed field need not also be a visible column. Returns null when the
+    /// field is absent or non-numeric for this row.</summary>
+    private static double? ValueForKey(string key, FlatDefectRow rep, List<FlatDefectRow> group)
+    {
+        if (string.IsNullOrWhiteSpace(key)) return null;
+
+        if (key.StartsWith(ReportBuilderRegistry.DefectPrefix, StringComparison.Ordinal))
+        {
+            if (int.TryParse(Strip(key, ReportBuilderRegistry.DefectPrefix), out var did))
+                return ToDouble(group.FirstOrDefault(x => x.DefectId == did)?.DefectValue);
+            return null;
+        }
+        if (key.StartsWith(ReportBuilderRegistry.ReadingPrefix, StringComparison.Ordinal))
+            return rep.Readings.TryGetValue(Strip(key, ReportBuilderRegistry.ReadingPrefix), out var rv)
+                ? ToDouble(ParseMaybeNumber(rv)) : null;
+        if (key.StartsWith(ReportBuilderRegistry.SampleHeaderPrefix, StringComparison.Ordinal))
+            return rep.SampleHeaderValues.TryGetValue(Strip(key, ReportBuilderRegistry.SampleHeaderPrefix), out var shv)
+                ? ToDouble(ParseMaybeNumber(shv)) : null;
+        if (key.StartsWith(ReportBuilderRegistry.MaterialHeaderPrefix, StringComparison.Ordinal))
+            return rep.MaterialHeaderValues.TryGetValue(Strip(key, ReportBuilderRegistry.MaterialHeaderPrefix), out var mhv)
+                ? ToDouble(ParseMaybeNumber(mhv)) : null;
+
+        // No prefix → a static field key.
+        return ReportBuilderRegistry.TryGetStatic(key, out var sf) ? ToDouble(sf.Get(rep)) : null;
+    }
+
     private static string LabelOf(ReportColumn col)
     {
         if (!string.IsNullOrWhiteSpace(col.Label)) return col.Label!;
@@ -283,7 +329,7 @@ public class ReportBuilderExporter : IReportBuilderExporter
     }
 
     private static bool IsNumericColumn(ReportColumn col) =>
-        col.Kind is ColumnKinds.Defect or ColumnKinds.Calc
+        col.Kind is ColumnKinds.Defect or ColumnKinds.Calc or ColumnKinds.Total
         || (col.Kind == ColumnKinds.Static
             && ReportBuilderRegistry.TryGetStatic(col.Key, out var sf)
             && sf.Type == ReportFieldType.Number);

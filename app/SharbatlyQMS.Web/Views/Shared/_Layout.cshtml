@@ -118,15 +118,15 @@
                            controller's [Authorize] guard is authoritative. *@
                         @if (role == UserRoles.Supervisor || role == UserRoles.Manager || role == UserRoles.SiteAdmin)
                         {
-                            <li class="nav-item">
-                                <a class="nav-link @(NavOn("Reports") ? "active" : "")" asp-controller="Reports" asp-action="FlatDefects">
-                                    <i class="bi bi-grid-3x3-gap me-1"></i>Data hub
+                            @* Data hub + Report builder combined under one "Reports" menu. *@
+                            <li class="nav-item dropdown">
+                                <a class="nav-link dropdown-toggle @(NavOn("Reports") ? "active" : "")" aria-current="@(NavOn("Reports") ? "page" : null)" href="#" data-bs-toggle="dropdown">
+                                    <i class="bi bi-bar-chart me-1"></i>Reports
                                 </a>
-                            </li>
-                            <li class="nav-item">
-                                <a class="nav-link" asp-controller="Reports" asp-action="ReportBuilder">
-                                    <i class="bi bi-table me-1"></i>Report builder
-                                </a>
+                                <ul class="dropdown-menu">
+                                    <li><a class="dropdown-item @(ActOn("FlatDefects") ? "active" : "")" asp-controller="Reports" asp-action="FlatDefects"><i class="bi bi-grid-3x3-gap me-1"></i>Data hub</a></li>
+                                    <li><a class="dropdown-item @(ActOn("ReportBuilder") ? "active" : "")" asp-controller="Reports" asp-action="ReportBuilder"><i class="bi bi-table me-1"></i>Report builder</a></li>
+                                </ul>
                             </li>
                         }
                         @if (canSeeParameters)

@@ -34,7 +34,7 @@ else
                     @if (Model.Editable)
                     {
                         <form asp-controller="Images" asp-action="Delete" method="post"
-                              onsubmit="return confirm('Remove this image?');" class="mt-1">
+                              data-confirm="Remove this image?" data-confirm-danger data-confirm-ok="Remove" class="mt-1">
                             @Html.AntiForgeryToken()
                             <input type="hidden" name="imageLinkId" value="@img.ImageLinkId" />
                             <input type="hidden" name="ownerType" value="@Model.OwnerType" />

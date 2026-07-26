@@ -283,8 +283,17 @@ public class PivotService : IPivotService
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("Measure key is required.");
         var measure = report.Measures.FirstOrDefault(m =>
-            string.Equals(m.Key, key, StringComparison.OrdinalIgnoreCase))
-            ?? throw new ArgumentException($"Unknown measure '{key}'");
+            string.Equals(m.Key, key, StringComparison.OrdinalIgnoreCase));
+        if (measure == null)
+        {
+            // V36 -- Excel-style field measures: any registered dimension may
+            // be counted. Registered measures win key collisions (checked
+            // first); the FieldAggs allow-list below rejects SUM/AVG/MIN/MAX.
+            var dim = report.Dimensions.FirstOrDefault(d =>
+                string.Equals(d.Key, key, StringComparison.OrdinalIgnoreCase))
+                ?? throw new ArgumentException($"Unknown measure or field '{key}'");
+            measure = new PivotMeasure(dim.Key, dim.Display, dim.SqlExpression, PivotAggregations.FieldAggs);
+        }
         var aggNorm = (agg ?? "").Trim().ToUpperInvariant();
         if (!PivotAggregations.IsValid(aggNorm))
             throw new ArgumentException($"Unknown aggregation '{agg}'");

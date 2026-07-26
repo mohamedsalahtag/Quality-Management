@@ -82,6 +82,35 @@
         border-color: #dc3545;
         background-color: #fff5f5;
     }
+    /* Sample header bar: true 3-column layout (title | size | spacer) so the
+       size control sits dead-centre and can never overlap the title. */
+    .sample-form .sample-header-bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: .5rem; }
+    .sample-form .sample-header-bar .shb-title { font-weight: 600; white-space: nowrap; }
+    .sample-form .sample-header-bar .shb-size { justify-self: center; }
+    /* Compact, polished "pill" holding the size label + input. */
+    .sample-form .sample-size-chip { display: inline-flex; align-items: center; gap: .35rem;
+        background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.35);
+        border-radius: 999px; padding: .1rem .5rem .1rem .7rem; }
+    .sample-form .sample-size-chip label { font-size: .72rem; font-weight: 600; white-space: nowrap; margin: 0; }
+    .sample-form .sample-size-chip .sample-size-input { width: 4.25rem; text-align: center; font-weight: 600;
+        border: none; border-radius: 999px; padding: .1rem .35rem; }
+    .sample-form .sample-size-chip .sample-size-input:focus { box-shadow: 0 0 0 .18rem rgba(255,255,255,.5); }
+    .sample-form .sample-size-chip .badge { font-size: .62rem; }
+    @@media (max-width: 575.98px) {
+        /* On a phone-width drawer, drop the spacer and let it be title | size. */
+        .sample-form .sample-header-bar { grid-template-columns: 1fr auto; }
+        .sample-form .sample-header-bar .shb-spacer { display: none; }
+    }
+    /* Tighter vertical rhythm so the added Material details card doesn't grow
+       the form: trim card gaps and section spacing without shrinking inputs. */
+    .sample-form .card { margin-bottom: .5rem !important; }
+    .sample-form .section-label { margin: .3rem 0 .15rem; }
+    .sample-form .row.g-1 { --bs-gutter-y: .25rem; }
+    /* Material details card — a persistent, obvious reminder when unmaintained. */
+    .sample-form .material-details-card .card-header { background: #f1f5ff; font-size: .82rem; }
+    .sample-form .material-details-card.md-incomplete { border-color: #ffc107; }
+    .sample-form .material-details-card.md-incomplete .card-header { background: #fff8e1; }
+    .sample-form .material-details-card .md-hint { font-size: .72rem; color: #8a6d00; margin-bottom: .3rem; }
 </style>
 
 @if (!editable)
@@ -116,76 +145,132 @@
             var hfByCode = Model.ExistingHeader.ToDictionary(h => h.FieldCode);
         }
 
+        @* Sample Size lives inline in the card header (compact) so it no longer
+           eats a full row. Keeps the .sample-size-input class + form
+           data-sample-size hook the defect-% JS relies on. *@
         <div class="card mb-2">
-            <div class="card-header bg-primary text-white">Sample header</div>
-            <div class="card-body">
-                <div class="row g-1">
-                    @* 2026-06-20: Sample size defaults to the material's effective
-                       size (numeric column when set, otherwise parsed from MARA's
-                       MaterialSize text). Editable per sample -- the controller
-                       flags SizeOverridden when the posted value differs from
-                       the material's effective size, which preserves the per-sample
-                       value across future material-level Override propagations. *@
-                    <div class="col-6 col-md-3">
-                        <label class="form-label">
-                            Sample Size <span class="text-muted">(inspected qty)</span>
-                        </label>
-                        <input name="SampleSize" type="number" min="1" step="1" inputmode="numeric"
-                               class="form-control form-control-sm sample-size-input"
-                               value="@(effectiveSampleSize)" />
-                        @if (s.SizeOverridden)
+            <div class="card-header bg-primary text-white sample-header-bar py-1">
+                <span class="shb-title"><i class="bi bi-clipboard-data me-1"></i>Sample header</span>
+                <span class="sample-size-chip shb-size">
+                    <label class="mb-0" for="sampleSizeInput-@s.SampleId"><i class="bi bi-rulers me-1"></i>Sample size</label>
+                    <input id="sampleSizeInput-@s.SampleId" name="SampleSize" type="number" min="1" step="1" inputmode="numeric"
+                           class="form-control form-control-sm sample-size-input"
+                           value="@(effectiveSampleSize)" />
+                    @if (s.SizeOverridden)
+                    {
+                        <span class="badge bg-warning text-dark" title="Differs from material default (@(materialDefaultSize?.ToString() ?? "—"))">≠@(materialDefaultSize?.ToString() ?? "—")</span>
+                    }
+                </span>
+                <span class="shb-spacer"></span>
+            </div>
+            @if (Model.HeaderFields.Count > 0)
+            {
+                <div class="card-body">
+                    <div class="row g-1">
+                        @* Dynamic Sample-scoped header fields from qms_sample_header_field. *@
+                        @foreach (var f in Model.HeaderFields)
                         {
-                            <small class="text-warning d-block">
-                                <i class="bi bi-pencil-square me-1"></i>Overridden — material default: @(materialDefaultSize?.ToString() ?? "—")
-                            </small>
-                        }
-                        else
-                        {
-                            <small class="text-muted d-block">Default from material: @(materialDefaultSize?.ToString() ?? "—")</small>
+                            hfByCode.TryGetValue(f.FieldCode, out var existing);
+                            <div class="col-6 col-md-3">
+                                <label class="form-label">
+                                    @f.FieldName <span class="text-muted">@f.DefaultUnit</span>
+                                    @if (f.IsMandatory)
+                                    {
+                                        <span class="text-danger fw-bold">*</span>
+                                    }
+                                </label>
+                                @if (f.ValueKind == "Numeric")
+                                {
+                                    <input name="@(HfName(f.FieldCode))" type="number" step="any" inputmode="decimal"
+                                           class="form-control form-control-sm"
+                                           value="@(existing?.NumericValue)"
+                                           required="@(f.IsMandatory)" />
+                                }
+                                else if (f.ValueKind == "Date")
+                                {
+                                    <input name="@(HfName(f.FieldCode))" type="date"
+                                           class="form-control form-control-sm"
+                                           value="@(existing?.DateValue?.ToString("yyyy-MM-dd"))"
+                                           required="@(f.IsMandatory)" />
+                                }
+                                else
+                                {
+                                    <input name="@(HfName(f.FieldCode))" type="text"
+                                           class="form-control form-control-sm"
+                                           value="@(existing?.TextValue)"
+                                           required="@(f.IsMandatory)" />
+                                }
+                            </div>
                         }
                     </div>
-                    @* Dynamic Sample-scoped header fields from qms_sample_header_field. *@
-                    @foreach (var f in Model.HeaderFields)
+                </div>
+            }
+        </div>
+
+        @* Material details — editable inline (2026-07-26). Shared by every sample
+           of this material: saving reflects to the material and all samples, so an
+           operator can maintain them from any sample and is reminded when they are
+           missing. NOT `required` here — it must never block a sample save. *@
+        @{
+            string MhName(string code) => $"mheader_{code}";
+            var mhByCode = Model.MaterialHeaderValues.ToDictionary(v => v.FieldCode);
+            bool MhFilled(SharbatlyQMS.Web.Models.SampleHeaderField f) =>
+                mhByCode.TryGetValue(f.FieldCode, out var mv)
+                && (!string.IsNullOrWhiteSpace(mv.TextValue) || mv.NumericValue.HasValue || mv.DateValue.HasValue);
+            bool matIncomplete = Model.MaterialHeaderFields.Any(f => !MhFilled(f));
+        }
+        @if (Model.MaterialHeaderFields.Count > 0)
+        {
+            <div class="card mb-2 material-details-card @(matIncomplete ? "md-incomplete" : "md-complete")">
+                <div class="card-header d-flex justify-content-between align-items-center gap-2 py-1">
+                    <span><i class="bi bi-box-seam me-1"></i>Material details</span>
+                    @if (matIncomplete)
                     {
-                        hfByCode.TryGetValue(f.FieldCode, out var existing);
-                        <div class="col-6 col-md-3">
-                            <label class="form-label">
-                                @f.FieldName <span class="text-muted">@f.DefaultUnit</span>
-                                @if (f.IsMandatory)
-                                {
-                                    <span class="text-danger fw-bold" title="Required — sample cannot be saved without this value">*</span>
-                                }
-                            </label>
-                            @if (f.ValueKind == "Numeric")
-                            {
-                                <input name="@(HfName(f.FieldCode))" type="number" step="any" inputmode="decimal"
-                                       class="form-control form-control-sm"
-                                       value="@(existing?.NumericValue)"
-                                       required="@(f.IsMandatory)" />
-                            }
-                            else if (f.ValueKind == "Date")
-                            {
-                                <input name="@(HfName(f.FieldCode))" type="date"
-                                       class="form-control form-control-sm"
-                                       value="@(existing?.DateValue?.ToString("yyyy-MM-dd"))"
-                                       required="@(f.IsMandatory)" />
-                            }
-                            else
-                            {
-                                <input name="@(HfName(f.FieldCode))" type="text"
-                                       class="form-control form-control-sm"
-                                       value="@(existing?.TextValue)"
-                                       required="@(f.IsMandatory)" />
-                            }
-                        </div>
+                        <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Not filled in</span>
                     }
-                    @if (Model.HeaderFields.Count == 0)
+                    else
                     {
-                        <div class="col-12"><div class="text-muted small">No sample-level header fields configured. Manage them (and their scope) in <a asp-controller="Admin" asp-action="SampleHeaders">Admin → Sample Headers</a>.</div></div>
+                        <span class="badge bg-success"><i class="bi bi-check2 me-1"></i>Filled</span>
                     }
                 </div>
+                <div class="card-body">
+                    @if (editable && matIncomplete)
+                    {
+                        <div class="md-hint">Shared by all samples of this material — fill it here and it applies to every sample (past and future).</div>
+                    }
+                    <div class="row g-1">
+                        @foreach (var f in Model.MaterialHeaderFields)
+                        {
+                            mhByCode.TryGetValue(f.FieldCode, out var mexisting);
+                            <div class="col-6 col-md-3">
+                                <label class="form-label">
+                                    @f.FieldName <span class="text-muted">@f.DefaultUnit</span>
+                                    @if (f.IsMandatory)
+                                    {
+                                        <span class="text-danger fw-bold">*</span>
+                                    }
+                                </label>
+                                @if (f.ValueKind == "Numeric")
+                                {
+                                    <input name="@(MhName(f.FieldCode))" type="number" step="any" inputmode="decimal"
+                                           class="form-control form-control-sm" value="@(mexisting?.NumericValue)" />
+                                }
+                                else if (f.ValueKind == "Date")
+                                {
+                                    <input name="@(MhName(f.FieldCode))" type="date"
+                                           class="form-control form-control-sm" value="@(mexisting?.DateValue?.ToString("yyyy-MM-dd"))" />
+                                }
+                                else
+                                {
+                                    <input name="@(MhName(f.FieldCode))" type="text"
+                                           class="form-control form-control-sm" value="@(mexisting?.TextValue)" />
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
             </div>
-        </div>
+        }
 
         @* Readings: section label + dense inputs, no card chrome.
            For a NEW sample, the GROSS_WEIGHT reading is pre-filled from the
@@ -251,12 +336,11 @@
                         @rt.ReadingName <span class="text-muted">@rt.DefaultUnit</span>
                         @if (rt.IsMandatory && !isNet)
                         {
-                            <span class="text-danger fw-bold"
-                                  title="Required — sample cannot be saved without this value">*</span>
+                            <span class="text-danger fw-bold">*</span>
                         }
                         @if (isNet)
                         {
-                            <span class="badge bg-secondary ms-1" title="Computed: Gross − Tara">auto</span>
+                            <span class="badge bg-secondary ms-1">auto</span>
                         }
                     </label>
                     @if (rt.ValueKind == "Numeric")
@@ -359,10 +443,6 @@
             <div class="card-header py-2 d-flex align-items-center gap-2">
                 <i class="bi bi-images"></i>
                 <strong>Photos</strong>
-                @if (s.SampleId > 0)
-                {
-                    <span class="text-muted small">drag & drop, paste from clipboard, or pick files</span>
-                }
             </div>
             <div class="card-body">
                 @if (s.SampleId == 0)

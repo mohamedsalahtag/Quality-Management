@@ -25,6 +25,25 @@ public class QualityOrder
     /// <summary>SAP plant inherited from the parent arrival (qms_arrival.plant).</summary>
     public string?  Plant         { get; set; }
     public string?  ArrivalNo     { get; set; }
+
+    // Materials rolled up for the QO list "quick peek" hover (mirrors the
+    // Pending Containers page). Populated only by ListAsync; empty elsewhere.
+    public int                 LineCount     { get; set; }
+    public List<QoMaterialLine> MaterialLines { get; set; } = new();
+}
+
+/// <summary>
+/// Lightweight material line for the QO list "quick peek" tooltip — just the
+/// four fields the hover shows (code, description, quantity, UoM), not the full
+/// <see cref="QualityOrderMaterial"/> which carries ~24 columns per row.
+/// </summary>
+public class QoMaterialLine
+{
+    public long     QualityOrderId { get; set; }
+    public string   MaterialNo     { get; set; } = "";
+    public string?  MaterialDesc   { get; set; }
+    public decimal? Quantity       { get; set; }
+    public string?  Uom            { get; set; }
 }
 
 public class QualityOrderMaterial
@@ -282,9 +301,7 @@ public class MaterialGroupSummary
     public string? Grade            { get; set; }          // = MaterialClass
     public string? MajorCategory    { get; set; }
     public int     SumSampleSize    { get; set; }          // Σ sample_size across all samples in group
-    public decimal SumGross         { get; set; }          // Σ (arrival_item.quantity × qoMaterial.NetWeight)
-    public decimal SumTara          { get; set; }          // Σ TARA reading.numeric_value across samples in group
-    public decimal Net              => SumGross - SumTara;
+    public decimal SumPoQuantity    { get; set; }          // Σ arrival_item.quantity across the group's materials (PO qty)
 
     // One section per defect category (ordered by category sort_order),
     // replacing the old fixed Major/Minor two-bucket scheme (V22+).
@@ -314,6 +331,9 @@ public class DefectCategorySection
     public int     SortOrder    { get; set; }
     public List<DefectAggRow> Rows { get; set; } = new();
     public decimal TotalPct => Rows.Sum(r => r.Percentage);
+    // Σ recorded defect pieces across this category (sum of the summed
+    // materials' defect values), shown in the summary category header.
+    public decimal TotalPieces => Rows.Sum(r => r.SumValue);
 }
 
 public class ReadingAggRow

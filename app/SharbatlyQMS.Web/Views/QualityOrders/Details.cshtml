@@ -9,6 +9,7 @@
     var samples     = ViewBag.Samples     as IReadOnlyList<Sample>               ?? new List<Sample>();
     var photoCounts = ViewBag.PhotoCounts as IReadOnlyDictionary<long, int>      ?? new Dictionary<long, int>();
     var sampleHeaders = ViewBag.SampleHeaders as ILookup<long, SampleHeaderValue>;
+    var sampleReadings = ViewBag.SampleReadings as ILookup<long, SampleReading>;
     var editable    = (bool?)ViewBag.Editable ?? (Model.StatusCode == QualityOrderStatus.Open);
     var role        = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     // V31 (2026-06-20): role hierarchy widened. Operator includes Supervisor for
@@ -66,6 +67,9 @@
     .clear-override-btn i { font-size: 1rem; }
     /* Toast positioning */
     #qoToastHost { position: fixed; top: 1rem; right: 1rem; z-index: 1080; }
+    /* Documents button — pale yellow so it stands out from the other header actions. */
+    .qo-docs-btn { background-color: #fdf6c9; border-color: #ecdf9a; color: #5c4d00; }
+    .qo-docs-btn:hover, .qo-docs-btn:focus { background-color: #f7ec9e; border-color: #e0cf7a; color: #5c4d00; }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -82,10 +86,17 @@
                 <i class="bi bi-box-arrow-in-down me-1"></i>View arrival
             </a>
         }
+        @* Documents live in a modal (opened from here) so they don't reserve
+           space on the page. Available in every status; upload/delete inside
+           the modal are still role- + plant-gated server-side. *@
+        <button type="button" class="btn btn-outline-secondary qo-docs-btn" data-bs-toggle="modal" data-bs-target="#documentsModal">
+            <i class="bi bi-paperclip me-1"></i>Documents
+        </button>
         @if (Model.StatusCode == QualityOrderStatus.Initial && canEdit)
         {
             <form asp-action="Open" asp-route-id="@Model.QualityOrderId" method="post"
-                  onsubmit="return confirm('Open this Quality Order? Samples can be added once opened.');">
+                  data-confirm="Open this Quality Order? Samples can be added once opened."
+                  data-confirm-title="Open Quality Order" data-confirm-ok="Open">
                 @Html.AntiForgeryToken()
                 <button type="submit" class="btn btn-primary"><i class="bi bi-unlock me-1"></i>Open</button>
             </form>
@@ -95,7 +106,8 @@
         @if (canAct)
         {
             <form asp-action="Submit" asp-route-id="@Model.QualityOrderId" method="post"
-                  onsubmit="return confirm('Submit this Quality Order for supervisor review? No more changes will be allowed until the supervisor either finishes or cancel-submits.');">
+                  data-confirm="Submit this Quality Order for supervisor review? No more changes will be allowed until the supervisor either finishes or cancel-submits."
+                  data-confirm-title="Submit for review" data-confirm-ok="Submit">
                 @Html.AntiForgeryToken()
                 <button type="submit" class="btn btn-primary"><i class="bi bi-send-check me-1"></i>Submit</button>
             </form>
@@ -106,7 +118,8 @@
                 <i class="bi bi-check-circle me-1"></i>Finish order
             </button>
             <form asp-action="CancelSubmit" asp-route-id="@Model.QualityOrderId" method="post" class="d-inline"
-                  onsubmit="return confirm('Cancel the submit and return this QO to Open so the operator can fix it?');">
+                  data-confirm="Cancel the submit and return this QO to Open so the operator can fix it?"
+                  data-confirm-title="Cancel submit" data-confirm-ok="Return to Open">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="reason" value="" />
                 <button type="submit" class="btn btn-outline-warning"><i class="bi bi-arrow-counterclockwise me-1"></i>Cancel submit</button>
@@ -172,7 +185,7 @@
            sessionStorage so reloads don't lose the user's expansion. *@
         <div class="card-header card-header-toggle d-flex justify-content-between align-items-center flex-wrap gap-2"
              data-target-body="#@bodyId" style="cursor: pointer;">
-            <div class="d-flex align-items-center gap-2">
+            <div class="d-flex align-items-center gap-2 flex-wrap">
                 <i class="bi bi-chevron-down chevron" title="Show / hide details"></i>
                 <i class="bi bi-box"></i>
                 <code>@m.MaterialNo</code>
@@ -180,32 +193,27 @@
                 <span class="badge bg-info ms-1 sample-count-badge" data-qo-material-id="@m.QoMaterialId">
                     @matSamples.Count sample@(matSamples.Count == 1 ? "" : "s")
                 </span>
+                @* 2026-07-26: material details are no longer a hard stop for adding
+                   samples — a soft reminder badge only. The real reminder is the
+                   editable Material details card inside every sample form. *@
+                @if (!matHeaderOk)
+                {
+                    <span class="badge bg-warning text-dark ms-1" title="Material details not filled in yet — you can fill them from any sample.">
+                        <i class="bi bi-exclamation-triangle me-1"></i>Details incomplete
+                    </span>
+                }
             </div>
             <div class="d-flex gap-2 flex-wrap">
                 @if (canAct)
                 {
-                    @* V31 (2026-06-20): Add sample button is state-aware -- it
-                       refuses (with an obvious pulse) when the material's
-                       mandatory header fields aren't filled yet. Click on the
-                       warning variant opens the Material Details modal so the
-                       operator can fill the fields without scrolling. *@
-                    if (matHeaderOk)
-                    {
-                        <button type="button" class="btn btn-sm btn-success sample-add"
-                                data-qo-id="@Model.QualityOrderId"
-                                data-qo-material-id="@m.QoMaterialId">
-                            <i class="bi bi-plus-circle me-1"></i>Add sample
-                        </button>
-                    }
-                    else
-                    {
-                        <button type="button" class="btn btn-sm btn-outline-warning btn-needs-headers material-details-btn"
-                                data-bs-toggle="modal" data-bs-target="#materialDetailsModal"
-                                data-qo-material-id="@m.QoMaterialId"
-                                title="Fill the required Material details before adding samples.">
-                            <i class="bi bi-exclamation-triangle me-1"></i>Fill material header to add samples
-                        </button>
-                    }
+                    @* Add sample is always available (2026-07-26). Missing material
+                       details no longer block it — they can be filled from within
+                       the sample. *@
+                    <button type="button" class="btn btn-sm btn-success sample-add"
+                            data-qo-id="@Model.QualityOrderId"
+                            data-qo-material-id="@m.QoMaterialId">
+                        <i class="bi bi-plus-circle me-1"></i>Add sample
+                    </button>
                 }
                 <button type="button" class="btn btn-sm btn-outline-info material-details-btn"
                         data-bs-toggle="modal" data-bs-target="#materialDetailsModal"
@@ -264,6 +272,8 @@
                                 <th>Pallet</th>
                                 <th>Lot</th>
                                 <th>Date code</th>
+                                <th class="text-end">Firmness</th>
+                                <th class="text-end">Brix</th>
                                 <th class="text-end">Size</th>
                                 <th class="text-end">Created</th>
                                 <th class="text-end" style="min-width:110px;">Actions</th>
@@ -275,13 +285,14 @@
                                 var rowVm = new SampleRowVm {
                                     Sample = s, Editable = editable,
                                     HeaderValues = sampleHeaders?[s.SampleId].ToList() ?? new List<SampleHeaderValue>(),
+                                    Readings    = sampleReadings?[s.SampleId].ToList() ?? new List<SampleReading>(),
                                     PhotoCount  = photoCounts.TryGetValue(s.SampleId, out var spc) ? spc : 0
                                 };
                                 <partial name="~/Views/QualityOrders/_SampleRow.cshtml" model="rowVm" />
                             }
                             @if (matSamples.Count == 0)
                             {
-                                <tr class="empty-samples-row"><td colspan="8" class="text-center text-muted small py-2">No samples recorded yet for this material.</td></tr>
+                                <tr class="empty-samples-row"><td colspan="10" class="text-center text-muted small py-2">No samples recorded yet for this material.</td></tr>
                             }
                         </tbody>
                     </table>
@@ -333,6 +344,38 @@
 @* ---- Toast host for inline success/error messages. ---- *@
 <div id="qoToastHost"></div>
 
+@* ---- Documents modal. Uses the shared _DocumentList partial (upload form +
+       grid, AJAX). Available in every status; upload/delete are role- +
+       plant-gated server-side in DocumentsController for "QualityOrder". ---- *@
+<div class="modal fade" id="documentsModal" tabindex="-1" aria-labelledby="documentsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="documentsModalLabel">
+                    <i class="bi bi-paperclip me-1"></i>Documents — @Model.QualityOrderNo
+                </h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                @{
+                    var qoDocsVm = new SharbatlyQMS.Web.ViewModels.DocumentListVm
+                    {
+                        OwnerType  = "QualityOrder",
+                        OwnerId    = Model.QualityOrderId,
+                        // Documents attach/remove in any status (per user request), so this
+                        // is role-only (canEdit) rather than canAct. canEdit is already
+                        // forced false in claim context, so the upload form stays hidden there.
+                        Editable   = canEdit,
+                        Ajax       = true,
+                        Categories = new[] { "InspectionReport", "Certificate", "LabResult", "ClaimDocument", "Other" }
+                    };
+                }
+                <partial name="_DocumentList" model="qoDocsVm" />
+            </div>
+        </div>
+    </div>
+</div>
+
 @* ---- Close / Reopen / Override modals (override now POSTs to AJAX). ---- *@
 <div class="modal fade" id="closeModal" tabindex="-1">
     <div class="modal-dialog">
@@ -380,6 +423,65 @@
         });
     })();
 </script>
+
+@* V38 (2026-07-08): bypassable "materials without samples" warning. When
+   Submit/Close hits the precondition, the controller redirects back with
+   TempData and this modal auto-opens, offering "Submit/Finish anyway". *@
+@if (TempData["BypassWarning"] is string bypassMsg)
+{
+    var bypassAction = TempData["BypassAction"] as string == "Close" ? "Close" : "Submit";
+    var bypassReason = TempData["BypassReason"] as string;
+    var bypassVerb   = bypassAction == "Close" ? "Finish" : "Submit";
+    <div class="modal fade" id="bypassWarnModal" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content shadow">
+                <div class="modal-header py-2">
+                    <h5 class="modal-title d-flex align-items-center gap-2 fs-6">
+                        <i class="bi bi-exclamation-triangle-fill text-warning fs-4"></i>
+                        Materials without samples
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                @* Form wraps body + footer so the mandatory reason textarea's
+                   HTML5 `required` validation fires from the submit button. Both
+                   Submit and Close post the reason under `name="reason"`; the
+                   server records it in the status history + audit trail and also
+                   re-checks it, so a crafted post can't skip it. *@
+                <form asp-action="@bypassAction" asp-route-id="@Model.QualityOrderId" method="post">
+                    @Html.AntiForgeryToken()
+                    <input type="hidden" name="bypassNoSamples" value="true" />
+                    <div class="modal-body">
+                        <p class="mb-2">@bypassMsg</p>
+                        <p class="small text-muted mb-3">
+                            You can @bypassVerb.ToLower() anyway if this is intended — the listed
+                            material(s) will remain without samples on this Quality Order.
+                        </p>
+                        <label for="bypassReasonInput" class="form-label mb-1 fw-semibold">
+                            Reason <span class="text-danger">*</span>
+                        </label>
+                        <textarea id="bypassReasonInput" name="reason" class="form-control" rows="3"
+                                  required maxlength="500"
+                                  placeholder="e.g. Supplier sample not available; proceeding with QM approval">@bypassReason</textarea>
+                        <div class="form-text">Required. Recorded in this Quality Order's audit trail.</div>
+                    </div>
+                    <div class="modal-footer py-2">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">
+                            Cancel — add samples first
+                        </button>
+                        <button type="submit" class="btn btn-warning btn-sm">
+                            <i class="bi bi-exclamation-triangle me-1"></i>@bypassVerb anyway
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            bootstrap.Modal.getOrCreateInstance(document.getElementById('bypassWarnModal')).show();
+        });
+    </script>
+}
 
 <div class="modal fade" id="reopenModal" tabindex="-1">
     <div class="modal-dialog">
@@ -690,7 +792,7 @@
         if (del) {
             const sid = del.dataset.sampleId;
             const sno = del.dataset.sampleNo;
-            if (!confirm('Delete sample #' + sno + '?')) return;
+            if (!await appDialogs.confirm('Delete sample #' + sno + '?', { danger: true, okText: 'Delete' })) return;
             try {
                 const data = await postJson('@Url.Action("DeleteSampleAjax", "QualityOrders")', { sampleId: sid });
                 if (!data.ok) { showToast(data.error || 'Delete failed.', 'danger'); return; }
@@ -711,7 +813,7 @@
         if (clr) {
             const qoMatId = clr.dataset.qoMaterialId;
             const qoId    = clr.dataset.qualityOrderId;
-            if (!confirm('Clear the size override and restore the original size?')) return;
+            if (!await appDialogs.confirm('Clear the size override and restore the original size?', { okText: 'Clear override' })) return;
             try {
                 const data = await postJson('@Url.Action("ClearOverrideAjax", "QualityOrders")', { qoMaterialId: qoMatId, qualityOrderId: qoId });
                 if (!data.ok) { showToast('Clear failed.', 'danger'); return; }

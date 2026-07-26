@@ -27,12 +27,16 @@ public interface IQualityOrderService
 
     Task<(bool ok, string? error)> OpenAsync(long qualityOrderId, string user);
     /// <summary>V31 (2026-06-20): operator marks data entry complete; locks
-    /// the QO until a Supervisor finishes (Close) or cancel-submits.</summary>
-    Task<(bool ok, string? error)> SubmitAsync(long qualityOrderId, string user);
+    /// the QO until a Supervisor finishes (Close) or cancel-submits.
+    /// V38: <paramref name="bypassNoSamples"/> skips the "every material has
+    /// a sample" precondition after the user explicitly accepted the warning.</summary>
+    // reason is recorded when the QO is submitted while bypassing the
+    // "every material must have a sample" rule (mandatory in that case).
+    Task<(bool ok, string? error)> SubmitAsync(long qualityOrderId, string user, bool bypassNoSamples = false, string? reason = null);
     /// <summary>V31: Supervisor returns a Submitted QO to Open so the operator
     /// can fix mistakes. Reason optional but recorded in the audit log.</summary>
     Task<(bool ok, string? error)> CancelSubmitAsync(long qualityOrderId, string user, string? reason);
-    Task<(bool ok, string? error)> CloseAsync(long qualityOrderId, string user, string? reason);
+    Task<(bool ok, string? error)> CloseAsync(long qualityOrderId, string user, string? reason, bool bypassNoSamples = false);
     Task<(bool ok, string? error)> ReopenAsync(long qualityOrderId, string user, string? reason);
     Task<(bool ok, string? error)> CancelAsync(long qualityOrderId, string user, string? reason);
 

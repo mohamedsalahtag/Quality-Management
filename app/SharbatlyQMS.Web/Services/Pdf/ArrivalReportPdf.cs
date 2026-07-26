@@ -90,7 +90,7 @@ public static class ArrivalReportPdf
             col.Item().Element(c => RenderQaTable(c, new[]
             {
                 ("Locate and retrieve data logger from container", YN(d.Checklist.DataLoggerLocated)),
-                ("Record logger serial number",                    d.Checklist.DataLoggerSerial ?? ""),
+                ("Record logger serial number",                    JoinLines(d.Checklist.DataLoggerSerial)),
                 ("Take photo of the data logger",                  YN(d.Checklist.DataLoggerPhotoTaken)),
                 ("Handover logger to Quality / Logistics for downloading temperature data",
                                                                    YN(d.Checklist.LoggerHandedOver)),
@@ -177,15 +177,20 @@ public static class ArrivalReportPdf
                         ?? d.Arrival.CompletedAt
                         ?? d.Arrival.CreatedAt).ToLocalTime().ToString("MMMM d, yyyy");
 
-        var rows = new[]
+        var rows = new List<(string, string)>
         {
             ("Company Name",              d.Branding.CompanyName),
             ("Date",                      dateStr),
             ("Container / Airway Bill # :", d.Arrival.ContainerNo ?? ""),
             ("Carrier Name:",             d.Checklist.CarrierName ?? d.Arrival.VendorName ?? ""),
-            ("Seal Number",               d.Checklist.SealNo ?? "")
+            ("Seal Number",               JoinLines(d.Checklist.SealNo))
         };
-        RenderQaTable(container, rows);
+        // V36: admin-defined arrival fields print directly after Seal Number,
+        // in the catalog's sort order (only fields applicable to this
+        // arrival's material groups are in the list).
+        foreach (var cf in d.CustomFields)
+            rows.Add((cf.FieldName, cf.DisplayValue));
+        RenderQaTable(container, rows.ToArray());
     }
 
     private static void RenderSectionHeader(IContainer container, string text)
@@ -297,6 +302,13 @@ public static class ArrivalReportPdf
 
     private static string YN(bool? b) => b switch { true => "YES", false => "NO", _ => "—" };
 
+    /// <summary>Seal numbers and logger serials are stored newline-delimited
+    /// (up to 4 values). Present them on one line separated by " / ".</summary>
+    private static string JoinLines(string? s) => string.IsNullOrWhiteSpace(s)
+        ? ""
+        : string.Join(" / ", s.Split('\n', StringSplitOptions.RemoveEmptyEntries)
+                               .Select(x => x.Trim()).Where(x => x.Length > 0));
+
     // =================================================================== appendix
     private static void RenderAppendix(QuestPDF.Fluent.PageDescriptor page, ArrivalReportData d)
     {
@@ -373,8 +385,9 @@ public static class ArrivalReportPdf
                     {
                         try
                         {
-                            if (d.ThumbCover) box.Image(bytes).FitUnproportionally();
-                            else              box.AlignCenter().AlignMiddle().Image(bytes).FitArea();
+                            // Embed our high-quality JPEG as-is (no 72-DPI re-raster).
+                            if (d.ThumbCover) box.Image(bytes).UseOriginalImage().FitUnproportionally();
+                            else              box.AlignCenter().AlignMiddle().Image(bytes).UseOriginalImage().FitArea();
                         }
                         catch
                         {

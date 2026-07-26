@@ -1,0 +1,81 @@
+@using SharbatlyQMS.Web.Services
+@using SharbatlyQMS.Web.ViewModels
+@model DocumentListVm
+@{
+    var returnUrl = Context.Request.Path + Context.Request.QueryString;
+    // Keep the picker filter and the server-side whitelist in DocumentService
+    // in step; the accept attribute is a convenience, never the enforcement.
+    var accept = string.Join(",", DocumentService.AllowedExtensions.OrderBy(e => e));
+}
+
+<div class="document-list" data-ajax="@(Model.Ajax ? "true" : "false")"
+     data-owner-type="@Model.OwnerType" data-owner-id="@Model.OwnerId">
+
+@if (Model.Editable)
+{
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-cloud-upload me-1"></i>Upload documents</div>
+        <div class="card-body">
+            <form asp-controller="Documents" asp-action="Upload" method="post"
+                  enctype="multipart/form-data" class="dl-upload-form">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="ownerType" value="@Model.OwnerType" />
+                <input type="hidden" name="ownerId"   value="@Model.OwnerId" />
+                <input type="hidden" name="returnUrl" value="@returnUrl" />
+                <div class="row g-2 align-items-end">
+                    @if (Model.Categories.Length > 0)
+                    {
+                        <div class="col-md-4">
+                            <label class="form-label mb-1" for="dl-category-@Model.OwnerId">Category</label>
+                            <select name="category" id="dl-category-@Model.OwnerId" class="form-select" required>
+                                @foreach (var cat in Model.Categories)
+                                {
+                                    <option value="@cat">@cat</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label mb-1" for="dl-files-@Model.OwnerId">Files</label>
+                            <input type="file" name="files" id="dl-files-@Model.OwnerId"
+                                   class="form-control" multiple accept="@accept" required />
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="bi bi-cloud-upload me-1"></i>Upload
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        @* No categories configured — post an empty category; the
+                           server coalesces it to "" (the column is NOT NULL). *@
+                        <input type="hidden" name="category" value="" />
+                        <div class="col-md-10">
+                            <label class="form-label mb-1" for="dl-files-@Model.OwnerId">Files</label>
+                            <input type="file" name="files" id="dl-files-@Model.OwnerId"
+                                   class="form-control" multiple accept="@accept" required />
+                        </div>
+                        <div class="col-md-2">
+                            <button type="submit" class="btn btn-primary w-100">
+                                <i class="bi bi-cloud-upload me-1"></i>Upload
+                            </button>
+                        </div>
+                    }
+                </div>
+                <small class="text-muted d-block mt-1">
+                    PDF / Word / Excel / CSV / TXT / Outlook msg / ZIP. Max 25 MB each. Multiple files supported.
+                </small>
+            </form>
+        </div>
+    </div>
+}
+
+<div class="dl-grid">
+    <partial name="_DocumentListGrid" model="Model" />
+</div>
+
+</div>
+
+@* AJAX wiring lives in /js/document-list-ajax.js (loaded once in _Layout).
+   Inline <script> here would not execute if the partial were ever injected
+   via innerHTML -- the same trap the image gallery hit in V31. *@

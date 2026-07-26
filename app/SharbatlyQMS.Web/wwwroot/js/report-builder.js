@@ -23,7 +23,7 @@
         loadedId: null        // saved perspective id when editing
     };
     var palette = { statics: [], defects: [], readings: [], sampleHeaders: [], materialHeaders: [] };
-    var calcSeq = 0, blankSeq = 0;
+    var calcSeq = 0, blankSeq = 0, totalSeq = 0;
 
     // ---- helpers -----------------------------------------------------------
     function $(id) { return document.getElementById(id); }
@@ -43,7 +43,7 @@
         el.textContent = msg || "";
         el.className = "small ms-2 " + (isErr ? "text-danger" : "text-muted");
     }
-    var NUMERIC_KINDS = { defect: true, calc: true };
+    var NUMERIC_KINDS = { defect: true, calc: true, total: true };
     function isNumeric(col) {
         if (NUMERIC_KINDS[col.kind]) return true;
         if (col.kind === "static") {
@@ -110,28 +110,70 @@
 
         host.appendChild(groupTitle("Arrival / PO / Shipment / Sample fields"));
         palette.statics.forEach(function (f) {
-            host.appendChild(paletteItem(f.label, f.numeric ? "#" : "", { key: f.key, kind: "static", label: f.label }));
+            host.appendChild(paletteItem(f.label, f.numeric ? "#" : "", { key: f.key, kind: "static", label: f.label, numeric: !!f.numeric }));
         });
 
         host.appendChild(groupTitle("Defects" + (state.materialGroup ? " — " + state.materialGroup : " (pick a group)")));
         palette.defects.forEach(function (d) {
-            host.appendChild(paletteItem(d.name, d.category, { key: "d:" + d.id, kind: "defect", label: d.name, defectValue: "count" }));
+            host.appendChild(paletteItem(d.name, d.category, { key: "d:" + d.id, kind: "defect", label: d.name, defectValue: "count", numeric: true }));
         });
 
         host.appendChild(groupTitle("Reading types"));
         palette.readings.forEach(function (r) {
-            host.appendChild(paletteItem(r.name, r.unit || r.valueKind, { key: "r:" + r.code, kind: "reading", label: r.name }));
+            host.appendChild(paletteItem(r.name, r.unit || r.valueKind, { key: "r:" + r.code, kind: "reading", label: r.name, numeric: r.valueKind === "Numeric" }));
         });
 
         host.appendChild(groupTitle("Sample header fields"));
         palette.sampleHeaders.forEach(function (h) {
-            host.appendChild(paletteItem(h.name, h.unit || "", { key: "sh:" + h.code, kind: "sampleHeader", label: h.name }));
+            host.appendChild(paletteItem(h.name, h.unit || "", { key: "sh:" + h.code, kind: "sampleHeader", label: h.name, numeric: h.valueKind === "Numeric" }));
         });
 
         host.appendChild(groupTitle("Material header fields"));
         palette.materialHeaders.forEach(function (h) {
-            host.appendChild(paletteItem(h.name, h.unit || "", { key: "mh:" + h.code, kind: "materialHeader", label: h.name }));
+            host.appendChild(paletteItem(h.name, h.unit || "", { key: "mh:" + h.code, kind: "materialHeader", label: h.name, numeric: h.valueKind === "Numeric" }));
         });
+    }
+
+    // Label shown for a palette key (used by Total member chips + sum preview).
+    function labelForKey(key) {
+        if (!key) return "";
+        if (key.indexOf("d:") === 0)  { var d = palette.defects.find(function (x) { return String(x.id) === key.slice(2); }); return d ? d.name : key; }
+        if (key.indexOf("sh:") === 0) { var sh = palette.sampleHeaders.find(function (x) { return x.code === key.slice(3); }); return sh ? sh.name : key; }
+        if (key.indexOf("mh:") === 0) { var mh = palette.materialHeaders.find(function (x) { return x.code === key.slice(3); }); return mh ? mh.name : key; }
+        if (key.indexOf("r:") === 0)  { var r = palette.readings.find(function (x) { return x.code === key.slice(2); }); return r ? r.name : key; }
+        var s = palette.statics.find(function (x) { return x.key === key; });
+        return s ? s.label : key;
+    }
+
+    // Ensure a dragged field exists as a data column BEFORE the given index (so a
+    // calc formula can reference it by label). Returns the column's label.
+    function ensureFieldColumn(desc, beforeIdx) {
+        var existing = state.columns.find(function (c) { return c.key === desc.key && c.kind === desc.kind; });
+        if (existing) return existing.label || existing.key;
+        var col = {
+            key: desc.key, kind: desc.kind, label: desc.label || desc.key,
+            placement: "column",
+            defectValue: desc.kind === "defect" ? "count" : undefined,
+            total: null
+        };
+        var at = (typeof beforeIdx === "number") ? beforeIdx : state.columns.length;
+        state.columns.splice(at, 0, col);
+        return col.label;
+    }
+
+    // Append text to a calc formula and re-validate, keeping focus in the box.
+    function appendFormula(fx, col, text) {
+        col.formula = (col.formula || "") + text;
+        fx.value = col.formula;
+        validateFormula(fx, col);
+        fx.focus();
+    }
+
+    // Parse the drag payload (a palette descriptor) from a drop event.
+    function readDesc(e) {
+        var raw = e.dataTransfer.getData("text/plain");
+        if (!raw) return null;
+        try { return JSON.parse(raw); } catch (_) { return null; }
     }
 
     // ---- layout ------------------------------------------------------------
@@ -141,7 +183,8 @@
             placement: "column",
             defectValue: desc.kind === "defect" ? "count" : undefined,
             total: null,
-            formula: desc.kind === "calc" ? "" : undefined
+            formula: desc.kind === "calc" ? "" : undefined,
+            members: desc.kind === "total" ? [] : undefined
         };
         if (typeof atIndex === "number") state.columns.splice(atIndex, 0, col);
         else state.columns.push(col);
@@ -168,7 +211,7 @@
 
         // handle + kind badge
         var kindBadge = { static: "field", defect: "defect", reading: "reading",
-            sampleHeader: "s.header", materialHeader: "m.header", calc: "calc", empty: "empty" }[col.kind] || col.kind;
+            sampleHeader: "s.header", materialHeader: "m.header", calc: "calc", total: "total", empty: "empty" }[col.kind] || col.kind;
 
         var html = '<i class="bi bi-grip-vertical rb-handle"></i>' +
             '<span class="rb-kind">' + esc(kindBadge) + '</span>' +
@@ -197,9 +240,43 @@
                 '</select>';
         }
 
-        // calc formula
+        // calc: visual builder (drag fields + operator buttons + value) over the
+        // formula string. The raw formula stays visible/editable for power users.
         if (col.kind === "calc") {
-            html += '<input class="rb-formula form-control form-control-sm" placeholder="e.g. ([Bruising] + [Decay]) / [Sample Size] * 100" value="' + esc(col.formula || "") + '" />';
+            html += '<div class="rb-calc">' +
+                '<div class="rb-calc-tools">' +
+                    '<span class="rb-calc-lbl">Build:</span>' +
+                    '<button type="button" class="rb-op" data-op=" + ">+</button>' +
+                    '<button type="button" class="rb-op" data-op=" - ">&minus;</button>' +
+                    '<button type="button" class="rb-op" data-op=" * ">&times;</button>' +
+                    '<button type="button" class="rb-op" data-op=" / ">&divide;</button>' +
+                    '<button type="button" class="rb-op" data-op="(">(</button>' +
+                    '<button type="button" class="rb-op" data-op=")">)</button>' +
+                    '<input type="number" step="any" class="rb-numval form-control form-control-sm" placeholder="value" />' +
+                    '<button type="button" class="rb-addnum">+ value</button>' +
+                    '<button type="button" class="rb-clearf" title="Clear formula">clear</button>' +
+                '</div>' +
+                '<input class="rb-formula form-control form-control-sm" placeholder="drag a field here, then use the operators…" value="' + esc(col.formula || "") + '" />' +
+                '<div class="rb-calc-hint">Drag fields from the palette onto the box above and combine them with the operators, or type a value. Dragged fields are added as columns so they can be referenced.</div>' +
+            '</div>';
+        }
+
+        // total: drop value fields to sum. Members are stored by palette key and
+        // summed server-side, so they need not also be shown as columns.
+        if (col.kind === "total") {
+            var members = col.members || [];
+            var chips = members.map(function (k, mi) {
+                return '<span class="rb-member">' + esc(labelForKey(k)) +
+                    '<i class="bi bi-x rb-member-x" data-mi="' + mi + '" title="Remove"></i></span>';
+            }).join("");
+            html += '<div class="rb-total-build">' +
+                '<div class="rb-total-drop">' +
+                    (chips || '<span class="rb-total-empty">drag value fields here to sum…</span>') +
+                '</div>' +
+                (members.length
+                    ? '<div class="rb-total-sum">= ' + members.map(function (k) { return esc(labelForKey(k)); }).join(" + ") + '</div>'
+                    : '') +
+            '</div>';
         }
 
         html += '<i class="bi bi-x-circle rb-x" title="Remove"></i>';
@@ -215,7 +292,64 @@
         var tot = el.querySelector(".rb-total");
         if (tot) tot.addEventListener("change", function (e) { col.total = e.target.value || null; });
         var fx = el.querySelector(".rb-formula");
-        if (fx) fx.addEventListener("input", function (e) { col.formula = e.target.value; validateFormula(fx, col); });
+        if (fx) {
+            fx.addEventListener("input", function (e) { col.formula = e.target.value; validateFormula(fx, col); });
+            // Operator buttons + value insert append to the formula in place.
+            el.querySelectorAll(".rb-op").forEach(function (b) {
+                b.addEventListener("click", function (e) { e.preventDefault(); appendFormula(fx, col, b.getAttribute("data-op")); });
+            });
+            var addnum = el.querySelector(".rb-addnum");
+            if (addnum) addnum.addEventListener("click", function (e) {
+                e.preventDefault();
+                var box = el.querySelector(".rb-numval");
+                var v = (box && box.value !== "") ? box.value : null;
+                if (v === null) { status("Type a value first.", true); return; }
+                appendFormula(fx, col, String(v));
+                if (box) box.value = "";
+            });
+            var clearf = el.querySelector(".rb-clearf");
+            if (clearf) clearf.addEventListener("click", function (e) {
+                e.preventDefault(); col.formula = ""; fx.value = ""; validateFormula(fx, col); fx.focus();
+            });
+            // Drop a palette field onto the formula box → add it as a column and
+            // insert its [Label] reference.
+            fx.addEventListener("dragover", function (e) { e.preventDefault(); e.stopPropagation(); fx.classList.add("rb-drop-hot"); });
+            fx.addEventListener("dragleave", function () { fx.classList.remove("rb-drop-hot"); });
+            fx.addEventListener("drop", function (e) {
+                e.preventDefault(); e.stopPropagation(); fx.classList.remove("rb-drop-hot");
+                var desc = readDesc(e);
+                if (!desc || !desc.key) return;
+                if (desc.kind === "calc" || desc.kind === "total" || desc.kind === "empty") {
+                    status("Drag a data field (not another calc/total) into a formula.", true); return;
+                }
+                var label = ensureFieldColumn(desc, idx);       // may add a column before this one
+                col.formula = (col.formula || "") + (col.formula ? " " : "") + "[" + label + "]";
+                renderLayout();
+            });
+        }
+
+        // total: member drop zone + remove
+        var tdrop = el.querySelector(".rb-total-drop");
+        if (tdrop) {
+            tdrop.addEventListener("dragover", function (e) { e.preventDefault(); e.stopPropagation(); tdrop.classList.add("rb-drop-hot"); });
+            tdrop.addEventListener("dragleave", function () { tdrop.classList.remove("rb-drop-hot"); });
+            tdrop.addEventListener("drop", function (e) {
+                e.preventDefault(); e.stopPropagation(); tdrop.classList.remove("rb-drop-hot");
+                var desc = readDesc(e);
+                if (!desc || !desc.key) return;
+                if (!desc.numeric) { status("Only numeric fields can be totaled.", true); return; }
+                col.members = col.members || [];
+                if (col.members.indexOf(desc.key) === -1) col.members.push(desc.key);
+                renderLayout();
+            });
+            el.querySelectorAll(".rb-member-x").forEach(function (x) {
+                x.addEventListener("click", function () {
+                    var mi = parseInt(x.getAttribute("data-mi"), 10);
+                    if (!isNaN(mi)) { col.members.splice(mi, 1); renderLayout(); }
+                });
+            });
+        }
+
         el.querySelector(".rb-x").addEventListener("click", function () {
             state.columns.splice(idx, 1); renderLayout();
         });
@@ -281,6 +415,10 @@
     $("rbAddCalc").addEventListener("click", function (e) {
         e.preventDefault();
         addColumn({ key: "calc:" + (++calcSeq), kind: "calc", label: "Calculated " + calcSeq });
+    });
+    $("rbAddTotal").addEventListener("click", function (e) {
+        e.preventDefault();
+        addColumn({ key: "total:" + (++totalSeq), kind: "total", label: "Total " + totalSeq });
     });
     $("rbAddEmpty").addEventListener("click", function (e) {
         e.preventDefault();

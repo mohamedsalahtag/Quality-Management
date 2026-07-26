@@ -30,6 +30,17 @@ public interface IArrivalService
     Task<ArrivalChecklist?> GetChecklistAsync(long arrivalId);
     Task<ShipmentSnapshot?> GetShipmentAsync(long arrivalId);
 
+    /// <summary>V36: the active custom fields applicable to this arrival
+    /// (definition's material group is present among the arrival's line
+    /// items), each carrying this arrival's stored value when one exists.</summary>
+    Task<IReadOnlyList<ArrivalCustomField>> GetCustomFieldsAsync(long arrivalId);
+
+    /// <summary>V36: upsert the custom-field values posted from the Details
+    /// page. Only fields applicable to the arrival are accepted; blank
+    /// values delete the stored row. Raw strings are parsed per the field's
+    /// value kind.</summary>
+    Task SaveCustomFieldValuesAsync(long arrivalId, IReadOnlyDictionary<int, string?> rawValues, string updatedBy);
+
     Task<long> CreateFromSapAsync(IReadOnlyList<SapShipmentRow> rows, string createdBy);
     Task SaveChecklistAsync(ArrivalChecklist cl, string updatedBy);
     Task SaveShipmentAsync(ShipmentSnapshot ss, string updatedBy);

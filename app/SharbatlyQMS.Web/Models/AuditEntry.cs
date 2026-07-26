@@ -80,6 +80,7 @@ public static class EntityTypes
     public const string DefectCategory       = "DefectCategory";
     public const string ReadingType          = "ReadingType";
     public const string SampleHeaderField    = "SampleHeaderField";
+    public const string ArrivalField         = "ArrivalField";
     public const string System               = "System";
 
     // Note: material-size override events are recorded under
@@ -104,7 +105,7 @@ public static class EntityTypes
     public static readonly string[] Admin =
     {
         User, Configuration, DefectCatalog, DefectCategory,
-        ReadingType, SampleHeaderField, System
+        ReadingType, SampleHeaderField, ArrivalField, System
     };
 
     public static bool IsValid(string? type) =>

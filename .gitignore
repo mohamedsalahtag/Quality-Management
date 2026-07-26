@@ -27,3 +27,12 @@ smoketest.log
 **/appsettings.Production.json
 **/appsettings.Local.json
 **/appsettings.*.local.json
+# Backups of the above still carry the same secrets — never commit them.
+**/appsettings.*.pre-*
+*.pre-mis-backup
+
+# Help docs -- generated bundles. Source hubs + screenshots stay tracked.
+docs/help/output/
+docs/help/_capture_details.py
+docs/help/_verify_xlsx.py
+docs/help/_verify*.xlsx

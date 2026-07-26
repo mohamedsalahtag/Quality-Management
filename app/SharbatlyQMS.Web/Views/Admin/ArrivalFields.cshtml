@@ -1,0 +1,161 @@
+@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.Services
+@model IReadOnlyList<ArrivalCustomField>
+@{
+    ViewData["Title"] = "Arrival Fields";
+    var groups = ViewBag.MaterialGroups as IReadOnlyList<MaraGroup> ?? new List<MaraGroup>();
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h1 class="h3 mb-0">
+        <i class="bi bi-input-cursor-text me-1"></i>Arrival Fields
+        <small class="text-muted fs-6 fw-normal ms-2">
+            Extra fields on an arrival, shown only when the arrival contains the linked material group.
+            The value also prints on the Arrival Checklist PDF after Seal Number.
+        </small>
+    </h1>
+    <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#afModal"
+            data-mode="create">
+        <i class="bi bi-plus-circle me-1"></i>Add arrival field
+    </button>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="50">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:1%"></th>
+                    <th>Name</th>
+                    <th>Kind</th>
+                    <th>Material group</th>
+                    <th>Active</th>
+                    <th class="text-end" style="width: 120px">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var f in Model)
+                {
+                    <tr>
+                        <td class="text-muted small">@f.SortOrder</td>
+                        <td>@f.FieldName</td>
+                        <td>@f.ValueKind</td>
+                        <td><span class="badge bg-info text-dark">@f.MaterialGroup</span></td>
+                        <td>@(f.IsActive ? "Yes" : "No")</td>
+                        <td class="text-end text-nowrap">
+                            <button type="button" class="btn btn-sm btn-outline-secondary"
+                                    data-bs-toggle="modal" data-bs-target="#afModal"
+                                    data-mode="edit"
+                                    data-id="@f.FieldId"
+                                    data-name="@f.FieldName"
+                                    data-kind="@f.ValueKind"
+                                    data-group="@f.MaterialGroup"
+                                    data-sort="@f.SortOrder"
+                                    data-active="@f.IsActive.ToString().ToLower()"
+                                    title="Edit">
+                                <i class="bi bi-pencil"></i>
+                            </button>
+                            @{
+                                var confirmMsg = f.IsInUse
+                                    ? $"'{f.FieldName}' has stored values on at least one arrival. Deleting it will permanently REMOVE those values from every arrival. This cannot be undone. Continue?"
+                                    : $"Delete arrival field '{f.FieldName}'? This cannot be undone.";
+                            }
+                            <form asp-action="DeleteArrivalField" method="post" class="d-inline"
+                                  data-confirm="@confirmMsg" data-confirm-danger data-confirm-ok="Delete">
+                                @Html.AntiForgeryToken()
+                                <input type="hidden" name="fieldId" value="@f.FieldId" />
+                                <button type="submit"
+                                        class="btn btn-sm @(f.IsInUse ? "btn-danger" : "btn-outline-danger")"
+                                        title="@(f.IsInUse ? "Delete (will wipe stored values on all arrivals)" : "Delete")">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+                @if (Model.Count == 0)
+                {
+                    <tr><td colspan="6" class="text-center text-muted small py-3">No arrival fields yet. Click <strong>Add arrival field</strong> to create one.</td></tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="modal fade" id="afModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form asp-action="SaveArrivalField" method="post" class="modal-content">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="fieldId" id="af-id" value="0" />
+            <div class="modal-header"><h5 class="modal-title" id="af-title">Add arrival field</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+            <div class="modal-body">
+                <div class="row g-2">
+                    <div class="col-md-8"><label class="form-label">Name *</label>
+                        <input name="fieldName" id="af-name" class="form-control" required maxlength="80" />
+                    </div>
+                    <div class="col-md-4"><label class="form-label">Sort order</label>
+                        <input name="sortOrder" id="af-sort" type="number" class="form-control" value="500" /></div>
+                    <div class="col-md-6"><label class="form-label">Value kind *</label>
+                        <select name="valueKind" id="af-kind" class="form-select" required>
+                            <option value="Text">Text — free text input</option>
+                            <option value="Numeric">Numeric — number input</option>
+                            <option value="Date">Date — date picker</option>
+                            <option value="YesNo">Yes / No — dropdown</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6"><label class="form-label">Material group *</label>
+                        <select name="materialGroup" id="af-group" class="form-select" required>
+                            <option value="">(choose group…)</option>
+                            @foreach (var g in groups)
+                            {
+                                <option value="@g.Code">@g.Code@(string.IsNullOrWhiteSpace(g.Name) ? "" : $" — {g.Name}")</option>
+                            }
+                        </select>
+                        <small class="text-muted">The field only appears on arrivals whose materials contain this group.</small>
+                    </div>
+                    <div class="col-12"><div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" name="isActive" id="af-active" value="true" checked />
+                        <label class="form-check-label" for="af-active">Active</label>
+                    </div></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@section Scripts {
+<script>
+    document.getElementById('afModal').addEventListener('show.bs.modal', function (e) {
+        var b = e.relatedTarget;
+        if (b.dataset.mode === 'edit') {
+            document.getElementById('af-title').textContent = 'Edit arrival field';
+            document.getElementById('af-id').value    = b.dataset.id;
+            document.getElementById('af-name').value  = b.dataset.name;
+            document.getElementById('af-kind').value  = b.dataset.kind;
+            document.getElementById('af-sort').value  = b.dataset.sort;
+            document.getElementById('af-active').checked = b.dataset.active === 'true';
+            var grp = document.getElementById('af-group');
+            grp.value = b.dataset.group;
+            // The stored group may be missing from the MARA list (e.g. cache
+            // cold or group retired) — keep it selectable instead of blanking.
+            if (grp.value !== b.dataset.group) {
+                var opt = new Option(b.dataset.group + ' — (not in current list)', b.dataset.group, true, true);
+                grp.appendChild(opt);
+            }
+        } else {
+            document.getElementById('af-title').textContent = 'Add arrival field';
+            document.getElementById('af-id').value = 0;
+            document.getElementById('af-name').value = '';
+            document.getElementById('af-kind').value = 'Text';
+            document.getElementById('af-sort').value = '500';
+            document.getElementById('af-group').value = '';
+            document.getElementById('af-active').checked = true;
+        }
+    });
+</script>
+}

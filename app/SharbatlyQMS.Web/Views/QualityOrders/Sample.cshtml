@@ -11,6 +11,8 @@
     var existingDefs  = ViewBag.ExistingDefects  as IReadOnlyList<SampleDefect>  ?? new List<SampleDefect>();
     var headerFields  = ViewBag.HeaderFields     as IReadOnlyList<SampleHeaderField> ?? new List<SampleHeaderField>();
     var existingHdr   = ViewBag.ExistingHeader   as IReadOnlyList<SampleHeaderValue> ?? new List<SampleHeaderValue>();
+    var matFields     = ViewBag.MaterialHeaderFields as IReadOnlyList<SampleHeaderField>  ?? new List<SampleHeaderField>();
+    var matValues     = ViewBag.MaterialHeaderValues as IReadOnlyList<MaterialHeaderValue> ?? new List<MaterialHeaderValue>();
     var categories    = ViewBag.Categories as IReadOnlyList<DefectCategory> ?? new List<DefectCategory>();
     ViewData["Title"] = $"Sample #{Model.SampleNo}";
     var editable = qo.StatusCode == QualityOrderStatus.Open;
@@ -27,6 +29,8 @@
         ExistingDefects = existingDefs,
         HeaderFields = headerFields,
         ExistingHeader = existingHdr,
+        MaterialHeaderFields = matFields,
+        MaterialHeaderValues = matValues,
         Categories = categories,
         Editable = editable
     };
@@ -46,7 +50,7 @@
         </a>
         @if (editable)
         {
-            <form asp-action="DeleteSample" method="post" onsubmit="return confirm('Delete this sample?');">
+            <form asp-action="DeleteSample" method="post" data-confirm="Delete this sample?" data-confirm-danger data-confirm-ok="Delete">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="sampleId" value="@Model.SampleId" />
                 <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash me-1"></i>Delete sample</button>

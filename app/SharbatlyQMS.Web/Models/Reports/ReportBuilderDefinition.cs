@@ -55,6 +55,11 @@ public class ReportColumn
 
     /// <summary>Calculated columns only: the arithmetic formula.</summary>
     public string? Formula { get; set; }
+
+    /// <summary>Total columns only: the labels of the value columns to sum, one
+    /// per dragged-in field. The row value is the sum of those columns' numeric
+    /// values (missing/blank members are skipped).</summary>
+    public List<string>? Members { get; set; }
 }
 
 /// <summary>Body for export / preview: a design (inline or by saved id) plus
@@ -82,6 +87,7 @@ public static class ColumnKinds
     public const string SampleHeader   = "sampleHeader";
     public const string MaterialHeader = "materialHeader";
     public const string Calc           = "calc";
+    public const string Total          = "total";
     public const string Empty          = "empty";
 }
 

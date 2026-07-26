@@ -194,6 +194,7 @@
                 <th>Container</th>
                 <th>BOL</th>
                 <th>PO</th>
+                <th class="text-end">PO Qty</th>
                 <th>PO Date</th>
                 <th>Shipping Date</th>
                 <th>Arrival Date</th>
@@ -233,6 +234,7 @@
                     <td>@r.ContainerNo</td>
                     <td>@r.BolNo</td>
                     <td>@r.Ebeln</td>
+                    <td class="text-end">@(r.ArrivalItemQuantity?.ToString("0.###")) <small class="text-muted">@r.ArrivalItemUom</small></td>
                     <td>@r.PoDate?.ToString("yyyy-MM-dd")</td>
                     <td>@r.ShippingDate?.ToString("yyyy-MM-dd")</td>
                     <td>@r.ArrivalDate?.ToString("yyyy-MM-dd")</td>
@@ -258,7 +260,7 @@
             }
             @if (shown == 0)
             {
-                <tr><td colspan="26" class="text-center text-muted py-3">
+                <tr><td colspan="27" class="text-center text-muted py-3">
                     No non-zero defect rows for this filter. Try widening the PO-date range or
                     clearing one of the filters — the Excel export will still include zero-value rows.
                 </td></tr>

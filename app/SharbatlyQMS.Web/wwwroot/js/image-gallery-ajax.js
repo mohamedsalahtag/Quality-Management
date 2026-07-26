@@ -17,6 +17,11 @@
 // endpoint to return JSON or stitches user data without encoding, replace
 // these assignments with a sanitised template build.
 (function () {
+    // V38: styled popup when dialogs.js is loaded; native alert as fallback.
+    function uiAlert(msg) {
+        if (window.appDialogs) window.appDialogs.alert(msg, { kind: 'error' });
+        else alert(msg);
+    }
     function ajaxGalleryOf(el) {
         var g = el.closest && el.closest('.image-gallery');
         return (g && g.getAttribute('data-ajax') === 'true') ? g : null;
@@ -65,7 +70,7 @@
             if (grid) grid.innerHTML = html;
             syncSampleCounterFromGallery(gallery);
         })
-        .catch(function () { alert('Upload failed. Please try again.'); });
+        .catch(function () { uiAlert('Upload failed. Please try again.'); });
     }
 
     document.addEventListener('submit', function (e) {
@@ -98,7 +103,7 @@
             syncSampleCounterFromGallery(gallery);
         })
         .catch(function () {
-            alert(isUpload ? 'Upload failed. Please try again.' : 'Could not remove the image.');
+            uiAlert(isUpload ? 'Upload failed. Please try again.' : 'Could not remove the image.');
         })
         .finally(function () { if (btn) btn.disabled = false; });
     });
