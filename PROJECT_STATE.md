@@ -213,6 +213,10 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-07-27 (QO report: hide PUC/Grower/Lot/Date Code from the group SUMMARY only)
+
+Follow-up to the un-hide below. Those readings are wanted on each per-sample card but NOT in the page-1 group **summary** roll-up (they're identifiers, not measurements). Added `HiddenSummaryOnlyFields` (PUC, GROWER, LOTNO/LOTNUMBER, DATECODE) + `IsHiddenSummaryField`, applied only to `RenderGroupSummary`'s readings filter. Per-sample readings still use `IsHiddenReportField`, so they keep showing there. Pallet No was NOT included (user listed only those four).
+
 ### 2026-07-27 (QO report: show Grower/Pallet/Date Code/Lot/PUC readings again)
 
 The QO PDF report had a hardcoded `HiddenReportFields` set (`QualityReportPdf`) that suppressed **Grower, Pallet No, Date Code, Lot No, PUC** (added 2026-07-25). The user configures these as **reading types** and entered values, but they never printed. **Reversed** for those five — the set now only hides **Packaging Material**. Affects both the per-sample "Sample Readings" grid and the group readings aggregate (both use `IsHiddenReportField`).

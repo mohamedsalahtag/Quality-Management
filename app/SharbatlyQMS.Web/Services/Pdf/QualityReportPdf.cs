@@ -440,7 +440,7 @@ public static class QualityReportPdf
             // Material, ...) so the header hides when nothing is left.
             var visibleReadings = g.Readings
                 .Where(r => !string.Equals(r.DisplayMode, "formula", StringComparison.OrdinalIgnoreCase))
-                .Where(r => !IsHiddenReportField(r.Name))
+                .Where(r => !IsHiddenSummaryField(r.Name))
                 .ToList();
             if (visibleReadings.Count > 0)
             {
@@ -1009,6 +1009,17 @@ public static class QualityReportPdf
         "PACKAGINGMATERIAL", "PACKINGMATERIAL",
     };
 
+    // 2026-07-27: fields hidden from the page-1 group SUMMARY readings only (they
+    // are identifiers, not measurements, so a group roll-up is meaningless), but
+    // still shown on each per-sample card. This is on TOP of HiddenReportFields.
+    private static readonly HashSet<string> HiddenSummaryOnlyFields = new(StringComparer.Ordinal)
+    {
+        "PUC",
+        "GROWER",
+        "LOTNO", "LOTNUMBER",
+        "DATECODE",
+    };
+
     /// <summary>Uppercase, strip everything that isn't A-Z/0-9, so "Pallet No.",
     /// "Pallet No" and "PALLET_NO" all compare equal.</summary>
     private static string NormalizeFieldName(string? name)
@@ -1016,6 +1027,14 @@ public static class QualityReportPdf
 
     private static bool IsHiddenReportField(string? name)
         => HiddenReportFields.Contains(NormalizeFieldName(name));
+
+    /// <summary>Hidden from the group summary readings (identifiers like PUC /
+    /// Grower / Lot No / Date Code) — but still shown per sample.</summary>
+    private static bool IsHiddenSummaryField(string? name)
+    {
+        var n = NormalizeFieldName(name);
+        return HiddenReportFields.Contains(n) || HiddenSummaryOnlyFields.Contains(n);
+    }
 
     private static string? JoinTemps(SharbatlyQMS.Web.Models.ArrivalChecklist? cl)
     {
