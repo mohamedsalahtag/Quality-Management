@@ -6,6 +6,10 @@ obj/
 # directly under deploy/ stay tracked; only the compiled bundle is ignored.
 deploy/SharbatlyQMS/
 
+# Runtime data store (uploaded photos + documents, several GB) — production
+# data that lives on disk, never in git.
+/data/
+
 # Data-protection keys (sensitive — auth cookies break if leaked)
 keys/
 
