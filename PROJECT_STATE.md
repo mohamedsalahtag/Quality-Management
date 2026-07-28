@@ -213,6 +213,10 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-07-27 (QO report: show Grower/Pallet/Date Code/Lot/PUC readings again)
+
+The QO PDF report had a hardcoded `HiddenReportFields` set (`QualityReportPdf`) that suppressed **Grower, Pallet No, Date Code, Lot No, PUC** (added 2026-07-25). The user configures these as **reading types** and entered values, but they never printed. **Reversed** for those five — the set now only hides **Packaging Material**. Affects both the per-sample "Sample Readings" grid and the group readings aggregate (both use `IsHiddenReportField`).
+
 ### 2026-07-26 (PDF image quality + upload compression + tablet touch ergonomics)
 
 - **Sharper photos in the QO/Arrival PDF reports.** Two causes were fixed: (1) the report pre-shrank each photo to only 2× its display box (`ReportsController.TryPreprocess`) at JPEG q80 — now **4×** the box at **q90**; (2) QuestPDF was re-rasterising embedded images down to 72 DPI — the report image embeds now call **`.UseOriginalImage()`** (both `QualityReportPdf` and `ArrivalReportPdf`) so our high-res JPEG is embedded as-is. Net: same printed size, ~4× the pixels, and it stays crisp when the reader zooms the PDF. (Interactive tap-to-zoom isn't a PDF capability; zooming the viewer is the practical equivalent now that the images are hi-res.)

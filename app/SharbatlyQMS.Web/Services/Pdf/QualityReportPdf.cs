@@ -995,20 +995,17 @@ public static class QualityReportPdf
     private static string? TimeBarDays(DateTime? basis, DateTime finished)
         => basis == null ? null : (finished.Date - basis.Value.Date).Days.ToString();
 
-    // Fields the QO report must NOT show, per the 2026-07-25 request. These
-    // exist in the app as admin-configured header fields and/or reading types
-    // and are still COLLECTED during inspection -- they are only suppressed on
-    // the printed report. Matching is by a normalised name so every spelling
-    // variant of the same field is caught: the header field "Pallet No", the
-    // reading type "Pallet No." and the code "PALLET_NO" all reduce to
-    // "PALLETNO". To show one again, remove its normalised form here.
+    // Fields the QO report must NOT show. Matching is by a normalised name so
+    // every spelling variant of the same field is caught: the header field
+    // "Pallet No", the reading type "Pallet No." and the code "PALLET_NO" all
+    // reduce to "PALLETNO". To show one again, remove its normalised form here.
+    //
+    // 2026-07-27: Grower / Pallet No / Date Code / Lot No / PUC were UN-hidden at
+    // the user's request — they configure these as reading types and want them
+    // to print in the sample Readings section. (They were hidden on 2026-07-25;
+    // that is now reversed for those fields.) Packaging Material stays hidden.
     private static readonly HashSet<string> HiddenReportFields = new(StringComparer.Ordinal)
     {
-        "GROWER",
-        "PALLETNO", "PALLETNUMBER",
-        "DATECODE",
-        "LOTNO", "LOTNUMBER",
-        "PUC",
         "PACKAGINGMATERIAL", "PACKINGMATERIAL",
     };
 
