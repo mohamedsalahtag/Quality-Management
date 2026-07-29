@@ -26,6 +26,11 @@
     above every defect list — both in the page-1 summary and on each individual sample.
     Leave a group at <em>@ReportUnit.DefaultLabel</em> to keep the default.
     Percentages and totals are unaffected; this is a label only.
+    <br />
+    <span class="text-muted">
+        Only material groups of type <code>ZTRD</code> (trading) and <code>ZCON</code> (consignment) are listed —
+        those are the ones that reach a quality order.
+    </span>
 </div>
 
 <form asp-action="SaveReportUnits" method="post">

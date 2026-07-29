@@ -34,27 +34,41 @@ public class MaraService : IMaraService
         return map.TryGetValue(materialNo, out var m) ? m : null;
     }
 
-    public async Task<IReadOnlyList<MaraGroup>> ListMaterialGroupsAsync()
+    public async Task<IReadOnlyList<MaraGroup>> ListMaterialGroupsAsync(
+        IReadOnlyCollection<string>? materialTypes = null)
     {
         // MARA groups change only when the material-master sync runs (rare).
         // Cache the projection for 15 minutes so the Defect Catalog page,
         // which calls this on every load, doesn't aggregate 33k rows every
         // time. Backed by IX_qms_sap_material_cache_group INCLUDE (desc) on
         // first miss, so even a cold load is index-only.
-        if (_cache.TryGetValue<IReadOnlyList<MaraGroup>>(GroupsCacheKey, out var hit) && hit != null)
+        //
+        // materialTypes narrows to specific MARA material types (MTART, e.g.
+        // ZTRD / ZCON). Each distinct filter gets its own cache entry -- the
+        // set of filters in use is tiny and fixed by the calling pages.
+        var types = materialTypes?.Where(t => !string.IsNullOrWhiteSpace(t))
+                                  .Select(t => t.Trim().ToUpperInvariant())
+                                  .Distinct()
+                                  .OrderBy(t => t, StringComparer.Ordinal)
+                                  .ToList();
+        var key = types is { Count: > 0 } ? $"{GroupsCacheKey}:{string.Join(',', types)}" : GroupsCacheKey;
+
+        if (_cache.TryGetValue<IReadOnlyList<MaraGroup>>(key, out var hit) && hit != null)
             return hit;
 
-        const string sql = @"
+        var sql = @"
             SELECT material_group AS Code, MAX(material_group_desc) AS Name
             FROM   qms_sap_material_cache
-            WHERE  material_group IS NOT NULL AND LEN(material_group) > 0
+            WHERE  material_group IS NOT NULL AND LEN(material_group) > 0"
+            + (types is { Count: > 0 } ? " AND material_type IN @types" : "")
+            + @"
             GROUP BY material_group
             ORDER BY material_group;";
         try
         {
             using var c = new SqlConnection(_cs);
-            var list = (await c.QueryAsync<MaraGroup>(sql)).ToList();
-            _cache.Set(GroupsCacheKey, (IReadOnlyList<MaraGroup>)list,
+            var list = (await c.QueryAsync<MaraGroup>(sql, new { types })).ToList();
+            _cache.Set(key, (IReadOnlyList<MaraGroup>)list,
                 new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = GroupsCacheTtL });
             return list;
         }

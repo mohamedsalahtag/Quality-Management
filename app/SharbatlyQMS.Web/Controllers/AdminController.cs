@@ -1590,7 +1590,10 @@ public class AdminController : Controller
 
         // Group list: MARA cache first, falling back to the groups actually
         // seen on quality orders so the page still works with a cold cache.
-        var maraGroups = await _mara.ListMaterialGroupsAsync();
+        // Restricted to inspected material types (ZTRD / ZCON) -- spares,
+        // packaging and advertising materials never reach a quality order, so
+        // listing their groups here is noise.
+        var maraGroups = await _mara.ListMaterialGroupsAsync(MaterialTypes.Inspected);
         IReadOnlyList<MaraGroup> groups = maraGroups;
         if (groups.Count == 0)
         {

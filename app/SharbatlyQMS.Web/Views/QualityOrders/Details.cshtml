@@ -135,6 +135,17 @@
            class="btn btn-outline-danger" target="_blank">
             <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF report
         </a>
+        @* Permanent delete. SiteAdmin only, and only while the QO is still
+           Initial or Open -- past that it is a signed-off record. The server
+           re-checks the role, the status and the typed number regardless of
+           whether this button rendered. *@
+        @if (!isClaimContext && role == UserRoles.SiteAdmin
+             && (Model.StatusCode == QualityOrderStatus.Initial || Model.StatusCode == QualityOrderStatus.Open))
+        {
+            <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteQoModal">
+                <i class="bi bi-trash me-1"></i>Delete
+            </button>
+        }
         @* "Send report to supplier" moved to the Claim Management chat-panel
            action bar (_ClaimChatPanel.cshtml). It now appears only when a
            claim exists and has been approved. The modal markup and JS for
@@ -341,44 +352,48 @@
     </div>
 </div>
 
-@* ---- Danger zone: permanent delete. SiteAdmin only, and only while the QO is
-       still Initial or Open -- once it has been submitted or finished it is a
-       signed-off record. Deliberately at the bottom of Details rather than on
-       the list, where a delete button next to 50 rows invites accidents. The
-       server re-checks the role, the status and the typed number. ---- *@
+@* ---- Delete confirmation. Deliberately a modal off the header button rather
+       than a panel on the page: the warning has to be read at the moment of
+       the click, not scrolled past. Typing the QO number is a per-record
+       confirmation, so it can't become muscle memory or hit the wrong record.
+       The Delete button stays disabled until what was typed matches. ---- *@
 @if (!isClaimContext && role == UserRoles.SiteAdmin
      && (Model.StatusCode == QualityOrderStatus.Initial || Model.StatusCode == QualityOrderStatus.Open))
 {
-    <div class="card border-danger mb-3">
-        <div class="card-header py-2 bg-danger-subtle text-danger-emphasis">
-            <i class="bi bi-exclamation-octagon me-1"></i>Danger zone
-        </div>
-        <div class="card-body">
-            <p class="mb-2 small">
-                Permanently delete <strong>@Model.QualityOrderNo</strong> and everything under it —
-                every sample, reading, defect, photo and document. <strong>This cannot be undone</strong>
-                and the quality order will also disappear from Data Hub and the Perspective Analyzer.
-                Arrival <strong>@Model.ArrivalNo</strong> is not affected, and you will be able to create
-                a fresh quality order for it afterwards.
-            </p>
-            <p class="mb-3 small text-muted">
-                Looking to stop work on this inspection but keep the record? Use <em>Cancel</em> instead.
-            </p>
-            <form asp-action="Delete" asp-route-id="@Model.QualityOrderId" method="post"
-                  class="row g-2 align-items-end"
-                  data-confirm="Permanently delete @Model.QualityOrderNo and all of its samples, photos and documents? This cannot be undone."
-                  data-confirm-title="Delete quality order" data-confirm-danger data-confirm-ok="Delete permanently">
+    <div class="modal fade" id="deleteQoModal" tabindex="-1" aria-labelledby="deleteQoModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <form asp-action="Delete" asp-route-id="@Model.QualityOrderId" method="post" class="modal-content border-danger">
                 @Html.AntiForgeryToken()
-                <div class="col-md-4">
+                <div class="modal-header bg-danger-subtle text-danger-emphasis">
+                    <h5 class="modal-title" id="deleteQoModalLabel">
+                        <i class="bi bi-exclamation-octagon me-1"></i>Delete @Model.QualityOrderNo permanently?
+                    </h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2">
+                        This removes the quality order and <strong>everything under it</strong> — every sample,
+                        reading, defect, photo and document.
+                    </p>
+                    <ul class="small mb-3">
+                        <li><strong>It cannot be undone.</strong></li>
+                        <li>The quality order also disappears from Data Hub and the Perspective Analyzer.</li>
+                        <li>Arrival <strong>@Model.ArrivalNo</strong> is <em>not</em> affected — you can create a fresh quality order for it afterwards.</li>
+                    </ul>
+                    <div class="alert alert-light border small py-2">
+                        Only want to stop work on this inspection but keep the record? Close this and use
+                        <strong>Cancel</strong> instead.
+                    </div>
                     <label class="form-label small mb-1" for="qo-delete-confirm">
                         Type <code>@Model.QualityOrderNo</code> to confirm
                     </label>
-                    <input type="text" name="confirm" id="qo-delete-confirm" class="form-control form-control-sm"
+                    <input type="text" name="confirm" id="qo-delete-confirm" class="form-control"
                            placeholder="@Model.QualityOrderNo" autocomplete="off" required />
                 </div>
-                <div class="col-md-3">
-                    <button type="submit" class="btn btn-danger btn-sm">
-                        <i class="bi bi-trash me-1"></i>Delete quality order
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger" id="qo-delete-submit" disabled>
+                        <i class="bi bi-trash me-1"></i>Delete permanently
                     </button>
                 </div>
             </form>
@@ -654,6 +669,23 @@
 
 @section Scripts {
 <script>
+    // ---- Delete confirmation: arm the button only on an exact QO-number
+    //      match, and clear the field each time the modal opens so a second
+    //      visit never starts pre-armed. The server checks this again anyway.
+    (function () {
+        var modal = document.getElementById('deleteQoModal');
+        if (!modal) return;                       // not a SiteAdmin, or wrong status
+        var input  = document.getElementById('qo-delete-confirm');
+        var submit = document.getElementById('qo-delete-submit');
+        var expected = '@Model.QualityOrderNo';
+
+        function sync() {
+            submit.disabled = input.value.trim().toUpperCase() !== expected.toUpperCase();
+        }
+        input.addEventListener('input', sync);
+        modal.addEventListener('shown.bs.modal', function () { input.value = ''; sync(); input.focus(); });
+    })();
+
     // ---- AJAX helpers (used by every page-local interaction) -------------
     const AF_TOKEN = document.querySelector('#qoAntiforgery input[name="__RequestVerificationToken"]').value;
     const QO_ID    = @Model.QualityOrderId;

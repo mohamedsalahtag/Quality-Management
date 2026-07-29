@@ -17,7 +17,21 @@ public interface IMaraService
     /// Catalog admin page so defects can only be assigned to groups that
     /// actually exist in SAP.
     /// </summary>
-    Task<IReadOnlyList<MaraGroup>> ListMaterialGroupsAsync();
+    /// <param name="materialTypes">Optional MARA material types (MTART) to
+    /// restrict to, e.g. ZTRD / ZCON. Null or empty returns every group.</param>
+    Task<IReadOnlyList<MaraGroup>> ListMaterialGroupsAsync(IReadOnlyCollection<string>? materialTypes = null);
+}
+
+/// <summary>MARA material types (MTART) the app filters on by name.</summary>
+public static class MaterialTypes
+{
+    public const string Trading     = "ZTRD";
+    public const string Consignment = "ZCON";
+
+    /// <summary>The types whose material groups are actually inspected, so the
+    /// Report Units page lists ~213 groups instead of all 270. Spares, packaging,
+    /// advertising and finished goods never appear on a quality order.</summary>
+    public static readonly string[] Inspected = { Trading, Consignment };
 }
 
 public class MaraGroup

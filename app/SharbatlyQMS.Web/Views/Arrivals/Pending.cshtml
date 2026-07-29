@@ -38,6 +38,18 @@
                 <i class="bi bi-cloud-download me-1"></i>Retrieve latest containers
             </button>
         </form>
+        @* Columns menu, rendered here rather than injected by columntoggle.js so
+           it paints with the rest of the header instead of popping in late on
+           a line of its own. The script only fills the menu in. *@
+        <div class="dropdown" data-coltoggle-ui="pending-containers">
+            <button type="button" class="btn btn-outline-secondary dropdown-toggle"
+                    data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                    title="Choose which columns to show. Your choice is remembered on this device.">
+                <i class="bi bi-layout-three-columns me-1"></i>Columns<span class="badge bg-secondary ms-1 d-none"
+                     data-coltoggle-count title="Columns currently hidden"></span>
+            </button>
+            <div class="dropdown-menu dropdown-menu-end p-2" data-coltoggle-menu style="min-width: 13rem;"></div>
+        </div>
         <div class="btn-group">
             <a asp-action="Index" class="btn btn-outline-secondary">
                 <i class="bi bi-arrow-left me-1"></i>Back to arrivals
@@ -222,10 +234,6 @@
     .pp-tip .pp-tip-qty  { opacity: .8; margin-left: .35rem; }
 </style>
 
-@* Landing spot for the Columns menu that columntoggle.js injects. Keeping it
-   outside the card means the dropdown isn't clipped by the table's overflow. *@
-<div class="d-flex justify-content-end mb-2" data-coltoggle-host="pending-containers"></div>
-
 <div class="card">
     <div class="table-responsive">
         @* data-col-key drives the Columns menu (columntoggle.js). Keys are
@@ -241,7 +249,8 @@
                     <th data-sort data-col-key="po">PO / STO</th>
                     <th data-sort data-col-key="type">Type</th>
                     <th data-sort data-col-key="vendor">Vendor</th>
-                    <th data-sort data-col-key="plant">Plant / Storage</th>
+                    <th data-sort data-col-key="plant">Plant</th>
+                    <th data-sort data-col-key="storage">Storage</th>
                     <th class="text-end" data-sort="num" data-col-key="lines">Lines</th>
                     <th data-col-key="materials">Materials</th>
                     <th data-sort data-col-key="dates">Dates</th>
@@ -252,7 +261,7 @@
             <tbody>
             @if (Model.Count == 0)
             {
-                <tr><td colspan="11" class="text-center text-muted py-4">
+                <tr><td colspan="12" class="text-center text-muted py-4">
                     @if (filtered)
                     {
                         <span>No pending containers match the filter. <a asp-action="Pending">Clear</a> to see all.</span>
@@ -310,23 +319,25 @@
                                 <div class="pp-sub">@r.VendorNo</div>
                             }
                         </td>
+                        @* Plant and storage are separate columns so each can be
+                           sorted and hidden on its own. Name in the badge, SAP
+                           code in the tooltip -- the name is what people read. *@
                         <td>
-                            @if (!string.IsNullOrEmpty(r.Plant) || !string.IsNullOrEmpty(r.StorageLocation))
+                            @if (!string.IsNullOrEmpty(r.Plant))
                             {
-                                <div class="pp-badges">
-                                    @* Name in the badge, SAP code in the tooltip -- the
-                                       name is what people actually read. *@
-                                    @if (!string.IsNullOrEmpty(r.Plant))
-                                    {
-                                        <span class="badge bg-light text-dark border"
-                                              data-bs-toggle="tooltip" title="@r.Plant">@Codes.PlantDisplay(r.Plant)</span>
-                                    }
-                                    @if (!string.IsNullOrEmpty(r.StorageLocation))
-                                    {
-                                        <span class="badge bg-light text-dark border"
-                                              data-bs-toggle="tooltip" title="@r.StorageLocation">@Codes.StorageLocationDisplay(r.Plant, r.StorageLocation)</span>
-                                    }
-                                </div>
+                                <span class="badge bg-light text-dark border"
+                                      data-bs-toggle="tooltip" title="@r.Plant">@Codes.PlantDisplay(r.Plant)</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(r.StorageLocation))
+                            {
+                                <span class="badge bg-light text-dark border"
+                                      data-bs-toggle="tooltip" title="@r.StorageLocation">@Codes.StorageLocationDisplay(r.Plant, r.StorageLocation)</span>
                             }
                             else
                             {

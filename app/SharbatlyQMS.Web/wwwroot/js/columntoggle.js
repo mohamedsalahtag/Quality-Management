@@ -5,8 +5,19 @@
 //     <th data-col-key="bol">BOL</th>        <!-- hideable -->
 //     <th data-col-key="action" data-col-lock>Action</th>   <!-- always shown -->
 //
-// A "Columns" dropdown is injected above the table. Ticking a box applies
-// immediately and writes to localStorage — there is no save button, by design.
+// Render the button yourself so it is painted with the rest of the page —
+// injecting it from here made it pop in late and pushed a line of its own:
+//   <div class="dropdown" data-coltoggle-ui="pending-containers">
+//     <button ... data-bs-toggle="dropdown" data-bs-auto-close="outside">
+//       Columns <span class="badge d-none" data-coltoggle-count></span></button>
+//     <div class="dropdown-menu" data-coltoggle-menu></div>
+//   </div>
+// This script only fills that menu in and wires it. If no such shell exists it
+// falls back to injecting one above the table, so a new page can opt in with a
+// single attribute.
+//
+// Ticking a box applies immediately and writes to localStorage — there is no
+// save button, by design.
 //
 // Why CSS instead of touching cells: tablekit (the sorting/pagination layer on
 // the same tables) reads th.cellIndex and caches its row list at enhance()
@@ -78,25 +89,40 @@
         }
 
         // ---- Dropdown UI -------------------------------------------------
-        var wrap = document.createElement('div');
-        wrap.className = 'dropdown d-inline-block coltoggle';
+        // Prefer the shell the page rendered; only build one if it is absent.
+        var shell = document.querySelector('[data-coltoggle-ui="' + table.id + '"]');
+        var wrap, menu, countBadge;
 
-        var btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn btn-sm btn-outline-secondary dropdown-toggle';
-        btn.setAttribute('data-bs-toggle', 'dropdown');
-        btn.setAttribute('data-bs-auto-close', 'outside');   // keep open while ticking
-        btn.setAttribute('aria-expanded', 'false');
-        btn.innerHTML = '<i class="bi bi-layout-three-columns me-1"></i>Columns ';
+        if (shell) {
+            wrap       = shell;
+            menu       = shell.querySelector('[data-coltoggle-menu]');
+            countBadge = shell.querySelector('[data-coltoggle-count]');
+        }
+        if (!menu) {
+            wrap = document.createElement('div');
+            wrap.className = 'dropdown d-inline-block coltoggle';
 
-        var countBadge = document.createElement('span');
-        countBadge.className = 'badge bg-secondary ms-1 d-none';
-        countBadge.title = 'Columns currently hidden';
-        btn.appendChild(countBadge);
+            var btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'btn btn-sm btn-outline-secondary dropdown-toggle';
+            btn.setAttribute('data-bs-toggle', 'dropdown');
+            btn.setAttribute('data-bs-auto-close', 'outside');   // keep open while ticking
+            btn.setAttribute('aria-expanded', 'false');
+            btn.innerHTML = '<i class="bi bi-layout-three-columns me-1"></i>Columns ';
 
-        var menu = document.createElement('div');
-        menu.className = 'dropdown-menu dropdown-menu-end p-2';
-        menu.style.minWidth = '13rem';
+            countBadge = document.createElement('span');
+            countBadge.className = 'badge bg-secondary ms-1 d-none';
+            countBadge.title = 'Columns currently hidden';
+            btn.appendChild(countBadge);
+
+            menu = document.createElement('div');
+            menu.className = 'dropdown-menu dropdown-menu-end p-2';
+            menu.style.minWidth = '13rem';
+
+            wrap.appendChild(btn);
+            wrap.appendChild(menu);
+            shell = null;
+        }
 
         cols.forEach(function (c) {
             var item = document.createElement('div');
@@ -139,19 +165,18 @@
         menu.appendChild(document.createElement('hr')).className = 'my-2';
         menu.appendChild(reset);
 
-        wrap.appendChild(btn);
-        wrap.appendChild(menu);
-
-        // Park the control in the table's toolbar if the page provides one,
-        // otherwise directly above the table.
-        var host = document.querySelector('[data-coltoggle-host="' + table.id + '"]');
-        if (host) {
-            host.appendChild(wrap);
-        } else {
-            var bar = document.createElement('div');
-            bar.className = 'd-flex justify-content-end mb-2';
-            bar.appendChild(wrap);
-            table.parentNode.insertBefore(bar, table);
+        // Only place the control when we built it ourselves; a page-rendered
+        // shell is already sitting where the page wants it.
+        if (!shell) {
+            var host = document.querySelector('[data-coltoggle-host="' + table.id + '"]');
+            if (host) {
+                host.appendChild(wrap);
+            } else {
+                var bar = document.createElement('div');
+                bar.className = 'd-flex justify-content-end mb-2';
+                bar.appendChild(wrap);
+                table.parentNode.insertBefore(bar, table);
+            }
         }
 
         apply();

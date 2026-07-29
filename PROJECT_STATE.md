@@ -213,6 +213,15 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-07-29b (follow-ups to the ten-item batch)
+
+Four corrections requested after using the previous deploy.
+
+- **Pending Containers: Plant / Storage split into two columns.** They shared one cell as two badges; separate columns let each be sorted and hidden independently. 11 → 12 columns, empty-state colspan updated.
+- **Columns button rendered server-side.** It was injected by `columntoggle.js` into a `data-coltoggle-host` div of its own, so it popped in after the page painted *and* consumed a whole line. The button + empty menu shell is now Razor markup inside the existing header button group (`data-coltoggle-ui="<tableId>"`), and the script only fills the menu in and wires it. The inject-a-host path is kept as a fallback so a new page can still opt in with one attribute. The `<th data-col-key>` list stays the single source of truth for what's hideable.
+- **QO delete is a header button + modal, not a page section.** The Danger Zone card sat below the fold and could be scrolled past; the warning now appears at the moment of the click. Same per-record confirmation (type the QO number), plus the modal's Delete button stays `disabled` until the typed value matches and the field is cleared on every open — the server re-checks role, status and the typed number regardless.
+- **Report Units lists only ZTRD / ZCON material groups.** The page listed all 270 MARA groups; spares, packaging, advertising and finished goods never reach a quality order. `IMaraService.ListMaterialGroupsAsync` gained an optional `materialTypes` filter (per-filter cache key) over `qms_sap_material_cache.material_type` (= MARA MTART), and `MaterialTypes.Inspected` names the two. 270 → 213 groups. Live MTART distribution for reference: ZTRD 16255, ZSPR 11710, ZCON 3199, ZFIN 2204, ZPAC 313, ZADV 80, ZNST 27, ZDEN 19, ERSA 1. **Note:** the user said "PO types ZTRD, ZCON" but these are *material* types — the PO types on the container cache are ZFAS / ZFCO / ZFFP.
+
 ### 2026-07-29 (ten-item batch: M10–M13 + list filters, code names, column control, report units & totals)
 
 One user request covering ten items across the QO list, Arrivals, Pending Containers and the QO report. Plan: `~/.claude/plans/frolicking-imagining-hinton.md`. Shipped in six deploys; all 86 tests green after each.
