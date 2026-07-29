@@ -213,6 +213,17 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-07-29c (QO report: overridden sample size never printed)
+
+User: "in quality order report when override samples size does not show on the report."
+
+**Root cause — the report was reading the wrong column.** The material card printed `qms_quality_order_material.sample_size`, which **only the "Override size" modal writes**. But MARA supplies no size for these materials, so operators type the size into each *sample* instead; that writes `qms_sample.sample_size` and sets `size_overridden = 1`, leaving the material column NULL. Production shows the shape starkly: **248 of 248 materials have `sample_size` AND `material_size` NULL, while 695 of 696 samples are `size_overridden = 1` with real sizes** (100, 110, 113, 125…). So the card printed "—" on every report ever generated, and the per-sample size — the divisor for every defect percentage on that card — was printed **nowhere at all**.
+
+- **Material card** now resolves material override → `EffectiveSampleSize` (parses MARA's size text) → **the sizes the samples were actually inspected at**, with the material group's unit appended. Several distinct sizes are listed (`113 / 125 Pieces`) rather than averaged or silently reduced to the first — those are different inspections, not a measurement error. `RenderMaterialCard` gained the sample sizes + unit as parameters; the caller already had the group in hand.
+- **Per-sample card** now prints `Sample size 125 Pieces` beside the `Sample #NNN` heading. This is the actual fix for the complaint: every percentage under that heading is `defect ÷ this number`, so it belongs on the page.
+- Zero is treated as "not recorded", not as a value — `0 Pieces` next to a column of 0% would read as a real measurement.
+- 9 new tests in `ReportSampleSizeTests` cover the resolution order, the multi-size case, the unit, and the zero/null guards (95 total, all green).
+
 ### 2026-07-29b (follow-ups to the ten-item batch)
 
 Four corrections requested after using the previous deploy.

@@ -167,7 +167,13 @@ public static class QualityReportPdf
                     // Material card: ShowEntire so its header never orphans at a
                     // page bottom with no samples following.
                     col.Item().ShowEntire().Element(mc =>
-                        RenderMaterialCard(mc, first.Material, first.MaterialHeaderValues, d.HeaderFieldScopeById));
+                        RenderMaterialCard(mc, first.Material, first.MaterialHeaderValues,
+                            d.HeaderFieldScopeById,
+                            // The sizes the samples were actually inspected at, so
+                            // the card can fall back to them when the material
+                            // carries no size of its own (see SampleSizeText).
+                            grp.Select(x => x.Sample.SampleSize).ToList(),
+                            d.UnitFor(first.Material?.MaterialGroup)));
 
                     // Do NOT ShowEntire a whole sample card: a large defect
                     // catalog can exceed one page and ShowEntire would throw a
@@ -540,6 +546,40 @@ public static class QualityReportPdf
 
     private static string Dash(string? v) => string.IsNullOrWhiteSpace(v) ? "—" : v!;
 
+    /// <summary>
+    /// Sample size for the material card, with the group's unit appended.
+    ///
+    /// Why this is not just <c>m.SampleSize</c>: that column is only written by
+    /// the "Override size" modal on the QO page. In practice MARA supplies no
+    /// size for these materials, so operators type the size into each SAMPLE
+    /// instead — which sets qms_sample.sample_size and marks the sample
+    /// overridden, leaving qms_quality_order_material.sample_size NULL. The card
+    /// therefore printed "—" on every report even though a size had been
+    /// entered, and the number every defect percentage is divided by was
+    /// nowhere on the page.
+    ///
+    /// Resolution order: the material's own size (explicit override) ->
+    /// EffectiveSampleSize (parses MARA's size text) -> the sizes the samples
+    /// were actually inspected at. Several distinct sample sizes are listed
+    /// rather than averaged or silently reduced to the first one.
+    /// </summary>
+    private static string SampleSizeText(QualityOrderMaterial? m,
+        IReadOnlyList<short?> sampleSizes, string unit)
+    {
+        var fromMaterial = m?.SampleSize ?? m?.EffectiveSampleSize;
+        if (fromMaterial is > 0) return $"{fromMaterial} {unit}";
+
+        var distinct = sampleSizes
+            .Where(s => s is > 0)
+            .Select(s => s!.Value)
+            .Distinct()
+            .OrderBy(s => s)
+            .ToList();
+        if (distinct.Count == 0) return "—";
+
+        return $"{string.Join(" / ", distinct)} {unit}";
+    }
+
     private static void RenderGroupReadings(QuestPDF.Infrastructure.IContainer container,
         IReadOnlyList<ReadingAggRow> readings)
     {
@@ -584,7 +624,8 @@ public static class QualityReportPdf
     // of these fields across every sample card under the same material.
     private static void RenderMaterialCard(QuestPDF.Infrastructure.IContainer container,
         QualityOrderMaterial? m, List<MaterialHeaderValue> materialHeaderValues,
-        IReadOnlyDictionary<int, string> scopeById)
+        IReadOnlyDictionary<int, string> scopeById,
+        IReadOnlyList<short?> sampleSizes, string unit)
     {
         container.PaddingTop(2).Column(col =>
         {
@@ -602,7 +643,7 @@ public static class QualityReportPdf
             //      disappears.
             var headerCells = new List<(string Label, string Value)>
             {
-                ("Sample Size", Dash(m?.SampleSize?.ToString())),
+                ("Sample Size", SampleSizeText(m, sampleSizes, unit)),
                 ("Size",        Dash(m?.MaterialSize)),
                 ("Pack Type",   Dash(m?.PackType)),
             };
@@ -673,7 +714,20 @@ public static class QualityReportPdf
             col.Item().Row(hr =>
             {
                 hr.RelativeItem().Text(t =>
-                    t.Span($"Sample #{s.Sample.SampleNo:000}").SemiBold().FontColor(Accent).FontSize(12));
+                {
+                    t.Span($"Sample #{s.Sample.SampleNo:000}").SemiBold().FontColor(Accent).FontSize(12);
+                    // The sample's OWN size -- every defect percentage on this
+                    // card is that value divided into the defect count, so it
+                    // has to be on the page. It was previously invisible: the
+                    // material card shows the material-level size (usually NULL,
+                    // because operators enter the size per sample) and nothing
+                    // printed the per-sample value at all.
+                    if (s.Sample.SampleSize is > 0)
+                    {
+                        t.Span("    Sample size ").FontColor(Colors.Grey.Darken1).FontSize(7);
+                        t.Span($"{s.Sample.SampleSize} {d.UnitFor(m?.MaterialGroup)}").SemiBold().FontSize(8);
+                    }
+                });
                 hr.RelativeItem().AlignRight().Text(t =>
                 {
                     var vs = m?.Variety;
