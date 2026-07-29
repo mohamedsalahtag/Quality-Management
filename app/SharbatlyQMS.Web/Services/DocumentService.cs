@@ -204,6 +204,37 @@ public class DocumentService : IDocumentService
             new { documentId });
     }
 
+    public int DeleteFiles(IEnumerable<string> relativeStoragePaths)
+    {
+        int removed = 0;
+        foreach (var rel in relativeStoragePaths)
+        {
+            if (string.IsNullOrWhiteSpace(rel)) continue;
+            try
+            {
+                // Same root + escape check as ResolveAbsolutePath: a tampered
+                // storage_path must not let a delete reach outside the root.
+                var combined = Path.GetFullPath(Path.Combine(_root, rel));
+                var rootPrefix = _root.EndsWith(Path.DirectorySeparatorChar)
+                    ? _root
+                    : _root + Path.DirectorySeparatorChar;
+                if (!combined.StartsWith(rootPrefix, StringComparison.OrdinalIgnoreCase))
+                {
+                    _log.LogWarning("Refusing to delete document file outside the documents root: {Path}", rel);
+                    continue;
+                }
+                if (File.Exists(combined)) { File.Delete(combined); removed++; }
+            }
+            catch (Exception ex)
+            {
+                // Non-fatal: the DB rows are already gone, so a leftover file is
+                // dead weight, not a correctness problem.
+                _log.LogWarning(ex, "Could not delete document file {Path}", rel);
+            }
+        }
+        return removed;
+    }
+
     public string? ResolveAbsolutePath(DocumentInfo doc)
     {
         if (string.IsNullOrWhiteSpace(doc.StoragePath)) return null;

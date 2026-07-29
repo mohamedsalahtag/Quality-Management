@@ -12,12 +12,17 @@ public class ArrivalService : IArrivalService
 {
     private readonly string _cs;
     private readonly IAuditService _audit;
+    // Only used by DeleteAsync, to unlink attachment files once the DB rows are
+    // gone. Documents live outside wwwroot, so a row deleted without its file
+    // leaves bytes nothing can ever reach again.
+    private readonly IDocumentService _docs;
 
-    public ArrivalService(IConfiguration config, IAuditService audit)
+    public ArrivalService(IConfiguration config, IAuditService audit, IDocumentService docs)
     {
         _cs = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
         _audit = audit;
+        _docs  = docs;
     }
 
     private SqlConnection Open() => new(_cs);
@@ -36,6 +41,8 @@ public class ArrivalService : IArrivalService
                a.vendor_no      VendorNo,
                a.vendor_name    VendorName,
                a.plant          Plant,
+               a.storage_location StorageLocation,
+               a.po_type          PoType,
                a.status_code    StatusCode,
                a.created_at     CreatedAt,
                a.created_by     CreatedBy,
@@ -288,10 +295,12 @@ public class ArrivalService : IArrivalService
         var arrivalId = await c.ExecuteScalarAsync<long>(@"
             INSERT INTO qms_arrival
                 (arrival_no, source_system, bol_no, container_no, ebeln, bukrs,
-                 vendor_no, vendor_name, plant, status_code, created_at, created_by)
+                 vendor_no, vendor_name, plant, storage_location, po_type,
+                 status_code, created_at, created_by)
             VALUES
                 (@arrivalNo, 'S4HANA', @bol, @container, @ebeln, @bukrs,
-                 @vendorNo, @vendorName, @plant, 'Draft', SYSUTCDATETIME(), @createdBy);
+                 @vendorNo, @vendorName, @plant, @storageLocation, @poType,
+                 'Draft', SYSUTCDATETIME(), @createdBy);
             SELECT CAST(SCOPE_IDENTITY() AS BIGINT);",
             new
             {
@@ -303,6 +312,11 @@ public class ArrivalService : IArrivalService
                 vendorNo   = first.VendorNo,
                 vendorName = first.VendorName,
                 plant      = first.Plant,
+                // M13: denormalised onto the header so the Arrivals list can show
+                // them as names and the QO list can filter on storage location
+                // without an EXISTS over qms_arrival_item.
+                storageLocation = first.StorageLocation,
+                poType          = first.PoType,
                 createdBy
             }, tx);
 
@@ -707,40 +721,18 @@ public class ArrivalService : IArrivalService
         var qoIds = (await c.QueryAsync<long>(
             "SELECT quality_order_id FROM qms_quality_order WHERE arrival_id=@arrivalId",
             new { arrivalId }, tx)).ToList();
-        if (qoIds.Count > 0)
-        {
-            var sampleIds = (await c.QueryAsync<long>(
-                "SELECT sample_id FROM qms_sample WHERE quality_order_id IN @qoIds",
-                new { qoIds }, tx)).ToList();
-            if (sampleIds.Count > 0)
-            {
-                await c.ExecuteAsync("DELETE FROM qms_sample_defect      WHERE sample_id IN @sampleIds", new { sampleIds }, tx);
-                await c.ExecuteAsync("DELETE FROM qms_sample_reading     WHERE sample_id IN @sampleIds", new { sampleIds }, tx);
-                await c.ExecuteAsync("DELETE FROM qms_sample_observation WHERE sample_id IN @sampleIds", new { sampleIds }, tx);
-                await c.ExecuteAsync("DELETE FROM qms_image_link WHERE owner_type='Sample' AND owner_id IN @sampleIds", new { sampleIds }, tx);
-            }
-            await c.ExecuteAsync("DELETE FROM qms_sample WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
-            // qms_report_log holds an FK to quality_order, so a QO that has ever
-            // produced a PDF (printed or e-mailed) blocked the delete below with
-            // FK_qms_report_log_quality_order_id. It was missing from this
-            // cascade, which made "Delete arrival" fail for any inspection that
-            // had been reported on.
-            await c.ExecuteAsync("DELETE FROM qms_report_log WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
+        // The whole QO subtree now lives in one shared helper -- the SiteAdmin
+        // "delete this quality order" action runs exactly the same code, so the
+        // two paths can't drift on which child tables they remember.
+        var qoDocPaths = await QoCascade.CollectDocumentPathsAsync(c, tx, qoIds);
+        await QoCascade.DeleteAsync(c, tx, qoIds);
 
-            var matIds = (await c.QueryAsync<long>(
-                "SELECT qo_material_id FROM qms_quality_order_material WHERE quality_order_id IN @qoIds",
-                new { qoIds }, tx)).ToList();
-            if (matIds.Count > 0)
-                await c.ExecuteAsync("DELETE FROM qms_image_link WHERE owner_type='QualityOrderMaterial' AND owner_id IN @matIds", new { matIds }, tx);
-            await c.ExecuteAsync("DELETE FROM qms_quality_order_material WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
-
-            // Claims can't exist on a cancelled QO in normal flow, but the FK is
-            // NO ACTION so clear defensively before the QO delete.
-            await c.ExecuteAsync("DELETE FROM qms_claim_read_marker WHERE claim_id IN (SELECT claim_id FROM qms_claim WHERE quality_order_id IN @qoIds)", new { qoIds }, tx);
-            await c.ExecuteAsync("DELETE FROM qms_claim_note        WHERE claim_id IN (SELECT claim_id FROM qms_claim WHERE quality_order_id IN @qoIds)", new { qoIds }, tx);
-            await c.ExecuteAsync("DELETE FROM qms_claim             WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
-            await c.ExecuteAsync("DELETE FROM qms_quality_order     WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
-        }
+        // The arrival's own attachments (V39). Collect the paths first: after
+        // the DELETE the rows are gone and the files would be unreachable.
+        var arrivalDocPaths = (await c.QueryAsync<string>(
+            "SELECT storage_path FROM qms_document WHERE owner_type='Arrival' AND owner_id=@arrivalId",
+            new { arrivalId }, tx)).Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
+        await c.ExecuteAsync("DELETE FROM qms_document WHERE owner_type='Arrival' AND owner_id=@arrivalId", new { arrivalId }, tx);
 
         await c.ExecuteAsync("DELETE FROM qms_arrival_sap_snapshot  WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
         await c.ExecuteAsync("DELETE FROM qms_arrival_item          WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
@@ -773,6 +765,10 @@ public class ArrivalService : IArrivalService
         await c.ExecuteAsync("DELETE FROM qms_arrival WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
 
         tx.Commit();
+
+        // Files only after the commit -- if the transaction had rolled back,
+        // deleting them first would leave rows pointing at nothing.
+        _docs.DeleteFiles(arrivalDocPaths.Concat(qoDocPaths));
         return (true, null);
     }
 

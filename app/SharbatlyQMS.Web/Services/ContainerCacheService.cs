@@ -54,16 +54,17 @@ public class ContainerCacheService : IContainerCacheService
                 receive_date   = @ReceiveDate,
                 quantity       = @Quantity,
                 uom            = @Uom,
+                transit_days   = @TransitDays,
                 payload_json   = @PayloadJson,
                 last_seen_at   = SYSUTCDATETIME()
             WHEN NOT MATCHED THEN INSERT
                 (container_no, bol_no, ebeln, ebelp, material_no, plant, storage_loc, batch_no,
                  vendor_no, vendor_name, material_desc, material_group, po_type, sto,
-                 doc_date, arrival_date, receive_date, quantity, uom, payload_json)
+                 doc_date, arrival_date, receive_date, quantity, uom, transit_days, payload_json)
             VALUES
                 (@ContainerNo, @BolNo, @Ebeln, @Ebelp, @MaterialNo, @Plant, @StorageLoc, @BatchNo,
                  @VendorNo, @VendorName, @MaterialDesc, @MaterialGroup, @PoType, @Sto,
-                 @DocDate, @ArrivalDate, @ReceiveDate, @Quantity, @Uom, @PayloadJson);";
+                 @DocDate, @ArrivalDate, @ReceiveDate, @Quantity, @Uom, @TransitDays, @PayloadJson);";
         foreach (var r in rows)
         {
             ct.ThrowIfCancellationRequested();
@@ -76,7 +77,7 @@ public class ContainerCacheService : IContainerCacheService
                 DocDate     = r.DocDate.HasValue     ? (DateTime?)r.DocDate.Value.ToDateTime(TimeOnly.MinValue)     : null,
                 ArrivalDate = r.ArrivalDate.HasValue ? (DateTime?)r.ArrivalDate.Value.ToDateTime(TimeOnly.MinValue) : null,
                 ReceiveDate = r.ReceiveDate.HasValue ? (DateTime?)r.ReceiveDate.Value.ToDateTime(TimeOnly.MinValue) : null,
-                r.Quantity, r.Uom,
+                r.Quantity, r.Uom, r.TransitDays,
                 PayloadJson = json
             });
         }
@@ -86,6 +87,7 @@ public class ContainerCacheService : IContainerCacheService
     public async Task<IReadOnlyList<PendingPickupRow>> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
         string? plant = null, string? poType = null, string? storageLoc = null,
+        string? supplier = null,
         CancellationToken ct = default)
     {
         using var c = Open();
@@ -94,12 +96,14 @@ public class ContainerCacheService : IContainerCacheService
         // first query filtered out. Container / BOL / PO use LIKE for
         // free-text contains-match; Plant / PoType / StorageLoc use
         // equality because they come from dropdowns sourced from the
-        // same column values.
+        // same column values. Supplier is free text too -- operators
+        // remember a word of the name, rarely the whole thing.
         const string filterClause = @"
             has_arrival = 0
             AND (@Container  IS NULL OR container_no LIKE @Container)
             AND (@Bol        IS NULL OR bol_no       LIKE @Bol)
             AND (@Po         IS NULL OR ebeln        LIKE @Po)
+            AND (@Supplier   IS NULL OR vendor_name  LIKE @Supplier OR vendor_no LIKE @Supplier)
             AND (@Plant      IS NULL OR plant        = @Plant)
             AND (@PoType     IS NULL OR po_type      = @PoType)
             AND (@StorageLoc IS NULL OR storage_loc  = @StorageLoc)";
@@ -119,6 +123,7 @@ public class ContainerCacheService : IContainerCacheService
             Container  = Wrap(container),
             Bol        = Wrap(bol),
             Po         = Wrap(po),
+            Supplier   = Wrap(supplier),
             Plant      = Exact(plant),
             PoType     = Exact(poType),
             StorageLoc = Exact(storageLoc)
@@ -139,6 +144,7 @@ public class ContainerCacheService : IContainerCacheService
                 MAX(doc_date)      AS DocDate,
                 MAX(arrival_date)  AS ArrivalDate,
                 MAX(receive_date)  AS ReceiveDate,
+                MAX(transit_days)  AS TransitDays,
                 MIN(first_seen_at) AS FirstSeenAt
             FROM   qms_sap_container_cache
             WHERE  {filterClause}

@@ -1,10 +1,11 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.Services.Sap;
+using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Controllers;
 
@@ -27,16 +28,17 @@ public class AdminController : Controller
     private readonly ICatalogCache _catalogCache;
     private readonly IMaraService _mara;
     private readonly IAuditService _audit;
+    private readonly ICodeDescriptionDirectory _codes;
 
     public AdminController(IDbService db, ISettingsService settings,
         ISapODataClient sapOData, ISapSyncService sapSync, IEmailService email,
         IAdService ad, IServiceScopeFactory scopeFactory, IWebHostEnvironment env,
         ILogger<AdminController> adminLog, ICatalogCache catalogCache, IMaraService mara,
-        IAuditService audit)
+        IAuditService audit, ICodeDescriptionDirectory codes)
     {
         _db = db; _settings = settings; _sapOData = sapOData; _sapSync = sapSync;
         _email = email; _ad = ad; _scopeFactory = scopeFactory; _env = env; _adminLog = adminLog;
-        _catalogCache = catalogCache; _mara = mara; _audit = audit;
+        _catalogCache = catalogCache; _mara = mara; _audit = audit; _codes = codes;
     }
 
     [HttpGet]
@@ -1424,6 +1426,262 @@ public class AdminController : Controller
             TempData["Error"] = "Field not found.";
         }
         return RedirectToAction(nameof(ArrivalFields));
+    }
+
+    // ---- Code Descriptions (M10, Parameters menu) ---------------------
+    //
+    // Friendly names for the raw SAP codes the lists used to print bare:
+    // plants, storage locations and PO/document types. Replaces the old
+    // hard-coded SapPlantDirectory (now only a fallback seed), so adding or
+    // renaming a code no longer needs a redeploy.
+    [HttpGet]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> CodeDescriptions(string? domain, string? q)
+    {
+        if (!CodeDomains.IsValid(domain)) domain = CodeDomains.Plant;
+
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        var rows = (await c.QueryAsync<CodeDescriptionEntry>(@"
+            SELECT code_desc_id CodeDescId, domain Domain, parent_code ParentCode,
+                   code Code, description Description, sort_order SortOrder,
+                   is_active IsActive, updated_at UpdatedAt, updated_by UpdatedBy
+            FROM   qms_code_description
+            WHERE  domain = @domain
+              AND (@q IS NULL OR code LIKE @q OR description LIKE @q OR parent_code LIKE @q)
+            ORDER  BY parent_code, sort_order, code",
+            new { domain, q = string.IsNullOrWhiteSpace(q) ? null : $"%{q.Trim()}%" })).ToList();
+
+        // Counts per domain for the tab badges -- always unfiltered, so the
+        // tabs don't appear to lose rows while a search is active.
+        var counts = (await c.QueryAsync<(string Domain, int N)>(
+            "SELECT domain AS Domain, COUNT(*) AS N FROM qms_code_description GROUP BY domain"))
+            .ToDictionary(r => r.Domain, r => r.N, StringComparer.OrdinalIgnoreCase);
+
+        ViewBag.Domain      = domain;
+        ViewBag.Query       = q;
+        ViewBag.Counts      = counts;
+        ViewBag.PlantCodes  = (await c.QueryAsync<string>(
+            "SELECT code FROM qms_code_description WHERE domain = 'Plant' ORDER BY code")).ToList();
+        return View(rows);
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> SaveCodeDescription(int codeDescId, string domain, string? parentCode,
+        string code, string description, int sortOrder, bool isActive)
+    {
+        if (!CodeDomains.IsValid(domain)) domain = CodeDomains.Plant;
+        code        = (code ?? "").Trim();
+        description = (description ?? "").Trim();
+        // parent_code only means something for storage locations (codes repeat
+        // across plants); force it null elsewhere so the uniqueness key is clean.
+        parentCode  = domain == CodeDomains.StorageLocation
+                          ? (string.IsNullOrWhiteSpace(parentCode) ? null : parentCode.Trim())
+                          : null;
+
+        if (code.Length == 0 || description.Length == 0)
+        {
+            TempData["Error"] = "Code and description are both required.";
+            return RedirectToAction(nameof(CodeDescriptions), new { domain });
+        }
+        if (domain == CodeDomains.StorageLocation && parentCode == null)
+        {
+            TempData["Error"] = "A storage location needs its plant — the same code exists under several plants.";
+            return RedirectToAction(nameof(CodeDescriptions), new { domain });
+        }
+
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        // Friendlier than the raw UQ_qms_code_description 2627.
+        var conflictId = await c.ExecuteScalarAsync<int?>(@"
+            SELECT TOP 1 code_desc_id FROM qms_code_description
+            WHERE domain = @domain AND ISNULL(parent_code,'') = ISNULL(@parentCode,'')
+              AND code = @code AND code_desc_id <> @codeDescId",
+            new { domain, parentCode, code, codeDescId });
+        if (conflictId.HasValue)
+        {
+            TempData["Error"] = $"'{code}' already has a description in {CodeDomains.DisplayName(domain)}.";
+            return RedirectToAction(nameof(CodeDescriptions), new { domain });
+        }
+
+        var user = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "system";
+        if (codeDescId <= 0)
+        {
+            await c.ExecuteAsync(@"
+                INSERT INTO qms_code_description
+                    (domain, parent_code, code, description, sort_order, is_active, updated_by)
+                VALUES (@domain, @parentCode, @code, @description, @sortOrder, @isActive, @user)",
+                new { domain, parentCode, code, description, sortOrder, isActive, user });
+            TempData["Success"] = $"'{code}' added to {CodeDomains.DisplayName(domain)}.";
+        }
+        else
+        {
+            await c.ExecuteAsync(@"
+                UPDATE qms_code_description SET
+                    parent_code = @parentCode, code = @code, description = @description,
+                    sort_order = @sortOrder, is_active = @isActive,
+                    updated_at = SYSUTCDATETIME(), updated_by = @user
+                WHERE code_desc_id = @codeDescId",
+                new { codeDescId, parentCode, code, description, sortOrder, isActive, user });
+            TempData["Success"] = $"'{code}' updated.";
+        }
+
+        // Swap the in-memory lookup so the change is visible on the very next
+        // page render rather than after the process restarts.
+        await _codes.RefreshAsync();
+        await AuditAdminAsync(EntityTypes.CodeDescription, codeDescId <= 0 ? 0 : codeDescId,
+            codeDescId <= 0 ? ActionCodes.Created : ActionCodes.Updated,
+            null, new { domain, parentCode, code, description, sortOrder, isActive });
+        return RedirectToAction(nameof(CodeDescriptions), new { domain });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> DeleteCodeDescription(int codeDescId, string domain)
+    {
+        if (!CodeDomains.IsValid(domain)) domain = CodeDomains.Plant;
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        var before = await c.QuerySingleOrDefaultAsync<CodeDescriptionEntry>(@"
+            SELECT code_desc_id CodeDescId, domain Domain, parent_code ParentCode,
+                   code Code, description Description
+            FROM   qms_code_description WHERE code_desc_id = @codeDescId",
+            new { codeDescId });
+
+        var n = await c.ExecuteAsync(
+            "DELETE FROM qms_code_description WHERE code_desc_id = @codeDescId", new { codeDescId });
+
+        if (n > 0)
+        {
+            // Nothing references these rows -- the lists fall back to the seeded
+            // name and then to the bare code, so a delete is always safe.
+            TempData["Success"] = $"'{before?.Code}' removed. The lists will show the built-in name, or the code itself.";
+            await _codes.RefreshAsync();
+            await AuditAdminAsync(EntityTypes.CodeDescription, codeDescId, ActionCodes.Deleted, before, null);
+        }
+        else
+        {
+            TempData["Error"] = "Entry not found.";
+        }
+        return RedirectToAction(nameof(CodeDescriptions), new { domain });
+    }
+
+    // ---- Report Units (M11, Parameters menu) --------------------------
+    //
+    // One unit label per material group, printed by the Quality Order PDF in
+    // place of the hard-coded word "Pieces": the group summary's Sample Size
+    // and the count column above every defect list (summary and per sample).
+    // A group with no row prints the default, so the table is sparse by design
+    // and the page shows every known group with the default pre-filled.
+    [HttpGet]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> ReportUnits()
+    {
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        var configured = (await c.QueryAsync<(string MaterialGroup, string UnitLabel)>(
+            "SELECT material_group AS MaterialGroup, unit_label AS UnitLabel FROM qms_material_group_unit"))
+            .ToDictionary(r => r.MaterialGroup, r => r.UnitLabel, StringComparer.OrdinalIgnoreCase);
+
+        // Group list: MARA cache first, falling back to the groups actually
+        // seen on quality orders so the page still works with a cold cache.
+        var maraGroups = await _mara.ListMaterialGroupsAsync();
+        IReadOnlyList<MaraGroup> groups = maraGroups;
+        if (groups.Count == 0)
+        {
+            var fallback = (await c.QueryAsync<string>(@"
+                SELECT DISTINCT material_group FROM qms_quality_order_material
+                WHERE material_group IS NOT NULL AND material_group <> ''")).ToList();
+            groups = fallback.Select(g => new MaraGroup { Code = g, Name = null }).ToList();
+        }
+
+        // Any group that has a saved unit but is missing from MARA still needs a
+        // row, or the admin could never see (let alone clear) what they set.
+        var known = groups.Select(g => g.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var orphans = configured.Keys.Where(k => !known.Contains(k))
+                                     .Select(k => new MaraGroup { Code = k, Name = "(not in material master)" });
+
+        var rows = groups.Concat(orphans)
+            .OrderBy(g => g.Code, StringComparer.OrdinalIgnoreCase)
+            .Select(g => new ReportUnitRow
+            {
+                MaterialGroup = g.Code,
+                GroupName     = g.Name,
+                UnitLabel     = configured.TryGetValue(g.Code, out var u) ? u : ReportUnit.DefaultLabel,
+                IsConfigured  = configured.ContainsKey(g.Code)
+            })
+            .ToList();
+
+        return View(rows);
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    public async Task<IActionResult> SaveReportUnits(string[] materialGroup, string[] unitLabel)
+    {
+        if (materialGroup == null || unitLabel == null || materialGroup.Length != unitLabel.Length)
+        {
+            TempData["Error"] = "Nothing to save — the form did not post as expected.";
+            return RedirectToAction(nameof(ReportUnits));
+        }
+
+        var user = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "system";
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+
+        var changed = new List<string>();
+        for (int i = 0; i < materialGroup.Length; i++)
+        {
+            var grp   = (materialGroup[i] ?? "").Trim();
+            if (grp.Length == 0) continue;
+            var label = (unitLabel[i] ?? "").Trim();
+
+            // Blank or the default means "no override" -- delete the row rather
+            // than storing 'Pieces' everywhere, so the table stays sparse and
+            // the default can be changed in one place later.
+            if (label.Length == 0 || string.Equals(label, ReportUnit.DefaultLabel, StringComparison.OrdinalIgnoreCase))
+            {
+                var n = await c.ExecuteAsync(
+                    "DELETE FROM qms_material_group_unit WHERE material_group = @grp", new { grp }, tx);
+                if (n > 0) changed.Add($"{grp}→{ReportUnit.DefaultLabel}");
+                continue;
+            }
+            if (label.Length > 20) label = label.Substring(0, 20);
+
+            var affected = await c.ExecuteAsync(@"
+                UPDATE qms_material_group_unit
+                SET    unit_label = @label, updated_at = SYSUTCDATETIME(), updated_by = @user
+                WHERE  material_group = @grp AND unit_label <> @label;
+
+                INSERT INTO qms_material_group_unit (material_group, unit_label, updated_by)
+                SELECT @grp, @label, @user
+                WHERE  NOT EXISTS (SELECT 1 FROM qms_material_group_unit WHERE material_group = @grp);",
+                new { grp, label, user }, tx);
+            if (affected > 0) changed.Add($"{grp}→{label}");
+        }
+        tx.Commit();
+
+        // The report reads these through ICatalogCache, so flush or the next
+        // PDF still prints the old unit for up to an hour.
+        _catalogCache.Invalidate();
+
+        if (changed.Count > 0)
+        {
+            TempData["Success"] = $"Report units updated ({changed.Count} material group(s)).";
+            await AuditAdminAsync(EntityTypes.ReportUnit, 0, ActionCodes.Updated, null, new { changed });
+        }
+        else
+        {
+            TempData["Success"] = "No changes to save.";
+        }
+        return RedirectToAction(nameof(ReportUnits));
     }
 
     // ---- Mail template (Parameters menu) -----------------------------

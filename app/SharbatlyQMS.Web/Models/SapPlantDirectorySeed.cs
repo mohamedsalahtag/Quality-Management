@@ -1,21 +1,26 @@
 namespace SharbatlyQMS.Web.Models;
 
 /// <summary>
-/// In-process lookup for SAP plant + storage-location descriptive names.
-/// The data was supplied by the operator on 2026-06-15 (snapshot of the
-/// live SAP configuration tables) so the QMS UI can render
-/// "JD01 — Jeddah" / "JDCS — JD Main Coldstor" instead of bare codes.
+/// SEED data for SAP plant + storage-location descriptive names, supplied by
+/// the operator on 2026-06-15 (snapshot of the live SAP configuration tables)
+/// so the QMS UI can render "JD01 — Jeddah" / "JDCS — JD Main Coldstor"
+/// instead of bare codes.
 ///
-/// Why not a DB table or live SAP fetch? Plant and storage-loc master
-/// data changes rarely (years apart in practice); a single C# file is
-/// simpler than a migration + admin UI and avoids one more SAP round
-/// trip per page render. When the customer adds a plant or storage
-/// location, edit this file, redeploy.
+/// This used to BE the lookup: a hard-coded file that needed a redeploy to
+/// change. Since M10 the live source is qms_code_description, editable from
+/// Parameters &gt; Code Descriptions, and these 562 rows were seeded into it.
 ///
-/// If a code is missing from the lookup we fall back to the bare code
-/// in the UI -- the page never crashes on unknown values.
+/// The class is kept for two reasons:
+///   1. it is the generator input for the M10 seed block, and
+///   2. <see cref="SharbatlyQMS.Web.Services.CodeDescriptionDirectory"/> falls
+///      back to it when a code has no DB row — so the list pages keep showing
+///      names in the window between a binary deploy and the migration, and if
+///      an admin ever deletes a row by mistake.
+///
+/// Do NOT add new codes here; add them in the admin page. Views must go
+/// through ICodeDescriptionDirectory, never this class directly.
 /// </summary>
-public static class SapPlantDirectory
+public static class SapPlantDirectorySeed
 {
     public sealed record Plant(string Code, string Name);
     public sealed record StorageLocation(string PlantCode, string Code, string Name);

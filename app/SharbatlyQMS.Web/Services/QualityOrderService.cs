@@ -1,9 +1,10 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Models.Reports;
+using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Services;
 
@@ -12,12 +13,16 @@ public class QualityOrderService : IQualityOrderService
     private readonly string _cs;
     private readonly IAuditService _audit;
     private readonly IMaraService _mara;
-    public QualityOrderService(IConfiguration config, IAuditService audit, IMaraService mara)
+    // Only used by DeleteAsync, to unlink attachment files after the commit.
+    private readonly IDocumentService _docs;
+    public QualityOrderService(IConfiguration config, IAuditService audit, IMaraService mara,
+        IDocumentService docs)
     {
         _cs = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
         _audit = audit;
         _mara  = mara;
+        _docs  = docs;
     }
     private SqlConnection Open() => new(_cs);
 
@@ -45,21 +50,74 @@ public class QualityOrderService : IQualityOrderService
         LEFT   JOIN qms_arrival  a ON a.arrival_id = qo.arrival_id";
 
     // Shared WHERE for the list. Kept as a constant so the header query and the
-    // materials roll-up query (below) filter to exactly the same set of QOs.
+    // materials roll-up query (below) filter to exactly the same set of QOs --
+    // which also means every predicate here must be self-contained (an EXISTS)
+    // or qualified with the qo./a. aliases that BOTH queries define, and every
+    // @parameter must be present in the single anonymous parameter object.
+    //
+    // Deliberately no JOIN to qms_arrival_item for the storage-location filter:
+    // that fans the header rows out and would list a multi-line QO several
+    // times (ListAsync has no DISTINCT). Storage location is denormalised onto
+    // qms_arrival by M13 precisely so this stays a plain equality test.
     private const string QoListWhere = @"
         WHERE  (@status IS NULL OR qo.status_code = @status)
           AND  (@plant  IS NULL OR a.plant        = @plant)
+          AND  (@container  IS NULL OR a.container_no    LIKE '%' + @container + '%')
+          AND  (@bol        IS NULL OR a.bol_no          LIKE '%' + @bol       + '%')
+          AND  (@po         IS NULL OR a.ebeln           LIKE '%' + @po        + '%')
+          AND  (@arrivalNo  IS NULL OR a.arrival_no      LIKE '%' + @arrivalNo + '%')
+          AND  (@storageLoc IS NULL OR a.storage_location = @storageLoc)
+          AND  (@openedBy   IS NULL OR qo.opened_by       = @openedBy)
+          AND  (@fromUtc    IS NULL OR qo.created_at     >= @fromUtc)
+          AND  (@toUtc      IS NULL OR qo.created_at      < @toUtc)
+          AND  (@material   IS NULL OR EXISTS (
+                    SELECT 1 FROM qms_quality_order_material m2
+                    WHERE  m2.quality_order_id = qo.quality_order_id
+                      AND (m2.material_no   LIKE '%' + @material + '%'
+                        OR m2.material_desc LIKE '%' + @material + '%')))
           AND  (@search IS NULL OR
                 qo.quality_order_no LIKE '%' + @search + '%' OR
                 a.container_no      LIKE '%' + @search + '%' OR
                 a.bol_no            LIKE '%' + @search + '%' OR
                 a.ebeln             LIKE '%' + @search + '%' OR
                 a.vendor_name       LIKE '%' + @search + '%' OR
-                qo.created_by       LIKE '%' + @search + '%')";
+                qo.created_by       LIKE '%' + @search + '%' OR
+                qo.opened_by        LIKE '%' + @search + '%')";
 
-    public async Task<IReadOnlyList<QualityOrder>> ListAsync(string? status, string? search, string? plant = null)
+    /// <param name="plantScope">Forced plant for plant-restricted operators.
+    /// When set it overrides whatever the user picked in the filter panel.</param>
+    public async Task<IReadOnlyList<QualityOrder>> ListAsync(QoListFilter f, string? plantScope = null)
     {
         using var c = Open();
+
+        static string? Trim(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        // qo.created_at is UTC; the list renders it local. Convert the picked
+        // LOCAL dates to UTC here, and make the upper bound exclusive-next-
+        // midnight rather than BETWEEN, which would drop everything after
+        // 00:00:00.000 on the To date.
+        DateTime? fromUtc = f.From.HasValue
+            ? DateTime.SpecifyKind(f.From.Value.Date, DateTimeKind.Local).ToUniversalTime()
+            : null;
+        DateTime? toUtc = f.To.HasValue
+            ? DateTime.SpecifyKind(f.To.Value.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime()
+            : null;
+
+        var p = new
+        {
+            status     = Trim(f.Status),
+            search     = Trim(f.Search),
+            plant      = Trim(plantScope) ?? Trim(f.Plant),
+            container  = Trim(f.Container),
+            bol        = Trim(f.Bol),
+            po         = Trim(f.Po),
+            arrivalNo  = Trim(f.ArrivalNo),
+            storageLoc = Trim(f.StorageLoc),
+            material   = Trim(f.Material),
+            openedBy   = Trim(f.OpenedBy),
+            fromUtc,
+            toUtc
+        };
         // Two result sets in one round trip (same pattern as the Pending
         // Containers list): the QO headers, then every material line for those
         // same QOs, stitched in memory so the list can show a materials "quick
@@ -80,8 +138,7 @@ public class QualityOrderService : IQualityOrderService
                        FROM   qms_quality_order qo
                        LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id"
                        + QoListWhere + @")
-            ORDER BY m.quality_order_id, m.qo_material_id;",
-            new { status, search, plant });
+            ORDER BY m.quality_order_id, m.qo_material_id;", p);
 
         var rows  = (await grid.ReadAsync<QualityOrder>()).ToList();
         var lines = (await grid.ReadAsync<QoMaterialLine>()).ToList();
@@ -93,6 +150,128 @@ public class QualityOrderService : IQualityOrderService
             r.LineCount     = r.MaterialLines.Count;
         }
         return rows;
+    }
+
+    /// <summary>
+    /// Permanently removes a quality order and everything under it: samples,
+    /// readings, defects, observations, photos, documents, claims, report log
+    /// and status history. There is no undo -- Cancel is the soft path.
+    ///
+    /// Deliberately restricted to Initial / Open. Once a QO is Submitted or
+    /// Finished it has been signed off and may sit behind a claim, so deleting
+    /// it would erase a record someone acted on. The status is enforced HERE in
+    /// SQL, not just by hiding the button, so a replayed POST can't slip past.
+    ///
+    /// The arrival is untouched and its container stays out of the Pending
+    /// queue -- the arrival still exists, so releasing it would invite a
+    /// duplicate. The audit row is written inside the transaction and survives,
+    /// carrying a snapshot of what was deleted.
+    /// </summary>
+    public async Task<(bool ok, string? error)> DeleteAsync(long qualityOrderId, string user)
+    {
+        var qo = await GetAsync(qualityOrderId);
+        if (qo == null) return (false, "Quality order not found.");
+        if (qo.StatusCode != QualityOrderStatus.Initial && qo.StatusCode != QualityOrderStatus.Open)
+            return (false, $"Only a quality order that is still Initial or Open can be deleted — this one is {QualityOrderStatus.DisplayName(qo.StatusCode)}.");
+
+        using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+
+        var qoIds = new[] { qualityOrderId };
+
+        // Re-check the status inside the transaction and take the row lock in
+        // the same statement, so two concurrent deletes (or a delete racing a
+        // Submit) can't both proceed.
+        var stillDeletable = await c.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM qms_quality_order WITH (UPDLOCK, HOLDLOCK)
+            WHERE  quality_order_id = @qualityOrderId
+              AND  status_code IN ('Initial','Open')",
+            new { qualityOrderId }, tx);
+        if (stillDeletable == 0)
+        {
+            tx.Rollback();
+            return (false, "The quality order changed status just now — reload the page and try again.");
+        }
+
+        var docPaths = await QoCascade.CollectDocumentPathsAsync(c, tx, qoIds);
+
+        var counts = await c.QuerySingleAsync<(int Samples, int Defects, int Photos, int Documents)>(@"
+            SELECT
+              (SELECT COUNT(*) FROM qms_sample WHERE quality_order_id = @qualityOrderId) AS Samples,
+              (SELECT COUNT(*) FROM qms_sample_defect d
+               JOIN   qms_sample s ON s.sample_id = d.sample_id
+               WHERE  s.quality_order_id = @qualityOrderId) AS Defects,
+              (SELECT COUNT(*) FROM qms_image_link
+               WHERE (owner_type='Sample' AND owner_id IN (SELECT sample_id FROM qms_sample WHERE quality_order_id = @qualityOrderId))
+                  OR (owner_type='QualityOrder' AND owner_id = @qualityOrderId)) AS Photos,
+              (SELECT COUNT(*) FROM qms_document
+               WHERE (owner_type='Sample' AND owner_id IN (SELECT sample_id FROM qms_sample WHERE quality_order_id = @qualityOrderId))
+                  OR (owner_type='QualityOrder' AND owner_id = @qualityOrderId)) AS Documents",
+            new { qualityOrderId }, tx);
+
+        // Audit BEFORE the delete so the snapshot is written while the row is
+        // still readable; qms_audit_log has no FK to the QO, so it survives.
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.QualityOrder, qualityOrderId, ActionCodes.Deleted,
+            oldValues: new
+            {
+                qo.QualityOrderNo, qo.ArrivalId, qo.ArrivalNo, qo.ContainerNo,
+                qo.BolNo, qo.Ebeln, qo.Plant, status_code = qo.StatusCode,
+                qo.CreatedBy, qo.CreatedAt, qo.OpenedBy, qo.OpenedAt,
+                counts.Samples, counts.Defects, counts.Photos, counts.Documents
+            },
+            newValues: null,
+            actor: user);
+
+        await QoCascade.DeleteAsync(c, tx, qoIds);
+        tx.Commit();
+
+        // Files only after the commit.
+        _docs.DeleteFiles(docPaths);
+        return (true, null);
+    }
+
+    /// <summary>
+    /// Dropdown sources for the Quality Orders filter panel. Drawn only from
+    /// arrivals that actually have a quality order, so picking any option is
+    /// guaranteed to return at least one row. Three cheap DISTINCTs in one
+    /// round trip -- same shape as ContainerCacheService.GetPendingFilterOptionsAsync.
+    /// </summary>
+    public async Task<QoFilterOptions> GetQoFilterOptionsAsync(string? plantScope = null)
+    {
+        using var c = Open();
+        using var grid = await c.QueryMultipleAsync(@"
+            SELECT DISTINCT a.plant
+            FROM   qms_quality_order qo
+            JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
+            WHERE  a.plant IS NOT NULL AND a.plant <> ''
+              AND (@plantScope IS NULL OR a.plant = @plantScope)
+            ORDER  BY a.plant;
+
+            SELECT DISTINCT a.plant AS Plant, a.storage_location AS Code
+            FROM   qms_quality_order qo
+            JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
+            WHERE  a.plant            IS NOT NULL AND a.plant            <> ''
+              AND  a.storage_location IS NOT NULL AND a.storage_location <> ''
+              AND (@plantScope IS NULL OR a.plant = @plantScope)
+            ORDER  BY a.plant, a.storage_location;
+
+            SELECT DISTINCT qo.opened_by
+            FROM   qms_quality_order qo
+            LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
+            WHERE  qo.opened_by IS NOT NULL AND qo.opened_by <> ''
+              AND (@plantScope IS NULL OR a.plant = @plantScope)
+            ORDER  BY qo.opened_by;",
+            new { plantScope = string.IsNullOrWhiteSpace(plantScope) ? null : plantScope.Trim() });
+
+        var plants   = (await grid.ReadAsync<string>()).ToList();
+        var storage  = (await grid.ReadAsync<QoPlantStorage>()).ToList();
+        var openedBy = (await grid.ReadAsync<string>()).ToList();
+        return new QoFilterOptions
+        {
+            Plants = plants, StorageLocations = storage, OpenedBy = openedBy
+        };
     }
 
     /// <summary>QO inherits plant from its arrival header (qms_arrival.plant,
@@ -889,6 +1068,19 @@ public class QualityOrderService : IQualityOrderService
         return rows.ToList();
     }
 
+    /// <summary>Report unit label per material group (M11). Only configured
+    /// groups are returned -- the report defaults everything else to "Pieces",
+    /// so an empty table is the normal state, not a missing-data problem.</summary>
+    public async Task<IReadOnlyDictionary<string, string>> GetReportUnitsAsync()
+    {
+        using var c = Open();
+        var rows = await c.QueryAsync<(string MaterialGroup, string UnitLabel)>(@"
+            SELECT material_group AS MaterialGroup, unit_label AS UnitLabel
+            FROM   qms_material_group_unit
+            WHERE  material_group IS NOT NULL AND unit_label IS NOT NULL");
+        return rows.ToDictionary(r => r.MaterialGroup, r => r.UnitLabel, StringComparer.OrdinalIgnoreCase);
+    }
+
     public async Task<IReadOnlyDictionary<string, string>> GetDisplaySectionMapAsync(string? materialGroup, string? majorCategory)
     {
         // Returns defect_code -> its REAL category name (V22+). Source of
@@ -1183,7 +1375,8 @@ public class QualityOrderService : IQualityOrderService
     // Major/Minor bucketing matches the existing _SampleForm.cshtml rule:
     // "Major" + "Critical" -> Major bucket; everything else -> Minor.
     public async Task<IReadOnlyList<MaterialGroupSummary>> BuildGroupSummariesAsync(
-        long qualityOrderId, IReadOnlyList<QualityOrderMaterial> materials)
+        long qualityOrderId, IReadOnlyList<QualityOrderMaterial> materials,
+        IReadOnlyDictionary<string, string>? unitsByGroup = null)
     {
         if (materials == null || materials.Count == 0)
             return Array.Empty<MaterialGroupSummary>();
@@ -1333,6 +1526,14 @@ public class QualityOrderService : IQualityOrderService
             foreach (var m in mats)
                 sumPoQty += qtyByMaterial.TryGetValue(m.QoMaterialId, out var q) ? (q ?? 0m) : 0m;
 
+            // Report unit for this material group ("Pieces" unless configured
+            // in Parameters > Report Units). Stamped on the summary AND on each
+            // of its defect sections so the renderer never needs the map.
+            var groupUnit = unitsByGroup != null
+                            && unitsByGroup.TryGetValue(g.Key.MaterialGroup, out var cfgUnit)
+                                ? ReportUnit.Normalize(cfgUnit)
+                                : ReportUnit.DefaultLabel;
+
             var summary = new MaterialGroupSummary
             {
                 MaterialGroup     = g.Key.MaterialGroup,
@@ -1344,7 +1545,8 @@ public class QualityOrderService : IQualityOrderService
                 SumSampleSize     = sumSize,
                 SumPoQuantity     = sumPoQty,
                 MaterialCount     = mats.Count,
-                SampleCount       = groupSamples.Count
+                SampleCount       = groupSamples.Count,
+                SampleUnit        = groupUnit
             };
 
             // ---- Defects: iterate the FULL active catalog for this group's
@@ -1386,7 +1588,8 @@ public class QualityOrderService : IQualityOrderService
                     {
                         CategoryName = d.DefectCategory,
                         ColorHex     = cat?.ColorHex,
-                        SortOrder    = cat?.SortOrder ?? 999
+                        SortOrder    = cat?.SortOrder ?? 999,
+                        Unit         = groupUnit
                     };
                     sectionsByCat[d.DefectCategory] = sec;
                 }

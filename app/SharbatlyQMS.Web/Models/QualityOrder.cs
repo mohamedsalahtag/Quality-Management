@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.Models;
+﻿namespace SharbatlyQMS.Web.Models;
 
 public class QualityOrder
 {
@@ -311,6 +311,21 @@ public class MaterialGroupSummary
 
     public int MaterialCount { get; set; }
     public int SampleCount   { get; set; }
+
+    /// <summary>What a "sample size" of 1 is called for this material group --
+    /// "Pieces" unless an admin set something else in Parameters > Report Units.
+    /// Label only: no percentage or total arithmetic depends on it.</summary>
+    public string SampleUnit { get; set; } = ReportUnit.DefaultLabel;
+}
+
+/// <summary>Per-material-group report unit label (qms_material_group_unit).</summary>
+public static class ReportUnit
+{
+    public const string DefaultLabel = "Pieces";
+
+    /// <summary>Blank / unknown group -> the default, so no renderer has to branch.</summary>
+    public static string Normalize(string? label) =>
+        string.IsNullOrWhiteSpace(label) ? DefaultLabel : label!.Trim();
 }
 
 public class DefectAggRow
@@ -330,10 +345,18 @@ public class DefectCategorySection
     public string? ColorHex     { get; set; }
     public int     SortOrder    { get; set; }
     public List<DefectAggRow> Rows { get; set; } = new();
-    public decimal TotalPct => Rows.Sum(r => r.Percentage);
-    // Σ recorded defect pieces across this category (sum of the summed
-    // materials' defect values), shown in the summary category header.
-    public decimal TotalPieces => Rows.Sum(r => r.SumValue);
+
+    /// <summary>Unit label for the count column -- the owning material group's
+    /// setting, "Pieces" by default. Set by whichever builder produced the
+    /// section, so the renderer works the same for summary and per-sample.</summary>
+    public string Unit { get; set; } = ReportUnit.DefaultLabel;
+
+    // Totals printed on the bottom line of each category list. Both sum the
+    // ROUNDED row values, matching what the rows above actually print -- a
+    // total that doesn't equal the visible column reads as a bug even when the
+    // unrounded maths is right.
+    public decimal TotalPct    => Rows.Sum(r => Math.Round(r.Percentage, 2, MidpointRounding.AwayFromZero));
+    public decimal TotalPieces => Rows.Sum(r => Math.Round(r.SumValue,   2, MidpointRounding.AwayFromZero));
 }
 
 public class ReadingAggRow

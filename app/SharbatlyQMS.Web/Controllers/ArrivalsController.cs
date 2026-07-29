@@ -27,7 +27,7 @@ public class ArrivalsController : Controller
     [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
     public async Task<IActionResult> Pending(
         string? container, string? bol, string? po,
-        string? plant, string? poType, string? storageLoc)
+        string? plant, string? poType, string? storageLoc, string? supplier)
     {
         // Operator plant-scope: if the user is restricted to a plant, force
         // the dropdown value to it (and the view replaces the dropdown with
@@ -35,12 +35,13 @@ public class ArrivalsController : Controller
         var scoped = User.GetScopedPlant();
         if (scoped != null) plant = scoped;
 
-        var rows    = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc);
+        var rows    = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc, supplier);
         var status  = await _cache.GetPullStatusAsync();
         var options = await _cache.GetPendingFilterOptionsAsync();
         ViewBag.Container         = container;
         ViewBag.Bol               = bol;
         ViewBag.Po                = po;
+        ViewBag.Supplier          = supplier;
         ViewBag.Plant             = plant;
         ViewBag.PoType            = poType;
         ViewBag.StorageLoc        = storageLoc;

@@ -1,3 +1,8 @@
-﻿@using SharbatlyQMS.Web
+@using SharbatlyQMS.Web
 @using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.Services
 @addTagHelper *, Microsoft.AspNetCore.Mvc.TagHelpers
+@* SAP code -> friendly name lookup (plants, storage locations, PO types).
+   Injected globally because several list views resolve names per table cell;
+   `Codes` is a singleton holding immutable dictionaries, so this is free. *@
+@inject ICodeDescriptionDirectory Codes

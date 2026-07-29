@@ -27,12 +27,16 @@ public class QualityOrdersController : Controller
         _cat = cat; _settings = settings; _log = log;
     }
 
-    public async Task<IActionResult> Index(string? status, string? search)
+    public async Task<IActionResult> Index([FromQuery] QoListFilter filter)
     {
+        // Plant-scoped operators can't widen their view: the scope overrides
+        // whatever the panel's plant dropdown posted (the view renders a locked
+        // badge + hidden input to match).
         var scoped = User.GetScopedPlant();
-        var rows = await _qos.ListAsync(string.IsNullOrEmpty(status) ? null : status, search, scoped);
-        ViewBag.Status = status;
-        ViewBag.Search = search;
+        var rows    = await _qos.ListAsync(filter, scoped);
+        var options = await _qos.GetQoFilterOptionsAsync(scoped);
+        ViewBag.Filter           = filter;
+        ViewBag.FilterOptions    = options;
         ViewBag.PlantScopeLocked = scoped;
         return View(rows);
     }
@@ -460,6 +464,46 @@ public class QualityOrdersController : Controller
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
         return await TransitionAsync(id, (qos, user, r) => qos.CancelAsync(id, user, r), reason);
+    }
+
+    /// <summary>
+    /// Permanent delete of a quality order and everything under it. SiteAdmin
+    /// only, Initial / Open only, and the admin has to type the QO number —
+    /// a per-record confirmation rather than a fixed word, so it can't be
+    /// muscle-memoried and can't hit the wrong record.
+    ///
+    /// Cancel is the reversible option and stays the normal path; this exists
+    /// for quality orders created by mistake.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    public async Task<IActionResult> Delete(long id, string? confirm)
+    {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+
+        var qo = await _qos.GetAsync(id);
+        if (qo == null)
+        {
+            TempData["Error"] = "Quality order not found.";
+            return RedirectToAction(nameof(Index));
+        }
+
+        if (!string.Equals((confirm ?? "").Trim(), qo.QualityOrderNo, StringComparison.OrdinalIgnoreCase))
+        {
+            TempData["Error"] = $"Nothing was deleted — type the quality order number ({qo.QualityOrderNo}) exactly to confirm.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        var (ok, error) = await _qos.DeleteAsync(id, user);
+        if (!ok)
+        {
+            TempData["Error"] = error ?? "Could not delete the quality order.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
+        TempData["Success"] = $"Quality order {qo.QualityOrderNo} and all of its samples, photos and documents were permanently deleted. Arrival {qo.ArrivalNo} was not touched.";
+        return RedirectToAction(nameof(Index));
     }
 
     [HttpPost, ValidateAntiForgeryToken]

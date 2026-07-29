@@ -113,7 +113,7 @@
                                      && !string.IsNullOrWhiteSpace(u.PlantCode))
                                 {
                                     <span class="badge bg-light text-dark border"
-                                          title="@(SapPlantDirectory.PlantName(u.PlantCode) ?? u.PlantCode)">@u.PlantCode</span>
+                                          title="@u.PlantCode">@Codes.PlantDisplay(u.PlantCode)</span>
                                 }
                                 else
                                 {
@@ -275,9 +275,9 @@
                         <label class="form-label">Plant <span class="text-muted small">(Operator only — restricts the user to one plant's containers/arrivals/QOs)</span></label>
                         <select name="plantCode" id="edit-plantCode" class="form-select">
                             <option value="">— No plant — sees every plant</option>
-                            @foreach (var p in SapPlantDirectory.Plants)
+                            @foreach (var p in Codes.Plants)
                             {
-                                <option value="@p.Code">@SapPlantDirectory.PlantLabel(p.Code)</option>
+                                <option value="@p.Code">@Codes.PlantLabel(p.Code)</option>
                             }
                         </select>
                     </div>

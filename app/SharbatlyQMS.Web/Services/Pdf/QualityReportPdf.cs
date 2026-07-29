@@ -429,7 +429,9 @@ public static class QualityReportPdf
                     Field(c, "Samples",            g.SampleCount + " Cartons");
                 });
                 row.RelativeItem().Column(c => {
-                    Field(c, "Sample Size", g.SumSampleSize + " Pieces");
+                    // Unit comes from Parameters > Report Units for this material
+                    // group -- "Pieces" unless the group counts boxes, cartons, ...
+                    Field(c, "Sample Size", g.SumSampleSize + " " + g.SampleUnit);
                     // PO Quantity shown on every summary (single or multi-material).
                     Field(c, "PO Quantity", g.SumPoQuantity.ToString("0.###"));
                 });
@@ -475,28 +477,31 @@ public static class QualityReportPdf
     }
 
     // Calm per-category defect list: a category header (name in its colour) with
-    // right-aligned "Pieces" / "Percentage" column headers, a hairline, one plain
-    // row per defect (name · count · coloured percentage), then a totals line.
+    // right-aligned unit / "Percentage" column headers, a hairline, one plain row
+    // per defect (name · count · coloured percentage), then a bold Total line.
     // Column weights scale to the container so it reads well full-width (summary)
     // or in a narrower column (sample card).
+    //
+    // Shared by BOTH call paths -- the page-1 group summary and every sample
+    // card -- so the unit rides on the section rather than the signature: the
+    // summary renderer never receives QualityReportData and so has no unit map
+    // of its own to pass down.
     private static void RenderDefectListCalm(QuestPDF.Infrastructure.IContainer container,
         DefectCategorySection sec)
     {
         var pctColor = ReadableOnWhite(sec.ColorHex);
         container.PaddingTop(3).Column(col =>
         {
-            // Category header: name in its colour + the total piece count inline
-            // (e.g. "Minor (number of pieces : 15)"). No bottom total row, no
-            // percentage sum.
+            // Category header: just the name in its colour. The piece count used
+            // to be spelled out inline here; the Total row at the bottom says the
+            // same thing in line with the numbers it totals.
             col.Item().Row(r =>
             {
                 r.RelativeItem(3f).Text(t =>
                 {
                     t.Span(sec.CategoryName).SemiBold().FontColor(pctColor).FontSize(8);
-                    t.Span($"  (number of pieces : {sec.TotalPieces.ToString("0.##")})")
-                        .FontColor(Colors.Grey.Darken1).FontSize(7);
                 });
-                r.RelativeItem(1f).AlignRight().Text("Pieces").FontColor(Colors.Grey.Darken1).FontSize(7);
+                r.RelativeItem(1f).AlignRight().Text(sec.Unit).FontColor(Colors.Grey.Darken1).FontSize(7);
                 r.RelativeItem(1.2f).AlignRight().Text("Percentage").FontColor(Colors.Grey.Darken1).FontSize(7);
             });
             col.Item().Element(Rule);
@@ -505,7 +510,7 @@ public static class QualityReportPdf
             {
                 col.Item().Text("No defects configured for this category in Defect Catalog.")
                     .Italic().FontColor(Colors.Grey.Darken1).FontSize(7);
-                return;
+                return;   // nothing to total
             }
 
             foreach (var dr in sec.Rows)
@@ -518,6 +523,18 @@ public static class QualityReportPdf
                         .Text(dr.Percentage.ToString("0.##") + "%").SemiBold().FontColor(pctColor).FontSize(7);
                 });
             }
+
+            // ----- Total line. Both figures sum the rounded row values, so the
+            //       printed column always adds up to the printed total.
+            col.Item().Element(Rule);
+            col.Item().Row(r =>
+            {
+                r.RelativeItem(3f).Text("Total").SemiBold().FontColor(Colors.Grey.Darken2).FontSize(7);
+                r.RelativeItem(1f).AlignRight()
+                    .Text(sec.TotalPieces.ToString("0.##")).SemiBold().FontColor(Colors.Grey.Darken2).FontSize(7);
+                r.RelativeItem(1.2f).AlignRight()
+                    .Text(sec.TotalPct.ToString("0.##") + "%").Bold().FontColor(pctColor).FontSize(7);
+            });
         });
     }
 
@@ -702,7 +719,8 @@ public static class QualityReportPdf
                               && d.DefectsByGroup.TryGetValue(m.MaterialGroup!, out var cat))
                               ? cat
                               : Array.Empty<DefectCatalogEntry>();
-            var sampleSections = BuildSampleDefectSections(s, catalog, d.Categories);
+            var sampleSections = BuildSampleDefectSections(
+                s, catalog, d.Categories, d.UnitFor(m?.MaterialGroup));
 
             // Same calm defect lists as the summary (category name in its colour,
             // Pieces / Percentage headers, coloured percentages), laid out
@@ -718,7 +736,8 @@ public static class QualityReportPdf
     // Sections are ordered by the category master's sort_order and coloured by
     // its colour; unknown/inactive categories fall to the end with no colour.
     private static List<DefectCategorySection> BuildSampleDefectSections(
-        SampleBundle s, IReadOnlyList<DefectCatalogEntry> catalog, IReadOnlyList<DefectCategory> categories)
+        SampleBundle s, IReadOnlyList<DefectCatalogEntry> catalog, IReadOnlyList<DefectCategory> categories,
+        string unit)
     {
         var catMeta = categories.ToDictionary(c => c.CategoryName, StringComparer.OrdinalIgnoreCase);
         var sections = new Dictionary<string, DefectCategorySection>(StringComparer.OrdinalIgnoreCase);
@@ -734,7 +753,8 @@ public static class QualityReportPdf
                 {
                     CategoryName = category,
                     ColorHex     = meta?.ColorHex,
-                    SortOrder    = meta?.SortOrder ?? 999
+                    SortOrder    = meta?.SortOrder ?? 999,
+                    Unit         = unit
                 };
                 sections[category] = sec;
             }

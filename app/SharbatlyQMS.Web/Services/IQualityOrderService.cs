@@ -1,11 +1,23 @@
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Models.Reports;
+using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Services;
 
 public interface IQualityOrderService
 {
-    Task<IReadOnlyList<QualityOrder>> ListAsync(string? status, string? search, string? plant = null);
+    /// <param name="plantScope">Forced plant for plant-restricted operators;
+    /// overrides whatever the filter carries.</param>
+    Task<IReadOnlyList<QualityOrder>> ListAsync(QoListFilter filter, string? plantScope = null);
+
+    /// <summary>Dropdown sources (plants, plant+storage pairs, openers) for the
+    /// Quality Orders filter panel, restricted to the caller's plant scope.</summary>
+    Task<QoFilterOptions> GetQoFilterOptionsAsync(string? plantScope = null);
+
+    /// <summary>Permanently removes a quality order and its whole subtree.
+    /// Refuses anything past Open (Submitted / Finished / Cancelled) — that
+    /// check is enforced in SQL, not just in the UI. Audited before deletion.</summary>
+    Task<(bool ok, string? error)> DeleteAsync(long qualityOrderId, string user);
     Task<QualityOrder?> GetAsync(long qualityOrderId);
     Task<QualityOrder?> GetByArrivalAsync(long arrivalId);
 
@@ -66,6 +78,9 @@ public interface IQualityOrderService
     Task<IReadOnlyDictionary<string, string>> GetDisplaySectionMapAsync(string? materialGroup, string? majorCategory);
     /// <summary>Active defect categories (V22+), ordered by sort_order; drives the dynamic per-category sections + colours.</summary>
     Task<IReadOnlyList<DefectCategory>> GetActiveCategoriesAsync();
+    /// <summary>Report unit label per material group (qms_material_group_unit, M11).
+    /// Only configured groups appear; everything else defaults to "Pieces".</summary>
+    Task<IReadOnlyDictionary<string, string>> GetReportUnitsAsync();
 
     // ----- Sample header fields (configurable, global, V20+) -----
     /// <summary>Active sample header field catalog (everything except
@@ -128,6 +143,10 @@ public interface IQualityOrderService
     /// / Grade / MARA weight come live from <see cref="IMaraService"/> via
     /// the supplied materials enriched with ApplyMara.
     /// </summary>
+    /// <param name="unitsByGroup">Report unit label per material group (see
+    /// <see cref="GetReportUnitsAsync"/>). Null means every group prints the
+    /// default "Pieces".</param>
     Task<IReadOnlyList<MaterialGroupSummary>> BuildGroupSummariesAsync(
-        long qualityOrderId, IReadOnlyList<QualityOrderMaterial> materials);
+        long qualityOrderId, IReadOnlyList<QualityOrderMaterial> materials,
+        IReadOnlyDictionary<string, string>? unitsByGroup = null);
 }

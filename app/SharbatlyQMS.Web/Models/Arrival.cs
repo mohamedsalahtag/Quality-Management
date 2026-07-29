@@ -14,6 +14,14 @@ public class Arrival
     /// <summary>Denormalized SAP plant (e.g. RD01) from the first cache row at
     /// create time. Drives the plant-scope filter on /Arrivals and gates Details access.</summary>
     public string?   Plant        { get; set; }
+    /// <summary>Denormalized SAP storage location (M13). Also present per line on
+    /// qms_arrival_item; the header copy exists so the Arrivals list can show it
+    /// and the QO list can filter on it without an EXISTS over the item table.</summary>
+    public string?   StorageLocation { get; set; }
+    /// <summary>SAP purchase-order document type (EKKO.BSART, e.g. ZFAS), copied
+    /// from the container cache at create time (M13). Rendered as a friendly name
+    /// via ICodeDescriptionDirectory.</summary>
+    public string?   PoType       { get; set; }
     public string    StatusCode   { get; set; } = "Draft";
     public DateTime  CreatedAt    { get; set; }
     public string    CreatedBy    { get; set; } = "";

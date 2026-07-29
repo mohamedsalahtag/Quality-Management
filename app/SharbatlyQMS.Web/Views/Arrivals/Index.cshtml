@@ -44,6 +44,8 @@
                     <th data-sort>Container</th>
                     <th data-sort>BOL</th>
                     <th data-sort>Plant</th>
+                    <th data-sort>Storage</th>
+                    <th data-sort>Type</th>
                     <th data-sort>Vendor</th>
                     <th data-sort>Created</th>
                     <th data-sort>Created By</th>
@@ -55,7 +57,7 @@
             <tbody>
                 @if (!Model.Any())
                 {
-                    <tr><td colspan="10" class="text-center text-muted py-4">
+                    <tr><td colspan="12" class="text-center text-muted py-4">
                         No arrivals yet. Click <em>New arrival from SAP</em> to create the first one.
                     </td></tr>
                 }
@@ -71,7 +73,32 @@
                                 @if (!string.IsNullOrEmpty(a.Plant))
                                 {
                                     <span class="badge bg-light text-dark border"
-                                          data-bs-toggle="tooltip" title="@(SapPlantDirectory.PlantName(a.Plant) ?? a.Plant)">@a.Plant</span>
+                                          data-bs-toggle="tooltip" title="@a.Plant">@Codes.PlantDisplay(a.Plant)</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+                            @* Storage location and PO type read as names; the raw
+                               SAP code stays available in the tooltip. Both are
+                               null on arrivals created before M13 backfilled them. *@
+                            <td>
+                                @if (!string.IsNullOrEmpty(a.StorageLocation))
+                                {
+                                    <span class="badge bg-light text-dark border"
+                                          data-bs-toggle="tooltip" title="@a.StorageLocation">@Codes.StorageLocationDisplay(a.Plant, a.StorageLocation)</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+                            <td>
+                                @if (!string.IsNullOrEmpty(a.PoType))
+                                {
+                                    <span class="badge bg-light text-dark border"
+                                          data-bs-toggle="tooltip" title="@a.PoType">@Codes.PoTypeDisplay(a.PoType)</span>
                                 }
                                 else
                                 {

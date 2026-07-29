@@ -9,6 +9,7 @@ public class CatalogCache : ICatalogCache
     private const string KeyDefects      = "cat:defects";
     private const string KeyHeaderFields = "cat:headerFields";
     private const string KeyCategories   = "cat:defectCategories";
+    private const string KeyReportUnits  = "cat:reportUnits";
     private static string KeySectionMap(string? mg, string? mc)
         => $"cat:sectionMap:{mg ?? "_"}|{mc ?? "_"}";
 
@@ -101,12 +102,22 @@ public class CatalogCache : ICatalogCache
         return data;
     }
 
+    public async Task<IReadOnlyDictionary<string,string>> GetReportUnitsAsync()
+    {
+        if (_cache.TryGetValue<IReadOnlyDictionary<string,string>>(KeyReportUnits, out var hit) && hit != null)
+            return hit;
+        var data = await _qos.GetReportUnitsAsync();
+        _cache.Set(KeyReportUnits, data, new MemoryCacheEntryOptions { AbsoluteExpirationRelativeToNow = TtL });
+        return data;
+    }
+
     public void Invalidate()
     {
         _cache.Remove(KeyReadingTypes);
         _cache.Remove(KeyDefects);
         _cache.Remove(KeyHeaderFields);
         _cache.Remove(KeyCategories);
+        _cache.Remove(KeyReportUnits);
         // Clear the dynamic per-(group, category) section-map keys too, so a
         // display-section change takes effect immediately instead of lingering
         // for up to the 60-minute TTL.

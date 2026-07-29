@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Models;
+﻿using SharbatlyQMS.Web.Models;
 
 namespace SharbatlyQMS.Web.Services.Pdf;
 
@@ -34,6 +34,23 @@ public class QualityReportData
     /// <summary>Active defect categories (ordered by sort_order) — drive the
     /// per-category defect sections + their colours on every sample card.</summary>
     public IReadOnlyList<DefectCategory> Categories { get; set; } = Array.Empty<DefectCategory>();
+
+    /// <summary>
+    /// Report unit label per `material_group` (qms_material_group_unit), e.g.
+    /// "Cartons". Groups with no configured row are simply absent — read it
+    /// through <see cref="UnitFor"/>, which falls back to "Pieces". The same
+    /// map feeds the page-1 summaries and every sample card, so the two can't
+    /// disagree. Populated by ReportsController.BuildDataAsync.
+    /// </summary>
+    public IReadOnlyDictionary<string, string> UnitsByGroup { get; set; }
+        = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Unit for a material group, tolerating null/unknown groups —
+    /// a QO can carry a material_group MARA no longer knows about.</summary>
+    public string UnitFor(string? materialGroup) =>
+        materialGroup != null && UnitsByGroup.TryGetValue(materialGroup, out var u)
+            ? ReportUnit.Normalize(u)
+            : ReportUnit.DefaultLabel;
 
     /// <summary>Map FieldId → Scope ("Sample"|"Material") for every active
     /// sample-header field. Lets the renderer split per-sample HeaderValues

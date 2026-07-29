@@ -31,6 +31,7 @@ public interface IContainerCacheService
     Task<IReadOnlyList<PendingPickupRow>> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
         string? plant = null, string? poType = null, string? storageLoc = null,
+        string? supplier = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -133,6 +134,9 @@ public class PendingPickupRow
     public DateTime? DocDate    { get; set; }
     public DateTime? ArrivalDate{ get; set; }
     public DateTime? ReceiveDate{ get; set; }
+    /// <summary>Days in transit, straight from SAP's Transit_Days. Promoted from
+    /// payload_json to its own cache column in M12 so the list can sort on it.</summary>
+    public short?    TransitDays{ get; set; }
     public DateTime  FirstSeenAt{ get; set; }
     /// <summary>Per-PO-line materials inside this triplet, ordered by Ebelp.</summary>
     public List<PendingMaterialLine> MaterialLines { get; set; } = new();

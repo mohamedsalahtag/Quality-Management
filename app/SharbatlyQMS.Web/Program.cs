@@ -59,6 +59,10 @@ builder.Services.AddScoped<IDocumentService, DocumentService>();
 builder.Services.AddScoped<IMaraService, MaraService>();
 builder.Services.AddScoped<IVendorService, VendorService>();
 builder.Services.AddScoped<ICatalogCache, CatalogCache>();
+// M10: SAP code -> friendly name lookup (plants, storage locations, PO types).
+// Singleton, not scoped: views resolve it per table cell, so it holds immutable
+// dictionaries and is refreshed wholesale after an admin save.
+builder.Services.AddSingleton<ICodeDescriptionDirectory, CodeDescriptionDirectory>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 // V34 (2026-06-20): Perspective Analyzer (server-side pivot + saved configs).
 builder.Services.AddScoped<SharbatlyQMS.Web.Services.Reports.IPivotService,
@@ -100,6 +104,7 @@ builder.Services.AddScoped<SharbatlyQMS.Web.Services.Sap.ISapSyncService,
 builder.Services.AddScoped<IContainerCacheService, ContainerCacheService>();
 builder.Services.AddHostedService<AutoSyncService>();
 builder.Services.AddHostedService<AdCachePrimingService>();
+builder.Services.AddHostedService<CodeDescriptionPrimingService>();
 builder.Services.AddHostedService<ContainerPollingService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpContextAccessor();

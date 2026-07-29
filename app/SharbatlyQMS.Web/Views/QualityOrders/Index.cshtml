@@ -1,9 +1,18 @@
 @using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.ViewModels
 @model IReadOnlyList<QualityOrder>
 @{
     ViewData["Title"] = "Quality Orders";
-    var status = ViewBag.Status as string;
-    var search = ViewBag.Search as string;
+    var f       = ViewBag.Filter as QoListFilter ?? new QoListFilter();
+    var opts    = ViewBag.FilterOptions as QoFilterOptions ?? new QoFilterOptions();
+    var status  = f.Status;
+    var search  = f.Search;
+    var plantScopeLocked = ViewBag.PlantScopeLocked as string;
+    // Panel starts collapsed, but opens itself when the URL already carries
+    // panel filters -- otherwise a bookmarked link shows a short list with no
+    // visible reason for it.
+    var panelOpen = f.AnyPanelFilter;
+    string D(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
 }
 
 <style>
@@ -35,32 +44,156 @@
 </div>
 
 @{
-    // Status filter is now a button group placed after the Filter submit.
-    // Cancelled was dropped because Quality Orders aren't cancelled in
-    // practice -- only Initial / Open / Reopened / Closed are real states.
-    // Each toggle button is its own submit, so picking a status posts the
-    // form (preserving the search text) without an extra click.
-    var statuses = new (string Value, string Label, string OutlineCss)[]
+    // Status filter is a button group placed after the Filter submit. Each
+    // toggle is its own submit, so picking a status posts the form (preserving
+    // the search text) without an extra click.
+    //
+    // Cancelled is deliberately absent -- Quality Orders aren't cancelled in
+    // practice. Labels come from QualityOrderStatus.DisplayName so this page
+    // can't drift from the rest of the app again (Closed reads "Finished").
+    var statuses = new (string Value, string OutlineCss)[]
     {
-        ("",        "All",     "btn-outline-secondary"),
-        ("Initial", "Initial", "btn-outline-secondary"),
-        ("Open",    "Open",    "btn-outline-primary"),
-        ("Closed",  "Closed",  "btn-outline-success"),
+        ("",                            "btn-outline-secondary"),
+        (QualityOrderStatus.Initial,    "btn-outline-secondary"),
+        (QualityOrderStatus.Open,       "btn-outline-primary"),
+        (QualityOrderStatus.Submitted,  "btn-outline-warning"),
+        (QualityOrderStatus.Closed,     "btn-outline-success"),
     };
+    string ChipLabel(string v) => v.Length == 0 ? "All" : QualityOrderStatus.DisplayName(v);
     string ActiveClass(string v, string baseCss) =>
         (status ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
 }
-<form method="get" class="row g-2 mb-3 align-items-stretch">
-    <div class="col-md-5">
-        <input type="text" name="search" value="@search" class="form-control" placeholder="Search by QO #, container, BOL, vendor, or created by..." />
-    </div>
-    <div class="col-md-2"><button type="submit" class="btn btn-outline-secondary w-100"><i class="bi bi-funnel me-1"></i>Filter</button></div>
-    <div class="col-md-5">
-        <div class="btn-group w-100" role="group" aria-label="Filter by status">
-            @foreach (var s in statuses)
+@* One form for everything: the always-visible quick bar and the collapsible
+   panel below it. Collapsed inputs still submit (display:none is not disabled),
+   which is exactly what we want -- the two sets AND together. *@
+<form method="get" class="mb-3">
+    <div class="row g-2 align-items-stretch">
+        <div class="col-md-4">
+            <input type="text" name="search" value="@search" class="form-control"
+                   placeholder="Search by QO #, container, BOL, PO, supplier, or user..." />
+        </div>
+        <div class="col-md-2 d-flex gap-2">
+            <button type="submit" class="btn btn-outline-secondary flex-grow-1"><i class="bi bi-funnel me-1"></i>Filter</button>
+            @if (f.Any)
             {
-                <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)">@s.Label</button>
+                <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter">Clear</a>
             }
+        </div>
+        <div class="col-md-4">
+            <div class="btn-group w-100" role="group" aria-label="Filter by status">
+                @foreach (var s in statuses)
+                {
+                    <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)">@ChipLabel(s.Value)</button>
+                }
+            </div>
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-outline-primary w-100" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#qoFilters"
+                    aria-expanded="@(panelOpen ? "true" : "false")" aria-controls="qoFilters">
+                <i class="bi bi-sliders me-1"></i>More filters
+                @if (f.PanelFilterCount > 0)
+                {
+                    <span class="badge bg-primary ms-1">@f.PanelFilterCount</span>
+                }
+            </button>
+        </div>
+    </div>
+
+    <div class="collapse @(panelOpen ? "show" : "")" id="qoFilters">
+        <div class="card card-body mt-2 bg-body-tertiary">
+            <div class="row g-2">
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Container</label>
+                    <input type="text" name="container" value="@f.Container" class="form-control form-control-sm"
+                           placeholder="any part" autocomplete="off" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">BOL</label>
+                    <input type="text" name="bol" value="@f.Bol" class="form-control form-control-sm"
+                           placeholder="any part" autocomplete="off" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">PO</label>
+                    <input type="text" name="po" value="@f.Po" class="form-control form-control-sm"
+                           placeholder="EBELN" autocomplete="off" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Arrival no.</label>
+                    <input type="text" name="arrivalNo" value="@f.ArrivalNo" class="form-control form-control-sm"
+                           placeholder="ARR-…" autocomplete="off" />
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label small mb-1">Material</label>
+                    <input type="text" name="material" value="@f.Material" class="form-control form-control-sm"
+                           placeholder="code or description" autocomplete="off" />
+                </div>
+
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-1">Plant</label>
+                    @if (plantScopeLocked != null)
+                    {
+                        @* Scoped operator: the server forces this plant anyway, so
+                           show why instead of a dropdown that can't take effect. *@
+                        <div class="form-control form-control-sm bg-light d-flex align-items-center"
+                             title="Your account is restricted to this plant.">
+                            <i class="bi bi-lock-fill text-muted me-1"></i>
+                            <span class="small">@Codes.PlantLabel(plantScopeLocked)</span>
+                        </div>
+                        <input type="hidden" id="qo-plant-filter" data-plant-filter="qo" name="plant" value="@plantScopeLocked" />
+                    }
+                    else
+                    {
+                        <select name="plant" id="qo-plant-filter" data-plant-filter="qo" class="form-select form-select-sm">
+                            <option value="">All plants</option>
+                            @foreach (var pl in opts.Plants)
+                            {
+                                <option value="@pl" selected="@(string.Equals(pl, f.Plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
+                            }
+                        </select>
+                    }
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-1">Storage location</label>
+                    <select name="storageLoc" id="qo-storage-filter" data-storage-filter="qo" class="form-select form-select-sm">
+                        <option value="">All storage locations</option>
+                        @foreach (var sl in opts.StorageLocations)
+                        {
+                            <option value="@sl.Code" data-plant="@sl.Plant"
+                                    selected="@(string.Equals(sl.Code, f.StorageLoc, StringComparison.OrdinalIgnoreCase)
+                                                && (string.IsNullOrEmpty(f.Plant) || string.Equals(sl.Plant, f.Plant, StringComparison.OrdinalIgnoreCase)))">
+                                @Codes.StorageLocationLabel(sl.Plant, sl.Code)
+                            </option>
+                        }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Opened by</label>
+                    <select name="openedBy" class="form-select form-select-sm">
+                        <option value="">Anyone</option>
+                        @foreach (var ob in opts.OpenedBy)
+                        {
+                            <option value="@ob" selected="@(string.Equals(ob, f.OpenedBy, StringComparison.OrdinalIgnoreCase))">@ob</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Created from</label>
+                    <input type="date" name="from" value="@D(f.From)" class="form-control form-control-sm" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Created to</label>
+                    <input type="date" name="to" value="@D(f.To)" class="form-control form-control-sm" />
+                </div>
+            </div>
+            <div class="mt-2 d-flex gap-2">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Apply filters</button>
+                @if (f.AnyPanelFilter)
+                {
+                    <a asp-action="Index" asp-route-status="@status" asp-route-search="@search"
+                       class="btn btn-outline-secondary btn-sm">Reset these filters</a>
+                }
+            </div>
         </div>
     </div>
 </form>
@@ -80,7 +213,9 @@
                     <th>Materials</th>
                     <th data-sort>Status</th>
                     <th data-sort>Created</th>
-                    <th data-sort>Created By</th>
+                    @* Who opened the QO, not who created it -- the inspector who
+                       took ownership is the useful name. Blank while Initial. *@
+                    <th data-sort>Opened By</th>
                     <th class="text-end">Actions</th>
                 </tr>
             </thead>
@@ -95,13 +230,17 @@
                 {
                     foreach (var q in Model)
                     {
-                        var (cls, label) = q.StatusCode switch {
-                            "Initial"   => ("secondary", "Initial"),
-                            "Open"      => ("primary",   "Open"),
-                            "Closed"    => ("success",   "Closed"),
-                            "Cancelled" => ("dark",      "Cancelled"),
-                            _           => ("secondary", q.StatusCode)
+                        // Colour only -- the wording is QualityOrderStatus.DisplayName's
+                        // job, so an unmapped status still reads correctly.
+                        var cls = q.StatusCode switch {
+                            QualityOrderStatus.Initial   => "secondary",
+                            QualityOrderStatus.Open      => "primary",
+                            QualityOrderStatus.Submitted => "warning text-dark",
+                            QualityOrderStatus.Closed    => "success",
+                            QualityOrderStatus.Cancelled => "dark",
+                            _                            => "secondary"
                         };
+                        var label = QualityOrderStatus.DisplayName(q.StatusCode);
                         var firstMat = q.MaterialLines.FirstOrDefault();
                         var extraMat = q.MaterialLines.Count - 1;
                         // Full material list for the hover tooltip: one <li> per
@@ -125,7 +264,7 @@
                                 @if (!string.IsNullOrEmpty(q.Plant))
                                 {
                                     <span class="badge bg-light text-dark border"
-                                          data-bs-toggle="tooltip" title="@(SapPlantDirectory.PlantName(q.Plant) ?? q.Plant)">@q.Plant</span>
+                                          data-bs-toggle="tooltip" title="@q.Plant">@Codes.PlantDisplay(q.Plant)</span>
                                 }
                                 else
                                 {
@@ -163,7 +302,7 @@
                             </td>
                             <td><span class="badge bg-@cls">@label</span></td>
                             <td>@q.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
-                            <td>@q.CreatedBy</td>
+                            <td>@q.OpenedBy</td>
                             <td class="text-end text-nowrap">
                                 <a asp-action="Details" asp-route-id="@q.QualityOrderId"
                                    class="btn btn-sm btn-outline-primary" title="Open Quality Order">

@@ -269,10 +269,17 @@ public class ReportsController : Controller
             if (mara.TryGetValue(m.MaterialNo, out var mm)) m.ApplyMara(mm);
         data.Materials = materials;
 
+        // Report unit per material group ("Pieces" unless configured under
+        // Parameters > Report Units). Loaded ONCE and handed to both the
+        // page-1 summary builder and the per-sample renderer, so the two
+        // paths can never print different units for the same group.
+        data.UnitsByGroup = await _qos.GetReportUnitsAsync();
+
         // Page-1 grouped summary (replaces the per-sample summary blocks).
         // Materials are passed in already MARA-enriched so the grouping key
         // (MaterialGroup, Brand, Variety, Grade) reflects the live cache.
-        data.GroupSummaries = await _qos.BuildGroupSummariesAsync(qo.QualityOrderId, materials);
+        data.GroupSummaries = await _qos.BuildGroupSummariesAsync(
+            qo.QualityOrderId, materials, data.UnitsByGroup);
 
         // Active catalog per material_group, for the per-sample defect render
         // (every sample card shows the FULL catalog with zeros for any defect

@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Models;
+﻿using SharbatlyQMS.Web.Models;
 
 namespace SharbatlyQMS.Web.Services;
 
@@ -25,6 +25,11 @@ public interface ICatalogCache
     /// <summary>Defect category master (V22+) — ordered list driving the
     /// dynamic per-category sections + their colours.</summary>
     Task<IReadOnlyList<DefectCategory>>     GetActiveCategoriesAsync();
+
+    /// <summary>Report unit label per material group (M11), e.g. "Cartons".
+    /// Groups an admin never configured are simply absent from the map --
+    /// callers fall back to <see cref="Models.ReportUnit.DefaultLabel"/>.</summary>
+    Task<IReadOnlyDictionary<string,string>> GetReportUnitsAsync();
 
     /// <summary>Drops every cached catalog. Call after admin-side catalog edits.</summary>
     void Invalidate();

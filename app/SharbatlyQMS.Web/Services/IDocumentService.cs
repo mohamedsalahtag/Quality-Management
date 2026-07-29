@@ -26,6 +26,18 @@ public interface IDocumentService
     /// </summary>
     string? ResolveAbsolutePath(DocumentInfo doc);
 
+    /// <summary>
+    /// Best-effort unlink of stored documents by their relative storage_path.
+    /// Used by the cascade deletes (arrival / quality order), which remove the
+    /// rows inside a transaction and then call this AFTER the commit — the
+    /// files live outside wwwroot, so a row deleted without its file leaves
+    /// bytes on disk that nothing can ever reach again.
+    ///
+    /// Never throws: a locked or already-missing file is logged, not fatal.
+    /// Returns how many files were actually removed.
+    /// </summary>
+    int DeleteFiles(IEnumerable<string> relativeStoragePaths);
+
     /// <summary>Server-side extension to MIME map. Never trust the stored content_type — it is client-supplied at upload.</summary>
     string ContentTypeFor(string fileName);
 }

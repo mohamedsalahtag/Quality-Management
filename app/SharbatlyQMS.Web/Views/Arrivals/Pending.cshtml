@@ -9,9 +9,11 @@
     var plant       = ViewBag.Plant      as string;
     var poType      = ViewBag.PoType     as string;
     var storageLoc  = ViewBag.StorageLoc as string;
+    var supplier    = ViewBag.Supplier   as string;
     bool filtered = !string.IsNullOrWhiteSpace(container)
                     || !string.IsNullOrWhiteSpace(bol)
                     || !string.IsNullOrWhiteSpace(po)
+                    || !string.IsNullOrWhiteSpace(supplier)
                     || !string.IsNullOrWhiteSpace(plant)
                     || !string.IsNullOrWhiteSpace(poType)
                     || !string.IsNullOrWhiteSpace(storageLoc);
@@ -100,20 +102,29 @@
    across plants in SAP, so showing all of them un-scoped would be
    ambiguous). *@
 <form method="get" class="row g-2 mb-3">
-    <div class="col-md-2">
+    @* Container and BOL gave up a column each so Supplier could have two.
+       All three are contains-matches, so a partial value is enough and the
+       narrower boxes still show what you typed. *@
+    <div class="col-6 col-md-1">
         <label class="form-label small mb-1">Container</label>
         <input type="text" name="container" value="@container" class="form-control form-control-sm"
-               placeholder="e.g. CMAU1234567" autocomplete="off" />
+               placeholder="CMAU12…" title="Container number — any part of it" autocomplete="off" />
     </div>
-    <div class="col-md-2">
+    <div class="col-6 col-md-1">
         <label class="form-label small mb-1">BOL</label>
         <input type="text" name="bol" value="@bol" class="form-control form-control-sm"
-               placeholder="e.g. MSCUAB1234" autocomplete="off" />
+               placeholder="MSCUA…" title="Bill of lading — any part of it" autocomplete="off" />
     </div>
-    <div class="col-md-1">
+    <div class="col-6 col-md-1">
         <label class="form-label small mb-1">PO</label>
         <input type="text" name="po" value="@po" class="form-control form-control-sm"
-               placeholder="EBELN" autocomplete="off" />
+               placeholder="EBELN" title="Purchase order number — any part of it" autocomplete="off" />
+    </div>
+    <div class="col-6 col-md-2">
+        <label class="form-label small mb-1">Supplier</label>
+        <input type="text" name="supplier" value="@supplier" class="form-control form-control-sm"
+               placeholder="part of the name" title="Supplier name or number — any part of it, no need to type it in full"
+               autocomplete="off" />
     </div>
     <div class="col-md-2">
         <label class="form-label small mb-1">Plant</label>
@@ -125,31 +136,31 @@
             <div class="form-control form-control-sm bg-light d-flex align-items-center"
                  title="Your account is restricted to this plant.">
                 <i class="bi bi-lock-fill text-muted me-1"></i>
-                <span class="small">@SapPlantDirectory.PlantLabel(plantScopeLocked)</span>
+                <span class="small">@Codes.PlantLabel(plantScopeLocked)</span>
             </div>
-            <input type="hidden" id="pending-plant-filter" name="plant" value="@plantScopeLocked" />
+            <input type="hidden" id="pending-plant-filter" data-plant-filter="pending" name="plant" value="@plantScopeLocked" />
         }
         else
         {
-            <select name="plant" id="pending-plant-filter" class="form-select form-select-sm">
+            <select name="plant" id="pending-plant-filter" data-plant-filter="pending" class="form-select form-select-sm">
                 <option value="">All plants</option>
                 @foreach (var pl in plantOptions)
                 {
-                    <option value="@pl" selected="@(string.Equals(pl, plant, StringComparison.OrdinalIgnoreCase))">@SapPlantDirectory.PlantLabel(pl)</option>
+                    <option value="@pl" selected="@(string.Equals(pl, plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
                 }
             </select>
         }
     </div>
     <div class="col-md-2">
         <label class="form-label small mb-1">Storage Loc</label>
-        <select name="storageLoc" id="pending-storage-filter" class="form-select form-select-sm">
+        <select name="storageLoc" id="pending-storage-filter" data-storage-filter="pending" class="form-select form-select-sm">
             <option value="">All storage locations</option>
             @foreach (var sl in storageOptions)
             {
                 <option value="@sl.Code" data-plant="@sl.Plant"
                         selected="@(string.Equals(sl.Code, storageLoc, StringComparison.OrdinalIgnoreCase)
                                     && (string.IsNullOrEmpty(plant) || string.Equals(sl.Plant, plant, StringComparison.OrdinalIgnoreCase)))">
-                    @SapPlantDirectory.StorageLocationLabel(sl.Plant, sl.Code)
+                    @Codes.StorageLocationLabel(sl.Plant, sl.Code)
                 </option>
             }
         </select>
@@ -160,7 +171,7 @@
             <option value="">All</option>
             @foreach (var pt in poTypeOptions)
             {
-                <option value="@pt" selected="@(string.Equals(pt, poType, StringComparison.OrdinalIgnoreCase))">@pt</option>
+                <option value="@pt" selected="@(string.Equals(pt, poType, StringComparison.OrdinalIgnoreCase))">@Codes.PoTypeDisplay(pt)</option>
             }
         </select>
     </div>
@@ -211,27 +222,37 @@
     .pp-tip .pp-tip-qty  { opacity: .8; margin-left: .35rem; }
 </style>
 
+@* Landing spot for the Columns menu that columntoggle.js injects. Keeping it
+   outside the card means the dropdown isn't clipped by the table's overflow. *@
+<div class="d-flex justify-content-end mb-2" data-coltoggle-host="pending-containers"></div>
+
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-sm table-hover align-middle mb-0 pending-table" data-tablekit data-page-size="50">
+        @* data-col-key drives the Columns menu (columntoggle.js). Keys are
+           stable strings, not positions, so hiding survives a new column
+           being added later. Action carries data-col-lock: hiding the only
+           way to create an arrival would strand the page. *@
+        <table id="pending-containers" class="table table-sm table-hover align-middle mb-0 pending-table"
+               data-tablekit data-page-size="50" data-coltoggle>
             <thead class="table-light">
                 <tr>
-                    <th data-sort>Container</th>
-                    <th data-sort>BOL</th>
-                    <th data-sort>PO / STO</th>
-                    <th data-sort>Type</th>
-                    <th data-sort>Vendor</th>
-                    <th data-sort>Plant / Storage</th>
-                    <th class="text-end" data-sort="num">Lines</th>
-                    <th>Materials</th>
-                    <th data-sort>Dates</th>
-                    <th class="text-end">Action</th>
+                    <th data-sort data-col-key="container">Container</th>
+                    <th data-sort data-col-key="bol">BOL</th>
+                    <th data-sort data-col-key="po">PO / STO</th>
+                    <th data-sort data-col-key="type">Type</th>
+                    <th data-sort data-col-key="vendor">Vendor</th>
+                    <th data-sort data-col-key="plant">Plant / Storage</th>
+                    <th class="text-end" data-sort="num" data-col-key="lines">Lines</th>
+                    <th data-col-key="materials">Materials</th>
+                    <th data-sort data-col-key="dates">Dates</th>
+                    <th class="text-end" data-sort="num" data-col-key="transit">Transit</th>
+                    <th class="text-end" data-col-key="action" data-col-lock>Action</th>
                 </tr>
             </thead>
             <tbody>
             @if (Model.Count == 0)
             {
-                <tr><td colspan="10" class="text-center text-muted py-4">
+                <tr><td colspan="11" class="text-center text-muted py-4">
                     @if (filtered)
                     {
                         <span>No pending containers match the filter. <a asp-action="Pending">Clear</a> to see all.</span>
@@ -274,7 +295,8 @@
                         <td>
                             @if (!string.IsNullOrEmpty(r.PoType))
                             {
-                                <span class="badge bg-light text-dark border">@r.PoType</span>
+                                <span class="badge bg-light text-dark border"
+                                      data-bs-toggle="tooltip" title="@r.PoType">@Codes.PoTypeDisplay(r.PoType)</span>
                             }
                             else
                             {
@@ -292,17 +314,17 @@
                             @if (!string.IsNullOrEmpty(r.Plant) || !string.IsNullOrEmpty(r.StorageLocation))
                             {
                                 <div class="pp-badges">
+                                    @* Name in the badge, SAP code in the tooltip -- the
+                                       name is what people actually read. *@
                                     @if (!string.IsNullOrEmpty(r.Plant))
                                     {
-                                        var plantName = SapPlantDirectory.PlantName(r.Plant);
                                         <span class="badge bg-light text-dark border"
-                                              data-bs-toggle="tooltip" title="@(plantName ?? r.Plant)">@r.Plant</span>
+                                              data-bs-toggle="tooltip" title="@r.Plant">@Codes.PlantDisplay(r.Plant)</span>
                                     }
                                     @if (!string.IsNullOrEmpty(r.StorageLocation))
                                     {
-                                        var slName = SapPlantDirectory.StorageLocationName(r.Plant, r.StorageLocation);
                                         <span class="badge bg-light text-dark border"
-                                              data-bs-toggle="tooltip" title="@(slName ?? r.StorageLocation)">@r.StorageLocation</span>
+                                              data-bs-toggle="tooltip" title="@r.StorageLocation">@Codes.StorageLocationDisplay(r.Plant, r.StorageLocation)</span>
                                     }
                                 </div>
                             }
@@ -356,6 +378,18 @@
                                 </span>
                             </div>
                         </td>
+                        <td class="text-end pp-code">
+                            @* Days in transit, straight from SAP. tablekit's
+                               numeric sort strips the unit, so "12 d" sorts. *@
+                            @if (r.TransitDays.HasValue)
+                            {
+                                <span>@r.TransitDays d</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">—</span>
+                            }
+                        </td>
                         <td class="text-end">
                             <form asp-action="Create" method="post" class="d-inline">
                                 @Html.AntiForgeryToken()
@@ -375,45 +409,6 @@
     </div>
 </div>
 
-@section Scripts {
-<script>
-    // Bootstrap tooltips are now wired up site-wide by site.js, so this
-    // view no longer needs a local init block.
-
-    // Storage Loc dropdown is plant-scoped: each <option> carries the
-    // parent plant code in data-plant. When the user picks a plant we
-    // hide the options whose data-plant doesn't match; when "All plants"
-    // is selected we show everything. If the current storage-loc
-    // selection becomes hidden by the plant change, reset it to "All"
-    // so the form submission is consistent with what the user sees.
-    (function () {
-        var plantSel   = document.getElementById('pending-plant-filter');
-        var storageSel = document.getElementById('pending-storage-filter');
-        if (!plantSel || !storageSel) return;
-
-        function applyPlantFilter() {
-            var plant = plantSel.value;
-            var anyVisible = false;
-            Array.prototype.forEach.call(storageSel.options, function (opt) {
-                if (!opt.value) { opt.hidden = false; anyVisible = true; return; }
-                var optPlant = opt.getAttribute('data-plant') || '';
-                var match    = !plant || optPlant === plant;
-                opt.hidden = !match;
-                if (match) anyVisible = true;
-            });
-            // If the currently-selected option is now hidden, snap back
-            // to the empty "All storage locations" placeholder.
-            var sel = storageSel.options[storageSel.selectedIndex];
-            if (sel && sel.hidden) storageSel.value = '';
-            // Disable the dropdown entirely if nothing under the plant
-            // matched (e.g. plant with no pending storage locs).
-            storageSel.disabled = !anyVisible;
-        }
-
-        plantSel.addEventListener('change', applyPlantFilter);
-        // Run once on load so a bookmarked URL with ?plant=X starts
-        // with the storage-loc dropdown already narrowed.
-        applyPlantFilter();
-    })();
-</script>
-}
+@* Bootstrap tooltips are wired site-wide by site.js, and the plant -> storage
+   narrowing now lives in wwwroot/js/plant-storage-filter.js (shared with the
+   Quality Orders filter panel) — this view needs no script block of its own. *@
