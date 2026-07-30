@@ -165,13 +165,22 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
                 return;
             }
             var identity = ctx.Principal!.Identity as System.Security.Claims.ClaimsIdentity;
-            var cookieRole = ctx.Principal.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-            if (identity != null && cookieRole != user.Role)
+            var cookieRoles = ctx.Principal.FindAll(System.Security.Claims.ClaimTypes.Role)
+                                           .Select(c => c.Value).ToList();
+            if (identity != null && (cookieRoles.Count != 1 || cookieRoles[0] != user.Role))
             {
                 // Role changed since login: swap the claim so menus and
                 // [Authorize] policies see the current role on this request.
-                var old = identity.FindFirst(System.Security.Claims.ClaimTypes.Role);
-                if (old != null) identity.RemoveClaim(old);
+                //
+                // Remove EVERY role claim, not just the first. AccountController
+                // emits one per Qc* role the user holds, and one real account
+                // holds all six -- so removing only the first left the stale
+                // extras in place for the full 30-day cookie. Worse, AddClaim
+                // appends, so [Authorize] (which matches ANY role claim) saw the
+                // fresh role while every view reading FindFirst(Role) still saw
+                // a stale one: menus and gates silently disagreed.
+                foreach (var stale in identity.FindAll(System.Security.Claims.ClaimTypes.Role).ToList())
+                    identity.RemoveClaim(stale);
                 identity.AddClaim(new System.Security.Claims.Claim(
                     System.Security.Claims.ClaimTypes.Role, user.Role));
             }
