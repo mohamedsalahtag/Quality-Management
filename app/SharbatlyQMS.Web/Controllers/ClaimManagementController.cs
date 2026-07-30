@@ -1,8 +1,10 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Extensions;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
+using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.ViewModels;
 
@@ -43,6 +45,7 @@ public class ClaimManagementController : Controller
         _images = images; _mara = mara; _settings = settings; _log = log;
     }
 
+    [RequireScreen(Screens.Claims, Seed.Everyone, "Open Claims")]
     public async Task<IActionResult> Index(string? status, string? search)
     {
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
@@ -58,6 +61,7 @@ public class ClaimManagementController : Controller
     /// so the existing view collapses every mutation button and renders the
     /// claim chat panel at the bottom.
     /// </summary>
+    [RequireScreen(Screens.Claims)]
     public async Task<IActionResult> Details(long id)
     {
         // Plant-scoped Operators must not see claims for QOs in other plants.
@@ -119,38 +123,36 @@ public class ClaimManagementController : Controller
     // ---- QM actions (Manager or SiteAdmin) ------------------------
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Claims.MarkClaimRequest, Seed.ManagerOrAdmin, "Mark as claim request")]
     public Task<IActionResult> MarkClaimRequest(long id, string note)
         => ActAsync(id, note, _claims.MarkClaimRequestAsync, "Marked as Claim Request.");
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Claims.MarkPassedQc, Seed.ManagerOrAdmin, "Mark as passed QC")]
     public Task<IActionResult> MarkPassedQc(long id, string note)
         => ActAsync(id, note, _claims.MarkPassedQcAsync, "Marked as Passed QC.");
 
     // ---- CM actions (ClaimManager or SiteAdmin) -------------------
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ClaimManagerOrAdmin)]
+    [RequirePermission(Perm.Claims.Approve, Seed.ClaimManagerOrAdmin, "Approve a claim")]
     public Task<IActionResult> Approve(long id, string note)
         => ActAsync(id, note, _claims.ApproveAsync, "Claim approved.");
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ClaimManagerOrAdmin)]
+    [RequirePermission(Perm.Claims.Hold, Seed.ClaimManagerOrAdmin, "Put a claim on hold")]
     public Task<IActionResult> Hold(long id, string note)
         => ActAsync(id, note, _claims.HoldAsync, "Claim placed on hold.");
 
     // ---- Either Manager/ClaimManager/SiteAdmin --------------------
 
+    // This was the only mutating action in the application gated by an inline
+    // role comparison rather than an attribute -- invisible to any audit of the
+    // authorization surface. It is now an ordinary permission.
     [HttpPost, ValidateAntiForgeryToken]
-    public async Task<IActionResult> AddNote(long id, string note)
-    {
-        var role = User.FindFirst(ClaimTypes.Role)?.Value ?? "";
-        // Inline gate -- Viewer/Operator should not be able to post chat notes.
-        if (role != UserRoles.Manager && role != UserRoles.ClaimManager && role != UserRoles.SiteAdmin)
-            return Forbid();
-        return await ActAsync(id, note, _claims.AddNoteAsync, "Note added.");
-    }
+    [RequirePermission(Perm.Claims.AddNote, Seed.ManagerOrClaimManagerOrAdmin, "Post a note on a claim")]
+    public Task<IActionResult> AddNote(long id, string note)
+        => ActAsync(id, note, _claims.AddNoteAsync, "Note added.");
 
     // ---- Shared plumbing ------------------------------------------
 

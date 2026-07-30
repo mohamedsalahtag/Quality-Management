@@ -224,6 +224,11 @@ GO
 MERGE qms.qms_screen AS t
 USING (VALUES
     ('General.Dashboard',           N'Dashboard',            'General',     10, 0),
+    -- Attachments are functions rather than a screen: one upload action serves
+    -- arrivals, quality orders and samples alike, so it cannot belong to any one
+    -- record screen. Not levelled -- a Read-only role must still be able to open
+    -- a document, and the download permission is separate from upload/delete.
+    ('Attachments',                 N'Photos & documents',   'General',     20, 0),
 
     ('Arrivals.Pending',            N'Pending Containers',   'Records',    100, 1),
     ('Arrivals.Index',              N'Arrivals',             'Records',    110, 1),

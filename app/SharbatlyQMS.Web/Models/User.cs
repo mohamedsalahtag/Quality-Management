@@ -10,9 +10,22 @@ public class User
     public string?   Department     { get; set; }
     public string?   ProfilePicture { get; set; }
     public string    PasswordHash   { get; set; } = "";
+    /// <summary>Legacy display name ("SiteAdmin", "Operator", …). Kept because
+    /// the Users screen and several views still show it; authorisation uses
+    /// <see cref="RoleCode"/>. For a custom role this equals the role code.</summary>
     public string    Role           { get; set; } = UserRoles.Viewer;
-    /// <summary>SAP plant code (e.g. "RD01"). Operator-only restriction;
-    /// null means the user sees every plant. See AuthPolicies.</summary>
+    /// <summary>The portal.Role code ("QcAdmin", "QcNightShift"). This is the
+    /// identity every permission grant hangs off — the one value that is stable
+    /// across renames and meaningful for roles the product has never heard of.</summary>
+    public string    RoleCode       { get; set; } = Security.RoleCodes.Viewer;
+    /// <summary>Administrator-facing label for the role.</summary>
+    public string    RoleName       { get; set; } = "";
+    /// <summary>Whether the role restricts its holders to a single plant.
+    /// Replaces the literal <c>role == "Operator"</c> test, which would have
+    /// given a custom operator-style role sight of every plant.</summary>
+    public bool      IsPlantScoped  { get; set; }
+    /// <summary>SAP plant code (e.g. "RD01"). Applies when the role is
+    /// plant-scoped; null means the user sees every plant.</summary>
     public string?   PlantCode      { get; set; }
     public bool      IsActive       { get; set; } = true;
     public bool      IsOnline       { get; set; }

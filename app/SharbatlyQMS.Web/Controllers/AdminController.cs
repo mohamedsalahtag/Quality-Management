@@ -3,17 +3,20 @@ using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
+using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.Services.Sap;
 using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Controllers;
 
-// Class-level gate is the loosest policy any action here uses (Manager+).
-// Each truly admin-only action explicitly adds [Authorize(Policy = AdminOnly)]
-// so AND-combining lifts it back to SiteAdmin. Parameters-menu actions
-// (defect catalog / reading types / mail template) stay Manager-accessible.
-[Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+// The class used to carry a Manager+ gate that AND-combined with a per-action
+// AdminOnly one, so several actions relied on inheriting it and an action with
+// no attribute of its own quietly fell back to Manager. Every action here now
+// declares its own permission, and the decision filter refuses anything that
+// declares nothing -- so nothing depends on inheritance any more.
+[Authorize]
 public class AdminController : Controller
 {
     private readonly IDbService _db;
@@ -29,20 +32,37 @@ public class AdminController : Controller
     private readonly IMaraService _mara;
     private readonly IAuditService _audit;
     private readonly ICodeDescriptionDirectory _codes;
+    private readonly IPermissionResolver _perms;
 
     public AdminController(IDbService db, ISettingsService settings,
         ISapODataClient sapOData, ISapSyncService sapSync, IEmailService email,
         IAdService ad, IServiceScopeFactory scopeFactory, IWebHostEnvironment env,
         ILogger<AdminController> adminLog, ICatalogCache catalogCache, IMaraService mara,
-        IAuditService audit, ICodeDescriptionDirectory codes)
+        IAuditService audit, ICodeDescriptionDirectory codes, IPermissionResolver perms)
     {
         _db = db; _settings = settings; _sapOData = sapOData; _sapSync = sapSync;
         _email = email; _ad = ad; _scopeFactory = scopeFactory; _env = env; _adminLog = adminLog;
-        _catalogCache = catalogCache; _mara = mara; _audit = audit; _codes = codes;
+        _catalogCache = catalogCache; _mara = mara; _audit = audit; _codes = codes; _perms = perms;
+    }
+
+    /// <summary>
+    /// True when removing, disabling or reassigning this user would leave nobody
+    /// able to reach the Security screen. Cheap to check and worth checking on
+    /// every path: with one role per user, "assign myself the new role to test
+    /// it" is the single most likely way to lose administration entirely.
+    /// </summary>
+    private async Task<bool> IsLastSecurityAdminAsync(User u)
+    {
+        if (!u.IsActive) return false;
+        if (!_perms.RoleHasSecurityAdmin(u.RoleCode)) return false;
+
+        var others = (await _db.ListUsersAsync(null, null, true))
+            .Count(x => x.UserId != u.UserId && _perms.RoleHasSecurityAdmin(x.RoleCode));
+        return others == 0;
     }
 
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequireScreen(Screens.AdminUsers, Seed.AdminOnly, "Open the Users screen")]
     public async Task<IActionResult> Users(string? search, string? role, string? status)
     {
         bool? active = status switch
@@ -58,6 +78,9 @@ public class AdminController : Controller
         ViewBag.Role         = role;
         ViewBag.Status       = status;
         ViewBag.AdConfigured = adCfg.IsConfigured;
+        // Sourced from the role table rather than a hard-coded list, so a role
+        // composed on the Security screen is assignable the moment it exists.
+        ViewBag.Roles        = await _db.ListAssignableRolesAsync();
         return View(users);
     }
 
@@ -68,19 +91,21 @@ public class AdminController : Controller
     // direct LDAP lookup only if the cache has expired between modal-open
     // and Add.
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.UsersEdit, Seed.AdminOnly, "Add or edit a user")]
     public async Task<IActionResult> CreateUser(string username, string role, string? plantCode)
     {
-        if (string.IsNullOrWhiteSpace(username) || !UserRoles.IsValid(role))
+        // `role` is a role CODE, checked against the role table so a role
+        // composed on the Security screen is assignable straight away.
+        var target = (await _db.ListAssignableRolesAsync())
+            .FirstOrDefault(r => string.Equals(r.RoleCode, role, StringComparison.OrdinalIgnoreCase));
+        if (string.IsNullOrWhiteSpace(username) || target == null)
         {
-            TempData["Error"] = "Username and a valid role are required.";
+            TempData["Error"] = "A username and an active role are required.";
             return RedirectToAction(nameof(Users));
         }
-        // Plant scope applies to Operators only; the picker is hidden in the UI
-        // for every other role but we strip on the server too as a hard rule.
-        if (!string.Equals(role, UserRoles.Operator, StringComparison.OrdinalIgnoreCase))
-            plantCode = null;
-        else if (string.IsNullOrWhiteSpace(plantCode))
+        // Plant scope follows the role's own flag. Stripped on the server as
+        // well as hidden in the UI, so a crafted post cannot smuggle one in.
+        if (!target.IsPlantScoped || string.IsNullOrWhiteSpace(plantCode))
             plantCode = null;
         var adCfg = await _settings.GetAdConfigAsync();
         if (!adCfg.IsConfigured)
@@ -114,7 +139,10 @@ public class AdminController : Controller
             FullName     = info.FullName,
             Email        = info.Email,
             Department   = info.Department,
-            Role         = role,
+            Role         = target.LegacyName ?? target.RoleCode,
+            RoleCode     = target.RoleCode,
+            RoleName     = target.DisplayName,
+            IsPlantScoped= target.IsPlantScoped,
             PlantCode    = plantCode,
             PasswordHash = "",        // AD-managed; password lives in the directory
             IsActive     = true,
@@ -136,7 +164,7 @@ public class AdminController : Controller
     /// table so the picker can grey them out.
     /// </summary>
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequireScreen(Screens.AdminUsers)]
     public async Task<IActionResult> BrowseAdUsersAjax(string? q)
     {
         var adCfg = await _settings.GetAdConfigAsync();
@@ -162,39 +190,58 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.UsersEdit, Seed.AdminOnly, "Add or edit a user")]
     public async Task<IActionResult> EditUser(int userId, string fullName, string email,
         string? department, string? employeeId, string role, string? plantCode)
     {
         var u = await _db.GetUserByIdAsync(userId);
         if (u == null) return NotFound();
-        if (!UserRoles.IsValid(role))
+
+        // `role` is a role CODE now, validated against the role table -- the six
+        // hard-coded names are gone. A name-to-code map used to sit here and
+        // silently fall back to Viewer, which would have demoted anyone holding
+        // a composed role on their next e-mail edit.
+        var target = (await _db.ListAssignableRolesAsync())
+            .FirstOrDefault(r => string.Equals(r.RoleCode, role, StringComparison.OrdinalIgnoreCase));
+        if (target == null)
         {
-            TempData["Error"] = "Invalid role.";
+            TempData["Error"] = "That role does not exist or is not active.";
             return RedirectToAction(nameof(Users));
         }
 
-        var beforeRole = u.Role; var beforePlant = u.PlantCode;
+        // Somebody has to stay able to administer. Refuse the change if this is
+        // the last active user whose role can reach the Security screen.
+        if (!string.Equals(u.RoleCode, target.RoleCode, StringComparison.OrdinalIgnoreCase)
+            && await IsLastSecurityAdminAsync(u))
+        {
+            TempData["Error"] = $"'{u.Username}' is the only active user who can manage security. " +
+                                "Give somebody else that access first.";
+            return RedirectToAction(nameof(Users));
+        }
+
+        var beforeRole = u.RoleCode; var beforePlant = u.PlantCode;
         u.FullName   = fullName;
         u.Email      = email;
         u.Department = department;
         u.EmployeeId = employeeId;
-        u.Role       = role;
-        // Plant scope applies to Operators only; clear for every other role.
-        u.PlantCode  = string.Equals(role, UserRoles.Operator, StringComparison.OrdinalIgnoreCase)
-                        && !string.IsNullOrWhiteSpace(plantCode)
-                            ? plantCode
-                            : null;
+        u.RoleCode   = target.RoleCode;
+        u.Role       = target.LegacyName ?? target.RoleCode;
+        u.RoleName   = target.DisplayName;
+        // Plant scope follows a flag on the ROLE, not the literal name
+        // "Operator" -- otherwise a composed operator-style role would silently
+        // have been given sight of every plant.
+        u.IsPlantScoped = target.IsPlantScoped;
+        u.PlantCode     = target.IsPlantScoped && !string.IsNullOrWhiteSpace(plantCode) ? plantCode : null;
         await _db.UpdateUserAsync(u);
         await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Updated,
             new { role = beforeRole, plantCode = beforePlant },
-            new { role = u.Role, plantCode = u.PlantCode });
+            new { role = u.RoleCode, plantCode = u.PlantCode });
         TempData["Success"] = $"User '{u.Username}' updated.";
         return RedirectToAction(nameof(Users));
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.UsersEdit, Seed.AdminOnly, "Add or edit a user")]
     public async Task<IActionResult> ResetPassword(int userId, string newPassword)
     {
         var u = await _db.GetUserByIdAsync(userId);
@@ -214,7 +261,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.UsersEdit, Seed.AdminOnly, "Add or edit a user")]
     public async Task<IActionResult> ToggleActive(int userId)
     {
         var current = GetCurrentUserId();
@@ -225,6 +272,12 @@ public class AdminController : Controller
         }
         var u = await _db.GetUserByIdAsync(userId);
         if (u == null) return NotFound();
+        if (u.IsActive && await IsLastSecurityAdminAsync(u))
+        {
+            TempData["Error"] = $"'{u.Username}' is the only active user who can manage security. " +
+                                "Give somebody else that access before disabling them.";
+            return RedirectToAction(nameof(Users));
+        }
         await _db.SetUserActiveAsync(userId, !u.IsActive, current);
         await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Updated,
             new { isActive = u.IsActive }, new { isActive = !u.IsActive });
@@ -233,7 +286,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.UsersDelete, Seed.AdminOnly, "Remove a user")]
     public async Task<IActionResult> DeleteUser(int userId)
     {
         var current = GetCurrentUserId();
@@ -244,6 +297,12 @@ public class AdminController : Controller
         }
         var u = await _db.GetUserByIdAsync(userId);
         if (u == null) return NotFound();
+        if (await IsLastSecurityAdminAsync(u))
+        {
+            TempData["Error"] = $"'{u.Username}' is the only active user who can manage security. " +
+                                "Give somebody else that access before removing them.";
+            return RedirectToAction(nameof(Users));
+        }
         var ok = await _db.TryDeleteUserAsync(userId);
         if (ok)
             await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Deleted,
@@ -255,7 +314,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.UsersDelete, Seed.AdminOnly, "Remove a user")]
     public async Task<IActionResult> BulkDeleteUsers(int[] userIds)
     {
         if (userIds == null || userIds.Length == 0)
@@ -292,7 +351,7 @@ public class AdminController : Controller
     // Catalogs, config, users, and SAP caches are preserved. Image files on
     // disk are also removed so wwwroot/uploads/ matches the empty DB state.
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.PurgeAll, Seed.AdminOnly, "Purge every transaction (danger zone)")]
     public async Task<IActionResult> PurgeAll(string? confirmation)
     {
         if (confirmation != "PURGE ALL")
@@ -439,7 +498,7 @@ public class AdminController : Controller
     }
 
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequireScreen(Screens.AdminSettings, Seed.AdminOnly, "Open Site Configuration")]
     public async Task<IActionResult> Settings(string? activeTab = null)
     {
         var vm = await BuildSettingsVmAsync();
@@ -448,7 +507,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
     public async Task<IActionResult> SaveSapSettings(SapEndpointConfig sap)
     {
         await _settings.SaveSapConfigAsync(sap, GetCurrentUserId());
@@ -459,7 +518,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
     public async Task<IActionResult> SaveSmtpSettings(SmtpConfig smtp)
     {
         await _settings.SaveSmtpConfigAsync(smtp, GetCurrentUserId());
@@ -469,7 +528,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
     public async Task<IActionResult> SaveThumbnailSettings(ThumbnailConfig thumbnails)
     {
         // Parameter name must equal the property name on SettingsVm (Thumbnails)
@@ -483,7 +542,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
     public async Task<IActionResult> SaveAlertSettings(AlertConfig alerts)
     {
         await _settings.SaveAlertConfigAsync(alerts, GetCurrentUserId());
@@ -493,7 +552,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
     public async Task<IActionResult> SaveReportSettings(ReportConfig report)
     {
         await _settings.SaveReportConfigAsync(report ?? new ReportConfig(), GetCurrentUserId());
@@ -504,7 +563,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
     public async Task<IActionResult> SaveContainerPollSettings(ContainerPollConfig containerPoll)
     {
         var cfg = containerPoll ?? new ContainerPollConfig();
@@ -520,7 +579,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.SapSync, Seed.AdminOnly, "Run a SAP sync or pull")]
     public async Task<IActionResult> PullContainersNow(ContainerPollConfig containerPoll,
         [FromServices] IConfiguration config)
     {
@@ -588,7 +647,7 @@ public class AdminController : Controller
     // ---- Per-endpoint sync (Material Master, Vendor Master) ----------------
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.SapSync, Seed.AdminOnly, "Run a SAP sync or pull")]
     public IActionResult SyncSapEndpointAjax(string endpointKey)
     {
         if (!SyncableEndpoints.IsValid(endpointKey))
@@ -616,7 +675,7 @@ public class AdminController : Controller
     }
 
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequireScreen(Screens.AdminSettings)]
     public async Task<IActionResult> SyncStatusAjax(string endpointKey)
     {
         if (!SyncableEndpoints.IsValid(endpointKey))
@@ -659,7 +718,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
     public async Task<IActionResult> SaveEndpointSync(string endpointKey, bool enabled, string? hoursCsv)
     {
         if (!SyncableEndpoints.IsValid(endpointKey))
@@ -690,7 +749,7 @@ public class AdminController : Controller
     // The endpointKey parameter tells us which row this is so we can look up
     // the right saved password.
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequireScreen(Screens.AdminSettings)]
     public async Task<IActionResult> TestSapEndpointAjax(string url, string? user = null, string? password = null, string? endpointKey = null)
     {
         var (u, p) = await ResolveCredsForLiveTestAsync(user, password, endpointKey);
@@ -699,7 +758,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequireScreen(Screens.AdminSettings)]
     public async Task<IActionResult> PreviewSapEndpointAjax(string url, string? user = null, string? password = null, string? endpointKey = null)
     {
         var (u, p) = await ResolveCredsForLiveTestAsync(user, password, endpointKey);
@@ -728,7 +787,7 @@ public class AdminController : Controller
     private static string? NullIfBlank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s;
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.SendTestEmail, Seed.AdminOnly, "Send a test e-mail")]
     public async Task<IActionResult> SendTestEmail(string toEmail)
     {
         if (string.IsNullOrWhiteSpace(toEmail))
@@ -744,7 +803,7 @@ public class AdminController : Controller
     // ---- Catalog admin (defects + reading types) -----------------------------
 
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequireScreen(Screens.DefectCatalog, Seed.ManagerOrAdmin, "Open the Defect Catalog")]
     public async Task<IActionResult> DefectCatalog(string? materialGroup = null)
     {
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
@@ -791,7 +850,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.DefectCatalogEdit, Seed.ManagerOrAdmin, "Edit the Defect Catalog")]
     public async Task<IActionResult> SaveDefect(int defectId, string materialGroup, string defectCode,
         string defectName, string defectCategory, string valueType,
         bool isActive, int sortOrder)
@@ -848,7 +907,7 @@ public class AdminController : Controller
     // matching qms_material_group_defect binding row(s) so the per-group
     // catalog stays in sync.
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.DefectCatalogEdit, Seed.ManagerOrAdmin, "Edit the Defect Catalog")]
     public async Task<IActionResult> DeleteDefect(int defectId, string? materialGroup)
     {
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
@@ -877,7 +936,7 @@ public class AdminController : Controller
     // ---- Defect categories (V22+) -- global master list driving the
     // dynamic per-category sections in the sample form + PDF. -------------
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequireScreen(Screens.DefectCategories, Seed.ManagerOrAdmin, "Open Defect Categories")]
     public async Task<IActionResult> DefectCategories()
     {
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
@@ -893,7 +952,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.DefectCategoriesEdit, Seed.ManagerOrAdmin, "Edit Defect Categories")]
     public async Task<IActionResult> SaveDefectCategory(int categoryId, string categoryName,
         int sortOrder, string? colorHex, bool isActive)
     {
@@ -949,7 +1008,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.DefectCategoriesEdit, Seed.ManagerOrAdmin, "Edit Defect Categories")]
     public async Task<IActionResult> DeleteDefectCategory(int categoryId)
     {
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
@@ -976,7 +1035,7 @@ public class AdminController : Controller
     }
 
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequireScreen(Screens.ReadingTypes, Seed.ManagerOrAdmin, "Open Reading Types")]
     public async Task<IActionResult> ReadingTypes(string? materialGroup = null)
     {
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
@@ -1033,7 +1092,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.ReadingTypesEdit, Seed.ManagerOrAdmin, "Edit Reading Types")]
     public async Task<IActionResult> SaveReadingType(int readingTypeId, string? materialGroup,
         string readingTypeCode, string readingName, string valueKind, string? defaultUnit,
         bool isActive, int sortOrder, bool isMandatory, string? displayMode)
@@ -1120,7 +1179,7 @@ public class AdminController : Controller
     // groups). The qms_material_group_reading binding is dropped first so
     // the FK to reading_type doesn't block the parent delete.
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.ReadingTypesEdit, Seed.ManagerOrAdmin, "Edit Reading Types")]
     public async Task<IActionResult> DeleteReadingType(int readingTypeId, string? materialGroup)
     {
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
@@ -1161,7 +1220,7 @@ public class AdminController : Controller
     // of this catalog -- it stays a first-class column on qms_sample
     // because every defect percentage divides by it.
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequireScreen(Screens.SampleHeaders, Seed.ManagerOrAdmin, "Open Sample Headers")]
     public async Task<IActionResult> SampleHeaders()
     {
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
@@ -1190,7 +1249,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.SampleHeadersEdit, Seed.ManagerOrAdmin, "Edit Sample Headers")]
     public async Task<IActionResult> SaveSampleHeaderField(int fieldId, string fieldCode,
         string fieldName, string valueKind, string? defaultUnit,
         bool isActive, bool isMandatory, int sortOrder, string scope = "Sample")
@@ -1248,7 +1307,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.SampleHeadersEdit, Seed.ManagerOrAdmin, "Edit Sample Headers")]
     public async Task<IActionResult> DeleteSampleHeaderField(int fieldId)
     {
         // Unlike Defect Catalog / Reading Types, sample-header deletion
@@ -1301,7 +1360,7 @@ public class AdminController : Controller
     // arrival's line items contain that group; the value also prints in the
     // Arrival Checklist PDF identity block after Seal Number.
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequireScreen(Screens.ArrivalFields, Seed.ManagerOrAdmin, "Open Arrival Fields")]
     public async Task<IActionResult> ArrivalFields()
     {
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
@@ -1337,7 +1396,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.ArrivalFieldsEdit, Seed.ManagerOrAdmin, "Edit Arrival Fields")]
     public async Task<IActionResult> SaveArrivalField(int fieldId, string fieldName,
         string valueKind, string materialGroup, int sortOrder, bool isActive)
     {
@@ -1391,7 +1450,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.ArrivalFieldsEdit, Seed.ManagerOrAdmin, "Edit Arrival Fields")]
     public async Task<IActionResult> DeleteArrivalField(int fieldId)
     {
         // Same policy as Sample Header Fields: deletion is allowed even when
@@ -1435,7 +1494,7 @@ public class AdminController : Controller
     // hard-coded SapPlantDirectory (now only a fallback seed), so adding or
     // renaming a code no longer needs a redeploy.
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequireScreen(Screens.CodeDescriptions, Seed.ManagerOrAdmin, "Open Code Descriptions")]
     public async Task<IActionResult> CodeDescriptions(string? domain, string? q)
     {
         if (!CodeDomains.IsValid(domain)) domain = CodeDomains.Plant;
@@ -1468,7 +1527,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.CodeDescriptionsEdit, Seed.ManagerOrAdmin, "Edit Code Descriptions")]
     public async Task<IActionResult> SaveCodeDescription(int codeDescId, string domain, string? parentCode,
         string code, string description, int sortOrder, bool isActive)
     {
@@ -1539,7 +1598,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.CodeDescriptionsEdit, Seed.ManagerOrAdmin, "Edit Code Descriptions")]
     public async Task<IActionResult> DeleteCodeDescription(int codeDescId, string domain)
     {
         if (!CodeDomains.IsValid(domain)) domain = CodeDomains.Plant;
@@ -1578,7 +1637,7 @@ public class AdminController : Controller
     // A group with no row prints the default, so the table is sparse by design
     // and the page shows every known group with the default pre-filled.
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequireScreen(Screens.ReportUnits, Seed.ManagerOrAdmin, "Open Report Units")]
     public async Task<IActionResult> ReportUnits()
     {
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
@@ -1624,7 +1683,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.ReportUnitsEdit, Seed.ManagerOrAdmin, "Edit Report Units")]
     public async Task<IActionResult> SaveReportUnits(string[] materialGroup, string[] unitLabel)
     {
         if (materialGroup == null || unitLabel == null || materialGroup.Length != unitLabel.Length)
@@ -1689,7 +1748,7 @@ public class AdminController : Controller
 
     // ---- Mail template (Parameters menu) -----------------------------
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequireScreen(Screens.MailTemplate, Seed.ManagerOrAdmin, "Open the Mail Template")]
     public async Task<IActionResult> MailTemplate()
     {
         var cfg = await _settings.GetQoMailTemplateAsync();
@@ -1697,7 +1756,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Parameters.MailTemplateEdit, Seed.ManagerOrAdmin, "Edit the Mail Template")]
     public async Task<IActionResult> SaveMailTemplate(QoMailTemplate template)
     {
         var userId = (int?)null; // _settings doesn't currently look it up by id; pass null
@@ -1753,7 +1812,7 @@ public class AdminController : Controller
     // ---- Active Directory settings (hosted as a tab on Site Configuration) ----
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
     public async Task<IActionResult> SaveAdSettings(AdConfig cfg)
     {
         await _settings.SaveAdConfigAsync(cfg ?? new AdConfig(), GetCurrentUserId());
@@ -1762,7 +1821,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequireScreen(Screens.AdminSettings)]
     public async Task<IActionResult> TestAdConnectionAjax(string? domain, string? ldapPath,
         string? serviceUser, string? servicePassword)
     {
@@ -1783,7 +1842,7 @@ public class AdminController : Controller
     // ---- Branding tab (logo upload + company info on reports) ----
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.Branding, Seed.AdminOnly, "Change branding")]
     public async Task<IActionResult> SaveBrandingSettings(BrandingConfig branding)
     {
         await _settings.SaveBrandingConfigAsync(branding, GetCurrentUserId());
@@ -1792,7 +1851,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.Branding, Seed.AdminOnly, "Change branding")]
     public async Task<IActionResult> UploadCompanyLogo(IFormFile logo)
     {
         if (logo == null || logo.Length == 0)
@@ -1832,7 +1891,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.Branding, Seed.AdminOnly, "Change branding")]
     public async Task<IActionResult> RemoveCompanyLogo()
     {
         var cfg = await _settings.GetBrandingConfigAsync();
@@ -1856,7 +1915,7 @@ public class AdminController : Controller
     // ---- Branding tab (page icon / favicon) ----
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.Branding, Seed.AdminOnly, "Change branding")]
     public async Task<IActionResult> SaveFaviconChoice(string? choice)
     {
         choice = (choice ?? "").Trim();
@@ -1880,7 +1939,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.Branding, Seed.AdminOnly, "Change branding")]
     public async Task<IActionResult> UploadCustomFavicon(IFormFile favicon)
     {
         if (favicon == null || favicon.Length == 0)
@@ -1923,7 +1982,7 @@ public class AdminController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.Branding, Seed.AdminOnly, "Change branding")]
     public async Task<IActionResult> RemoveCustomFavicon()
     {
         var cfg = await _settings.GetBrandingConfigAsync();

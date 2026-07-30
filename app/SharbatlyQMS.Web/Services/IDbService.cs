@@ -32,6 +32,10 @@ public interface IDbService
     /// </summary>
     Task<IReadOnlyList<string>> GetUserRolesAsync(int userId);
 
+    /// <summary>Active roles an administrator may assign, from qms_role — the
+    /// six built-ins plus anything composed on the Security screen.</summary>
+    Task<IReadOnlyList<AssignableRole>> ListAssignableRolesAsync();
+
     /// <summary>
     /// Grants the default QMS role to someone who already exists in the shared
     /// portal identity store but has no quality access yet. Returns false when
@@ -39,4 +43,18 @@ public interface IDbService
     /// not invent rows in an identity store the SCM app also depends on.
     /// </summary>
     Task<bool> TryGrantDefaultAccessAsync(string username);
+}
+
+/// <summary>A role the Users screen may assign. Sourced from qms_role, so a
+/// role composed on the Security screen appears in the picker automatically.</summary>
+public sealed class AssignableRole
+{
+    public string  RoleCode      { get; set; } = "";
+    public string  DisplayName   { get; set; } = "";
+    /// <summary>Legacy name for the six built-ins; null for composed roles.</summary>
+    public string? LegacyName    { get; set; }
+    public int     Rank          { get; set; }
+    public bool    IsBuiltIn     { get; set; }
+    public bool    IsPlantScoped { get; set; }
+    public string? Description   { get; set; }
 }

@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.ViewModels
 @model QualityOrder
 @{
@@ -15,9 +15,9 @@
     // V31 (2026-06-20): role hierarchy widened. Operator includes Supervisor for
     // edit-on-Open; new canSupervise flag controls Finish + Cancel submit;
     // canManage stays Manager/SiteAdmin (Reopen Finished QOs).
-    var canEdit      = role == UserRoles.Operator || role == UserRoles.Supervisor || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
-    var canSupervise = role == UserRoles.Supervisor || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
-    var canManage    = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;
+    var canEdit      = Perms.CanEdit(Screens.QoDetails);
+    var canSupervise = Perms.Can(Perm.Qo.Finish);
+    var canManage    = Perms.Can(Perm.Qo.Reopen);
     // When this view is rendered by ClaimManagementController.Details, every
     // QO mutation surface is suppressed -- the only interactive area is the
     // claim chat panel rendered at the bottom of the page. Forcing all four
@@ -139,7 +139,7 @@
            Initial or Open -- past that it is a signed-off record. The server
            re-checks the role, the status and the typed number regardless of
            whether this button rendered. *@
-        @if (!isClaimContext && role == UserRoles.SiteAdmin
+        @if (!isClaimContext && Perms.Can(Perm.Qo.Delete)
              && (Model.StatusCode == QualityOrderStatus.Initial || Model.StatusCode == QualityOrderStatus.Open))
         {
             <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteQoModal">
@@ -357,7 +357,7 @@
        the click, not scrolled past. Typing the QO number is a per-record
        confirmation, so it can't become muscle memory or hit the wrong record.
        The Delete button stays disabled until what was typed matches. ---- *@
-@if (!isClaimContext && role == UserRoles.SiteAdmin
+@if (!isClaimContext && Perms.Can(Perm.Qo.Delete)
      && (Model.StatusCode == QualityOrderStatus.Initial || Model.StatusCode == QualityOrderStatus.Open))
 {
     <div class="modal fade" id="deleteQoModal" tabindex="-1" aria-labelledby="deleteQoModalLabel" aria-hidden="true">

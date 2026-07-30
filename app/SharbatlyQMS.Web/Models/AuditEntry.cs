@@ -83,6 +83,10 @@ public static class EntityTypes
     public const string ArrivalField         = "ArrivalField";
     public const string ReportUnit           = "ReportUnit";
     public const string CodeDescription      = "CodeDescription";
+    /// <summary>Role creation, deletion and permission-grant changes made on the
+    /// Security screen. The audit row is the only record of who changed a grant,
+    /// so it is written inside the same transaction as the change itself.</summary>
+    public const string Role                 = "Role";
     public const string System               = "System";
 
     // Note: material-size override events are recorded under
@@ -108,7 +112,7 @@ public static class EntityTypes
     {
         User, Configuration, DefectCatalog, DefectCategory,
         ReadingType, SampleHeaderField, ArrivalField,
-        ReportUnit, CodeDescription, System
+        ReportUnit, CodeDescription, Role, System
     };
 
     public static bool IsValid(string? type) =>

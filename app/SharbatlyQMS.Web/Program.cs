@@ -18,6 +18,11 @@ builder.Services.AddControllersWithViews(opt =>
         .RequireAuthenticatedUser()
         .Build();
     opt.Filters.Add(new Microsoft.AspNetCore.Mvc.Authorization.AuthorizeFilter(policy));
+    // Default-deny backstop: an action with no permission attribute is refused
+    // rather than served to everyone. Startup validation and a unit test both
+    // catch a missing attribute first, but if either is bypassed, forgetting to
+    // protect something must break it loudly instead of exposing it.
+    opt.Filters.AddService<SharbatlyQMS.Web.Security.PermissionDecisionFilter>();
     // Audit-trail: capture request IP + user-agent into IAuditContext
     // before each MVC action runs. Background hosted services never go
     // through this filter, which matches FR-001 (user-initiated only).
@@ -52,6 +57,7 @@ builder.Services.AddScoped<IClaimService, ClaimService>();
 builder.Services.AddScoped<IAuditContext, AuditContext>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<AuditContextActionFilter>();
+builder.Services.AddScoped<SharbatlyQMS.Web.Security.PermissionDecisionFilter>();
 builder.Services.AddScoped<IImageService, ImageService>();
 // V39 (2026-07-15): document (non-image) attachments. Separate from IImageService
 // because documents are stored outside wwwroot and served only via an authenticated action.
@@ -149,7 +155,12 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
             var stamp = ctx.Properties.GetString(stampKey);
             if (stamp != null
                 && DateTimeOffset.TryParse(stamp, null, System.Globalization.DateTimeStyles.RoundtripKind, out var at)
-                && DateTimeOffset.UtcNow - at < TimeSpan.FromMinutes(5))
+                // 60 seconds, not 5 minutes. Permission changes take effect on
+                // the next request regardless (they are resolved from the
+                // database, not the cookie), but a role REASSIGNMENT still rides
+                // this window, and one singleton-row lookup per user per minute
+                // costs nothing on a LAN application.
+                && DateTimeOffset.UtcNow - at < TimeSpan.FromSeconds(60))
                 return;
 
             var idClaim = ctx.Principal?.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
@@ -167,7 +178,7 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
             var identity = ctx.Principal!.Identity as System.Security.Claims.ClaimsIdentity;
             var cookieRoles = ctx.Principal.FindAll(System.Security.Claims.ClaimTypes.Role)
                                            .Select(c => c.Value).ToList();
-            if (identity != null && (cookieRoles.Count != 1 || cookieRoles[0] != user.Role))
+            if (identity != null && (cookieRoles.Count != 1 || cookieRoles[0] != user.RoleCode))
             {
                 // Role changed since login: swap the claim so menus and
                 // [Authorize] policies see the current role on this request.
@@ -182,35 +193,35 @@ builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationSc
                 foreach (var stale in identity.FindAll(System.Security.Claims.ClaimTypes.Role).ToList())
                     identity.RemoveClaim(stale);
                 identity.AddClaim(new System.Security.Claims.Claim(
-                    System.Security.Claims.ClaimTypes.Role, user.Role));
+                    System.Security.Claims.ClaimTypes.Role, user.RoleCode));
             }
             ctx.Properties.SetString(stampKey, DateTimeOffset.UtcNow.ToString("O"));
             ctx.ShouldRenew = true;   // persist the refreshed claims + stamp
         };
     });
 
-builder.Services.AddAuthorization(opt =>
-{
-    opt.AddPolicy(AuthPolicies.AdminOnly,
-        p => p.RequireRole(UserRoles.SiteAdmin));
-    opt.AddPolicy(AuthPolicies.ManagerOrAdmin,
-        p => p.RequireRole(UserRoles.Manager, UserRoles.SiteAdmin));
-    // Supervisor (2026-06-20): reviews operator work. Can Finish a Submitted QO,
-    // cancel-submit it back to Open, edit Completed arrivals, view the flat
-    // data-hub report. Cannot reopen Finished QOs (Manager-only).
-    opt.AddPolicy(AuthPolicies.SupervisorOrAbove,
-        p => p.RequireRole(UserRoles.Supervisor, UserRoles.Manager, UserRoles.SiteAdmin));
-    opt.AddPolicy(AuthPolicies.OperatorOrAbove,
-        p => p.RequireRole(UserRoles.Operator, UserRoles.Supervisor, UserRoles.Manager, UserRoles.SiteAdmin));
-    // Claim Manager (commercial approver) or SiteAdmin -- gates the Approve/Hold
-    // actions in Claim Management. SiteAdmin still acts as both roles.
-    opt.AddPolicy(AuthPolicies.ClaimManagerOrAdmin,
-        p => p.RequireRole(UserRoles.ClaimManager, UserRoles.SiteAdmin));
-    // Audit-trail (2026-05-21): the global /Audit page + Excel export use
-    // AdminOnly (above). The per-record audit panel uses ManagerOrAdmin.
-    // The dedicated AuditViewer / AuditorOrAdmin policies were removed when
-    // the Auditor role was retired (V16 migration).
-});
+// Authorization is entirely permission-driven since M14. The five RequireRole
+// policies that used to live here are gone: each [RequirePermission] /
+// [RequireScreen] attribute carries its own requirement via
+// IAuthorizationRequirementData, so there is no policy to register per
+// permission and no custom policy provider to maintain.
+builder.Services.AddAuthorization();
+builder.Services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler,
+                              SharbatlyQMS.Web.Security.PermissionHandler>();
+
+// The grant snapshot: one immutable map of role -> permission -> level, plus
+// user -> role, swapped whole on refresh. Singleton because it is read on every
+// request and roughly fifty times per page render.
+builder.Services.AddSingleton<SharbatlyQMS.Web.Security.IPermissionResolver,
+                              SharbatlyQMS.Web.Security.PermissionResolver>();
+builder.Services.AddSingleton<SharbatlyQMS.Web.Security.PermissionCatalog>();
+// An IStartupFilter, not an IHostedService: the integration-test host strips
+// every hosted service, so a catalogue primed that way would be empty in every
+// test -- passing tests that prove nothing about production.
+builder.Services.AddSingleton<IStartupFilter, SharbatlyQMS.Web.Security.PermissionStartupFilter>();
+builder.Services.AddScoped<SharbatlyQMS.Web.Security.IUserPermissions,
+                           SharbatlyQMS.Web.Security.UserPermissions>();
+builder.Services.AddScoped<ISecurityAdminService, SecurityAdminService>();
 
 builder.Services.AddAntiforgery(opt =>
 {

@@ -113,20 +113,34 @@ public class DbService : IDbService
 
     private const string UserSelect = @"
         SELECT UserId, EmployeeId, Username, FullName, Email, Department,
-               ProfilePicture, PasswordHash, Role, PlantCode, IsActive, IsOnline,
+               ProfilePicture, PasswordHash, Role, RoleCode, RoleName, IsPlantScoped,
+               PlantCode, IsActive, IsOnline,
                LastLogin, LastSeen, CreatedAt, CreatedBy, DisabledAt, DisabledBy
         FROM qms.AppUser";
 
-    /// <summary>Maps a QMS role name onto its namespaced portal.Role code.</summary>
-    private static string ToRoleCode(string? role) => role switch
+    /// <summary>
+    /// Validates a role code before it is written to the shared portal.UserRole.
+    ///
+    /// This replaces a name-to-code map that fell back to "QcViewer" for
+    /// anything it did not recognise. That map ran on EVERY user edit, not just
+    /// role changes, so once custom roles existed, editing somebody's e-mail
+    /// address would silently demote them to Viewer and audit it as a success.
+    /// Now an unknown code throws.
+    /// </summary>
+    private static async Task<string> RequireKnownRoleCodeAsync(
+        SqlConnection c, SqlTransaction? tx, string? roleCode)
     {
-        UserRoles.SiteAdmin    => "QcAdmin",
-        UserRoles.Manager      => "QcManager",
-        UserRoles.ClaimManager => "QcClaimManager",
-        UserRoles.Supervisor   => "QcSupervisor",
-        UserRoles.Operator     => "QcOperator",
-        _                      => "QcViewer",
-    };
+        if (string.IsNullOrWhiteSpace(roleCode))
+            throw new ArgumentException("A role code is required.", nameof(roleCode));
+
+        var exists = await c.ExecuteScalarAsync<int>(
+            "SELECT COUNT(*) FROM qms_role WHERE role_code = @roleCode AND is_active = 1",
+            new { roleCode }, tx);
+        if (exists == 0)
+            throw new ArgumentException($"'{roleCode}' is not an active QMS role.", nameof(roleCode));
+
+        return roleCode.Trim();
+    }
 
     public async Task<User?> GetUserByIdAsync(int userId)
     {
@@ -150,7 +164,10 @@ public class DbService : IDbService
                    FullName LIKE '%' + @search + '%' OR
                    Username LIKE '%' + @search + '%' OR
                    Email    LIKE '%' + @search + '%')
-              AND (@role IS NULL OR Role = @role)
+              -- Matches on either form: the Users screen filters by role CODE,
+              -- but a bookmarked link from before the permission model carries
+              -- the old display name.
+              AND (@role IS NULL OR RoleCode = @role OR Role = @role)
               AND (@isActive IS NULL OR IsActive = @isActive)
             ORDER BY FullName";
         var rows = await c.QueryAsync<User>(sql, new { search, role, isActive });
@@ -220,20 +237,31 @@ public class DbService : IDbService
                 VALUES (@userId, @EmployeeId, @Department, 0, @CreatedBy);",
             new { userId, u.EmployeeId, u.Department, u.CreatedBy }, tx);
 
-        // Exactly one Qc role per user, mirroring the single Role column the
-        // application model carries.
+        // Exactly one Qc role per user. Scoped to 'Qc%' so an SCM role on the
+        // same person survives; validated first so an unknown code fails loudly
+        // instead of silently landing the user on Viewer.
+        var roleCode = await RequireKnownRoleCodeAsync(c, tx, u.RoleCode);
         await c.ExecuteAsync(@"
             DELETE FROM portal.UserRole WHERE UserId = @userId AND RoleCode LIKE 'Qc%';
             INSERT INTO portal.UserRole (UserId, RoleCode, SourceKind)
             VALUES (@userId, @roleCode, 'MANUAL');",
-            new { userId, roleCode = ToRoleCode(u.Role) }, tx);
+            new { userId, roleCode }, tx);
 
-        await c.ExecuteAsync(@"
-            DELETE FROM portal.UserPlant WHERE UserId = @userId;
-            INSERT INTO portal.UserPlant (UserId, Plant, AssignedAt, AssignedByUserId)
-            SELECT @userId, @plant, SYSUTCDATETIME(), NULL
-            WHERE @plant IS NOT NULL AND LEN(@plant) > 0;",
-            new { userId, plant = u.PlantCode }, tx);
+        // portal.UserPlant is shared with the SCM app and this delete is not
+        // filtered by plant, so it replaces every assignment the person has.
+        // Today that is harmless -- all 13 rows belong to QMS users with one
+        // plant each -- but it would quietly destroy SCM data the moment that
+        // stops being true. Only touch it when QMS actually has something to say
+        // about the plant, i.e. when the role is plant-scoped.
+        if (u.IsPlantScoped || !string.IsNullOrWhiteSpace(u.PlantCode))
+        {
+            await c.ExecuteAsync(@"
+                DELETE FROM portal.UserPlant WHERE UserId = @userId;
+                INSERT INTO portal.UserPlant (UserId, Plant, AssignedAt, AssignedByUserId)
+                SELECT @userId, @plant, SYSUTCDATETIME(), NULL
+                WHERE @plant IS NOT NULL AND LEN(@plant) > 0;",
+                new { userId, plant = u.PlantCode }, tx);
+        }
     }
 
     public async Task UpdateProfilePictureAsync(int userId, string path)
@@ -296,21 +324,29 @@ public class DbService : IDbService
         }
     }
 
+    /// <summary>Every Qc role code the user holds. The UI assigns exactly one, so
+    /// this normally returns a single element; it exists for the Users screen to
+    /// show when historical data says otherwise.</summary>
     public async Task<IReadOnlyList<string>> GetUserRolesAsync(int userId)
     {
         using var c = Open();
-        var rows = await c.QueryAsync<string>(@"
-            SELECT CASE RoleCode
-                       WHEN 'QcAdmin'        THEN 'SiteAdmin'
-                       WHEN 'QcManager'      THEN 'Manager'
-                       WHEN 'QcClaimManager' THEN 'ClaimManager'
-                       WHEN 'QcSupervisor'   THEN 'Supervisor'
-                       WHEN 'QcOperator'     THEN 'Operator'
-                       ELSE 'Viewer'
-                   END
-            FROM portal.UserRole
-            WHERE UserId = @userId AND RoleCode LIKE 'Qc%'",
+        var rows = await c.QueryAsync<string>(
+            "SELECT RoleCode FROM portal.UserRole WHERE UserId = @userId AND RoleCode LIKE 'Qc%'",
             new { userId });
+        return rows.ToList();
+    }
+
+    /// <summary>Roles an administrator may assign, newest permission model.</summary>
+    public async Task<IReadOnlyList<AssignableRole>> ListAssignableRolesAsync()
+    {
+        using var c = Open();
+        var rows = await c.QueryAsync<AssignableRole>(@"
+            SELECT role_code AS RoleCode, display_name AS DisplayName, legacy_name AS LegacyName,
+                   rank AS Rank, is_builtin AS IsBuiltIn, is_plant_scoped AS IsPlantScoped,
+                   description AS Description
+            FROM   qms_role
+            WHERE  is_active = 1
+            ORDER  BY rank DESC, display_name");
         return rows.ToList();
     }
 

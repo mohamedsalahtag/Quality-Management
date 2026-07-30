@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @model Arrival
 @{
     ViewData["Title"] = "Arrival " + Model.ArrivalNo;
@@ -11,9 +11,9 @@
     var role      = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     // V31 (2026-06-20): Supervisor included in canEdit (OperatorOrAbove now
     // covers it). New canSupervise gate unlocks edits on Completed arrivals.
-    var canEdit       = role == UserRoles.Operator || role == UserRoles.Supervisor || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
-    var canSupervise  = role == UserRoles.Supervisor || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
-    var canManage     = role == UserRoles.Manager  || role == UserRoles.SiteAdmin;
+    var canEdit       = Perms.CanEdit(Screens.ArrivalsDetails);
+    var canSupervise  = Perms.Can(Perm.Arrivals.ReopenForEdit) || Perms.Can(Perm.Arrivals.SaveChecklist);
+    var canManage     = Perms.Can(Perm.Arrivals.Delete);
     var isAdmin       = canManage;   // backward-compat alias for blocks that already use isAdmin
     // Combined "edit allowed on this arrival" gate: draft is editable by every
     // OperatorOrAbove; Completed is editable by Supervisor+.

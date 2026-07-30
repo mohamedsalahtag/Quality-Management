@@ -1,8 +1,10 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Extensions;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
+using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.Services.Sap;
 
@@ -24,7 +26,7 @@ public class ArrivalsController : Controller
     }
 
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequireScreen(Screens.ArrivalsPending, Seed.OperatorOrAbove, "Open Pending Containers")]
     public async Task<IActionResult> Pending(
         string? container, string? bol, string? po,
         string? plant, string? poType, string? storageLoc, string? supplier)
@@ -73,7 +75,7 @@ public class ArrivalsController : Controller
     /// twice or simultaneously with the auto-scheduler can't double-pull.
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Arrivals.Retrieve, Seed.OperatorOrAbove, "Retrieve latest containers from SAP")]
     public async Task<IActionResult> RetrieveLatestContainers(
         [FromServices] ISettingsService settings,
         [FromServices] IConfiguration   config,
@@ -120,6 +122,7 @@ public class ArrivalsController : Controller
         return RedirectToAction(nameof(Pending));
     }
 
+    [RequireScreen(Screens.ArrivalsIndex, Seed.Everyone, "Open Arrivals")]
     public async Task<IActionResult> Index(string? status, string? search)
     {
         var scoped = User.GetScopedPlant();
@@ -131,6 +134,7 @@ public class ArrivalsController : Controller
     }
 
     [HttpGet]
+    [RequireScreen(Screens.ArrivalsSearch, Seed.OperatorOrAbove, "Search SAP for a container")]
     public async Task<IActionResult> Search(string? container, string? bol, string? po, string? material)
     {
         var query = new SapSearchQuery
@@ -201,7 +205,7 @@ public class ArrivalsController : Controller
     // under one BOL for one PO (EBELN). Every PO *item* line for that triple
     // becomes an arrival item automatically -- the user does not pick lines.
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Arrivals.Create, Seed.OperatorOrAbove, "Create an arrival")]
     public async Task<IActionResult> Create(string containerNo, string bolNo, string po)
     {
         // BOL is optional: some containers arrive without a bill of lading. The
@@ -285,6 +289,7 @@ public class ArrivalsController : Controller
         }
     }
 
+    [RequireScreen(Screens.ArrivalsDetails, Seed.Everyone, "Open an arrival")]
     public async Task<IActionResult> Details(long id)
     {
         if (await EnsureCanReadArrivalAsync(id) is { } block) return block;
@@ -315,7 +320,7 @@ public class ArrivalsController : Controller
 
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Arrivals.SaveChecklist, Seed.OperatorOrAbove, "Save the arrival checklist")]
     public async Task<IActionResult> SaveChecklist(ArrivalChecklist checklist)
     {
         if (await EnsureCanReadArrivalAsync(checklist.ArrivalId) is { } block) return block;
@@ -377,7 +382,7 @@ public class ArrivalsController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Arrivals.SaveShipment, Seed.OperatorOrAbove, "Save shipment details")]
     public async Task<IActionResult> SaveShipment(ShipmentSnapshot shipment)
     {
         if (await EnsureCanReadArrivalAsync(shipment.ArrivalId) is { } block) return block;
@@ -395,7 +400,7 @@ public class ArrivalsController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Arrivals.Complete, Seed.OperatorOrAbove, "Complete an arrival")]
     public async Task<IActionResult> Complete(long id)
     {
         if (await EnsureCanReadArrivalAsync(id) is { } block) return block;
@@ -408,7 +413,7 @@ public class ArrivalsController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Arrivals.ReopenForEdit, Seed.ManagerOrAdmin, "Reopen a completed arrival for editing")]
     public async Task<IActionResult> ReopenForEdit(long id, string? reason)
     {
         if (await EnsureCanReadArrivalAsync(id) is { } block) return block;
@@ -421,7 +426,7 @@ public class ArrivalsController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Arrivals.Delete, Seed.ManagerOrAdmin, "Delete an arrival")]
     public async Task<IActionResult> Delete(long id)
     {
         if (await EnsureCanReadArrivalAsync(id) is { } block) return block;

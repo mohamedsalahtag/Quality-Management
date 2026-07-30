@@ -1,10 +1,12 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using ClosedXML.Excel;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
+using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Models.Reports;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.Services.Pdf;
@@ -56,6 +58,10 @@ public class ReportsController : Controller
     /// When the arrival has images attached, an Images Appendix page is
     /// added at the end with the photos grouped by category.
     /// </summary>
+    // Seeded for every built-in role: printing the checklist was open to any
+    // authenticated user, Viewer included, and narrowing it here would have
+    // taken the report away from the people who actually print it.
+    [RequirePermission(Perm.Arrivals.ChecklistPdf, Seed.Everyone, "Download the arrival checklist PDF", ReadOnly = true)]
     public async Task<IActionResult> ArrivalChecklistPdf(long id, CancellationToken ct = default)
     {
         var arrival = await _arrivals.GetAsync(id);
@@ -117,7 +123,7 @@ public class ReportsController : Controller
     /// dialog can pre-populate (operator may edit before sending).
     /// </summary>
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier")]
     public async Task<IActionResult> PrepareSendQualityReport(long id)
     {
         var qo = await _qos.GetAsync(id);
@@ -163,7 +169,7 @@ public class ReportsController : Controller
     /// confirmed in the dialog. Returns JSON for the AJAX caller.
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier")]
     public async Task<IActionResult> SendQualityReport(long id, string to, string? cc, string subject, string body, CancellationToken ct = default)
     {
         var qo = await _qos.GetAsync(id);
@@ -200,6 +206,7 @@ public class ReportsController : Controller
                 .Select(a => a.Trim())
                 .Where(a => a.Length > 0);
 
+    [RequirePermission(Perm.Qo.Pdf, Seed.Everyone, "Download the quality report PDF", ReadOnly = true)]
     public async Task<IActionResult> QualityOrderPdf(long id, CancellationToken ct = default)
     {
         var qo = await _qos.GetAsync(id);
@@ -483,7 +490,7 @@ public class ReportsController : Controller
     // Auth: SupervisorOrAbove (data hub is for review/analysis, not operators).
     // ===================================================================
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequireScreen(Screens.ReportsDataHub, Seed.SupervisorOrAbove, "Open the Data hub")]
     public async Task<IActionResult> FlatDefects(
         [FromQuery] FlatDefectFilter filter, CancellationToken ct = default)
     {
@@ -526,7 +533,7 @@ public class ReportsController : Controller
     }
 
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Reports.DataHubExport, Seed.SupervisorOrAbove, "Export the data hub to Excel", ReadOnly = true)]
     public async Task<IActionResult> FlatDefectsExcel(
         [FromQuery] FlatDefectFilter filter, CancellationToken ct = default)
     {
@@ -774,7 +781,7 @@ public class ReportsController : Controller
     // before honouring scope='shared'.
     // ===================================================================
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Reports.Pivot, Seed.SupervisorOrAbove, "Use the perspective analyzer", ReadOnly = true)]
     public IActionResult PivotSchema(string report)
     {
         if (string.IsNullOrWhiteSpace(report)
@@ -798,7 +805,7 @@ public class ReportsController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Reports.Pivot, Seed.SupervisorOrAbove, "Use the perspective analyzer", ReadOnly = true)]
     public async Task<IActionResult> Pivot([FromBody] PivotRequest req, CancellationToken ct)
     {
         if (req == null) return BadRequest(new { error = "Empty request" });
@@ -829,7 +836,7 @@ public class ReportsController : Controller
     /// </summary>
     [HttpPost]
     [ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Reports.PivotExport, Seed.SupervisorOrAbove, "Export a pivot to Excel", ReadOnly = true)]
     public async Task<IActionResult> PivotExcel([FromBody] PivotRequest req, CancellationToken ct)
     {
         if (req == null) return BadRequest(new { error = "Empty request" });
@@ -1102,7 +1109,7 @@ public class ReportsController : Controller
     /// short-term cached by PivotService.
     /// </summary>
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Reports.Pivot, Seed.SupervisorOrAbove, "Use the perspective analyzer", ReadOnly = true)]
     public async Task<IActionResult> PivotValues(string report, string dim,
         [FromQuery] FlatDefectFilter filter, bool ignorePageFilter = false,
         string? q = null, CancellationToken ct = default)
@@ -1127,7 +1134,7 @@ public class ReportsController : Controller
     }
 
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Reports.Pivot, Seed.SupervisorOrAbove, "Use the perspective analyzer", ReadOnly = true)]
     public async Task<IActionResult> Perspectives(string report, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(report)) return BadRequest(new { error = "report required" });
@@ -1142,7 +1149,7 @@ public class ReportsController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Reports.SharePerspective, Seed.SupervisorOrAbove, "Save a perspective")]
     public async Task<IActionResult> SavePerspective([FromBody] PerspectiveSaveRequest req,
         CancellationToken ct)
     {
@@ -1165,7 +1172,7 @@ public class ReportsController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Reports.SharePerspective, Seed.SupervisorOrAbove, "Save a perspective")]
     public async Task<IActionResult> SetDefaultPerspective(long id, CancellationToken ct)
     {
         var user = User.Identity?.Name ?? "";
@@ -1175,7 +1182,7 @@ public class ReportsController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Reports.SharePerspective, Seed.SupervisorOrAbove, "Save a perspective")]
     public async Task<IActionResult> DeletePerspective(long id, CancellationToken ct)
     {
         var user        = User.Identity?.Name ?? "";
@@ -1203,7 +1210,7 @@ public class ReportsController : Controller
     // Auth: SupervisorOrAbove, same as the other data-hub reports.
     // ===================================================================
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequireScreen(Screens.ReportsBuilder, Seed.SupervisorOrAbove, "Open the Report builder")]
     public async Task<IActionResult> ReportBuilder()
     {
         ViewBag.MaterialGroups = await _mara.ListMaterialGroupsAsync();
@@ -1217,7 +1224,7 @@ public class ReportsController : Controller
     }
 
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequireScreen(Screens.ReportsBuilder)]
     public async Task<IActionResult> ReportBuilderPalette(string? materialGroup, CancellationToken ct)
     {
         var g = (materialGroup ?? "").Trim();
@@ -1263,7 +1270,7 @@ public class ReportsController : Controller
             .ToList();
 
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequireScreen(Screens.ReportsBuilder)]
     public async Task<IActionResult> ReportBuilderVendors(CancellationToken ct)
     {
         using var c = new SqlConnection(_config.GetConnectionString("Default"));
@@ -1277,7 +1284,7 @@ public class ReportsController : Controller
     }
 
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequireScreen(Screens.ReportsBuilder)]
     public async Task<IActionResult> ReportBuilderContainers(string? vendorNo, CancellationToken ct)
     {
         var v = string.IsNullOrWhiteSpace(vendorNo) ? null : vendorNo.Trim();
@@ -1294,7 +1301,7 @@ public class ReportsController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequireScreen(Screens.ReportsBuilder)]
     public IActionResult ReportBuilderValidateFormula([FromBody] FormulaValidateRequest req)
     {
         if (req == null) return BadRequest(new { error = "Empty request" });
@@ -1304,7 +1311,7 @@ public class ReportsController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequireScreen(Screens.ReportsBuilder)]
     public async Task<IActionResult> ReportBuilderPreview([FromBody] ReportBuilderRequest req, CancellationToken ct)
     {
         var (def, _) = await ResolveDefinitionAsync(req, ct);
@@ -1316,7 +1323,7 @@ public class ReportsController : Controller
 
     [HttpPost]
     [ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Reports.BuilderExport, Seed.SupervisorOrAbove, "Export a built report to Excel", ReadOnly = true)]
     public async Task<IActionResult> ReportBuilderExport([FromBody] ReportBuilderRequest req, CancellationToken ct)
     {
         var (def, name) = await ResolveDefinitionAsync(req, ct);

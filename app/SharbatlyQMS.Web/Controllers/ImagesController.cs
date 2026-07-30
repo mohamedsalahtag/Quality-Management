@@ -1,8 +1,10 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Extensions;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
+using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.ViewModels;
 
@@ -23,7 +25,8 @@ public class ImagesController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Attachments.PhotoUpload, Seed.OperatorOrAbove, "Upload a photo")]
+
     [RequestSizeLimit(100L * 1024 * 1024)]
     public async Task<IActionResult> Upload(string ownerType, long ownerId, string category,
         List<IFormFile> files, string? returnUrl)
@@ -47,7 +50,7 @@ public class ImagesController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Attachments.PhotoDelete, Seed.OperatorOrAbove, "Delete a photo")]
     public async Task<IActionResult> Delete(long imageLinkId, string? ownerType, long ownerId, string? returnUrl)
     {
         // Resolve the link's real owner and gate against THAT (not the caller-

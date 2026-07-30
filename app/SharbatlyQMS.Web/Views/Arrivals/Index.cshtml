@@ -1,12 +1,12 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @model IReadOnlyList<Arrival>
 @{
     ViewData["Title"] = "Arrivals";
     var status   = ViewBag.Status as string;
     var search   = ViewBag.Search as string;
     var role     = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-    var canEdit  = role == UserRoles.Operator || role == UserRoles.Manager || role == UserRoles.SiteAdmin;
-    var canManage = role == UserRoles.Manager || role == UserRoles.SiteAdmin;
+    var canEdit  = Perms.Can(Perm.Arrivals.Create);
+    var canManage = Perms.Can(Perm.Arrivals.Delete);
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3">

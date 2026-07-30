@@ -1,5 +1,6 @@
-using System.Net;
+﻿using System.Net;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
 using Xunit;
 
 namespace SharbatlyQMS.Tests;
@@ -13,7 +14,15 @@ namespace SharbatlyQMS.Tests;
 /// controller, the services, Dapper and the Razor view together.
 ///
 /// Read-only -- these tests create nothing and delete nothing.
+///
+/// In the "workflow" collection so it does NOT run in parallel with the other
+/// classes: it sets TestAuthHandler.Role, which is process-wide, and a parallel
+/// class issuing HTTP requests would otherwise be authenticated as whatever role
+/// this class last wrote. That produced nothing worse than luck before the
+/// permission model; now it would be intermittent 403s that look like a bug in
+/// the feature.
 /// </summary>
+[Collection("workflow")]
 public class PageSmokeTests : IClassFixture<QmsAppFactory>
 {
     private readonly QmsAppFactory _factory;
@@ -50,7 +59,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
     [MemberData(nameof(Pages))]
     public async Task Page_loads_without_error(string url)
     {
-        TestAuthHandler.Role = UserRoles.SiteAdmin;
+        TestAuthHandler.Role = RoleCodes.Admin;
         var client = _factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false
@@ -75,7 +84,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
     [Fact]
     public async Task Defect_catalogue_page_shows_migrated_defects()
     {
-        TestAuthHandler.Role = UserRoles.SiteAdmin;
+        TestAuthHandler.Role = RoleCodes.Admin;
         var client = _factory.CreateClient();
         var html = await client.GetStringAsync("/Admin/DefectCatalog");
         Assert.False(string.IsNullOrWhiteSpace(html));
@@ -86,7 +95,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
     [Fact]
     public async Task User_admin_lists_migrated_quality_users()
     {
-        TestAuthHandler.Role = UserRoles.SiteAdmin;
+        TestAuthHandler.Role = RoleCodes.Admin;
         var client = _factory.CreateClient();
         var html = await client.GetStringAsync("/Admin/Users");
         // Identity now comes from portal.User via qms.AppUser.
@@ -97,7 +106,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
     [Fact]
     public async Task Operator_is_denied_admin_pages()
     {
-        TestAuthHandler.Role = UserRoles.Operator;
+        TestAuthHandler.Role = RoleCodes.Operator;
         var client = _factory.CreateClient(new Microsoft.AspNetCore.Mvc.Testing.WebApplicationFactoryClientOptions
         {
             AllowAutoRedirect = false

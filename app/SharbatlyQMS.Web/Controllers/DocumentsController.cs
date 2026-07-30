@@ -1,8 +1,10 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Extensions;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
+using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.ViewModels;
 
@@ -29,7 +31,8 @@ public class DocumentsController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Attachments.Upload, Seed.OperatorOrAbove, "Upload a document")]
+
     [RequestSizeLimit(100L * 1024 * 1024)]
     public async Task<IActionResult> Upload(string ownerType, long ownerId, string category,
         List<IFormFile> files, string? returnUrl)
@@ -65,7 +68,7 @@ public class DocumentsController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Attachments.Delete, Seed.OperatorOrAbove, "Delete a document")]
     public async Task<IActionResult> Delete(long documentId, string? ownerType, long ownerId, string? returnUrl)
     {
         // Resolve the document's real owner and gate against THAT (not the caller-
@@ -94,7 +97,12 @@ public class DocumentsController : Controller
     /// right plant may download — including Viewer, and including on a Completed
     /// arrival. Read access must NOT depend on the record still being editable.
     /// </summary>
+    // Seeded for EVERY built-in role, Viewer included. Downloading an
+    // attachment was open to any authenticated user before the permission
+    // model; narrowing it to the upload audience here would have quietly taken
+    // supplier invoices away from the people who read them.
     [HttpGet]
+    [RequirePermission(Perm.Attachments.Download, Seed.Everyone, "Download a document", ReadOnly = true)]
     public async Task<IActionResult> Download(long id)
     {
         var doc = await _docs.GetAsync(id);

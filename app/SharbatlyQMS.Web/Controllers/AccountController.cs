@@ -1,9 +1,11 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
+using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
 
 namespace SharbatlyQMS.Web.Controllers;
@@ -20,15 +22,17 @@ public class AccountController : Controller
     private readonly IAdService _ad;
     private readonly ISettingsService _settings;
     private readonly IWebHostEnvironment _env;
+    private readonly IUserPermissions _perms;
     private readonly ILogger<AccountController> _logger;
 
     public AccountController(IDbService db, IAdService ad, ISettingsService settings,
-        IWebHostEnvironment env, ILogger<AccountController> logger)
+        IWebHostEnvironment env, IUserPermissions perms, ILogger<AccountController> logger)
     {
         _db = db;
         _ad = ad;
         _settings = settings;
         _env = env;
+        _perms = perms;
         _logger = logger;
     }
 
@@ -128,25 +132,26 @@ public class AccountController : Controller
             new(ClaimTypes.Name,           user.Username),
             new(ClaimTypes.GivenName,      user.FullName),
             new(ClaimTypes.Email,          user.Email ?? ""),
-            new(ClaimTypes.Role,           user.Role),
+            // The ROLE CODE, not the display name. Permissions hang off the code,
+            // it survives a rename, and it is the only thing that means anything
+            // for a role composed on the Security screen.
+            new(ClaimTypes.Role,           user.RoleCode),
+            new("RoleName",                user.RoleName ?? user.Role),
             new("Department",              user.Department ?? ""),
             new("EmployeeId",              user.EmployeeId ?? ""),
             new("ProfilePicture",          user.ProfilePicture ?? ""),
-            // Plant scope: only Operators are restricted. Manager / SiteAdmin /
-            // Viewer / ClaimManager always see every plant, so they get an
-            // empty PlantCode claim regardless of any DB assignment.
-            new("PlantCode",
-                string.Equals(user.Role, UserRoles.Operator, StringComparison.OrdinalIgnoreCase)
-                    ? (user.PlantCode ?? "")
-                    : "")
+            // Plant scope now follows a flag on the ROLE rather than the literal
+            // name "Operator". A composed operator-style role would otherwise
+            // have been handed sight of every plant -- a silent widening that
+            // nothing would have surfaced.
+            new("PlantCode", user.IsPlantScoped ? (user.PlantCode ?? "") : "")
         };
 
-        // user.Role is the highest-ranked role only. portal.UserRole can hold a
-        // peer role too (ClaimManager beside Manager), so emit every one of
-        // them -- RequireRole matches any single role claim.
-        foreach (var extra in await _db.GetUserRolesAsync(user.UserId))
-            if (!string.Equals(extra, user.Role, StringComparison.OrdinalIgnoreCase))
-                claims.Add(new Claim(ClaimTypes.Role, extra));
+        // Exactly one role claim. The extra claims this used to emit -- one per
+        // Qc role held -- were never refreshed after login, so they went stale
+        // for the life of the cookie. Access is resolved from the database by
+        // user id now, so a second claim would buy nothing and could only
+        // disagree with the real answer.
 
         var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
         var props = new AuthenticationProperties
@@ -168,6 +173,7 @@ public class AccountController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
+    [QmsAlwaysAllowed]
     public async Task<IActionResult> Logout()
     {
         var idClaim = User.FindFirst(ClaimTypes.NameIdentifier);
@@ -182,26 +188,30 @@ public class AccountController : Controller
     public IActionResult AccessDenied() => View();
 
     // ---- View site as ----------------------------------------------------
-    // Lets a real SiteAdmin impersonate another role to verify security gates.
-    // The Role-claim swap is done by ViewAsClaimsTransformer on each request;
-    // here we only manage the cookie that drives it. Passing role="" (or any
-    // non-role value) clears impersonation and the admin reverts to self.
+    // Preview the application as another role, to verify a composed role before
+    // assigning it to anybody. ViewAsClaimsTransformer does the claim swap on
+    // each request; this only manages the cookie that drives it.
+    //
+    // [QmsAlwaysAllowed] and the unconditional CLEAR path below are what stop an
+    // administrator trapping themselves: previewing a role that cannot reach
+    // this endpoint would otherwise leave them stuck as that role for eight
+    // hours. Starting a preview still requires the permission, checked against
+    // the user's REAL role.
     [HttpPost, ValidateAntiForgeryToken]
+    [QmsAlwaysAllowed]
     public IActionResult ViewAs(string? role, string? returnUrl = null)
     {
-        // Trust the OriginalRole claim when present (we are mid-impersonation),
-        // otherwise the current Role claim is the real one.
-        var realRole = User.FindFirst(ViewAsClaimsTransformer.OriginalRoleClaim)?.Value
-                    ?? User.FindFirst(ClaimTypes.Role)?.Value;
-        if (realRole != UserRoles.SiteAdmin) return Forbid();
+        var clearing = string.IsNullOrWhiteSpace(role);
+        if (!clearing && !_perms.AsActualUser.Can(Perm.Admin.ViewAs)) return Forbid();
 
-        if (string.IsNullOrWhiteSpace(role) || role == UserRoles.SiteAdmin || !UserRoles.IsValid(role))
+        if (clearing || string.Equals(role, _perms.ActualRole, StringComparison.OrdinalIgnoreCase))
         {
             Response.Cookies.Delete(ViewAsClaimsTransformer.CookieName);
         }
         else
         {
-            Response.Cookies.Append(ViewAsClaimsTransformer.CookieName, role, new CookieOptions
+            // role is non-null here: `clearing` is exactly the null/blank case.
+            Response.Cookies.Append(ViewAsClaimsTransformer.CookieName, role!, new CookieOptions
             {
                 HttpOnly = true,
                 SameSite = SameSiteMode.Lax,
@@ -217,7 +227,7 @@ public class AccountController : Controller
 
     // ---- My Profile ------------------------------------------------------
 
-    [HttpGet, Authorize]
+    [HttpGet, Authorize, QmsAlwaysAllowed]
     public async Task<IActionResult> Profile()
     {
         var user = await CurrentUserAsync();
@@ -225,7 +235,7 @@ public class AccountController : Controller
         return View(ToVm(user));
     }
 
-    [HttpPost, ValidateAntiForgeryToken, Authorize]
+    [HttpPost, ValidateAntiForgeryToken, Authorize, QmsAlwaysAllowed]
     public async Task<IActionResult> Profile(ProfileVm vm)
     {
         var user = await CurrentUserAsync();
@@ -252,7 +262,7 @@ public class AccountController : Controller
         return RedirectToAction(nameof(Profile));
     }
 
-    [HttpPost, ValidateAntiForgeryToken, Authorize]
+    [HttpPost, ValidateAntiForgeryToken, Authorize, QmsAlwaysAllowed]
     public async Task<IActionResult> ChangePassword(ChangePasswordVm vm)
     {
         var user = await CurrentUserAsync();
@@ -279,7 +289,7 @@ public class AccountController : Controller
         return RedirectToAction(nameof(Profile));
     }
 
-    [HttpPost, ValidateAntiForgeryToken, Authorize]
+    [HttpPost, ValidateAntiForgeryToken, Authorize, QmsAlwaysAllowed]
     public async Task<IActionResult> UploadProfilePicture(IFormFile avatar)
     {
         var user = await CurrentUserAsync();

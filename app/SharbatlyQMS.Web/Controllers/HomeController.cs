@@ -2,6 +2,8 @@ using System.Diagnostics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
+using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
 
 namespace SharbatlyQMS.Web.Controllers;
@@ -9,18 +11,25 @@ namespace SharbatlyQMS.Web.Controllers;
 public class HomeController : Controller
 {
     private readonly IDashboardService _dashboard;
+    private readonly IUserPermissions _perms;
     private readonly ILogger<HomeController> _logger;
 
-    public HomeController(IDashboardService dashboard, ILogger<HomeController> logger)
+    public HomeController(IDashboardService dashboard, IUserPermissions perms,
+        ILogger<HomeController> logger)
     {
         _dashboard = dashboard;
+        _perms     = perms;
         _logger    = logger;
     }
 
+    [RequireScreen(Screens.Dashboard, Seed.Everyone, "Open the dashboard")]
     public async Task<IActionResult> Index(CancellationToken ct)
     {
         var vm = await _dashboard.GetSummaryAsync(ct);
-        vm.IsAdmin = User.IsInRole(UserRoles.SiteAdmin);
+        // Was User.IsInRole(SiteAdmin). The dashboard's admin panel is really
+        // "may this person administer settings", which is now a permission a
+        // composed role can hold without being the built-in administrator.
+        vm.IsAdmin = _perms.CanView(Screens.AdminSettings);
         return View(vm);
     }
 

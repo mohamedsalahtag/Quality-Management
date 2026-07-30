@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @model IReadOnlyList<User>
 @{
     ViewData["Title"] = "Users";
@@ -6,6 +6,9 @@
     var roleFilter = ViewBag.Role as string;
     var status = ViewBag.Status as string;
     var adConfigured = (bool?)ViewBag.AdConfigured ?? false;
+    // Roles come from the role table, so anything composed on the Security
+    // screen is assignable here immediately -- no code change, no redeploy.
+    var roles = ViewBag.Roles as IReadOnlyList<AssignableRole> ?? new List<AssignableRole>();
     var currentUserId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
 }
 
@@ -38,9 +41,9 @@
     <div class="col-md-3">
         <select name="role" class="form-select">
             <option value="">All roles</option>
-            @foreach (var r in UserRoles.All)
+            @foreach (var r in roles)
             {
-                <option value="@r" selected="@(r == roleFilter)">@r</option>
+                <option value="@r.RoleCode" selected="@(r.RoleCode == roleFilter)">@r.DisplayName</option>
             }
         </select>
     </div>
@@ -96,20 +99,20 @@
                             <td>@u.Department</td>
                             <td>
                                 @{
-                                    var roleBadge = u.Role switch
+                                    var roleBadge = u.RoleCode switch
                                     {
-                                        UserRoles.SiteAdmin    => "danger",
-                                        UserRoles.Manager      => "primary",
-                                        UserRoles.ClaimManager => "warning text-dark",
-                                        UserRoles.Operator     => "info",
-                                        UserRoles.Viewer       => "secondary",
+                                        RoleCodes.Admin        => "danger",
+                                        RoleCodes.Manager      => "primary",
+                                        RoleCodes.ClaimManager => "warning text-dark",
+                                        RoleCodes.Operator     => "info",
+                                        RoleCodes.Viewer       => "secondary",
                                         _                      => "light text-dark"
                                     };
                                 }
-                                <span class="badge bg-@roleBadge">@u.Role</span>
+                                <span class="badge bg-@roleBadge" title="@u.RoleCode">@(string.IsNullOrWhiteSpace(u.RoleName) ? u.Role : u.RoleName)</span>
                             </td>
                             <td>
-                                @if (string.Equals(u.Role, UserRoles.Operator, StringComparison.OrdinalIgnoreCase)
+                                @if (u.IsPlantScoped
                                      && !string.IsNullOrWhiteSpace(u.PlantCode))
                                 {
                                     <span class="badge bg-light text-dark border"
@@ -136,7 +139,7 @@
                                         data-user-id="@u.UserId" data-username="@u.Username"
                                         data-fullname="@u.FullName" data-email="@u.Email"
                                         data-department="@u.Department" data-employeeid="@u.EmployeeId"
-                                        data-role="@u.Role" data-plantcode="@u.PlantCode">
+                                        data-role="@u.RoleCode" data-plantcode="@u.PlantCode">
                                     <i class="bi bi-pencil"></i>
                                 </button>
                                 @if (!string.IsNullOrEmpty(u.PasswordHash))
@@ -263,7 +266,7 @@
                         <input name="employeeId" id="edit-employeeId" class="form-control" /></div>
                     <div class="col-md-6"><label class="form-label">Role</label>
                         <select name="role" id="edit-role" class="form-select">
-                            @foreach (var r in UserRoles.All) { <option value="@r">@r</option> }
+                            @foreach (var r in roles.Select(x => x.RoleCode)) { <option value="@r">@r</option> }
                         </select></div>
                     <div class="col-12"><label class="form-label">Full name</label>
                         <input name="fullName" id="edit-fullName" class="form-control" required /></div>
@@ -417,8 +420,9 @@
             var filter  = document.getElementById('adFilter');
             var tbody   = document.getElementById('adPickerTbody');
             var status  = document.getElementById('adPickerStatus');
-            var roleOpts = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(UserRoles.All));
-            var defaultRole = '@UserRoles.Viewer';
+            var roleOpts = @Html.Raw(System.Text.Json.JsonSerializer.Serialize(
+                roles.Select(r => new { code = r.RoleCode, name = r.DisplayName })));
+            var defaultRole = '@RoleCodes.Viewer';
             var allUsers = null;     // cached server response
             var renderTimer = null;
 
@@ -448,7 +452,9 @@
                     return;
                 }
                 var roleOptionsHtml = roleOpts.map(function (r) {
-                    return '<option value="' + r + '"' + (r === defaultRole ? ' selected' : '') + '>' + r + '</option>';
+                    return '<option value="' + escapeHtml(r.code) + '"'
+                         + (r.code === defaultRole ? ' selected' : '') + '>'
+                         + escapeHtml(r.name) + '</option>';
                 }).join('');
                 // Cap visible rows at 1000 so the DOM stays snappy on huge
                 // tenants. Status line surfaces total + capped count so users

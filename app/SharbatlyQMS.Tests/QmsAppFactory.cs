@@ -8,7 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
 
 namespace SharbatlyQMS.Tests;
 
@@ -19,10 +19,15 @@ namespace SharbatlyQMS.Tests;
 ///   * Authentication is stubbed. QMS signs users in by binding to Active
 ///     Directory, which a test cannot do, so a fake handler issues the same
 ///     claims AccountController would. Everything downstream of the bind --
-///     routing, authorisation policies, controllers, services, Dapper, the
-///     views -- is the genuine article.
+///     routing, authorisation, controllers, services, Dapper, the views -- is
+///     the genuine article, including the permission catalogue and resolver.
 ///   * Background services are removed, so booting the host does not kick off
 ///     a SAP pull or an AD cache prime.
+///
+/// Note what is deliberately NOT removed: the permission catalogue is primed by
+/// an IStartupFilter rather than an IHostedService, precisely so it survives the
+/// strip below. A catalogue primed by a hosted service would be empty in every
+/// test, which would make the whole suite pass while proving nothing.
 ///
 /// Environment is forced to Production so appsettings.Production.json supplies
 /// the Sharbatly_MIS connection string, i.e. the tests exercise exactly what
@@ -60,26 +65,56 @@ public class QmsAppFactory : WebApplicationFactory<Program>
     }
 }
 
+/// <summary>
+/// Signs every request in as a chosen role.
+///
+/// The role is taken from the <c>X-Test-Role</c> request header when present,
+/// falling back to the static <see cref="Role"/>. The header is what a
+/// permission test should use: the static is shared process-wide, so two test
+/// classes running in parallel would otherwise authenticate each other's
+/// requests as the wrong role and produce intermittent, baffling 403s.
+///
+/// The USER ID also follows the role, because permissions resolve from the user
+/// id rather than the role claim -- signing in as user 85 while claiming to be
+/// an Operator would simply resolve back to that user's real role.
+/// </summary>
 public class TestAuthHandler : AuthenticationHandler<AuthenticationSchemeOptions>
 {
     public new const string Scheme = "TestAuth";
 
-    /// <summary>Role the next request runs as; mirrors UserRoles values.</summary>
-    public static string Role { get; set; } = UserRoles.SiteAdmin;
+    /// <summary>Header that overrides the role for a single request.</summary>
+    public const string RoleHeader = "X-Test-Role";
+
+    /// <summary>Default role when no header is supplied. A portal.Role CODE
+    /// (QcAdmin, QcOperator, ...), not a legacy display name.</summary>
+    public static string Role { get; set; } = RoleCodes.Admin;
 
     public TestAuthHandler(IOptionsMonitor<AuthenticationSchemeOptions> options,
         ILoggerFactory logger, UrlEncoder encoder) : base(options, logger, encoder) { }
 
     protected override Task<AuthenticateResult> HandleAuthenticateAsync()
     {
+        var role = Request.Headers.TryGetValue(RoleHeader, out var h) && !string.IsNullOrWhiteSpace(h)
+            ? h.ToString()
+            : Role;
+
+        // Only the genuine administrator maps to the real portal user; every
+        // other role runs as an id that does not exist in qms.AppUser, so the
+        // resolver falls back to the role claim and the request really is
+        // evaluated as that role.
+        var userId = string.Equals(role, RoleCodes.Admin, StringComparison.OrdinalIgnoreCase)
+            ? QmsAppFactory.AdminUserId
+            : 0;
+
         // Same claim set AccountController.IssueCookieAsync builds.
         var claims = new[]
         {
-            new Claim(ClaimTypes.NameIdentifier, QmsAppFactory.AdminUserId.ToString()),
+            new Claim(ClaimTypes.NameIdentifier, userId.ToString()),
             new Claim(ClaimTypes.Name,           QmsAppFactory.AdminUser),
             new Claim(ClaimTypes.GivenName,      "Mohamed Tag"),
             new Claim(ClaimTypes.Email,          ""),
-            new Claim(ClaimTypes.Role,           Role),
+            new Claim(ClaimTypes.Role,           role),
+            new Claim("RoleName",     role),
             new Claim("Department",   ""),
             new Claim("EmployeeId",   ""),
             new Claim("ProfilePicture", ""),

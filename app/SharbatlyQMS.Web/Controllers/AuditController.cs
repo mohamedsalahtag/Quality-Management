@@ -1,9 +1,11 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.Security.Claims;
 using ClosedXML.Excel;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
+using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.ViewModels;
 
@@ -57,7 +59,7 @@ public class AuditController : Controller
     /// HistoryPanel endpoint below.
     /// </summary>
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequireScreen(Screens.AdminAuditLog, Seed.AdminOnly, "Open the audit log")]
     public async Task<IActionResult> Index([FromQuery] AuditFilter filter)
     {
         filter ??= new AuditFilter();
@@ -93,7 +95,7 @@ public class AuditController : Controller
     /// (FR-021).
     /// </summary>
     [HttpGet]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Admin.AuditExport, Seed.AdminOnly, "Export the audit log to Excel", ReadOnly = true)]
     public async Task<IActionResult> Export([FromQuery] AuditFilter filter, CancellationToken ct)
     {
         if (filter == null || !filter.FromUtc.HasValue || !filter.ToUtc.HasValue)

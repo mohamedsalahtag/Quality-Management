@@ -1,8 +1,10 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Extensions;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Security;
+using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.ViewModels;
 
@@ -17,16 +19,18 @@ public class QualityOrdersController : Controller
     private readonly IMaraService _mara;
     private readonly ICatalogCache _cat;
     private readonly ISettingsService _settings;
+    private readonly IUserPermissions _perms;
     private readonly ILogger<QualityOrdersController> _log;
 
     public QualityOrdersController(IQualityOrderService qos, IArrivalService arrivals,
         IImageService images, IMaraService mara, ICatalogCache cat,
-        ISettingsService settings, ILogger<QualityOrdersController> log)
+        ISettingsService settings, IUserPermissions perms, ILogger<QualityOrdersController> log)
     {
         _qos = qos; _arrivals = arrivals; _images = images; _mara = mara;
-        _cat = cat; _settings = settings; _log = log;
+        _cat = cat; _settings = settings; _perms = perms; _log = log;
     }
 
+    [RequireScreen(Screens.QoIndex, Seed.Everyone, "Open Quality Orders")]
     public async Task<IActionResult> Index([FromQuery] QoListFilter filter)
     {
         // Plant-scoped operators can't widen their view: the scope overrides
@@ -66,7 +70,7 @@ public class QualityOrdersController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.Create, Seed.OperatorOrAbove, "Create a quality order")]
     public async Task<IActionResult> CreateForArrival(long arrivalId)
     {
         if (await EnsureCanReadArrivalAsync(arrivalId) is { } block) return block;
@@ -84,6 +88,7 @@ public class QualityOrdersController : Controller
         }
     }
 
+    [RequireScreen(Screens.QoDetails, Seed.Everyone, "Open a quality order")]
     public async Task<IActionResult> Details(long id)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
@@ -144,6 +149,7 @@ public class QualityOrdersController : Controller
     /// doesn't have to pre-render dozens of hidden forms.
     /// </summary>
     [HttpGet]
+    [RequireScreen(Screens.QoDetails)]
     public async Task<IActionResult> SamplePanel(long? sampleId, long? qoId, long? qoMaterialId, bool isNew = false)
     {
         QualityOrder? qo;
@@ -226,7 +232,7 @@ public class QualityOrdersController : Controller
                                   ? await _qos.GetMaterialHeaderValuesAsync(mat.QoMaterialId)
                                   : Array.Empty<MaterialHeaderValue>(),
             Categories       = await _cat.GetActiveCategoriesAsync(),
-            Editable         = qo.StatusCode == QualityOrderStatus.Open
+            Editable         = qo.StatusCode == QualityOrderStatus.Open && _perms.CanEdit(Screens.QoDetails)
         };
         return PartialView("_SampleForm", vm);
     }
@@ -238,6 +244,7 @@ public class QualityOrdersController : Controller
     /// the sample-edit drawer loading.
     /// </summary>
     [HttpGet]
+    [RequireScreen(Screens.QoDetails)]
     public async Task<IActionResult> SamplePhotosPanel(long sampleId)
     {
         var sample = await _qos.GetSampleAsync(sampleId);
@@ -247,7 +254,7 @@ public class QualityOrdersController : Controller
         if (qo == null) return NotFound();
         ViewBag.Sample   = sample;
         ViewBag.Qo       = qo;
-        ViewBag.Editable = qo.StatusCode == QualityOrderStatus.Open;
+        ViewBag.Editable = qo.StatusCode == QualityOrderStatus.Open && _perms.CanEdit(Screens.QoDetails);
         return PartialView("SamplePhotosPanel");
     }
 
@@ -258,6 +265,7 @@ public class QualityOrdersController : Controller
     /// AJAX when the user opens the material's modal.
     /// </summary>
     [HttpGet]
+    [RequireScreen(Screens.QoDetails)]
     public async Task<IActionResult> MaterialPanel(long qoMaterialId)
     {
         // GetMaterialsAsync is keyed by QO, so resolve the parent QO first.
@@ -282,7 +290,7 @@ public class QualityOrdersController : Controller
                               .Where(f => f.Scope == "Material").ToList(),
             ExistingValues = await _qos.GetMaterialHeaderValuesAsync(qoMaterialId),
             SampleSize   = mat.SampleSize,
-            Editable     = qo.StatusCode == QualityOrderStatus.Open
+            Editable     = qo.StatusCode == QualityOrderStatus.Open && _perms.CanEdit(Screens.QoDetails)
         };
         return PartialView("_MaterialForm", vm);
     }
@@ -291,7 +299,7 @@ public class QualityOrdersController : Controller
     /// values, and propagates the size to every sample. Returns JSON for
     /// in-place DOM update of the material card.</summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.EditMaterial, Seed.OperatorOrAbove, "Edit material details")]
     public async Task<IActionResult> SaveMaterialHeaderAjax(long qoMaterialId, IFormCollection form)
     {
         try
@@ -355,7 +363,7 @@ public class QualityOrdersController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.Open, Seed.OperatorOrAbove, "Open a quality order")]
     public async Task<IActionResult> Open(long id)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
@@ -384,7 +392,7 @@ public class QualityOrdersController : Controller
     /// unsampled materials with a "Submit anyway" button that re-posts with
     /// <paramref name="bypassNoSamples"/> = true.</summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.Submit, Seed.OperatorOrAbove, "Submit a quality order")]
     public async Task<IActionResult> Submit(long id, bool bypassNoSamples = false, string? reason = null)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
@@ -413,7 +421,7 @@ public class QualityOrdersController : Controller
     /// <summary>V31 (2026-06-20): Supervisor returns a Submitted QO to Open so
     /// the operator can fix mistakes. Reason optional but recorded.</summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Qo.CancelSubmit, Seed.SupervisorOrAbove, "Cancel a submit and return to Open")]
     public async Task<IActionResult> CancelSubmit(long id, string? reason)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
@@ -425,7 +433,7 @@ public class QualityOrdersController : Controller
     /// "all materials sampled" precondition still applies as a safety net,
     /// though the Submit step should have enforced it earlier.</summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.SupervisorOrAbove)]
+    [RequirePermission(Perm.Qo.Finish, Seed.SupervisorOrAbove, "Finish a quality order")]
     public async Task<IActionResult> Close(long id, string? reason, bool bypassNoSamples = false)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
@@ -451,7 +459,7 @@ public class QualityOrdersController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Qo.Reopen, Seed.ManagerOrAdmin, "Reopen a finished quality order")]
     public async Task<IActionResult> Reopen(long id, string? reason)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
@@ -459,7 +467,7 @@ public class QualityOrdersController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.ManagerOrAdmin)]
+    [RequirePermission(Perm.Qo.Cancel, Seed.ManagerOrAdmin, "Cancel a quality order")]
     public async Task<IActionResult> Cancel(long id, string? reason)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
@@ -476,7 +484,7 @@ public class QualityOrdersController : Controller
     /// for quality orders created by mistake.
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.AdminOnly)]
+    [RequirePermission(Perm.Qo.Delete, Seed.AdminOnly, "Permanently delete a quality order")]
     public async Task<IActionResult> Delete(long id, string? confirm)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
@@ -507,7 +515,7 @@ public class QualityOrdersController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.OverrideSize, Seed.OperatorOrAbove, "Override the sample size")]
     public async Task<IActionResult> SaveOverride(long qoMaterialId, long quality_order_id,
         string newSize, string? reason)
     {
@@ -526,7 +534,7 @@ public class QualityOrdersController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.OverrideSize, Seed.OperatorOrAbove, "Override the sample size")]
     public async Task<IActionResult> ClearOverride(long qoMaterialId, long qualityOrderId)
     {
         // V31: editable-gate restored (was missing).
@@ -540,7 +548,7 @@ public class QualityOrdersController : Controller
     // ---- Samples ----
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.EditSample, Seed.OperatorOrAbove, "Add or edit a sample")]
     public async Task<IActionResult> CreateSample(long qualityOrderId, long qoMaterialId)
     {
         if (await EnsureCanReadQoAsync(qualityOrderId) is { } block) return block;
@@ -560,6 +568,7 @@ public class QualityOrdersController : Controller
         return RedirectToAction(nameof(Details), new { id = qualityOrderId, openSample = sampleId });
     }
 
+    [RequireScreen(Screens.QoDetails)]
     public async Task<IActionResult> Sample(long id)
     {
         var sample = await _qos.GetSampleAsync(id);
@@ -875,7 +884,7 @@ public class QualityOrdersController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.EditSample, Seed.OperatorOrAbove, "Add or edit a sample")]
     public async Task<IActionResult> SaveSample(Sample sample, IFormCollection form)
     {
         if (sample.QualityOrderId > 0 && await EnsureCanReadQoAsync(sample.QualityOrderId) is { } block)
@@ -899,7 +908,7 @@ public class QualityOrdersController : Controller
     /// can update the table in place without reloading the page.
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.EditSample, Seed.OperatorOrAbove, "Add or edit a sample")]
     public async Task<IActionResult> SaveSampleAjax(Sample sample, IFormCollection form)
     {
         if (sample.QualityOrderId > 0 && await EnsureCanReadQoAsync(sample.QualityOrderId) is { } block)
@@ -914,6 +923,9 @@ public class QualityOrdersController : Controller
         var rowVm = new SampleRowVm
         {
             Sample = fresh,
+            // Safe to hardcode: this row is re-rendered immediately after a
+            // successful save, so the caller has just proved it holds the
+            // permission and the QO is still open.
             Editable = true,
             HeaderValues = await _qos.GetSampleHeaderValuesAsync(saved.SampleId),
             Readings     = await _qos.GetReadingsAsync(saved.SampleId)
@@ -932,7 +944,7 @@ public class QualityOrdersController : Controller
     }
 
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.DeleteSample, Seed.OperatorOrAbove, "Delete a sample")]
     public async Task<IActionResult> DeleteSample(long sampleId)
     {
         _log.LogInformation("DeleteSample requested for SampleId={SampleId}", sampleId);
@@ -967,7 +979,7 @@ public class QualityOrdersController : Controller
 
     /// <summary>AJAX twin of DeleteSample. Returns JSON; client removes the row from the table and decrements the badge.</summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.DeleteSample, Seed.OperatorOrAbove, "Delete a sample")]
     public async Task<IActionResult> DeleteSampleAjax(long sampleId)
     {
         try
@@ -998,7 +1010,7 @@ public class QualityOrdersController : Controller
 
     /// <summary>AJAX twin of SaveOverride. Returns the new size + override state for in-place DOM update.</summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.OverrideSize, Seed.OperatorOrAbove, "Override the sample size")]
     public async Task<IActionResult> SaveOverrideAjax(long qoMaterialId, string newSize, string? reason)
     {
         // V31 (2026-06-20): editable-gate restored. Resolve the parent QO from
@@ -1022,7 +1034,7 @@ public class QualityOrdersController : Controller
 
     /// <summary>AJAX twin of ClearOverride. Returns the restored size.</summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [Authorize(Policy = AuthPolicies.OperatorOrAbove)]
+    [RequirePermission(Perm.Qo.OverrideSize, Seed.OperatorOrAbove, "Override the sample size")]
     public async Task<IActionResult> ClearOverrideAjax(long qoMaterialId, long qualityOrderId)
     {
         // V31 (2026-06-20): editable-gate restored.

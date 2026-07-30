@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.Services
 @inject ISettingsService _siteSettings
 @{
@@ -15,10 +15,13 @@
     // glance which plant's data they're seeing.
     var plantScope = User?.FindFirst("PlantCode")?.Value;
     if (string.IsNullOrWhiteSpace(plantScope)) plantScope = null;
-    // Role gates for menu visibility. Parameters need Manager or SiteAdmin;
-    // Admin pages stay SiteAdmin-only.
-    var canSeeParameters = role == UserRoles.Manager || role == UserRoles.SiteAdmin;
-    var canSeeAdmin      = role == UserRoles.SiteAdmin;
+    // Menu visibility follows the permissions the user actually holds, so a
+    // composed role gets exactly the dropdowns it can use. A dropdown appears
+    // when at least one screen inside it is reachable; each item is then gated
+    // individually, which the old all-or-nothing role test could not do.
+    var canSeeParameters = Perms.CanViewAny(Screens.ParametersGroup);
+    var canSeeAdmin      = Perms.CanViewAny(Screens.AdminGroup);
+    var canSeeReports    = Perms.CanViewAny(Screens.ReportsGroup);
     // Audit Log nav moved under the Admin dropdown 2026-05-21 -- gated by
     // canSeeAdmin (SiteAdmin only). Per-record audit panels on QO/Arrival/
     // Claim detail pages are STILL visible to Manager + SiteAdmin via their
@@ -29,9 +32,11 @@
     // while the swapped role lands in Role. realRole drives the dropdown
     // (only real admins see it); impersonating == claims differ.
     var originalRole  = User?.FindFirst(ViewAsClaimsTransformer.OriginalRoleClaim)?.Value;
-    var realRole      = originalRole ?? role;
-    var impersonating = originalRole != null && originalRole != role;
-    var canViewAs     = realRole == UserRoles.SiteAdmin;
+    var realRole      = Perms.ActualRole ?? originalRole ?? role;
+    var impersonating = Perms.IsImpersonating;
+    // Asked of the REAL role, so the menu stays reachable while previewing --
+    // otherwise previewing a restricted role would hide the way back out.
+    var canViewAs     = Perms.AsActualUser.Can(Perm.Admin.ViewAs);
     var returnUrl     = Context.Request.Path + Context.Request.QueryString;
 
     // Navbar active-link highlighting. The Parameters and Admin menus both live
@@ -43,7 +48,7 @@
     bool ActOn(string act) => string.Equals(curAct, act, StringComparison.OrdinalIgnoreCase);
     var paramActions = new[] { "DefectCatalog", "DefectCategories", "ReadingTypes", "SampleHeaders", "ArrivalFields", "ReportUnits", "CodeDescriptions", "MailTemplate" };
     var paramsOn     = NavOn("Admin") && paramActions.Contains(curAct, StringComparer.OrdinalIgnoreCase);
-    var adminOn      = (NavOn("Admin") && (ActOn("Settings") || ActOn("Users"))) || NavOn("Audit");
+    var adminOn      = (NavOn("Admin") && (ActOn("Settings") || ActOn("Users"))) || NavOn("Audit") || NavOn("Security");
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -93,30 +98,42 @@
                             var onPending  = NavOn("Arrivals") && ActOn("Pending");
                             var onArrivals = NavOn("Arrivals") && !ActOn("Pending");
                         }
-                        <li class="nav-item">
-                            <a class="nav-link @(onPending ? "active" : "")" aria-current="@(onPending ? "page" : null)" asp-controller="Arrivals" asp-action="Pending">
-                                <i class="bi bi-inbox me-1"></i>Pending Containers
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link @(onArrivals ? "active" : "")" aria-current="@(onArrivals ? "page" : null)" asp-controller="Arrivals" asp-action="Index">
-                                <i class="bi bi-box-arrow-in-down me-1"></i>Arrivals
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link @(NavOn("QualityOrders") ? "active" : "")" aria-current="@(NavOn("QualityOrders") ? "page" : null)" asp-controller="QualityOrders" asp-action="Index">
-                                <i class="bi bi-clipboard-data me-1"></i>Quality Orders
-                            </a>
-                        </li>
-                        <li class="nav-item">
-                            <a class="nav-link @(NavOn("ClaimManagement") ? "active" : "")" aria-current="@(NavOn("ClaimManagement") ? "page" : null)" asp-controller="ClaimManagement" asp-action="Index">
-                                <i class="bi bi-shield-exclamation me-1"></i>Claims
-                            </a>
-                        </li>
+                        @if (Perms.CanView(Screens.ArrivalsPending))
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link @(onPending ? "active" : "")" aria-current="@(onPending ? "page" : null)" asp-controller="Arrivals" asp-action="Pending">
+                                    <i class="bi bi-inbox me-1"></i>Pending Containers
+                                </a>
+                            </li>
+                        }
+                        @if (Perms.CanView(Screens.ArrivalsIndex))
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link @(onArrivals ? "active" : "")" aria-current="@(onArrivals ? "page" : null)" asp-controller="Arrivals" asp-action="Index">
+                                    <i class="bi bi-box-arrow-in-down me-1"></i>Arrivals
+                                </a>
+                            </li>
+                        }
+                        @if (Perms.CanView(Screens.QoIndex))
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link @(NavOn("QualityOrders") ? "active" : "")" aria-current="@(NavOn("QualityOrders") ? "page" : null)" asp-controller="QualityOrders" asp-action="Index">
+                                    <i class="bi bi-clipboard-data me-1"></i>Quality Orders
+                                </a>
+                            </li>
+                        }
+                        @if (Perms.CanView(Screens.Claims))
+                        {
+                            <li class="nav-item">
+                                <a class="nav-link @(NavOn("ClaimManagement") ? "active" : "")" aria-current="@(NavOn("ClaimManagement") ? "page" : null)" asp-controller="ClaimManagement" asp-action="Index">
+                                    <i class="bi bi-shield-exclamation me-1"></i>Claims
+                                </a>
+                            </li>
+                        }
                         @* V31 (2026-06-20): flat per-defect data hub for analytics.
                            Gated client-side by role (Supervisor and above) -- the
                            controller's [Authorize] guard is authoritative. *@
-                        @if (role == UserRoles.Supervisor || role == UserRoles.Manager || role == UserRoles.SiteAdmin)
+                        @if (canSeeReports)
                         {
                             @* Data hub + Report builder combined under one "Reports" menu. *@
                             <li class="nav-item dropdown">
@@ -124,8 +141,10 @@
                                     <i class="bi bi-bar-chart me-1"></i>Reports
                                 </a>
                                 <ul class="dropdown-menu">
-                                    <li><a class="dropdown-item @(ActOn("FlatDefects") ? "active" : "")" asp-controller="Reports" asp-action="FlatDefects"><i class="bi bi-grid-3x3-gap me-1"></i>Data hub</a></li>
-                                    <li><a class="dropdown-item @(ActOn("ReportBuilder") ? "active" : "")" asp-controller="Reports" asp-action="ReportBuilder"><i class="bi bi-table me-1"></i>Report builder</a></li>
+                                    @if (Perms.CanView(Screens.ReportsDataHub))
+                                    { <li><a class="dropdown-item @(ActOn("FlatDefects") ? "active" : "")" asp-controller="Reports" asp-action="FlatDefects"><i class="bi bi-grid-3x3-gap me-1"></i>Data hub</a></li> }
+                                    @if (Perms.CanView(Screens.ReportsBuilder))
+                                    { <li><a class="dropdown-item @(ActOn("ReportBuilder") ? "active" : "")" asp-controller="Reports" asp-action="ReportBuilder"><i class="bi bi-table me-1"></i>Report builder</a></li> }
                                 </ul>
                             </li>
                         }
@@ -159,7 +178,10 @@
                                 <ul class="dropdown-menu">
                                     <li><a class="dropdown-item @(ActOn("Settings") ? "active" : "")" asp-controller="Admin" asp-action="Settings"><i class="bi bi-sliders me-1"></i>Site Configuration</a></li>
                                     <li><a class="dropdown-item @(ActOn("Users") ? "active" : "")" asp-controller="Admin" asp-action="Users"><i class="bi bi-people me-1"></i>Users</a></li>
-                                    <li><a class="dropdown-item @(NavOn("Audit") ? "active" : "")" asp-controller="Audit" asp-action="Index"><i class="bi bi-shield-shaded me-1"></i>Audit Log</a></li>
+                                    @if (Perms.CanView(Screens.AdminAuditLog))
+                                    { <li><a class="dropdown-item @(NavOn("Audit") ? "active" : "")" asp-controller="Audit" asp-action="Index"><i class="bi bi-shield-shaded me-1"></i>Audit Log</a></li> }
+                                    @if (Perms.CanView(Screens.AdminSecurity))
+                                    { <li><a class="dropdown-item @(NavOn("Security") ? "active" : "")" asp-controller="Security" asp-action="Index"><i class="bi bi-shield-lock me-1"></i>Security</a></li> }
                                 </ul>
                             </li>
                         }
@@ -173,20 +195,22 @@
                                 <a class="nav-link dropdown-toggle @(impersonating ? "text-warning fw-semibold" : "")"
                                    href="#" data-bs-toggle="dropdown"
                                    title="View site as another role (testing)">
-                                    <i class="bi bi-incognito me-1"></i>View as: @role
+                                    <i class="bi bi-incognito me-1"></i>View as: @(Perms.EffectiveRole ?? role)
                                 </a>
                                 <ul class="dropdown-menu dropdown-menu-end">
                                     <li><h6 class="dropdown-header">View site as</h6></li>
-                                    @* V31 (2026-06-20): Supervisor added to the impersonation list. *@
-                                    @foreach (var r in new[] { UserRoles.Viewer, UserRoles.Operator, UserRoles.Supervisor, UserRoles.Manager, UserRoles.ClaimManager })
+                                    @* Driven by the role table, so a role composed on the Security
+                                       screen can be previewed the moment it is created -- which is
+                                       the only practical way to check one before assigning it. *@
+                                    @foreach (var r in Perms.PreviewableRoles.Where(x => x.RoleCode != realRole))
                                     {
                                         <li>
                                             <form asp-controller="Account" asp-action="ViewAs" method="post" class="d-inline">
                                                 @Html.AntiForgeryToken()
-                                                <input type="hidden" name="role" value="@r" />
+                                                <input type="hidden" name="role" value="@r.RoleCode" />
                                                 <input type="hidden" name="returnUrl" value="@returnUrl" />
-                                                <button type="submit" class="dropdown-item @(role == r ? "active" : "")">
-                                                    <i class="bi bi-person me-2"></i>@r
+                                                <button type="submit" class="dropdown-item @(Perms.EffectiveRole == r.RoleCode ? "active" : "")">
+                                                    <i class="bi bi-person me-2"></i>@r.DisplayName
                                                 </button>
                                             </form>
                                         </li>
@@ -198,7 +222,7 @@
                                             <input type="hidden" name="role" value="" />
                                             <input type="hidden" name="returnUrl" value="@returnUrl" />
                                             <button type="submit" class="dropdown-item @(!impersonating ? "active" : "")">
-                                                <i class="bi bi-person-check me-2"></i>Become self (SiteAdmin)
+                                                <i class="bi bi-person-check me-2"></i>Stop previewing
                                             </button>
                                         </form>
                                     </li>

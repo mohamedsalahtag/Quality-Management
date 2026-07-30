@@ -8,7 +8,7 @@
     var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     // Page is now SiteAdmin-only (2026-05-21 change). Anyone who reaches
     // this view is SiteAdmin per the controller's AdminOnly policy.
-    var canExport = role == UserRoles.SiteAdmin;
+    var canExport = Perms.Can(Perm.Admin.AuditExport);
 
     string DateStr(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
 
