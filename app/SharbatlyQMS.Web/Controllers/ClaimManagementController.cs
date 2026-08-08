@@ -64,14 +64,13 @@ public class ClaimManagementController : Controller
     [RequireScreen(Screens.Claims)]
     public async Task<IActionResult> Details(long id)
     {
-        // Plant-scoped Operators must not see claims for QOs in other plants.
-        // Manager / ClaimManager / SiteAdmin / Viewer are unscoped and pass.
-        var scoped = User.GetScopedPlant();
-        if (scoped != null)
+        // Plant-scoped users must not see claims for QOs in other plants.
+        // Administrators (and anyone marked all-plants) are unrestricted and pass.
+        var scope = User.GetPlantScope();
+        if (!scope.Unrestricted)
         {
             var qoPlant = await _qos.GetPlantForQoAsync(id);
-            if (!string.Equals(qoPlant, scoped, StringComparison.OrdinalIgnoreCase))
-                return Forbid();
+            if (!scope.Allows(qoPlant)) return Forbid();
         }
         var qo = await _qos.GetAsync(id);
         if (qo == null) return NotFound();
@@ -90,6 +89,13 @@ public class ClaimManagementController : Controller
 
         var photoCounts = await _images.CountByOwnersAsync(
             "QualityOrderMaterial", materials.Select(m => m.QoMaterialId));
+
+        // Grouped summary — the SAME rollup the QC report prints on page 1
+        // (BuildGroupSummariesAsync), so the claim page's "Summary" header matches
+        // the report exactly. Materials are already MARA-enriched above, so the
+        // grouping key (group/brand/variety/grade) reflects the live cache.
+        var reportUnits    = await _qos.GetReportUnitsAsync();
+        var groupSummaries = await _qos.BuildGroupSummariesAsync(id, materials, reportUnits);
 
         var (claim, notes) = await _claims.GetForQoAsync(id);
 
@@ -115,6 +121,7 @@ public class ClaimManagementController : Controller
         ViewBag.Editable        = false;             // hard-locked in claim context
         ViewBag.SendMailEnabled = mailTemplate.Enabled;
         ViewBag.IsClaimContext  = true;
+        ViewBag.GroupSummaries  = groupSummaries;
         ViewBag.Claim           = claim;
         ViewBag.ClaimNotes      = notes;
         return View("/Views/QualityOrders/Details.cshtml", qo);

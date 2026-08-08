@@ -31,7 +31,7 @@ public interface IContainerCacheService
     Task<IReadOnlyList<PendingPickupRow>> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
         string? plant = null, string? poType = null, string? storageLoc = null,
-        string? supplier = null,
+        string? supplier = null, Models.PlantScope? scope = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -41,7 +41,8 @@ public interface IContainerCacheService
     /// that has zero pending rows would just produce an empty result page
     /// when the operator picks it.
     /// </summary>
-    Task<PendingFilterOptions> GetPendingFilterOptionsAsync(CancellationToken ct = default);
+    Task<PendingFilterOptions> GetPendingFilterOptionsAsync(
+        Models.PlantScope? scope = null, CancellationToken ct = default);
 
     /// <summary>
     /// Returns every cached SapShipmentRow for the given (Container, BOL, PO)
@@ -57,6 +58,33 @@ public interface IContainerCacheService
     /// ArrivalsController.Create on success.
     /// </summary>
     Task MarkArrivedAsync(string containerNo, string bolNo, string ebeln, long arrivalId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reassigns every pending cache row in the (Container, BOL, PO) triplet
+    /// to <paramref name="targetPlant"/> so the container moves into that
+    /// plant's Pending list and the Arrival/QO it becomes are created there.
+    /// The SAP <c>plant</c> column is untouched (it is part of the UPSERT key);
+    /// the override lives in its own column and survives every re-sync. Passing
+    /// the container's original SAP plant clears the override. Returns the
+    /// number of cache rows updated (0 when the triplet is gone / already has
+    /// an arrival). Manager/Admin-gated at the controller.
+    /// </summary>
+    Task<int> SetPlantOverrideAsync(string containerNo, string bolNo, string ebeln,
+        string targetPlant, string user, CancellationToken ct = default);
+
+    /// <summary>
+    /// The effective plant of a pending triplet — <c>COALESCE(override_plant,
+    /// plant)</c>. Null when no pending row exists for the triplet. Used by the
+    /// plant-scope gate before letting a manager reassign or an operator create.
+    /// </summary>
+    Task<string?> GetEffectivePlantAsync(string containerNo, string bolNo, string ebeln, CancellationToken ct = default);
+
+    /// <summary>
+    /// The manager-set plant override for a pending triplet, or null when none
+    /// is set. Passed into <see cref="IArrivalService.CreateFromSapAsync"/> so
+    /// the new arrival's header plant reflects the override.
+    /// </summary>
+    Task<string?> GetPlantOverrideAsync(string containerNo, string bolNo, string ebeln, CancellationToken ct = default);
 
     /// <summary>
     /// One-shot UPDATE that catches cache rows whose arrival already exists
@@ -125,7 +153,16 @@ public class PendingPickupRow
     public string? VendorNo        { get; set; }
     public string? VendorName      { get; set; }
     public string? PoType          { get; set; }
+    /// <summary>Effective plant — the manager override when set, otherwise SAP's
+    /// plant. This is what drives visibility, the plant badge, and the Arrival
+    /// that gets created.</summary>
     public string? Plant           { get; set; }
+    /// <summary>The container's original SAP plant. Only differs from
+    /// <see cref="Plant"/> when a manager has reassigned it; the view shows it
+    /// as a "was …" sub-badge so the move is visible.</summary>
+    public string? OriginalPlant   { get; set; }
+    /// <summary>True when a manager has overridden this container's plant.</summary>
+    public bool    IsPlantOverridden { get; set; }
     public string? StorageLocation { get; set; }
     public int     LineCount       { get; set; }
     // SQL DATE columns come back from Dapper as System.DateTime (it has no

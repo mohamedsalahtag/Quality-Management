@@ -1,5 +1,6 @@
 ﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.ViewModels
+@using SharbatlyQMS.Web.Services.Pdf
 @model QualityOrder
 @{
     ViewData["Title"] = "QO " + Model.QualityOrderNo;
@@ -25,6 +26,9 @@
     // blocks throughout this view.
     var isClaimContext = (bool?)ViewBag.IsClaimContext ?? false;
     if (isClaimContext) { editable = false; canEdit = false; canSupervise = false; canManage = false; }
+    // Grouped summary (claim context only) — the exact rollup the QC report prints.
+    var groupSummaries = ViewBag.GroupSummaries as IReadOnlyList<MaterialGroupSummary>
+                         ?? new List<MaterialGroupSummary>();
     // Combined "user may interact with mutating buttons on this page".
     // editable carries the QO-status guard; role carries the per-user guard.
     var canAct       = editable && canEdit;
@@ -70,6 +74,14 @@
     /* Documents button — pale yellow so it stands out from the other header actions. */
     .qo-docs-btn { background-color: #fdf6c9; border-color: #ecdf9a; color: #5c4d00; }
     .qo-docs-btn:hover, .qo-docs-btn:focus { background-color: #f7ec9e; border-color: #e0cf7a; color: #5c4d00; }
+    /* Claim-page Summary header — mirrors the QC report's page-1 grouped summary. */
+    .qc-summary .qcs-f { display:flex; justify-content:space-between; gap:1rem; padding:.15rem 0; border-bottom:1px solid #f2f2f2; }
+    .qc-summary .qcs-f > span:first-child { color:#6c757d; }
+    .qc-summary .qcs-f > span:last-child  { font-weight:600; text-align:right; }
+    .qc-summary .qcs-defects { font-size:.8rem; }
+    .qc-summary .qcs-defects th { font-weight:600; border-bottom:1px solid #dee2e6; padding:.15rem .3rem; }
+    .qc-summary .qcs-defects td { padding:.15rem .3rem; }
+    .qc-summary .qcs-defects .qcs-total td { border-top:1px solid #dee2e6; }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -131,6 +143,12 @@
                 <i class="bi bi-arrow-clockwise me-1"></i>Reopen
             </button>
         }
+        @if (!isClaimContext)
+        {
+            <button type="button" class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#summaryModal">
+                <i class="bi bi-clipboard-check me-1"></i>Generate Summary
+            </button>
+        }
         <a asp-controller="Reports" asp-action="QualityOrderPdf" asp-route-id="@Model.QualityOrderId"
            class="btn btn-outline-danger" target="_blank">
             <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF report
@@ -153,6 +171,46 @@
            (standalone QO and claim context) share the same wiring. *@
     </div>
 </div>
+
+@* ---- Summary (claim context) — the exact page-1 grouped summary the QC report
+       prints, from the shared _QcSummary partial. On the QO page the same partial
+       is loaded on demand by the "Generate Summary" popup. ---- *@
+@if (isClaimContext && groupSummaries.Count > 0)
+{
+    <div class="card mb-3 qc-summary">
+        <div class="card-header py-2 fw-semibold text-uppercase">
+            <i class="bi bi-clipboard-check me-1"></i>Summary
+        </div>
+        <div class="card-body">
+            @await Html.PartialAsync("_QcSummary", groupSummaries)
+        </div>
+    </div>
+}
+
+@* ---- Generate Summary popup (QO page). Loads the same summary fresh each time
+       it opens, so it always reflects the latest samples — usable before the
+       order is finished. ---- *@
+@if (!isClaimContext)
+{
+    <div class="modal fade" id="summaryModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-clipboard-check me-1"></i>Summary — @Model.QualityOrderNo</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body qc-summary" id="summaryModalBody">
+                    <div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-1"></span>Loading…</div>
+                </div>
+                <div class="modal-footer">
+                    <span class="text-muted small me-auto">Reflects the latest saved data.</span>
+                    <button type="button" class="btn btn-outline-secondary" id="summaryRefreshBtn"><i class="bi bi-arrow-repeat me-1"></i>Refresh</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
 
 @if (arrival != null && shipment != null)
 {
@@ -669,6 +727,30 @@
 
 @section Scripts {
 <script>
+    // ---- Generate Summary popup: fetch the grouped summary fresh every time the
+    //      modal opens (and on Refresh), so it always reflects the latest saved
+    //      data — even before the order is finished.
+    (function () {
+        var modal = document.getElementById('summaryModal');
+        if (!modal) return;
+        var body  = document.getElementById('summaryModalBody');
+        var url   = '@Url.Action("SummaryPanel", "QualityOrders", new { id = Model.QualityOrderId })';
+        var loading = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-1"></span>Loading…</div>';
+        async function load() {
+            body.innerHTML = loading;
+            try {
+                var res = await fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                if (!res.ok) { body.innerHTML = '<div class="alert alert-danger mb-0">Could not load the summary (' + res.status + ').</div>'; return; }
+                body.innerHTML = await res.text();
+            } catch (e) {
+                body.innerHTML = '<div class="alert alert-danger mb-0">Request failed: ' + (e && e.message ? e.message : e) + '</div>';
+            }
+        }
+        modal.addEventListener('show.bs.modal', load);
+        var rb = document.getElementById('summaryRefreshBtn');
+        if (rb) rb.addEventListener('click', load);
+    })();
+
     // ---- Delete confirmation: arm the button only on an exact QO-number
     //      match, and clear the field each time the modal opens so a second
     //      visit never starts pre-armed. The server checks this again anyway.

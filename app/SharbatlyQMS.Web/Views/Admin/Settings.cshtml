@@ -57,11 +57,15 @@
             <i class="bi bi-person-lines-fill me-1"></i>Active Directory
         </button>
     </li>
+    @* Danger Zone (Purge all operational data) hidden by request. To restore,
+       uncomment this tab button and the matching #tab-danger pane below. *@
+    @*
     <li class="nav-item ms-auto">
         <button class="@TabClass("danger") text-danger" data-bs-toggle="tab" data-bs-target="#tab-danger" type="button">
             <i class="bi bi-exclamation-octagon-fill me-1"></i>Danger Zone
         </button>
     </li>
+    *@
 </ul>
 
 <div class="tab-content">
@@ -1134,7 +1138,10 @@
     </div>
 </div>
 
-@* ===================== Danger Zone ===================== *@
+@*  ===== Danger Zone: Purge all operational data — HIDDEN by request =====
+    Intentionally hidden from Site Configuration. To restore: delete this
+    opening marker and the closing marker after the pane, and uncomment the
+    "Danger Zone" tab button above.
 <div class="@TabPaneClass("danger")" id="tab-danger">
     <div class="card border-danger">
         <div class="card-header bg-danger text-white d-flex align-items-center">
@@ -1185,6 +1192,7 @@
         </div>
     </div>
 </div>
+*@
 
 
 </div>

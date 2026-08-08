@@ -32,6 +32,8 @@ public class ReportsController : Controller
     private readonly IConfiguration _config;
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<ReportsController> _log;
+    private readonly IDbService _db;
+    private readonly ICodeDescriptionDirectory _codes;
 
     // Hard cap on rows in a single flat-defects Excel export to bound memory.
     private const int MaxExportRows = 250_000;
@@ -41,7 +43,8 @@ public class ReportsController : Controller
         IVendorService vendors, IEmailService email,
         IPivotService pivot, IPerspectiveService perspectives,
         IReportBuilderExporter reportBuilder,
-        IConfiguration config, IWebHostEnvironment env, ILogger<ReportsController> log)
+        IConfiguration config, IWebHostEnvironment env, ILogger<ReportsController> log,
+        IDbService db, ICodeDescriptionDirectory codes)
     {
         _qos = qos; _arrivals = arrivals; _images = images;
         _settings = settings; _mara = mara;
@@ -49,6 +52,7 @@ public class ReportsController : Controller
         _pivot = pivot; _perspectives = perspectives;
         _reportBuilder = reportBuilder;
         _config = config; _env = env; _log = log;
+        _db = db; _codes = codes;
     }
 
     /// <summary>
@@ -260,6 +264,17 @@ public class ReportsController : Controller
         if (!string.IsNullOrWhiteSpace(branding.FooterLine))  data.CompanyFooter = branding.FooterLine;
 
         data.TimeBarBasis = (await _settings.GetReportConfigAsync()).TimeBarBasis;
+
+        // Who created this quality order, with their branch — shown in the report
+        // header. Branch is the creator's own plant when set, otherwise the
+        // order's plant.
+        if (!string.IsNullOrWhiteSpace(qo.CreatedBy))
+        {
+            var creator = await _db.GetUserByUsernameAsync(qo.CreatedBy);
+            data.CreatedByName = string.IsNullOrWhiteSpace(creator?.FullName) ? qo.CreatedBy : creator!.FullName;
+            var branchCode = !string.IsNullOrWhiteSpace(creator?.PlantCode) ? creator!.PlantCode : qo.Plant;
+            data.CreatedByBranch = string.IsNullOrWhiteSpace(branchCode) ? null : _codes.PlantDisplay(branchCode);
+        }
 
         var arrival = await _arrivals.GetAsync(qo.ArrivalId);
         if (arrival != null) data.Arrival = arrival;

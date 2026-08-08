@@ -7,6 +7,8 @@
     var groups = Model.Cards.GroupBy(c => c.GroupName)
                             .OrderBy(g => Array.IndexOf(new[] { "General", "Records", "Reports", "Parameters", "Admin" }, g.Key))
                             .ToList();
+    var usersTab = string.Equals(Model.ActiveTab, "users", StringComparison.OrdinalIgnoreCase);
+    var canManageUsers = Perms.Can(Perm.Admin.UsersEdit);
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -43,14 +45,15 @@
     </div>
 }
 
+@{ var openCompare = (bool?)ViewBag.OpenCompare ?? false; }
 <ul class="nav nav-tabs mb-3">
-    <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#tab-editor">Role editor</a></li>
-    <li class="nav-item"><a class="nav-link" data-bs-toggle="tab" href="#tab-matrix">Compare all roles</a></li>
+    <li class="nav-item"><a class="nav-link @(openCompare ? "" : "active")" data-bs-toggle="tab" href="#tab-editor">Role editor</a></li>
+    <li class="nav-item"><a class="nav-link @(openCompare ? "active" : "")" data-bs-toggle="tab" href="#tab-matrix">Compare all roles</a></li>
 </ul>
 
 <div class="tab-content">
     @* ============================ ROLE EDITOR ============================ *@
-    <div class="tab-pane fade show active" id="tab-editor">
+    <div class="tab-pane fade @(openCompare ? "" : "show active")" id="tab-editor">
         <div class="row g-3">
             @* ---- Role list ---- *@
             <div class="col-lg-3">
@@ -102,16 +105,11 @@
                                     <input type="text" name="description" value="@sel.Description" maxlength="400"
                                            class="form-control form-control-sm" placeholder="What is this role for?" />
                                 </div>
+                                @* Plant access is a per-USER setting now (assigned on the Users
+                                   screen), not a per-role flag, so the old "One plant only"
+                                   switch is gone. is_plant_scoped is preserved server-side. *@
+                                <input type="hidden" name="isPlantScoped" value="@(sel.IsPlantScoped ? "true" : "false")" />
                                 <div class="col-md-2">
-                                    <div class="form-check form-switch">
-                                        <input class="form-check-input" type="checkbox" name="isPlantScoped" value="true"
-                                               id="sel-plant" @(sel.IsPlantScoped ? "checked" : "") />
-                                        <input type="hidden" name="isPlantScoped" value="false" />
-                                        <label class="form-check-label small" for="sel-plant"
-                                               title="Holders only see data for the single plant assigned to them on the Users screen.">
-                                            One plant only
-                                        </label>
-                                    </div>
                                     <div class="form-check form-switch">
                                         <input class="form-check-input" type="checkbox" name="isActive" value="true"
                                                id="sel-active" @(sel.IsActive ? "checked" : "") @(sel.IsBuiltIn ? "disabled" : "") />
@@ -147,7 +145,34 @@
                             </div>
                         </div>
                     }
+                    @if (Model.SelectedIsSuper)
+                    {
+                        <div class="alert alert-secondary d-flex align-items-center gap-2">
+                            <i class="bi bi-shield-lock-fill fs-5"></i>
+                            <div>
+                                <strong>The Administrator is a super role.</strong> It always holds every permission —
+                                including any added later — and can never be locked out, so its access is shown
+                                read-only here.
+                            </div>
+                        </div>
+                    }
 
+                    <ul class="nav nav-pills mb-3">
+                        <li class="nav-item">
+                            <a class="nav-link @(usersTab ? "" : "active")" data-bs-toggle="tab" href="#sub-permissions">
+                                <i class="bi bi-ui-checks me-1"></i>Permissions
+                            </a>
+                        </li>
+                        <li class="nav-item">
+                            <a class="nav-link @(usersTab ? "active" : "")" data-bs-toggle="tab" href="#sub-users">
+                                <i class="bi bi-people me-1"></i>Users
+                                <span class="badge rounded-pill bg-secondary ms-1">@Model.Members.Count</span>
+                            </a>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content">
+                    <div class="tab-pane fade @(usersTab ? "" : "show active")" id="sub-permissions">
                     <form asp-action="SaveGrants" method="post" id="grantsForm">
                         @Html.AntiForgeryToken()
                         <input type="hidden" name="roleCode" value="@sel.RoleCode" />
@@ -194,13 +219,20 @@
                                                             {
                                                                 var id = cardId + "-lvl-" + opt.Item1;
                                                                 <input type="radio" class="btn-check" name="lvl-@card.ScreenKey" id="@id"
-                                                                       value="@opt.Item1" @((int)card.ScreenLevel == opt.Item1 ? "checked" : "") />
+                                                                       value="@opt.Item1" @((int)card.ScreenLevel == opt.Item1 ? "checked" : "")
+                                                                       @(Model.SelectedIsSuper ? "disabled" : "") />
                                                                 <label class="btn btn-outline-primary" for="@id">@opt.Item2</label>
                                                             }
                                                         </div>
                                                         <div class="form-text">
-                                                            <strong>Read only</strong> also switches off every button below, on this screen and on the server.
+                                                            <strong>No access</strong> — the role cannot open or even see this screen.
+                                                            <strong>Read only</strong> — the role can open and view the screen; only the
+                                                            <span class="badge bg-info-subtle text-info-emphasis">view / export</span>
+                                                            buttons below can be granted, every button that changes data is switched off.
+                                                            <strong>Edit</strong> — every button below can be granted.
                                                         </div>
+                                                        @* Restated for the current choice, updated live by security-matrix.js. *@
+                                                        <div class="form-text fw-semibold text-body" data-level-hint></div>
                                                     }
                                                     else
                                                     {
@@ -208,7 +240,8 @@
                                                         <div class="form-check form-switch">
                                                             <input class="form-check-input" type="checkbox" id="@id"
                                                                    data-screen-toggle="@card.ScreenKey"
-                                                                   @(card.ScreenLevel != AccessLevel.None ? "checked" : "") />
+                                                                   @(card.ScreenLevel != AccessLevel.None ? "checked" : "")
+                                                                   @(Model.SelectedIsSuper ? "disabled" : "") />
                                                             <label class="form-check-label" for="@id">Can open this screen</label>
                                                         </div>
                                                     }
@@ -234,9 +267,16 @@
                                                                 <input class="form-check-input" type="checkbox" name="granted"
                                                                        value="@a.Code" id="@aid"
                                                                        @(a.Granted || a.IsLocked ? "checked" : "")
-                                                                       @(a.IsLocked ? "disabled" : "") />
+                                                                       @(a.IsLocked ? "disabled" : "")
+                                                                       @(a.IsLocked ? "data-locked=true" : "")
+                                                                       @(a.IsReadOnlyAction ? "data-readonly=true" : "") />
                                                                 <label class="form-check-label small" for="@aid">
                                                                     @a.DisplayName
+                                                                    @if (a.IsReadOnlyAction)
+                                                                    {
+                                                                        <span class="badge bg-info-subtle text-info-emphasis ms-1"
+                                                                              title="Only reads data. Stays available when this screen is set to read-only.">view / export</span>
+                                                                    }
                                                                     @if (a.IsLocked)
                                                                     {
                                                                         <i class="bi bi-lock-fill text-muted ms-1"
@@ -260,81 +300,193 @@
                         }
 
                         <div class="mt-3 d-flex gap-2 align-items-center">
-                            <button type="submit" class="btn btn-primary" @(Model.EditingOwnRole ? "disabled" : "")>
+                            <button type="submit" class="btn btn-primary" @((Model.EditingOwnRole || Model.SelectedIsSuper) ? "disabled" : "")>
                                 <i class="bi bi-save me-1"></i>Save permissions for @sel.DisplayName
                             </button>
                             <span class="text-muted small">Takes effect on the next page anyone loads — no sign-out needed.</span>
                         </div>
                     </form>
+                    </div>@* /sub-permissions *@
+
+                    @* ============================ USERS TAB ============================ *@
+                    @* Read-only: this tab shows who holds the selected role. Adding,
+                       moving and removing people is done on the Users screen. *@
+                    <div class="tab-pane fade @(usersTab ? "show active" : "")" id="sub-users">
+                        <div class="card">
+                            <div class="card-header py-2 d-flex align-items-center gap-2 flex-wrap">
+                                <i class="bi bi-people me-1"></i>
+                                <strong>Users with the “@sel.DisplayName” role</strong>
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis">@Model.Members.Count</span>
+                                @if (canManageUsers)
+                                {
+                                    <a asp-controller="Admin" asp-action="Users" asp-route-role="@sel.RoleCode"
+                                       class="btn btn-sm btn-outline-secondary ms-auto">
+                                        <i class="bi bi-box-arrow-up-right me-1"></i>Manage on the Users screen
+                                    </a>
+                                }
+                            </div>
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Full name</th>
+                                            <th>Username</th>
+                                            <th>Email</th>
+                                            <th>Department</th>
+                                            @if (sel.IsPlantScoped) { <th>Plant</th> }
+                                            <th>Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @if (Model.Members.Count == 0)
+                                        {
+                                            var cols = 5 + (sel.IsPlantScoped ? 1 : 0);
+                                            <tr><td colspan="@cols" class="text-center text-muted py-4">
+                                                Nobody holds this role yet.
+                                            </td></tr>
+                                        }
+                                        else
+                                        {
+                                            foreach (var m in Model.Members)
+                                            {
+                                                <tr>
+                                                    <td>@m.FullName</td>
+                                                    <td><code>@m.Username</code></td>
+                                                    <td>@m.Email</td>
+                                                    <td>@m.Department</td>
+                                                    @if (sel.IsPlantScoped)
+                                                    {
+                                                        <td>@(string.IsNullOrWhiteSpace(m.PlantCode) ? "—" : Codes.PlantDisplay(m.PlantCode))</td>
+                                                    }
+                                                    <td>
+                                                        @if (m.IsActive) { <span class="badge bg-success">Active</span> }
+                                                        else { <span class="badge bg-secondary">Disabled</span> }
+                                                    </td>
+                                                </tr>
+                                            }
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>@* /sub-users *@
+                    </div>@* /tab-content *@
                 }
             </div>
         </div>
     </div>
 
-    @* ============================ COMPARISON GRID ============================ *@
-    <div class="tab-pane fade" id="tab-matrix">
-        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
-            <input type="search" id="matrixSearch" class="form-control form-control-sm" style="max-width: 22rem"
-                   placeholder="Filter permissions…" autocomplete="off" />
-            @if (Model.AnyObsolete)
+    @* ==================== EDITABLE COMPARISON GRID ==================== *@
+    @* One editable column per role. Each column posts granted_<role> (ticked
+       actions) and screenLevel_<role> ("<screenKey>=<0|1|2>") exactly like the
+       single-role editor, and is saved through the same SaveGrantsAsync guards. *@
+    <div class="tab-pane fade @(openCompare ? "show active" : "")" id="tab-matrix">
+        <form asp-action="SaveMatrix" method="post" id="matrixForm">
+            @Html.AntiForgeryToken()
+            @foreach (var r in Model.Roles)
             {
-                <a class="btn btn-outline-secondary btn-sm" asp-action="Index"
-                   asp-route-role="@sel?.RoleCode" asp-route-showObsolete="@(!Model.ShowObsolete)">
-                    @(Model.ShowObsolete ? "Hide retired" : "Show retired")
-                </a>
+                <input type="hidden" name="role_present" value="@r.RoleCode" />
             }
-            <span class="ms-auto small text-muted">
-                @Model.MatrixRows.Count permissions × @Model.Roles.Count roles
-            </span>
-        </div>
-        <div class="card">
-            <div class="table-responsive">
-                @* Deliberately no data-tablekit: it caches column indexes when it
-                   enhances a table, and this grid gains a column whenever a role
-                   is created. A plain table plus the filter above is enough. *@
-                <table class="table table-sm table-hover align-middle mb-0" id="matrixTable">
-                    <thead class="table-light">
-                        <tr>
-                            <th>Screen</th>
-                            <th>Permission</th>
-                            @foreach (var r in Model.Roles)
-                            {
-                                <th class="text-center small" title="@r.Description">@r.DisplayName</th>
-                            }
-                        </tr>
-                    </thead>
-                    <tbody>
-                    @foreach (var row in Model.MatrixRows)
-                    {
-                        <tr data-label="@row.ScreenTitle @row.DisplayName @row.Code">
-                            <td class="small text-muted">@row.ScreenTitle</td>
-                            <td class="small">
-                                @(row.Kind == "Screen" ? "Open the screen" : row.DisplayName)
-                                @if (row.IsObsolete) { <span class="badge bg-warning text-dark ms-1">retired</span> }
-                            </td>
-                            @foreach (var lvl in row.Levels)
-                            {
-                                <td class="text-center">
-                                    @switch (lvl)
-                                    {
-                                        case AccessLevel.Edit:
-                                            <i class="bi bi-check-circle-fill text-success" title="Full access"></i>
-                                            break;
-                                        case AccessLevel.Read:
-                                            <i class="bi bi-eye-fill text-info" title="Read only"></i>
-                                            break;
-                                        default:
-                                            <span class="text-muted">·</span>
-                                            break;
-                                    }
-                                </td>
-                            }
-                        </tr>
-                    }
-                    </tbody>
-                </table>
+            <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                <input type="search" id="matrixSearch" class="form-control form-control-sm" style="max-width: 22rem"
+                       placeholder="Filter permissions…" autocomplete="off" />
+                @if (Model.AnyObsolete)
+                {
+                    <a class="btn btn-outline-secondary btn-sm" asp-action="Index"
+                       asp-route-role="@sel?.RoleCode" asp-route-showObsolete="@(!Model.ShowObsolete)" asp-route-tab="compare">
+                        @(Model.ShowObsolete ? "Hide retired" : "Show retired")
+                    </a>
+                }
+                <span class="small text-muted">@Model.MatrixRows.Count permissions × @Model.Roles.Count roles</span>
+                <button type="submit" class="btn btn-primary btn-sm ms-auto">
+                    <i class="bi bi-save me-1"></i>Save all roles
+                </button>
             </div>
-        </div>
+            <div class="alert alert-info py-1 px-2 small mb-2">
+                Edit any role's access here, then <strong>Save all roles</strong>. An action can only be
+                granted once its screen is set to Read only or Edit. The Administrator's core cells and the
+                role you are signed in as cannot be changed.
+            </div>
+            <div class="card">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0" id="matrixTable">
+                        <thead class="table-light" style="position:sticky; top:0; z-index:2;">
+                            <tr>
+                                <th>Screen</th>
+                                <th>Permission</th>
+                                @foreach (var r in Model.Roles)
+                                {
+                                    <th class="text-center small" title="@r.Description">
+                                        @r.DisplayName
+                                        @if (r.IsSuper)
+                                        {
+                                            <i class="bi bi-shield-lock-fill text-muted ms-1" title="Super role — always full access, read-only"></i>
+                                        }
+                                    </th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                        @foreach (var row in Model.MatrixRows)
+                        {
+                            <tr data-label="@row.ScreenTitle @row.DisplayName @row.Code" class="@(row.Kind == "Screen" ? "table-light" : "")">
+                                <td class="small text-muted">@row.ScreenTitle</td>
+                                <td class="small">
+                                    @(row.Kind == "Screen" ? "Open the screen" : row.DisplayName)
+                                    @if (row.IsReadOnlyAction) { <span class="badge bg-info-subtle text-info-emphasis ms-1">view / export</span> }
+                                    @if (row.IsObsolete) { <span class="badge bg-warning text-dark ms-1">retired</span> }
+                                </td>
+                                @for (int i = 0; i < row.Cells.Count; i++)
+                                {
+                                    var cell = row.Cells[i];
+                                    var rc   = Model.Roles[i].RoleCode;
+                                    <td class="text-center">
+                                        @if (row.Kind == "Screen")
+                                        {
+                                            @if (cell.Locked)
+                                            {
+                                                <span class="badge bg-success-subtle text-success-emphasis" title="Always on for the Administrator">Edit</span>
+                                                <input type="hidden" name="screenLevel_@rc" value="@(row.ScreenKey)=2" />
+                                            }
+                                            else
+                                            {
+                                                <select class="form-select form-select-sm d-inline-block matrix-screen"
+                                                        style="width:auto; min-width:5.5rem"
+                                                        name="screenLevel_@rc" data-role="@rc" data-screen="@row.ScreenKey">
+                                                    <option value="@(row.ScreenKey)=0" selected="@(cell.Level == AccessLevel.None)">No access</option>
+                                                    @if (row.SupportsAccessLevel)
+                                                    {
+                                                        <option value="@(row.ScreenKey)=1" selected="@(cell.Level == AccessLevel.Read)">Read only</option>
+                                                    }
+                                                    <option value="@(row.ScreenKey)=2" selected="@(cell.Level == AccessLevel.Edit)">@(row.SupportsAccessLevel ? "Edit" : "Access")</option>
+                                                </select>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            @if (cell.Locked)
+                                            {
+                                                <i class="bi bi-lock-fill text-muted" title="Always on for the Administrator"></i>
+                                                <input type="hidden" name="granted_@rc" value="@row.Code" />
+                                            }
+                                            else
+                                            {
+                                                <input class="form-check-input matrix-action" type="checkbox"
+                                                       name="granted_@rc" value="@row.Code"
+                                                       data-role="@rc" data-screen="@row.ScreenKey"
+                                                       data-readonly="@(row.IsReadOnlyAction ? "true" : "false")"
+                                                       checked="@(cell.Level != AccessLevel.None)" />
+                                            }
+                                        }
+                                    </td>
+                                }
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </form>
     </div>
 </div>
 
@@ -370,14 +522,9 @@
                     </select>
                     <div class="form-text">Copying is usually quicker than ticking a hundred boxes.</div>
                 </div>
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" name="isPlantScoped" value="true" id="new-plant" />
-                    <input type="hidden" name="isPlantScoped" value="false" />
-                    <label class="form-check-label" for="new-plant">
-                        Restrict holders to one plant
-                        <span class="text-muted small d-block">The plant itself is picked per user on the Users screen.</span>
-                    </label>
-                </div>
+                @* Plant access is assigned per user on the Users screen, so a new
+                   role no longer carries a plant flag. *@
+                <input type="hidden" name="isPlantScoped" value="false" />
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>

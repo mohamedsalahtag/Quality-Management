@@ -8,7 +8,8 @@ namespace SharbatlyQMS.Web.Security;
 
 /// <summary>One permission as declared by an attribute on a controller action.</summary>
 public sealed record DiscoveredPermission(
-    string Code, string ScreenKey, string Kind, string DisplayName, int SortOrder, Seed SeedFor);
+    string Code, string ScreenKey, string Kind, string DisplayName, int SortOrder, Seed SeedFor,
+    bool IsReadOnly = false);
 
 /// <summary>
 /// Discovers the permission catalogue by reflecting over every controller
@@ -100,7 +101,7 @@ public sealed class PermissionCatalog
                         continue;
                     }
                     Register(byCode, owners, problems, where, new DiscoveredPermission(
-                        p.Code, owner, "Action", p.DisplayName, p.SortOrder, p.SeedFor));
+                        p.Code, owner, "Action", p.DisplayName, p.SortOrder, p.SeedFor, p.ReadOnly));
                     break;
                 }
             }
@@ -114,6 +115,18 @@ public sealed class PermissionCatalog
 
         return byCode.Values.OrderBy(p => p.ScreenKey).ThenBy(p => p.SortOrder).ThenBy(p => p.Code).ToList();
     }
+
+    /// <summary>
+    /// Action codes that only READ. The Security screen keeps these grantable
+    /// even when their screen is set to read-only, because that is exactly what
+    /// they are for: a "can look and print, cannot change" role. The flag lives
+    /// on the attribute, not the database, so it is read back from reflection
+    /// rather than the resolver snapshot.
+    /// </summary>
+    public IReadOnlySet<string> ReadOnlyActionCodes() =>
+        Discover().Where(p => p.IsReadOnly)
+                  .Select(p => p.Code)
+                  .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     private static void Register(
         Dictionary<string, DiscoveredPermission> byCode,

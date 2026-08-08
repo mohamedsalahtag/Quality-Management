@@ -59,19 +59,114 @@ public class ArrivalService : IArrivalService
             ORDER  BY quality_order_id DESC
         ) qo";
 
-    public async Task<IReadOnlyList<Arrival>> ListAsync(string? status, string? search, string? plant = null)
+    public async Task<IReadOnlyList<Arrival>> ListAsync(ViewModels.ArrivalListFilter f, Models.PlantScope scope)
     {
         using var c = Open();
+
+        static string? Trim(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        // a.created_at is UTC; the list renders it local. Convert the picked LOCAL
+        // dates to UTC here, upper bound exclusive-next-midnight (mirrors the QO
+        // list) so the To date isn't dropped after 00:00:00.000.
+        DateTime? fromUtc = f.From.HasValue
+            ? DateTime.SpecifyKind(f.From.Value.Date, DateTimeKind.Local).ToUniversalTime()
+            : null;
+        DateTime? toUtc = f.To.HasValue
+            ? DateTime.SpecifyKind(f.To.Value.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime()
+            : null;
+
+        var p = new
+        {
+            status     = Trim(f.Status),
+            search     = Trim(f.Search),
+            plant      = Trim(f.Plant),
+            sUnrestricted = scope.Unrestricted,
+            sPlants       = scope.QueryPlants,
+            container  = Trim(f.Container),
+            bol        = Trim(f.Bol),
+            po         = Trim(f.Po),
+            arrivalNo  = Trim(f.ArrivalNo),
+            storageLoc = Trim(f.StorageLoc),
+            createdBy  = Trim(f.CreatedBy),
+            material   = Trim(f.Material),
+            supplier   = Trim(f.Supplier),
+            fromUtc,
+            toUtc
+        };
+
         var rows = await c.QueryAsync<Arrival>(ArrivalSelect + @"
-            WHERE  (@status IS NULL OR a.status_code = @status)
-              AND  (@plant  IS NULL OR a.plant       = @plant)
+            WHERE  (@status     IS NULL OR a.status_code     = @status)
+              AND  (@plant      IS NULL OR a.plant           = @plant)
+              AND  (@sUnrestricted = 1 OR a.plant IN @sPlants)
+              AND  (@container  IS NULL OR a.container_no     LIKE '%' + @container + '%')
+              AND  (@bol        IS NULL OR a.bol_no           LIKE '%' + @bol       + '%')
+              AND  (@po         IS NULL OR a.ebeln            LIKE '%' + @po        + '%')
+              AND  (@arrivalNo  IS NULL OR a.arrival_no       LIKE '%' + @arrivalNo + '%')
+              AND  (@storageLoc IS NULL OR a.storage_location = @storageLoc)
+              AND  (@supplier   IS NULL OR a.vendor_name      = @supplier)
+              AND  (@createdBy  IS NULL OR a.created_by       = @createdBy)
+              AND  (@fromUtc    IS NULL OR a.created_at      >= @fromUtc)
+              AND  (@toUtc      IS NULL OR a.created_at       < @toUtc)
+              AND  (@material   IS NULL OR EXISTS (
+                        SELECT 1 FROM qms_arrival_item ai
+                        WHERE  ai.arrival_id = a.arrival_id
+                          AND (ai.material_no   LIKE '%' + @material + '%'
+                            OR ai.material_desc LIKE '%' + @material + '%')))
               AND  (@search IS NULL
                     OR a.arrival_no   LIKE '%' + @search + '%'
                     OR a.container_no LIKE '%' + @search + '%'
                     OR a.bol_no       LIKE '%' + @search + '%'
-                    OR a.vendor_name  LIKE '%' + @search + '%')
-            ORDER BY a.created_at DESC", new { status, search, plant });
+                    OR a.ebeln        LIKE '%' + @search + '%'
+                    OR a.vendor_name  LIKE '%' + @search + '%'
+                    OR a.created_by   LIKE '%' + @search + '%')
+            ORDER BY a.created_at DESC", p);
         return rows.ToList();
+    }
+
+    /// <summary>
+    /// Dropdown sources for the Arrivals filter panel: distinct plants, (plant,
+    /// storage-location) pairs, and creators — each drawn only from arrivals that
+    /// exist, so picking any option returns at least one row. Mirrors
+    /// QualityOrderService.GetQoFilterOptionsAsync.
+    /// </summary>
+    public async Task<ViewModels.ArrivalFilterOptions> GetArrivalFilterOptionsAsync(Models.PlantScope scope)
+    {
+        using var c = Open();
+        using var grid = await c.QueryMultipleAsync(@"
+            SELECT DISTINCT a.plant
+            FROM   qms_arrival a
+            WHERE  a.plant IS NOT NULL AND a.plant <> ''
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
+            ORDER  BY a.plant;
+
+            SELECT DISTINCT a.plant AS Plant, a.storage_location AS Code
+            FROM   qms_arrival a
+            WHERE  a.plant            IS NOT NULL AND a.plant            <> ''
+              AND  a.storage_location IS NOT NULL AND a.storage_location <> ''
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
+            ORDER  BY a.plant, a.storage_location;
+
+            SELECT DISTINCT a.vendor_name
+            FROM   qms_arrival a
+            WHERE  a.vendor_name IS NOT NULL AND a.vendor_name <> ''
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
+            ORDER  BY a.vendor_name;
+
+            SELECT DISTINCT a.created_by
+            FROM   qms_arrival a
+            WHERE  a.created_by IS NOT NULL AND a.created_by <> ''
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
+            ORDER  BY a.created_by;",
+            new { sUnrestricted = scope.Unrestricted, sPlants = scope.QueryPlants });
+
+        var plants    = (await grid.ReadAsync<string>()).ToList();
+        var storage   = (await grid.ReadAsync<ViewModels.QoPlantStorage>()).ToList();
+        var suppliers = (await grid.ReadAsync<string>()).ToList();
+        var createdBy = (await grid.ReadAsync<string>()).ToList();
+        return new ViewModels.ArrivalFilterOptions
+        {
+            Plants = plants, StorageLocations = storage, Suppliers = suppliers, CreatedBy = createdBy
+        };
     }
 
     /// <summary>Returns the arrival's plant code, or null when the arrival doesn't exist.
@@ -271,11 +366,15 @@ public class ArrivalService : IArrivalService
             WHERE  arrival_id = @arrivalId", new { arrivalId });
     }
 
-    public async Task<long> CreateFromSapAsync(IReadOnlyList<SapShipmentRow> rows, string createdBy)
+    public async Task<long> CreateFromSapAsync(IReadOnlyList<SapShipmentRow> rows, string createdBy, string? overridePlant = null)
     {
         if (rows.Count == 0) throw new InvalidOperationException("No SAP rows selected.");
 
         var first = rows[0];
+        // A manager-set plant override moves the arrival (and the QO that
+        // inherits a.plant) into the target plant. Empty/whitespace is treated
+        // as "no override" so a stray value can't blank the plant.
+        var headerPlant = string.IsNullOrWhiteSpace(overridePlant) ? first.Plant : overridePlant.Trim();
         if (rows.Any(r => !string.Equals(r.ContainerNo, first.ContainerNo, StringComparison.OrdinalIgnoreCase) ||
                           !string.Equals(r.BolNo,       first.BolNo,       StringComparison.OrdinalIgnoreCase) ||
                           !string.Equals(r.Ebeln,       first.Ebeln,       StringComparison.OrdinalIgnoreCase)))
@@ -311,7 +410,7 @@ public class ArrivalService : IArrivalService
                 bukrs      = first.Bukrs,
                 vendorNo   = first.VendorNo,
                 vendorName = first.VendorName,
-                plant      = first.Plant,
+                plant      = headerPlant,
                 // M13: denormalised onto the header so the Arrivals list can show
                 // them as names and the QO list can filter on storage location
                 // without an EXISTS over qms_arrival_item.
@@ -443,6 +542,7 @@ public class ArrivalService : IArrivalService
                 ebeln = first.Ebeln,
                 vendor_no = first.VendorNo,
                 vendor_name = first.VendorName,
+                plant = headerPlant,
                 item_count = rows.Count
             },
             actor: createdBy);

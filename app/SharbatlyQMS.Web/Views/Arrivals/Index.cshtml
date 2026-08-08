@@ -1,12 +1,19 @@
 ﻿@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.ViewModels
 @model IReadOnlyList<Arrival>
 @{
     ViewData["Title"] = "Arrivals";
-    var status   = ViewBag.Status as string;
-    var search   = ViewBag.Search as string;
-    var role     = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-    var canEdit  = Perms.Can(Perm.Arrivals.Create);
+    var f       = ViewBag.Filter as ArrivalListFilter ?? new ArrivalListFilter();
+    var opts    = ViewBag.FilterOptions as ArrivalFilterOptions ?? new ArrivalFilterOptions();
+    var status  = f.Status;
+    var search  = f.Search;
+    var plantScopeLocked = ViewBag.PlantScopeLocked as string;
+    var canEdit   = Perms.Can(Perm.Arrivals.Create);
     var canManage = Perms.Can(Perm.Arrivals.Delete);
+    // Panel starts collapsed, but opens itself when the URL already carries panel
+    // filters -- otherwise a bookmarked link shows a short list with no reason.
+    var panelOpen = f.AnyPanelFilter;
+    string D(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -19,19 +26,164 @@
     }
 </div>
 
-<form method="get" class="row g-2 mb-3">
-    <div class="col-md-5">
-        <input type="text" name="search" value="@search" class="form-control" placeholder="Container / BOL / vendor / arrival number..." />
+@{
+    // Status filter chips (same mechanism as Quality Orders): each toggle is its
+    // own submit, so picking a status posts the form and preserves the search
+    // text without an extra click. Cancelled is omitted -- arrivals aren't
+    // cancelled in practice, matching the old dropdown's Draft/Completed.
+    var statuses = new (string Value, string OutlineCss)[]
+    {
+        ("",                       "btn-outline-secondary"),
+        (ArrivalStatus.Draft,      "btn-outline-warning"),
+        (ArrivalStatus.Completed,  "btn-outline-success"),
+    };
+    string ChipLabel(string v) => v.Length == 0 ? "All" : v;
+    string ActiveClass(string v, string baseCss) =>
+        (status ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
+}
+@* One form for everything: the always-visible quick bar and the collapsible
+   panel below it. Collapsed inputs still submit (display:none is not disabled),
+   so the two sets AND together. *@
+<form method="get" class="mb-3">
+    <div class="row g-2 align-items-stretch">
+        <div class="col-md-4">
+            <input type="text" name="search" value="@search" class="form-control"
+                   placeholder="Search by arrival #, container, BOL, PO, vendor, or user..." />
+        </div>
+        <div class="col-md-2 d-flex gap-2">
+            <button type="submit" class="btn btn-outline-secondary flex-grow-1"><i class="bi bi-funnel me-1"></i>Filter</button>
+            @if (f.Any)
+            {
+                <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter">Clear</a>
+            }
+        </div>
+        <div class="col-md-4">
+            <div class="btn-group w-100" role="group" aria-label="Filter by status">
+                @foreach (var s in statuses)
+                {
+                    <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)">@ChipLabel(s.Value)</button>
+                }
+            </div>
+        </div>
+        <div class="col-md-2">
+            <button class="btn btn-outline-primary w-100" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#arrFilters"
+                    aria-expanded="@(panelOpen ? "true" : "false")" aria-controls="arrFilters">
+                <i class="bi bi-sliders me-1"></i>More filters
+                @if (f.PanelFilterCount > 0)
+                {
+                    <span class="badge bg-primary ms-1">@f.PanelFilterCount</span>
+                }
+            </button>
+        </div>
     </div>
-    <div class="col-md-3">
-        <select name="status" class="form-select">
-            <option value="">All statuses</option>
-            <option value="Draft"     selected="@(status == "Draft")">Draft</option>
-            <option value="Completed" selected="@(status == "Completed")">Completed</option>
-        </select>
-    </div>
-    <div class="col-md-2">
-        <button type="submit" class="btn btn-outline-secondary w-100">Filter</button>
+
+    <div class="collapse @(panelOpen ? "show" : "")" id="arrFilters">
+        <div class="card card-body mt-2 bg-body-tertiary">
+            <div class="row g-2">
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Container</label>
+                    <input type="text" name="container" value="@f.Container" class="form-control form-control-sm"
+                           placeholder="any part" autocomplete="off" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">BOL</label>
+                    <input type="text" name="bol" value="@f.Bol" class="form-control form-control-sm"
+                           placeholder="any part" autocomplete="off" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">PO</label>
+                    <input type="text" name="po" value="@f.Po" class="form-control form-control-sm"
+                           placeholder="EBELN" autocomplete="off" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Arrival no.</label>
+                    <input type="text" name="arrivalNo" value="@f.ArrivalNo" class="form-control form-control-sm"
+                           placeholder="ARR-…" autocomplete="off" />
+                </div>
+                <div class="col-12 col-md-4">
+                    <label class="form-label small mb-1">Material</label>
+                    <input type="text" name="material" value="@f.Material" class="form-control form-control-sm"
+                           placeholder="code or description" autocomplete="off" />
+                </div>
+
+                <div class="col-12 col-md-4">
+                    <label class="form-label small mb-1">Supplier</label>
+                    <select name="supplier" class="form-select form-select-sm">
+                        <option value="">All suppliers</option>
+                        @foreach (var sup in opts.Suppliers)
+                        {
+                            <option value="@sup" selected="@(string.Equals(sup, f.Supplier, StringComparison.OrdinalIgnoreCase))">@sup</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-1">Plant</label>
+                    @if (plantScopeLocked != null)
+                    {
+                        @* Scoped operator: the server forces this plant anyway, so
+                           show why instead of a dropdown that can't take effect. *@
+                        <div class="form-control form-control-sm bg-light d-flex align-items-center"
+                             title="Your account is restricted to this plant.">
+                            <i class="bi bi-lock-fill text-muted me-1"></i>
+                            <span class="small">@Codes.PlantLabel(plantScopeLocked)</span>
+                        </div>
+                        <input type="hidden" id="arr-plant-filter" data-plant-filter="arr" name="plant" value="@plantScopeLocked" />
+                    }
+                    else
+                    {
+                        <select name="plant" id="arr-plant-filter" data-plant-filter="arr" class="form-select form-select-sm">
+                            <option value="">All plants</option>
+                            @foreach (var pl in opts.Plants)
+                            {
+                                <option value="@pl" selected="@(string.Equals(pl, f.Plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
+                            }
+                        </select>
+                    }
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-1">Storage location</label>
+                    <select name="storageLoc" id="arr-storage-filter" data-storage-filter="arr" class="form-select form-select-sm">
+                        <option value="">All storage locations</option>
+                        @foreach (var sl in opts.StorageLocations)
+                        {
+                            <option value="@sl.Code" data-plant="@sl.Plant"
+                                    selected="@(string.Equals(sl.Code, f.StorageLoc, StringComparison.OrdinalIgnoreCase)
+                                                && (string.IsNullOrEmpty(f.Plant) || string.Equals(sl.Plant, f.Plant, StringComparison.OrdinalIgnoreCase)))">
+                                @Codes.StorageLocationLabel(sl.Plant, sl.Code)
+                            </option>
+                        }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Created by</label>
+                    <select name="createdBy" class="form-select form-select-sm">
+                        <option value="">Anyone</option>
+                        @foreach (var cb in opts.CreatedBy)
+                        {
+                            <option value="@cb" selected="@(string.Equals(cb, f.CreatedBy, StringComparison.OrdinalIgnoreCase))">@cb</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Created from</label>
+                    <input type="date" name="from" value="@D(f.From)" class="form-control form-control-sm" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Created to</label>
+                    <input type="date" name="to" value="@D(f.To)" class="form-control form-control-sm" />
+                </div>
+            </div>
+            <div class="mt-2 d-flex gap-2">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Apply filters</button>
+                @if (f.AnyPanelFilter)
+                {
+                    <a asp-action="Index" asp-route-status="@status" asp-route-search="@search"
+                       class="btn btn-outline-secondary btn-sm">Reset these filters</a>
+                }
+            </div>
+        </div>
     </div>
 </form>
 

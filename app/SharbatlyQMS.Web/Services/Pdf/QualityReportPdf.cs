@@ -128,6 +128,20 @@ public static class QualityReportPdf
                 t.Span("QC No.  ").FontColor(Colors.Grey.Darken1);
                 t.Span(d.QualityOrder.QualityOrderNo).Bold();
             });
+            // Who created the quality order, and their branch.
+            if (!string.IsNullOrWhiteSpace(d.CreatedByName))
+            {
+                col.Item().AlignRight().Text(t =>
+                {
+                    t.Span("Created by  ").FontColor(Colors.Grey.Darken1);
+                    t.Span(d.CreatedByName!).Bold();
+                    if (!string.IsNullOrWhiteSpace(d.CreatedByBranch))
+                    {
+                        t.Span("  ·  Branch  ").FontColor(Colors.Grey.Darken1);
+                        t.Span(d.CreatedByBranch!).Bold();
+                    }
+                });
+            }
 
             // Shipment details
             col.Item().Element(c => RenderShipmentDetails(c, d));
@@ -1078,21 +1092,14 @@ public static class QualityReportPdf
     // the user's request — they configure these as reading types and want them
     // to print in the sample Readings section. (They were hidden on 2026-07-25;
     // that is now reversed for those fields.) Packaging Material stays hidden.
-    private static readonly HashSet<string> HiddenReportFields = new(StringComparer.Ordinal)
-    {
-        "PACKAGINGMATERIAL", "PACKINGMATERIAL",
-    };
+    // Single source of truth: shared with the claim page's HTML summary via
+    // SummaryReadingFilter, so the two never disagree on what the summary shows.
+    private static readonly HashSet<string> HiddenReportFields = SummaryReadingFilter.HiddenReportFields;
 
     // 2026-07-27: fields hidden from the page-1 group SUMMARY readings only (they
     // are identifiers, not measurements, so a group roll-up is meaningless), but
     // still shown on each per-sample card. This is on TOP of HiddenReportFields.
-    private static readonly HashSet<string> HiddenSummaryOnlyFields = new(StringComparer.Ordinal)
-    {
-        "PUC",
-        "GROWER",
-        "LOTNO", "LOTNUMBER",
-        "DATECODE",
-    };
+    private static readonly HashSet<string> HiddenSummaryOnlyFields = SummaryReadingFilter.HiddenSummaryOnlyFields;
 
     /// <summary>Uppercase, strip everything that isn't A-Z/0-9, so "Pallet No.",
     /// "Pallet No" and "PALLET_NO" all compare equal.</summary>

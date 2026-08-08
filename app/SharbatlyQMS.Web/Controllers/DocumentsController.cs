@@ -170,18 +170,18 @@ public class DocumentsController : Controller
 
     private async Task<IActionResult?> PlantGateAsync(long arrivalId)
     {
-        var scoped = User.GetScopedPlant();
-        if (scoped == null) return null;   // unrestricted role
+        var scope = User.GetPlantScope();
+        if (scope.Unrestricted) return null;
         var plant = await _arrivals.GetPlantAsync(arrivalId);
-        return string.Equals(plant, scoped, StringComparison.OrdinalIgnoreCase) ? null : Forbid();
+        return scope.Allows(plant) ? null : Forbid();
     }
 
     private async Task<IActionResult?> QoPlantGateAsync(long qualityOrderId)
     {
-        var scoped = User.GetScopedPlant();
-        if (scoped == null) return null;   // unrestricted role
+        var scope = User.GetPlantScope();
+        if (scope.Unrestricted) return null;
         var plant = await _qos.GetPlantForQoAsync(qualityOrderId);
-        return string.Equals(plant, scoped, StringComparison.OrdinalIgnoreCase) ? null : Forbid();
+        return scope.Allows(plant) ? null : Forbid();
     }
 
     private IActionResult EditBlocked(string message)

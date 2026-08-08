@@ -1,4 +1,5 @@
 ﻿@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.Models.Security
 @model IReadOnlyList<User>
 @{
     ViewData["Title"] = "Users";
@@ -10,6 +11,14 @@
     // screen is assignable here immediately -- no code change, no redeploy.
     var roles = ViewBag.Roles as IReadOnlyList<AssignableRole> ?? new List<AssignableRole>();
     var currentUserId = int.Parse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)!.Value);
+    // Per-user plant assignments (multi-plant). Administrators are unrestricted
+    // and carry no rows here.
+    var userPlants = ViewBag.UserPlants as IReadOnlyDictionary<int, IReadOnlyList<string>>
+                     ?? new Dictionary<int, IReadOnlyList<string>>();
+    var adminRoleCode = RoleCodes.Admin;
+    // Total plants in the system; a non-admin user holding all of them is shown
+    // as a single "All plants" badge rather than every code.
+    var allPlantCount = Codes.Plants.Count();
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -112,15 +121,28 @@
                                 <span class="badge bg-@roleBadge" title="@u.RoleCode">@(string.IsNullOrWhiteSpace(u.RoleName) ? u.Role : u.RoleName)</span>
                             </td>
                             <td>
-                                @if (u.IsPlantScoped
-                                     && !string.IsNullOrWhiteSpace(u.PlantCode))
+                                @{
+                                    var isAdminRow = string.Equals(u.RoleCode, adminRoleCode, StringComparison.OrdinalIgnoreCase);
+                                    var rowPlants = userPlants.TryGetValue(u.UserId, out var _rp) ? _rp : (IReadOnlyList<string>)Array.Empty<string>();
+                                }
+                                @if (isAdminRow)
                                 {
-                                    <span class="badge bg-light text-dark border"
-                                          title="@u.PlantCode">@Codes.PlantDisplay(u.PlantCode)</span>
+                                    <span class="badge bg-success-subtle text-success-emphasis border" title="Administrators see every plant">All plants</span>
+                                }
+                                else if (rowPlants.Count == 0)
+                                {
+                                    <span class="badge bg-warning-subtle text-warning-emphasis border" title="No plants assigned — sees no plant data">None</span>
+                                }
+                                else if (allPlantCount > 0 && rowPlants.Count >= allPlantCount)
+                                {
+                                    <span class="badge bg-success-subtle text-success-emphasis border" title="Assigned every plant">All plants</span>
                                 }
                                 else
                                 {
-                                    <span class="text-muted">—</span>
+                                    foreach (var pc in rowPlants)
+                                    {
+                                        <span class="badge bg-light text-dark border me-1" title="@pc">@Codes.PlantDisplay(pc)</span>
+                                    }
                                 }
                             </td>
                             <td>
@@ -139,7 +161,8 @@
                                         data-user-id="@u.UserId" data-username="@u.Username"
                                         data-fullname="@u.FullName" data-email="@u.Email"
                                         data-department="@u.Department" data-employeeid="@u.EmployeeId"
-                                        data-role="@u.RoleCode" data-plantcode="@u.PlantCode">
+                                        data-role="@u.RoleCode"
+                                        data-plants="@(userPlants.TryGetValue(u.UserId, out var _ups) ? string.Join(",", _ups) : "")">
                                     <i class="bi bi-pencil"></i>
                                 </button>
                                 @if (!string.IsNullOrEmpty(u.PasswordHash))
@@ -266,7 +289,7 @@
                         <input name="employeeId" id="edit-employeeId" class="form-control" /></div>
                     <div class="col-md-6"><label class="form-label">Role</label>
                         <select name="role" id="edit-role" class="form-select">
-                            @foreach (var r in roles.Select(x => x.RoleCode)) { <option value="@r">@r</option> }
+                            @foreach (var r in roles) { <option value="@r.RoleCode" data-is-admin="@(string.Equals(r.RoleCode, adminRoleCode, StringComparison.OrdinalIgnoreCase) ? "true" : "false")">@r.RoleCode</option> }
                         </select></div>
                     <div class="col-12"><label class="form-label">Full name</label>
                         <input name="fullName" id="edit-fullName" class="form-control" required /></div>
@@ -275,14 +298,29 @@
                     <div class="col-md-6"><label class="form-label">Department</label>
                         <input name="department" id="edit-department" class="form-control" /></div>
                     <div class="col-12" id="edit-plant-wrapper">
-                        <label class="form-label">Plant <span class="text-muted small">(Operator only — restricts the user to one plant's containers/arrivals/QOs)</span></label>
-                        <select name="plantCode" id="edit-plantCode" class="form-select">
-                            <option value="">— No plant — sees every plant</option>
+                        <label class="form-label d-flex align-items-center gap-2 flex-wrap">
+                            Plants
+                            <span class="text-muted small">Tick the plants this user may see. None ticked = the user sees no plant data until you assign one.</span>
+                            <span class="ms-auto small">
+                                <a href="#" id="edit-plants-all" class="link-primary">All</a> ·
+                                <a href="#" id="edit-plants-none" class="link-secondary">None</a>
+                            </span>
+                        </label>
+                        <div class="border rounded p-2 d-flex flex-wrap gap-3" id="edit-plants-list">
                             @foreach (var p in Codes.Plants)
                             {
-                                <option value="@p.Code">@Codes.PlantLabel(p.Code)</option>
+                                <div class="form-check">
+                                    <input class="form-check-input edit-plant-cb" type="checkbox"
+                                           name="plantCodes" value="@p.Code" id="edit-plant-@p.Code" />
+                                    <label class="form-check-label" for="edit-plant-@p.Code">@Codes.PlantLabel(p.Code)</label>
+                                </div>
                             }
-                        </select>
+                        </div>
+                    </div>
+                    <div class="col-12 d-none" id="edit-plant-admin-note">
+                        <div class="alert alert-info py-2 mb-0 small">
+                            <i class="bi bi-info-circle me-1"></i>Administrators always see every plant, so no plant assignment is needed.
+                        </div>
                     </div>
                 </div>
             </div>
@@ -344,24 +382,32 @@
             document.getElementById('edit-department').value = b.dataset.department || '';
             document.getElementById('edit-employeeId').value = b.dataset.employeeid || '';
             document.getElementById('edit-role').value       = b.dataset.role;
-            document.getElementById('edit-plantCode').value  = b.dataset.plantcode || '';
+            // Tick exactly the plants this user currently has.
+            var assigned = (b.dataset.plants || '').split(',').map(function (s) { return s.trim(); });
+            document.querySelectorAll('.edit-plant-cb').forEach(function (cb) {
+                cb.checked = assigned.indexOf(cb.value) !== -1;
+            });
             toggleEditPlantVisibility();
         });
-        // Plant picker is only meaningful for Operators (the only plant-scoped role).
-        // Hide the row when the role dropdown shows anything else; clear the value
-        // on transition so a stale RD01 doesn't ride along when switching to Manager.
+        // Plant assignment is per-user now and applies to every role EXCEPT the
+        // Administrator (who always sees every plant). Show the plant list for
+        // non-admin roles; for the admin role hide it and show a note instead.
         function toggleEditPlantVisibility() {
-            var role = document.getElementById('edit-role').value;
-            var wrap = document.getElementById('edit-plant-wrapper');
-            var sel  = document.getElementById('edit-plantCode');
-            if (role === 'Operator') {
-                wrap.style.display = '';
-            } else {
-                wrap.style.display = 'none';
-                sel.value = '';
-            }
+            var roleSel = document.getElementById('edit-role');
+            var opt     = roleSel.options[roleSel.selectedIndex];
+            var isAdmin = opt && opt.dataset.isAdmin === 'true';
+            document.getElementById('edit-plant-wrapper').style.display   = isAdmin ? 'none' : '';
+            document.getElementById('edit-plant-admin-note').classList.toggle('d-none', !isAdmin);
         }
         document.getElementById('edit-role').addEventListener('change', toggleEditPlantVisibility);
+        document.getElementById('edit-plants-all').addEventListener('click', function (ev) {
+            ev.preventDefault();
+            document.querySelectorAll('.edit-plant-cb').forEach(function (cb) { cb.checked = true; });
+        });
+        document.getElementById('edit-plants-none').addEventListener('click', function (ev) {
+            ev.preventDefault();
+            document.querySelectorAll('.edit-plant-cb').forEach(function (cb) { cb.checked = false; });
+        });
         document.getElementById('resetPasswordModal').addEventListener('show.bs.modal', function (e) {
             var b = e.relatedTarget;
             document.getElementById('rp-userId').value = b.dataset.userId;

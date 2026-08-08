@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using SharbatlyQMS.Web.Extensions;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Models.Security;
 using SharbatlyQMS.Web.Security;
@@ -126,6 +127,15 @@ public class AccountController : Controller
         await _db.UpdateLastSeenAsync(user.UserId);
         await _db.SetUserOnlineAsync(user.UserId, true);
 
+        // Plant scope is per-USER now. Administrators always see every plant;
+        // everyone else is limited to exactly the plants assigned to them on the
+        // Users screen. "*" means unrestricted; an empty string means "no plants
+        // assigned yet -> sees nothing" (deliberately strict).
+        var isAdmin = string.Equals(user.RoleCode, RoleCodes.Admin, StringComparison.OrdinalIgnoreCase);
+        var plantsClaim = isAdmin
+            ? "*"
+            : string.Join(",", await _db.GetUserPlantsAsync(user.UserId));
+
         var claims = new List<Claim>
         {
             new(ClaimTypes.NameIdentifier, user.UserId.ToString()),
@@ -140,11 +150,7 @@ public class AccountController : Controller
             new("Department",              user.Department ?? ""),
             new("EmployeeId",              user.EmployeeId ?? ""),
             new("ProfilePicture",          user.ProfilePicture ?? ""),
-            // Plant scope now follows a flag on the ROLE rather than the literal
-            // name "Operator". A composed operator-style role would otherwise
-            // have been handed sight of every plant -- a silent widening that
-            // nothing would have surfaced.
-            new("PlantCode", user.IsPlantScoped ? (user.PlantCode ?? "") : "")
+            new(ClaimsPrincipalExtensions.PlantsClaim, plantsClaim)
         };
 
         // Exactly one role claim. The extra claims this used to emit -- one per

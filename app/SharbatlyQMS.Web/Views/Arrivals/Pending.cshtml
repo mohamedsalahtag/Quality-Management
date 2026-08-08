@@ -22,6 +22,9 @@
     var poTypeOptions    = ViewBag.PoTypeOptions     as IReadOnlyList<string>          ?? Array.Empty<string>();
     var storageOptions   = ViewBag.StorageLocOptions as IReadOnlyList<PlantStorageLoc> ?? Array.Empty<PlantStorageLoc>();
     var plantScopeLocked = ViewBag.PlantScopeLocked  as string;
+    // QC Manager / Admin: reassign a pending container to another plant.
+    var canOverridePlant = Perms.Can(Perm.Arrivals.OverridePlant);
+    var allPlants        = Codes.Plants;
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -323,15 +326,62 @@
                            sorted and hidden on its own. Name in the badge, SAP
                            code in the tooltip -- the name is what people read. *@
                         <td>
-                            @if (!string.IsNullOrEmpty(r.Plant))
-                            {
-                                <span class="badge bg-light text-dark border"
-                                      data-bs-toggle="tooltip" title="@r.Plant">@Codes.PlantDisplay(r.Plant)</span>
-                            }
-                            else
-                            {
-                                <span class="text-muted">—</span>
-                            }
+                            <div class="pp-stack">
+                                @if (!string.IsNullOrEmpty(r.Plant))
+                                {
+                                    <span class="badge @(r.IsPlantOverridden ? "bg-info-subtle text-info-emphasis border border-info" : "bg-light text-dark border")"
+                                          data-bs-toggle="tooltip"
+                                          title="@(r.IsPlantOverridden ? r.Plant + " — reassigned from " + r.OriginalPlant : r.Plant)">
+                                        @Codes.PlantDisplay(r.Plant)
+                                    </span>
+                                    @if (r.IsPlantOverridden && !string.IsNullOrEmpty(r.OriginalPlant))
+                                    {
+                                        <span class="pp-sub"><span class="pp-sub-label">was</span>@Codes.PlantDisplay(r.OriginalPlant)</span>
+                                    }
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                                @if (canOverridePlant)
+                                {
+                                    @* QC Manager / Admin: move the container to another plant.
+                                       The form posts to OverridePlant; picking the original
+                                       plant undoes a previous move. *@
+                                    <div class="dropdown">
+                                        <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none"
+                                                data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                                                title="Reassign this container to another plant">
+                                            <i class="bi bi-pencil-square me-1"></i>Change plant
+                                        </button>
+                                        <div class="dropdown-menu p-2" style="min-width: 15rem;">
+                                            <form asp-action="OverridePlant" method="post" class="m-0">
+                                                @Html.AntiForgeryToken()
+                                                <input type="hidden" name="containerNo" value="@r.ContainerNo" />
+                                                <input type="hidden" name="bolNo"       value="@r.BolNo" />
+                                                <input type="hidden" name="po"          value="@r.Ebeln" />
+                                                <label class="form-label small mb-1">Move container to plant</label>
+                                                <select name="plant" class="form-select form-select-sm mb-2" required>
+                                                    @foreach (var pl in allPlants)
+                                                    {
+                                                        <option value="@pl.Code"
+                                                                selected="@(string.Equals(pl.Code, r.Plant, StringComparison.OrdinalIgnoreCase))">
+                                                            @Codes.PlantLabel(pl.Code)
+                                                        </option>
+                                                    }
+                                                </select>
+                                                <button type="submit" class="btn btn-sm btn-primary w-100">
+                                                    <i class="bi bi-arrow-left-right me-1"></i>Move container
+                                                </button>
+                                                @if (r.IsPlantOverridden)
+                                                {
+                                                    <div class="form-text mt-1">Pick @Codes.PlantDisplay(r.OriginalPlant) to undo the move.</div>
+                                                }
+                                            </form>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
                         </td>
                         <td>
                             @if (!string.IsNullOrEmpty(r.StorageLocation))

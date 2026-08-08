@@ -83,6 +83,15 @@ public class QualityReportData
     public string GeneratedBy  { get; set; } = "system";
     public DateTime GeneratedAt{ get; set; } = DateTime.UtcNow;
 
+    /// <summary>Full name of the user who created this quality order (falls back to
+    /// the raw username). Shown in the report header.</summary>
+    public string? CreatedByName   { get; set; }
+
+    /// <summary>Branch/plant of the user who created the quality order — their own
+    /// plant when they have one, otherwise the order's plant. Shown in the header
+    /// next to the creator's name.</summary>
+    public string? CreatedByBranch { get; set; }
+
     // Images grouped by owner type/id; the renderer pulls absolute paths from these.
     public List<ImageRef> ArrivalImages { get; set; } = new();
 

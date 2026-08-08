@@ -222,6 +222,7 @@ builder.Services.AddSingleton<IStartupFilter, SharbatlyQMS.Web.Security.Permissi
 builder.Services.AddScoped<SharbatlyQMS.Web.Security.IUserPermissions,
                            SharbatlyQMS.Web.Security.UserPermissions>();
 builder.Services.AddScoped<ISecurityAdminService, SecurityAdminService>();
+builder.Services.AddScoped<IUserAdminService, UserAdminService>();
 
 builder.Services.AddAntiforgery(opt =>
 {

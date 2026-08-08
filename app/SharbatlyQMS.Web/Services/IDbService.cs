@@ -18,6 +18,16 @@ public interface IDbService
     Task<IReadOnlyList<User>> ListUsersAsync(string? search, string? role, bool? isActive);
     Task<int>  CreateUserAsync(User user);
     Task UpdateUserAsync(User user);
+
+    // ---- Per-user plant scope (portal.UserPlant is a shared many-to-many) ----
+    /// <summary>Every plant code assigned to the user, ordered. Empty = none.</summary>
+    Task<IReadOnlyList<string>> GetUserPlantsAsync(int userId);
+    /// <summary>Plant codes per user for a set of users (for list screens).</summary>
+    Task<IReadOnlyDictionary<int, IReadOnlyList<string>>> GetPlantsForUsersAsync(IEnumerable<int> userIds);
+    /// <summary>Replaces the user's plant assignments with exactly this set.</summary>
+    Task SetUserPlantsAsync(int userId, IReadOnlyCollection<string> plantCodes);
+    /// <summary>All plant codes known to the system (the "assignable" universe).</summary>
+    Task<IReadOnlyList<string>> ListAllPlantCodesAsync();
     Task UpdateProfilePictureAsync(int userId, string path);
     Task UpdateLastSeenAsync(int userId);
     Task SetUserOnlineAsync(int userId, bool online);

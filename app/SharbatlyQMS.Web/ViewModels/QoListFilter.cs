@@ -24,6 +24,7 @@ public class QoListFilter
     public string? Plant      { get; set; }
     public string? StorageLoc { get; set; }
     public string? Material   { get; set; }
+    public string? Supplier   { get; set; }
     public string? OpenedBy   { get; set; }
     /// <summary>QO created date, inclusive, as the user's LOCAL date. The
     /// controller converts to UTC before it reaches SQL — qo.created_at is
@@ -45,6 +46,7 @@ public class QoListFilter
         || !string.IsNullOrWhiteSpace(Plant)
         || !string.IsNullOrWhiteSpace(StorageLoc)
         || !string.IsNullOrWhiteSpace(Material)
+        || !string.IsNullOrWhiteSpace(Supplier)
         || !string.IsNullOrWhiteSpace(OpenedBy)
         || From.HasValue || To.HasValue;
 
@@ -57,6 +59,7 @@ public class QoListFilter
         + (string.IsNullOrWhiteSpace(Plant)      ? 0 : 1)
         + (string.IsNullOrWhiteSpace(StorageLoc) ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Material)   ? 0 : 1)
+        + (string.IsNullOrWhiteSpace(Supplier)   ? 0 : 1)
         + (string.IsNullOrWhiteSpace(OpenedBy)   ? 0 : 1)
         + (From.HasValue ? 1 : 0)
         + (To.HasValue   ? 1 : 0);
@@ -74,6 +77,7 @@ public class QoFilterOptions
     /// <summary>(plant, storage-loc) pairs — storage codes repeat across plants,
     /// so the dropdown narrows to the picked plant client-side.</summary>
     public IReadOnlyList<QoPlantStorage>  StorageLocations { get; init; } = Array.Empty<QoPlantStorage>();
+    public IReadOnlyList<string>          Suppliers        { get; init; } = Array.Empty<string>();
     public IReadOnlyList<string>          OpenedBy         { get; init; } = Array.Empty<string>();
 }
 

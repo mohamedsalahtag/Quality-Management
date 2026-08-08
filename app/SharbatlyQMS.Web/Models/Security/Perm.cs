@@ -18,6 +18,10 @@ public static class Perm
     public static class Arrivals
     {
         public const string Retrieve       = Screens.ArrivalsPending + ".Retrieve";
+        /// <summary>QC Manager / Admin: reassign a pending SAP container to a
+        /// different plant so its Arrival + Quality Order are created there and
+        /// the target plant's users can see it.</summary>
+        public const string OverridePlant  = Screens.ArrivalsPending + ".OverridePlant";
         public const string Create         = Screens.ArrivalsIndex   + ".Create";
         public const string SaveChecklist  = Screens.ArrivalsDetails + ".SaveChecklist";
         public const string SaveShipment   = Screens.ArrivalsDetails + ".SaveShipment";

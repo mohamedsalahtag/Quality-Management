@@ -247,21 +247,63 @@ public class DbService : IDbService
             VALUES (@userId, @roleCode, 'MANUAL');",
             new { userId, roleCode }, tx);
 
-        // portal.UserPlant is shared with the SCM app and this delete is not
-        // filtered by plant, so it replaces every assignment the person has.
-        // Today that is harmless -- all 13 rows belong to QMS users with one
-        // plant each -- but it would quietly destroy SCM data the moment that
-        // stops being true. Only touch it when QMS actually has something to say
-        // about the plant, i.e. when the role is plant-scoped.
-        if (u.IsPlantScoped || !string.IsNullOrWhiteSpace(u.PlantCode))
+        // Plant assignment is a per-user, MANY-plant concern now and is written
+        // separately through SetUserPlantsAsync (so editing a name or role never
+        // disturbs the plant set). Deliberately nothing here.
+    }
+
+    public async Task<IReadOnlyList<string>> GetUserPlantsAsync(int userId)
+    {
+        using var c = Open();
+        var rows = await c.QueryAsync<string>(
+            "SELECT Plant FROM portal.UserPlant WHERE UserId = @userId ORDER BY Plant",
+            new { userId });
+        return rows.ToList();
+    }
+
+    public async Task<IReadOnlyDictionary<int, IReadOnlyList<string>>> GetPlantsForUsersAsync(IEnumerable<int> userIds)
+    {
+        var ids = userIds.Distinct().ToArray();
+        if (ids.Length == 0) return new Dictionary<int, IReadOnlyList<string>>();
+        using var c = Open();
+        var rows = await c.QueryAsync<(int UserId, string Plant)>(
+            "SELECT UserId, Plant FROM portal.UserPlant WHERE UserId IN @ids ORDER BY Plant",
+            new { ids });
+        return rows.GroupBy(r => r.UserId)
+                   .ToDictionary(g => g.Key,
+                                 g => (IReadOnlyList<string>)g.Select(x => x.Plant).ToList());
+    }
+
+    public async Task SetUserPlantsAsync(int userId, IReadOnlyCollection<string> plantCodes)
+    {
+        // Normalise: distinct, trimmed, non-empty. Replaces the whole set in one
+        // transaction so the assignment is always internally consistent.
+        var codes = plantCodes
+            .Where(p => !string.IsNullOrWhiteSpace(p))
+            .Select(p => p.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+        await c.ExecuteAsync("DELETE FROM portal.UserPlant WHERE UserId = @userId", new { userId }, tx);
+        if (codes.Length > 0)
         {
             await c.ExecuteAsync(@"
-                DELETE FROM portal.UserPlant WHERE UserId = @userId;
                 INSERT INTO portal.UserPlant (UserId, Plant, AssignedAt, AssignedByUserId)
-                SELECT @userId, @plant, SYSUTCDATETIME(), NULL
-                WHERE @plant IS NOT NULL AND LEN(@plant) > 0;",
-                new { userId, plant = u.PlantCode }, tx);
+                VALUES (@userId, @plant, SYSUTCDATETIME(), NULL);",
+                codes.Select(plant => new { userId, plant }), tx);
         }
+        tx.Commit();
+    }
+
+    public async Task<IReadOnlyList<string>> ListAllPlantCodesAsync()
+    {
+        using var c = Open();
+        var rows = await c.QueryAsync<string>(
+            "SELECT code FROM qms_code_description WHERE domain = 'Plant' ORDER BY code");
+        return rows.ToList();
     }
 
     public async Task UpdateProfilePictureAsync(int userId, string path)

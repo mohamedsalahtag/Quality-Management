@@ -46,6 +46,10 @@ public interface IPermissionResolver
     /// last-administrator guards on the Users screen.</summary>
     bool RoleHasSecurityAdmin(string? roleCode);
 
+    /// <summary>True for a super role (the built-in Administrator): holds every
+    /// permission implicitly and is read-only on the Security screen.</summary>
+    bool IsSuperRole(string? roleCode);
+
     IReadOnlyList<RoleInfo>       Roles       { get; }
     IReadOnlyList<ScreenInfo>     Screens     { get; }
     IReadOnlyList<PermissionInfo> Permissions { get; }
@@ -86,6 +90,9 @@ public sealed class PermissionResolver : IPermissionResolver
         public required IReadOnlyList<RoleInfo> Roles { get; init; }
         public required IReadOnlyList<ScreenInfo> Screens { get; init; }
         public required IReadOnlyList<PermissionInfo> Permissions { get; init; }
+        /// <summary>Role codes flagged is_super: they hold every permission,
+        /// always, and cannot be edited on the Security screen.</summary>
+        public required IReadOnlySet<string> SuperRoles { get; init; }
         public DateTimeOffset? LoadedAtUtc { get; init; }
     }
 
@@ -98,6 +105,7 @@ public sealed class PermissionResolver : IPermissionResolver
         Roles       = Array.Empty<RoleInfo>(),
         Screens     = Array.Empty<ScreenInfo>(),
         Permissions = Array.Empty<PermissionInfo>(),
+        SuperRoles  = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
     };
 
     private readonly string _cs;
@@ -137,6 +145,12 @@ public sealed class PermissionResolver : IPermissionResolver
             : AccessLevel.None;
     }
 
+    /// <summary>True for a role flagged is_super — the built-in Administrator.
+    /// It holds every permission implicitly and is read-only on the Security
+    /// screen.</summary>
+    public bool IsSuperRole(string? roleCode) =>
+        !string.IsNullOrEmpty(roleCode) && _snap.SuperRoles.Contains(roleCode);
+
     public bool RoleHas(string? roleCode, string permissionCode, AccessLevel minimum, bool isScreen)
     {
         if (string.IsNullOrEmpty(roleCode)) return false;
@@ -149,6 +163,11 @@ public sealed class PermissionResolver : IPermissionResolver
         if (string.Equals(roleCode, RoleCodes.Admin, StringComparison.OrdinalIgnoreCase)
             && Array.Exists(Perm.AdminFloor, c => string.Equals(c, permissionCode, StringComparison.OrdinalIgnoreCase)))
             return true;
+
+        // ---- Super roles (the built-in Administrator) hold every permission,
+        //      always. This makes the role genuinely un-lockable and means a
+        //      newly added permission needs no grant to reach an administrator.
+        if (IsSuperRole(roleCode)) return _snap.PermByCode.ContainsKey(permissionCode);
 
         // An unknown code denies. It never throws: a permission removed by a
         // rollback must lock the button, not break the page.
@@ -258,6 +277,8 @@ public sealed class PermissionResolver : IPermissionResolver
                 ScreenByKey = screens.ToDictionary(s => s.ScreenKey, s => s, StringComparer.OrdinalIgnoreCase),
                 PermByCode  = perms.ToDictionary(p => p.Code, p => p, StringComparer.OrdinalIgnoreCase),
                 Roles = roles, Screens = screens, Permissions = perms,
+                SuperRoles = roles.Where(r => r.IsSuper).Select(r => r.RoleCode)
+                                  .ToHashSet(StringComparer.OrdinalIgnoreCase),
                 LoadedAtUtc = DateTimeOffset.UtcNow,
             };
             _loaded = true;

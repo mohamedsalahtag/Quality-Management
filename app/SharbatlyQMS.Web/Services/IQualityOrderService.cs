@@ -8,11 +8,11 @@ public interface IQualityOrderService
 {
     /// <param name="plantScope">Forced plant for plant-restricted operators;
     /// overrides whatever the filter carries.</param>
-    Task<IReadOnlyList<QualityOrder>> ListAsync(QoListFilter filter, string? plantScope = null);
+    Task<IReadOnlyList<QualityOrder>> ListAsync(QoListFilter filter, PlantScope scope);
 
     /// <summary>Dropdown sources (plants, plant+storage pairs, openers) for the
     /// Quality Orders filter panel, restricted to the caller's plant scope.</summary>
-    Task<QoFilterOptions> GetQoFilterOptionsAsync(string? plantScope = null);
+    Task<QoFilterOptions> GetQoFilterOptionsAsync(PlantScope scope);
 
     /// <summary>Permanently removes a quality order and its whole subtree.
     /// Refuses anything past Open (Submitted / Finished / Cancelled) — that

@@ -1,11 +1,20 @@
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services.Sap;
+using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Services;
 
 public interface IArrivalService
 {
-    Task<IReadOnlyList<Arrival>> ListAsync(string? status, string? search, string? plant = null);
+    /// <summary>The Arrivals list, filtered by the quick bar + "More filters"
+    /// panel. <paramref name="plantScope"/> forces the plant for plant-restricted
+    /// operators and overrides whatever the panel posted.</summary>
+    Task<IReadOnlyList<Arrival>> ListAsync(ArrivalListFilter filter, Models.PlantScope scope);
+
+    /// <summary>Dropdown sources for the Arrivals filter panel (plants, storage
+    /// locations, creators), drawn only from arrivals that exist.</summary>
+    Task<ArrivalFilterOptions> GetArrivalFilterOptionsAsync(Models.PlantScope scope);
+
     Task<Arrival?> GetAsync(long arrivalId);
     Task<IReadOnlyList<ArrivalItem>> GetItemsAsync(long arrivalId);
 
@@ -41,7 +50,12 @@ public interface IArrivalService
     /// value kind.</summary>
     Task SaveCustomFieldValuesAsync(long arrivalId, IReadOnlyDictionary<int, string?> rawValues, string updatedBy);
 
-    Task<long> CreateFromSapAsync(IReadOnlyList<SapShipmentRow> rows, string createdBy);
+    /// <summary>Promotes a pending SAP shipment to a Draft arrival. When
+    /// <paramref name="overridePlant"/> is supplied (a QC Manager/Admin has
+    /// reassigned the container), the arrival header plant — which every plant
+    /// scope and the Quality Order inherit — is set to it instead of the SAP
+    /// row's plant. Item lines keep their original SAP plant as a record.</summary>
+    Task<long> CreateFromSapAsync(IReadOnlyList<SapShipmentRow> rows, string createdBy, string? overridePlant = null);
     Task SaveChecklistAsync(ArrivalChecklist cl, string updatedBy);
     Task SaveShipmentAsync(ShipmentSnapshot ss, string updatedBy);
     Task<(bool ok, string? error)> CompleteAsync(long arrivalId, string user);

@@ -62,7 +62,11 @@ public sealed class SecurityAdminService : ISecurityAdminService
             SELECT r.role_code AS RoleCode, r.display_name AS DisplayName, r.description AS Description,
                    r.rank AS Rank, r.is_builtin AS IsBuiltIn, r.is_super AS IsSuper,
                    r.is_plant_scoped AS IsPlantScoped, r.is_active AS IsActive,
-                   (SELECT COUNT(*) FROM portal.UserRole ur WHERE ur.RoleCode = r.role_code) AS UserCount,
+                   -- Count users by their EFFECTIVE role (qms.AppUser collapses a
+                   -- user to their highest-ranked Qc role), so this badge matches
+                   -- the members list exactly. Counting portal.UserRole rows
+                   -- instead double-counts anyone holding more than one Qc role.
+                   (SELECT COUNT(*) FROM qms.AppUser au WHERE au.RoleCode = r.role_code) AS UserCount,
                    (SELECT COUNT(*) FROM qms_role_permission rp WHERE rp.role_code = r.role_code) AS GrantCount
             FROM   qms_role r
             ORDER  BY r.rank DESC, r.display_name");
@@ -222,14 +226,20 @@ public sealed class SecurityAdminService : ISecurityAdminService
         if (role.IsBuiltIn && !isActive)
             return (false, "Built-in roles cannot be deactivated.");
 
+        // Explicit open + transaction + commit, matching every other write in
+        // this service. (An earlier version relied on Dapper's implicit auto-open
+        // with no transaction.)
         using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
         await c.ExecuteAsync(@"
             UPDATE qms_role
             SET    display_name = @displayName, description = @description,
                    is_plant_scoped = @isPlantScoped, is_active = @isActive,
                    updated_at = SYSUTCDATETIME(), updated_by = @actor
             WHERE  role_code = @roleCode",
-            new { roleCode, displayName, description, isPlantScoped, isActive, actor });
+            new { roleCode, displayName, description, isPlantScoped, isActive, actor }, tx);
+        tx.Commit();
 
         await _perms.RefreshAsync();
         return (true, null);

@@ -1,6 +1,9 @@
 ﻿using System.Net;
+using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models.Reports;
 using SharbatlyQMS.Web.Models.Security;
+using SharbatlyQMS.Web.Services;
 using Xunit;
 
 namespace SharbatlyQMS.Tests;
@@ -41,6 +44,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         "/Account/Profile",
         "/Admin/Users",
         "/Admin/Settings",
+        "/Security",
         "/Admin/DefectCatalog",
         "/Admin/DefectCategories",
         "/Admin/ReadingTypes",
@@ -100,6 +104,178 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         var html = await client.GetStringAsync("/Admin/Users");
         // Identity now comes from portal.User via qms.AppUser.
         Assert.Contains("mohamed.tag", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The Security editor must tag its read-only actions so the browser can keep
+    /// them grantable on a read-only screen. This renders the real controller,
+    /// view model and Razor view, so it catches the flag being dropped anywhere
+    /// along that path -- the "view / export cannot be chosen" bug.
+    /// </summary>
+    [Fact]
+    public async Task Security_editor_marks_read_only_actions()
+    {
+        TestAuthHandler.Role = RoleCodes.Admin;
+        var client = _factory.CreateClient();
+        // Viewer is the read-only built-in, so the download PDF action is on show.
+        var html = await client.GetStringAsync("/Security?role=" + RoleCodes.Viewer);
+
+        Assert.Contains(Perm.Qo.Pdf, html, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("data-readonly", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The Users tab in the role editor lists the people who hold the selected
+    /// role. Renders the controller, the ListUsers query and the view together.
+    /// </summary>
+    [Fact]
+    public async Task Security_users_tab_lists_role_members()
+    {
+        TestAuthHandler.Role = RoleCodes.Admin;
+        var client = _factory.CreateClient();
+        var html = await client.GetStringAsync("/Security?role=" + RoleCodes.Admin + "&tab=users");
+
+        Assert.Contains("Users with the", html, StringComparison.OrdinalIgnoreCase);
+        // The signed-in administrator holds QcAdmin, so they appear in the list.
+        Assert.Contains(QmsAppFactory.AdminUser, html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The claim page (QO Details in claim context) renders the QC report's
+    /// grouped Summary as a header. Drives a real closed QO that has samples, so
+    /// the summary block is populated — this exercises BuildGroupSummariesAsync,
+    /// the controller, and the new Razor section end-to-end.
+    /// </summary>
+    [Fact]
+    public async Task Claim_page_renders_the_report_summary_header()
+    {
+        TestAuthHandler.Role = RoleCodes.Admin;
+
+        long chosen = 0;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
+            var qos    = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
+            var rows   = await claims.ListClosedQosAsync(null, null, "test");
+            foreach (var r in rows.Take(25))
+            {
+                var samples = await qos.ListSamplesAsync(r.QualityOrderId);
+                if (samples.Count > 0) { chosen = r.QualityOrderId; break; }
+            }
+        }
+        if (chosen == 0) return;   // no closed QO with samples to test against
+
+        var client = _factory.CreateClient();
+        var html = await client.GetStringAsync($"/ClaimManagement/Details/{chosen}");
+
+        // The Summary section we added only renders in claim context with data.
+        Assert.Contains("qc-summary", html);
+        Assert.Contains("Summary", html, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// The QC report PDF still generates after adding the opener/branch header —
+    /// exercises ReportsController.BuildDataAsync (incl. the new user + plant
+    /// lookup) end to end for a real quality order.
+    /// </summary>
+    [Fact]
+    public async Task Quality_report_pdf_generates_with_opener_header()
+    {
+        TestAuthHandler.Role = RoleCodes.Admin;
+
+        long qoId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
+            var rows   = await claims.ListClosedQosAsync(null, null, "test");
+            qoId = rows.Select(r => r.QualityOrderId).FirstOrDefault();
+        }
+        if (qoId == 0) return;   // no quality orders to render
+
+        var client = _factory.CreateClient();
+        var res = await client.GetAsync($"/Reports/QualityOrderPdf/{qoId}");
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var bytes = await res.Content.ReadAsByteArrayAsync();
+        Assert.True(bytes.Length > 1000, $"PDF unexpectedly small ({bytes.Length} bytes).");
+        // Real PDFs start with the "%PDF" magic bytes.
+        Assert.True(bytes.Length >= 4 && bytes[0] == (byte)'%' && bytes[1] == (byte)'P'
+                    && bytes[2] == (byte)'D' && bytes[3] == (byte)'F', "Response is not a PDF.");
+    }
+
+    /// <summary>
+    /// The QO page's "Generate Summary" popup loads its content from
+    /// /QualityOrders/SummaryPanel — the same grouped summary as the claim page
+    /// and the report, rebuilt on demand. Verifies the endpoint + partial render.
+    /// </summary>
+    [Fact]
+    public async Task Quality_order_summary_panel_returns_grouped_summary()
+    {
+        TestAuthHandler.Role = RoleCodes.Admin;
+
+        long chosen = 0;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
+            var qos    = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
+            var rows   = await claims.ListClosedQosAsync(null, null, "test");
+            foreach (var r in rows.Take(25))
+            {
+                var samples = await qos.ListSamplesAsync(r.QualityOrderId);
+                if (samples.Count > 0) { chosen = r.QualityOrderId; break; }
+            }
+        }
+        if (chosen == 0) return;   // no QO with samples to test against
+
+        var client = _factory.CreateClient();
+        var html = await client.GetStringAsync($"/QualityOrders/SummaryPanel/{chosen}");
+
+        // The grouped summary fields (qcs-f) render for a QO that has samples.
+        Assert.Contains("qcs-f", html);
+    }
+
+    /// <summary>
+    /// The Arrivals list now has the same filter surface as Quality Orders: a
+    /// status chip bar and a collapsible "More filters" panel. This exercises the
+    /// new ArrivalListFilter binding, the filtered query, and the options load.
+    /// </summary>
+    [Fact]
+    public async Task Arrivals_page_renders_status_chips_and_filter_panel()
+    {
+        TestAuthHandler.Role = RoleCodes.Admin;
+        var client = _factory.CreateClient();
+        var html = await client.GetStringAsync(
+            "/Arrivals?status=Completed&container=C&from=2020-01-01&to=2030-01-01");
+
+        Assert.Contains("More filters", html);   // the panel toggle
+        Assert.Contains("arrFilters", html);      // the collapsible panel id
+    }
+
+    /// <summary>
+    /// Report Builder / data-hub identifier fields (Grower, Pallet No, Date Code,
+    /// Lot No, Label) are captured as reading types in this deployment, not the
+    /// legacy qms_sample columns. The flat pipeline must resolve them from the
+    /// reading/header bags so the column a user picks actually shows their value.
+    /// Verified against container MSGU9205337 (grower entered as a reading).
+    /// </summary>
+    [Fact]
+    public async Task Flat_rows_resolve_grower_from_readings_not_the_empty_column()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var qos = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
+
+        var filter = new FlatDefectFilter { ContainerNo = "MSGU9205337" };
+        var rows = 0;
+        var growerResolved = false;
+        await foreach (var row in qos.StreamFlatDefectRowsAsync(filter, CancellationToken.None))
+        {
+            rows++;
+            if (!string.IsNullOrWhiteSpace(row.Grower)) { growerResolved = true; break; }
+        }
+
+        if (rows == 0) return;   // container purged from the DB — nothing to assert
+        Assert.True(growerResolved,
+            "Grower did not resolve from the reading bag for a container that has grower readings.");
     }
 
     /// <summary>An Operator must not reach the admin area.</summary>

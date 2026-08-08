@@ -82,7 +82,7 @@ public class ImagesController : Controller
         if (!ImageService.IsValidOwnerType(ownerType))
             return BadRequest("Unknown image owner type.");
 
-        var scoped = User.GetScopedPlant();
+        var scope = User.GetPlantScope();
 
         switch (ownerType)
         {
@@ -93,7 +93,7 @@ public class ImagesController : Controller
                 if (arrival == null) return NotFound();
                 if (arrival.StatusCode != ArrivalStatus.Draft)
                     return EditBlocked($"Arrival is {arrival.StatusCode}; photos can only be changed while it is in Draft.");
-                if (scoped != null && !string.Equals(await _arrivals.GetPlantAsync(ownerId), scoped, StringComparison.OrdinalIgnoreCase))
+                if (!scope.Unrestricted && !scope.Allows(await _arrivals.GetPlantAsync(ownerId)))
                     return Forbid();
                 return null;
             }
@@ -105,7 +105,7 @@ public class ImagesController : Controller
                 if (qo == null) return NotFound();
                 if (qo.StatusCode != QualityOrderStatus.Open)
                     return EditBlocked($"Quality Order is {qo.StatusCode}; photos can only be changed while it is Open.");
-                if (scoped != null && !string.Equals(await _qos.GetPlantForQoAsync(sample.QualityOrderId), scoped, StringComparison.OrdinalIgnoreCase))
+                if (!scope.Unrestricted && !scope.Allows(await _qos.GetPlantForQoAsync(sample.QualityOrderId)))
                     return Forbid();
                 return null;
             }

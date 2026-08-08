@@ -36,12 +36,15 @@ public class QualityOrdersController : Controller
         // Plant-scoped operators can't widen their view: the scope overrides
         // whatever the panel's plant dropdown posted (the view renders a locked
         // badge + hidden input to match).
-        var scoped = User.GetScopedPlant();
-        var rows    = await _qos.ListAsync(filter, scoped);
-        var options = await _qos.GetQoFilterOptionsAsync(scoped);
+        var scope   = User.GetPlantScope();
+        var rows    = await _qos.ListAsync(filter, scope);
+        var options = await _qos.GetQoFilterOptionsAsync(scope);
         ViewBag.Filter           = filter;
         ViewBag.FilterOptions    = options;
-        ViewBag.PlantScopeLocked = scoped;
+        // Lock the plant dropdown to a badge only when the user has exactly one
+        // plant; multi-plant users still pick among their own via the options,
+        // which are already limited to their scope above.
+        ViewBag.PlantScopeLocked = User.SinglePlantOrNull();
         return View(rows);
     }
 
@@ -49,24 +52,20 @@ public class QualityOrdersController : Controller
     /// different plant; null when access is OK.</summary>
     private async Task<IActionResult?> EnsureCanReadQoAsync(long qualityOrderId)
     {
-        var scoped = User.GetScopedPlant();
-        if (scoped == null) return null;
+        var scope = User.GetPlantScope();
+        if (scope.Unrestricted) return null;
         var plant = await _qos.GetPlantForQoAsync(qualityOrderId);
-        return string.Equals(plant, scoped, StringComparison.OrdinalIgnoreCase)
-            ? null
-            : Forbid();
+        return scope.Allows(plant) ? null : Forbid();
     }
 
     /// <summary>Forbid() when the user is plant-scoped and the arrival's plant
     /// (where this QO would attach) doesn't match. Used by CreateForArrival.</summary>
     private async Task<IActionResult?> EnsureCanReadArrivalAsync(long arrivalId)
     {
-        var scoped = User.GetScopedPlant();
-        if (scoped == null) return null;
+        var scope = User.GetPlantScope();
+        if (scope.Unrestricted) return null;
         var plant = await _arrivals.GetPlantAsync(arrivalId);
-        return string.Equals(plant, scoped, StringComparison.OrdinalIgnoreCase)
-            ? null
-            : Forbid();
+        return scope.Allows(plant) ? null : Forbid();
     }
 
     [HttpPost, ValidateAntiForgeryToken]
@@ -293,6 +292,31 @@ public class QualityOrdersController : Controller
             Editable     = qo.StatusCode == QualityOrderStatus.Open && _perms.CanEdit(Screens.QoDetails)
         };
         return PartialView("_MaterialForm", vm);
+    }
+
+    /// <summary>
+    /// Live grouped summary for the "Generate Summary" popup on the QO page —
+    /// the SAME rollup the QC report prints and the claim page shows, rebuilt on
+    /// each call so it always reflects the latest saved samples. Works in any
+    /// status, so a summary can be reviewed before the order is finished.
+    /// </summary>
+    [RequireScreen(Screens.QoDetails)]
+    public async Task<IActionResult> SummaryPanel(long id)
+    {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+        var qo = await _qos.GetAsync(id);
+        if (qo == null) return NotFound();
+
+        var materials = (await _qos.GetMaterialsAsync(id)).ToList();
+        // MARA-enrich so the grouping key (group/brand/variety/grade) matches the
+        // report and the QO page exactly.
+        var mara = await _mara.LookupAsync(materials.Select(m => m.MaterialNo));
+        foreach (var m in materials)
+            if (mara.TryGetValue(m.MaterialNo, out var mm)) m.ApplyMara(mm);
+
+        var units     = await _qos.GetReportUnitsAsync();
+        var summaries = await _qos.BuildGroupSummariesAsync(id, materials, units);
+        return PartialView("_QcSummary", summaries);
     }
 
     /// <summary>Saves the per-material Sample Size + Material-scoped header

@@ -1,3 +1,4 @@
+using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Models.Security;
 using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
@@ -35,7 +36,22 @@ public sealed class SecurityVm
     /// The save is refused server-side; the screen says so up front.</summary>
     public bool EditingOwnRole { get; init; }
 
+    /// <summary>True when the selected role is a super role (the built-in
+    /// Administrator): it holds everything and is shown read-only.</summary>
+    public bool SelectedIsSuper { get; init; }
+
     public DateTimeOffset? PermissionsLoadedAt { get; init; }
+
+    // ---- Users tab: who holds the selected role (read-only list) ----
+
+    /// <summary>Users who currently hold the selected role (active and disabled).
+    /// The Security screen only shows them; the Users screen is where they are
+    /// added, moved or removed.</summary>
+    public IReadOnlyList<User> Members { get; init; } = Array.Empty<User>();
+
+    /// <summary>Which sub-tab of the role editor to open: "permissions" (default)
+    /// or "users".</summary>
+    public string ActiveTab { get; init; } = "permissions";
 }
 
 public sealed class ScreenCardVm
@@ -66,6 +82,10 @@ public sealed class PermissionRowVm
     public string DisplayName { get; init; } = "";
     public bool   Granted     { get; init; }
     public bool   IsObsolete  { get; init; }
+    /// <summary>The action only reads (download a PDF, export). It stays
+    /// grantable when the screen is set to read-only, and the editor keeps it
+    /// enabled where an edit button would be locked out.</summary>
+    public bool   IsReadOnlyAction { get; init; }
     /// <summary>Rendered locked and ticked: the administrator role can never be
     /// denied the Security screen, so the cell would be a lie if it were
     /// editable.</summary>
@@ -75,10 +95,25 @@ public sealed class PermissionRowVm
 public sealed class MatrixRowVm
 {
     public string ScreenTitle { get; init; } = "";
+    /// <summary>The owning screen key — groups action rows under their screen and
+    /// drives the two-switch rule (an action needs its screen at Edit/Read).</summary>
+    public string ScreenKey   { get; init; } = "";
     public string Code        { get; init; } = "";
     public string DisplayName { get; init; } = "";
-    public string Kind        { get; init; } = "";
+    public string Kind        { get; init; } = "";   // "Screen" | "Action"
     public bool   IsObsolete  { get; init; }
-    /// <summary>Level per role code, in the same order as SecurityVm.Roles.</summary>
-    public IReadOnlyList<AccessLevel> Levels { get; init; } = Array.Empty<AccessLevel>();
+    /// <summary>Screen rows only: a tri-state No/Read/Edit rather than on/off.</summary>
+    public bool   SupportsAccessLevel { get; init; }
+    /// <summary>Action rows only: stays grantable when its screen is read-only.</summary>
+    public bool   IsReadOnlyAction    { get; init; }
+    /// <summary>One cell per role code, in the same order as SecurityVm.Roles.</summary>
+    public IReadOnlyList<MatrixCellVm> Cells { get; init; } = Array.Empty<MatrixCellVm>();
+}
+
+/// <summary>One (permission, role) cell in the editable comparison grid.</summary>
+public sealed class MatrixCellVm
+{
+    public AccessLevel Level  { get; init; }
+    /// <summary>The administrator floor: rendered ticked and read-only.</summary>
+    public bool        Locked { get; init; }
 }

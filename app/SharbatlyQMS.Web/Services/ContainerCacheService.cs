@@ -87,9 +87,10 @@ public class ContainerCacheService : IContainerCacheService
     public async Task<IReadOnlyList<PendingPickupRow>> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
         string? plant = null, string? poType = null, string? storageLoc = null,
-        string? supplier = null,
+        string? supplier = null, Models.PlantScope? scope = null,
         CancellationToken ct = default)
     {
+        var sc = scope ?? Models.PlantScope.All;
         using var c = Open();
         // Same filter clause is applied to both result sets so the
         // material-lines query never returns lines for triplets the
@@ -98,15 +99,19 @@ public class ContainerCacheService : IContainerCacheService
         // equality because they come from dropdowns sourced from the
         // same column values. Supplier is free text too -- operators
         // remember a word of the name, rarely the whole thing.
+        // Plant matching runs on the EFFECTIVE plant -- COALESCE(override_plant,
+        // plant) -- so a manager-reassigned container shows in the target plant's
+        // list (and the target plant's scope) and leaves the original's.
         const string filterClause = @"
             has_arrival = 0
             AND (@Container  IS NULL OR container_no LIKE @Container)
             AND (@Bol        IS NULL OR bol_no       LIKE @Bol)
             AND (@Po         IS NULL OR ebeln        LIKE @Po)
             AND (@Supplier   IS NULL OR vendor_name  LIKE @Supplier OR vendor_no LIKE @Supplier)
-            AND (@Plant      IS NULL OR plant        = @Plant)
+            AND (@Plant      IS NULL OR COALESCE(override_plant, plant) = @Plant)
             AND (@PoType     IS NULL OR po_type      = @PoType)
-            AND (@StorageLoc IS NULL OR storage_loc  = @StorageLoc)";
+            AND (@StorageLoc IS NULL OR storage_loc  = @StorageLoc)
+            AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)";
 
         // SQL LIKE wildcards: empty input -> NULL (match everything);
         // populated input -> '%value%' contains-match (operators usually
@@ -126,7 +131,9 @@ public class ContainerCacheService : IContainerCacheService
             Supplier   = Wrap(supplier),
             Plant      = Exact(plant),
             PoType     = Exact(poType),
-            StorageLoc = Exact(storageLoc)
+            StorageLoc = Exact(storageLoc),
+            sUnrestricted = sc.Unrestricted,
+            sPlants       = sc.QueryPlants
         };
 
         using var grid = await c.QueryMultipleAsync($@"
@@ -138,7 +145,9 @@ public class ContainerCacheService : IContainerCacheService
                 MAX(vendor_no)     AS VendorNo,
                 MAX(vendor_name)   AS VendorName,
                 MAX(po_type)       AS PoType,
-                MAX(plant)         AS Plant,
+                COALESCE(MAX(override_plant), MAX(plant)) AS Plant,
+                MAX(plant)         AS OriginalPlant,
+                CASE WHEN MAX(override_plant) IS NOT NULL THEN 1 ELSE 0 END AS IsPlantOverridden,
                 MAX(storage_loc)   AS StorageLocation,
                 COUNT(*)           AS LineCount,
                 MAX(doc_date)      AS DocDate,
@@ -180,8 +189,10 @@ public class ContainerCacheService : IContainerCacheService
         return triplets;
     }
 
-    public async Task<PendingFilterOptions> GetPendingFilterOptionsAsync(CancellationToken ct = default)
+    public async Task<PendingFilterOptions> GetPendingFilterOptionsAsync(
+        Models.PlantScope? scope = null, CancellationToken ct = default)
     {
+        var sc = scope ?? Models.PlantScope.All;
         using var c = Open();
         // Three cheap DISTINCT queries over the pending-filtered index
         // (IX_qms_sap_container_cache_pending) -- index-only seeks, no
@@ -189,24 +200,32 @@ public class ContainerCacheService : IContainerCacheService
         // The third query returns (plant, storage_loc) pairs because
         // storage-loc codes repeat across plants (e.g. "0001" appears
         // under multiple plants in SAP); the UI needs the parent plant
-        // to render and filter correctly.
+        // to render and filter correctly. All three honour the user's plant
+        // scope so a restricted user never even sees another plant's codes.
+        // Dropdowns list the EFFECTIVE plant (override when set, else SAP's) so
+        // they line up with what ListPendingAsync filters and shows, and a
+        // reassigned container appears under its target plant.
         using var grid = await c.QueryMultipleAsync(@"
-            SELECT DISTINCT plant
+            SELECT DISTINCT COALESCE(override_plant, plant) AS Plant
             FROM   qms_sap_container_cache
-            WHERE  has_arrival = 0 AND plant IS NOT NULL AND plant <> ''
-            ORDER  BY plant;
+            WHERE  has_arrival = 0 AND COALESCE(override_plant, plant) IS NOT NULL AND COALESCE(override_plant, plant) <> ''
+              AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)
+            ORDER  BY Plant;
 
             SELECT DISTINCT po_type
             FROM   qms_sap_container_cache
             WHERE  has_arrival = 0 AND po_type IS NOT NULL AND po_type <> ''
+              AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)
             ORDER  BY po_type;
 
-            SELECT DISTINCT plant AS Plant, storage_loc AS Code
+            SELECT DISTINCT COALESCE(override_plant, plant) AS Plant, storage_loc AS Code
             FROM   qms_sap_container_cache
             WHERE  has_arrival = 0
-              AND  plant       IS NOT NULL AND plant       <> ''
+              AND  COALESCE(override_plant, plant) IS NOT NULL AND COALESCE(override_plant, plant) <> ''
               AND  storage_loc IS NOT NULL AND storage_loc <> ''
-            ORDER  BY plant, storage_loc;");
+              AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)
+            ORDER  BY Plant, storage_loc;",
+            new { sUnrestricted = sc.Unrestricted, sPlants = sc.QueryPlants });
 
         var plants    = (await grid.ReadAsync<string>()).ToList();
         var poTypes   = (await grid.ReadAsync<string>()).ToList();
@@ -259,6 +278,54 @@ public class ContainerCacheService : IContainerCacheService
               AND  bol_no       = @bolNo
               AND  ebeln        = @ebeln",
             new { containerNo, bolNo, ebeln, arrivalId });
+    }
+
+    public async Task<int> SetPlantOverrideAsync(string containerNo, string bolNo, string ebeln,
+        string targetPlant, string user, CancellationToken ct = default)
+    {
+        using var c = Open();
+        // Reassigning to the container's own SAP plant clears the override
+        // (per-row CASE, so a triplet spanning >1 SAP plant is handled row by
+        // row). override_plant is deliberately not part of the UPSERT key, so a
+        // later SAP sweep re-MERGEs the same rows and leaves this column intact.
+        return await c.ExecuteAsync(@"
+            UPDATE qms_sap_container_cache
+            SET    override_plant    = CASE WHEN @targetPlant = plant THEN NULL ELSE @targetPlant END,
+                   override_plant_by  = @user,
+                   override_plant_at  = SYSUTCDATETIME(),
+                   last_seen_at       = SYSUTCDATETIME()
+            WHERE  container_no = @containerNo
+              AND  bol_no       = @bolNo
+              AND  ebeln        = @ebeln
+              AND  has_arrival  = 0",
+            new { containerNo, bolNo, ebeln, targetPlant, user });
+    }
+
+    public async Task<string?> GetEffectivePlantAsync(string containerNo, string bolNo, string ebeln, CancellationToken ct = default)
+    {
+        using var c = Open();
+        return await c.ExecuteScalarAsync<string?>(@"
+            SELECT TOP 1 COALESCE(override_plant, plant)
+            FROM   qms_sap_container_cache
+            WHERE  container_no = @containerNo
+              AND  bol_no       = @bolNo
+              AND  ebeln        = @ebeln
+              AND  has_arrival  = 0",
+            new { containerNo, bolNo, ebeln });
+    }
+
+    public async Task<string?> GetPlantOverrideAsync(string containerNo, string bolNo, string ebeln, CancellationToken ct = default)
+    {
+        using var c = Open();
+        return await c.ExecuteScalarAsync<string?>(@"
+            SELECT TOP 1 override_plant
+            FROM   qms_sap_container_cache
+            WHERE  container_no = @containerNo
+              AND  bol_no       = @bolNo
+              AND  ebeln        = @ebeln
+              AND  has_arrival  = 0
+              AND  override_plant IS NOT NULL",
+            new { containerNo, bolNo, ebeln });
     }
 
     public async Task<int> ReconcileWithArrivalsAsync(CancellationToken ct = default)

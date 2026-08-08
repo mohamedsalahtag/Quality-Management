@@ -43,23 +43,48 @@
 
     if (form) form.addEventListener('submit', serialiseLevels);
 
-    // ---- Read-only generates: untick the screen's buttons ------------------
+    // ---- The screen level drives which buttons can be granted --------------
+    // Edit (2):        every button is grantable.
+    // Read only (1):   only READ-only buttons (download the PDF, export) can be
+    //                  granted -- an edit button could never be pressed, so it
+    //                  is unticked and locked out. This is what lets an admin
+    //                  build a "can look, can print, cannot change" role.
+    // No access (0):   the screen is off, so nothing on it is reachable.
+    //
+    // Boxes are selected WITHOUT :not([disabled]) on purpose: a box a previous
+    // Read-only / No-access choice disabled must be re-enabled when the screen
+    // goes back to Edit. [data-locked] boxes (the administrator floor) are the
+    // only ones left untouched -- they are permanently ticked by the server.
     function applyLevelToCard(card) {
         var group = card.querySelector('[data-screen-level]');
         if (!group) return;
         var picked = group.querySelector('input[type=radio]:checked');
         var level  = picked ? picked.value : '0';
-        var boxes  = card.querySelectorAll('.perm-row input[type=checkbox]:not([disabled])');
+        var anyGrantable = false;
 
-        if (level !== '2') {
-            // No access or read-only: a button here could never be pressed, so
-            // showing it ticked would be a lie.
-            boxes.forEach(function (b) { b.checked = false; });
-        }
-        boxes.forEach(function (b) { b.disabled = (level !== '2'); });
-        card.querySelectorAll('[data-select-all],[data-select-none]').forEach(function (b) {
-            b.disabled = (level !== '2');
+        card.querySelectorAll('.perm-row input[type=checkbox]:not([data-locked])').forEach(function (b) {
+            var readOnlyAction = b.hasAttribute('data-readonly');
+            var grantable = level === '2' || (level === '1' && readOnlyAction);
+            if (!grantable) b.checked = false;   // can't grant what can't be reached
+            b.disabled = !grantable;
+            if (grantable) anyGrantable = true;
         });
+
+        card.querySelectorAll('[data-select-all],[data-select-none]').forEach(function (b) {
+            b.disabled = !anyGrantable;
+        });
+
+        // Restate what the current choice means, right under the buttons, so
+        // "No access" and "Read only" are never a mystery.
+        var hint = card.querySelector('[data-level-hint]');
+        if (hint) {
+            hint.textContent =
+                level === '2' ? 'Edit: this role can open the screen and use every button you tick below.'
+              : level === '1' ? (anyGrantable
+                    ? 'Read only: this role can view the screen. Tick the view/export buttons it may use; buttons that change data are switched off.'
+                    : 'Read only: this role can view the screen. It has no view/export buttons, so nothing else can be granted here.')
+              : 'No access: this role cannot open or even see this screen, so none of its buttons apply.';
+        }
     }
 
     document.querySelectorAll('[data-card]').forEach(function (card) {
@@ -173,4 +198,34 @@
             });
         });
     }
+
+    // ---- Editable comparison grid: the two-switch generator, per column -----
+    // Each role column is an independent per-role editor. A screen <select>
+    // (No access / Read only / Edit) drives which of THAT role's action cells in
+    // THAT screen can be granted, mirroring applyLevelToCard() above:
+    //   Edit (2)      -> every action grantable
+    //   Read only (1) -> only view/export actions; edit actions unticked + locked
+    //   No access (0) -> nothing on the screen is reachable, all unticked + locked
+    function levelOf(sel) {
+        var v = sel.value || '';
+        return v.substring(v.lastIndexOf('=') + 1);   // "screenKey=2" -> "2"
+    }
+    function applyMatrixScreen(sel) {
+        var role   = sel.getAttribute('data-role');
+        var screen = sel.getAttribute('data-screen');
+        var level  = levelOf(sel);
+        document
+          .querySelectorAll('.matrix-action[data-role="' + role + '"][data-screen="' + screen + '"]')
+          .forEach(function (cb) {
+              var readOnly  = cb.getAttribute('data-readonly') === 'true';
+              var grantable = level === '2' || (level === '1' && readOnly);
+              if (!grantable) cb.checked = false;   // can't grant what can't be reached
+              cb.disabled = !grantable;
+          });
+    }
+    var screenSelects = document.querySelectorAll('.matrix-screen');
+    screenSelects.forEach(function (sel) {
+        sel.addEventListener('change', function () { applyMatrixScreen(sel); });
+        applyMatrixScreen(sel);   // set the initial enabled/disabled state
+    });
 })();

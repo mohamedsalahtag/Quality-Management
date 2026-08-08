@@ -62,11 +62,15 @@ public class QualityOrderService : IQualityOrderService
     private const string QoListWhere = @"
         WHERE  (@status IS NULL OR qo.status_code = @status)
           AND  (@plant  IS NULL OR a.plant        = @plant)
+          -- Per-user plant scope: unrestricted users pass @sUnrestricted = 1;
+          -- everyone else is limited to their assigned plants (empty = nothing).
+          AND  (@sUnrestricted = 1 OR a.plant IN @sPlants)
           AND  (@container  IS NULL OR a.container_no    LIKE '%' + @container + '%')
           AND  (@bol        IS NULL OR a.bol_no          LIKE '%' + @bol       + '%')
           AND  (@po         IS NULL OR a.ebeln           LIKE '%' + @po        + '%')
           AND  (@arrivalNo  IS NULL OR a.arrival_no      LIKE '%' + @arrivalNo + '%')
           AND  (@storageLoc IS NULL OR a.storage_location = @storageLoc)
+          AND  (@supplier   IS NULL OR a.vendor_name      = @supplier)
           AND  (@openedBy   IS NULL OR qo.opened_by       = @openedBy)
           AND  (@fromUtc    IS NULL OR qo.created_at     >= @fromUtc)
           AND  (@toUtc      IS NULL OR qo.created_at      < @toUtc)
@@ -86,7 +90,7 @@ public class QualityOrderService : IQualityOrderService
 
     /// <param name="plantScope">Forced plant for plant-restricted operators.
     /// When set it overrides whatever the user picked in the filter panel.</param>
-    public async Task<IReadOnlyList<QualityOrder>> ListAsync(QoListFilter f, string? plantScope = null)
+    public async Task<IReadOnlyList<QualityOrder>> ListAsync(QoListFilter f, PlantScope scope)
     {
         using var c = Open();
 
@@ -107,13 +111,16 @@ public class QualityOrderService : IQualityOrderService
         {
             status     = Trim(f.Status),
             search     = Trim(f.Search),
-            plant      = Trim(plantScope) ?? Trim(f.Plant),
+            plant      = Trim(f.Plant),
+            sUnrestricted = scope.Unrestricted,
+            sPlants       = scope.QueryPlants,
             container  = Trim(f.Container),
             bol        = Trim(f.Bol),
             po         = Trim(f.Po),
             arrivalNo  = Trim(f.ArrivalNo),
             storageLoc = Trim(f.StorageLoc),
             material   = Trim(f.Material),
+            supplier   = Trim(f.Supplier),
             openedBy   = Trim(f.OpenedBy),
             fromUtc,
             toUtc
@@ -238,7 +245,7 @@ public class QualityOrderService : IQualityOrderService
     /// guaranteed to return at least one row. Three cheap DISTINCTs in one
     /// round trip -- same shape as ContainerCacheService.GetPendingFilterOptionsAsync.
     /// </summary>
-    public async Task<QoFilterOptions> GetQoFilterOptionsAsync(string? plantScope = null)
+    public async Task<QoFilterOptions> GetQoFilterOptionsAsync(PlantScope scope)
     {
         using var c = Open();
         using var grid = await c.QueryMultipleAsync(@"
@@ -246,7 +253,7 @@ public class QualityOrderService : IQualityOrderService
             FROM   qms_quality_order qo
             JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
             WHERE  a.plant IS NOT NULL AND a.plant <> ''
-              AND (@plantScope IS NULL OR a.plant = @plantScope)
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
             ORDER  BY a.plant;
 
             SELECT DISTINCT a.plant AS Plant, a.storage_location AS Code
@@ -254,23 +261,31 @@ public class QualityOrderService : IQualityOrderService
             JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
             WHERE  a.plant            IS NOT NULL AND a.plant            <> ''
               AND  a.storage_location IS NOT NULL AND a.storage_location <> ''
-              AND (@plantScope IS NULL OR a.plant = @plantScope)
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
             ORDER  BY a.plant, a.storage_location;
+
+            SELECT DISTINCT a.vendor_name
+            FROM   qms_quality_order qo
+            JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
+            WHERE  a.vendor_name IS NOT NULL AND a.vendor_name <> ''
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
+            ORDER  BY a.vendor_name;
 
             SELECT DISTINCT qo.opened_by
             FROM   qms_quality_order qo
             LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
             WHERE  qo.opened_by IS NOT NULL AND qo.opened_by <> ''
-              AND (@plantScope IS NULL OR a.plant = @plantScope)
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
             ORDER  BY qo.opened_by;",
-            new { plantScope = string.IsNullOrWhiteSpace(plantScope) ? null : plantScope.Trim() });
+            new { sUnrestricted = scope.Unrestricted, sPlants = scope.QueryPlants });
 
-        var plants   = (await grid.ReadAsync<string>()).ToList();
-        var storage  = (await grid.ReadAsync<QoPlantStorage>()).ToList();
-        var openedBy = (await grid.ReadAsync<string>()).ToList();
+        var plants    = (await grid.ReadAsync<string>()).ToList();
+        var storage   = (await grid.ReadAsync<QoPlantStorage>()).ToList();
+        var suppliers = (await grid.ReadAsync<string>()).ToList();
+        var openedBy  = (await grid.ReadAsync<string>()).ToList();
         return new QoFilterOptions
         {
-            Plants = plants, StorageLocations = storage, OpenedBy = openedBy
+            Plants = plants, StorageLocations = storage, Suppliers = suppliers, OpenedBy = openedBy
         };
     }
 
@@ -1945,13 +1960,17 @@ public class QualityOrderService : IQualityOrderService
                     SampleScope     = s.SampleScope,
                     SampleSize      = s.SampleSize,
                     SizeOverridden  = s.SizeOverridden,
-                    Grower          = s.Grower,
-                    PalletNo        = s.PalletNo,
-                    GrowerPallet    = s.GrowerPallet,
-                    PackCodeSample  = s.PackCode,
-                    DateCode        = s.DateCode,
-                    LabelValue      = s.LabelValue,
-                    LotNo           = s.LotNo,
+                    // These identifier fields are captured as READING TYPES (or
+                    // material header fields) in this deployment, not the legacy
+                    // qms_sample columns (which are always empty), so resolve them
+                    // from the reading / header bags. See PickIdentifier.
+                    Grower          = PickIdentifier(s.Grower,       readingBag, sHeaderBag, mHeaderBag, "Grower", "GROWER"),
+                    PalletNo        = PickIdentifier(s.PalletNo,     readingBag, sHeaderBag, mHeaderBag, "Pallet No.", "PALLET_NO", "Pallet No", "PalletNo"),
+                    GrowerPallet    = PickIdentifier(s.GrowerPallet, readingBag, sHeaderBag, mHeaderBag, "Grower Pallet", "GROWER_PALLET", "GrowerPallet"),
+                    PackCodeSample  = PickIdentifier(s.PackCode,     readingBag, sHeaderBag, mHeaderBag, "Pack Code", "PACK_CODE", "PackCode"),
+                    DateCode        = PickIdentifier(s.DateCode,     readingBag, sHeaderBag, mHeaderBag, "Date Code", "DATE_CODE", "DateCode"),
+                    LabelValue      = PickIdentifier(s.LabelValue,   readingBag, sHeaderBag, mHeaderBag, "Label", "LABEL_VALUE", "Label Value"),
+                    LotNo           = PickIdentifier(s.LotNo,        readingBag, sHeaderBag, mHeaderBag, "Lot No.", "LOT_NO", "Lot No", "Lot Number", "LotNo"),
                     SampleCreatedAt = s.CreatedAt,
                     SampleCreatedBy = s.CreatedBy,
                     // Defect row
@@ -1970,6 +1989,34 @@ public class QualityOrderService : IQualityOrderService
                 };
             }
         }
+    }
+
+    // The sample identifier fields (Grower, Pallet No, Grower Pallet, Date Code,
+    // Label, Lot No, Pack Code) were originally dedicated qms_sample columns, but
+    // this deployment captures them as READING TYPES (or material header fields)
+    // instead -- the columns are always empty (verified: 0 rows). Resolve the
+    // legacy column first (so an old sample that did use it still works), then
+    // fall back to a matching reading, then a matching header value, trying each
+    // candidate key (reading code, then header field code) case-insensitively.
+    // This is why "Grower" now shows in the Report Builder / pivot / data hub.
+    private static string? PickIdentifier(
+        string? legacy,
+        IReadOnlyDictionary<string, string?> readings,
+        IReadOnlyDictionary<string, string?> sampleHeaders,
+        IReadOnlyDictionary<string, string?> materialHeaders,
+        params string[] keys)
+    {
+        if (!string.IsNullOrWhiteSpace(legacy)) return legacy;
+        foreach (var bag in new[] { readings, sampleHeaders, materialHeaders })
+        {
+            if (bag is null || bag.Count == 0) continue;
+            foreach (var key in keys)
+                foreach (var kv in bag)
+                    if (string.Equals(kv.Key, key, StringComparison.OrdinalIgnoreCase)
+                        && !string.IsNullOrWhiteSpace(kv.Value))
+                        return kv.Value;
+        }
+        return null;
     }
 
     private static string? FormatHv(string? kind, string? text, decimal? num, DateTime? date) => kind switch

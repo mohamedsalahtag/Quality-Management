@@ -103,6 +103,25 @@ public class PermissionCatalogTests : IClassFixture<QmsAppFactory>
     }
 
     [Fact]
+    public void Read_only_actions_are_flagged_so_they_survive_a_read_only_screen()
+    {
+        // The Security editor keeps these grantable when their screen is set to
+        // read-only, and the resolver only asks for screen-Read to run them.
+        // Both depend on the ReadOnly flag reaching the catalogue.
+        var readOnly = Catalog().ReadOnlyActionCodes();
+
+        Assert.Contains(Perm.Qo.Pdf, readOnly);
+        Assert.Contains(Perm.Arrivals.ChecklistPdf, readOnly);
+        Assert.Contains(Perm.Attachments.Download, readOnly);
+
+        // An action that changes data must never be flagged read-only, or the
+        // editor would leave an edit button pressable on a read-only screen.
+        Assert.DoesNotContain(Perm.Qo.Delete, readOnly);
+        Assert.DoesNotContain(Perm.Qo.Submit, readOnly);
+        Assert.DoesNotContain(Perm.Arrivals.Complete, readOnly);
+    }
+
+    [Fact]
     public void Self_service_actions_stay_outside_the_permission_system()
     {
         // Signing out and editing your own profile must never be revocable, or

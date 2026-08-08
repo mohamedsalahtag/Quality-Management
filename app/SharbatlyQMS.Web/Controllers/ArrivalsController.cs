@@ -7,6 +7,7 @@ using SharbatlyQMS.Web.Models.Security;
 using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.Services.Sap;
+using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Controllers;
 
@@ -34,12 +35,10 @@ public class ArrivalsController : Controller
         // Operator plant-scope: if the user is restricted to a plant, force
         // the dropdown value to it (and the view replaces the dropdown with
         // a locked badge). Manager / SiteAdmin / etc. pass null and see all.
-        var scoped = User.GetScopedPlant();
-        if (scoped != null) plant = scoped;
-
-        var rows    = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc, supplier);
+        var scope   = User.GetPlantScope();
+        var rows    = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc, supplier, scope);
         var status  = await _cache.GetPullStatusAsync();
-        var options = await _cache.GetPendingFilterOptionsAsync();
+        var options = await _cache.GetPendingFilterOptionsAsync(scope);
         ViewBag.Container         = container;
         ViewBag.Bol               = bol;
         ViewBag.Po                = po;
@@ -51,7 +50,7 @@ public class ArrivalsController : Controller
         ViewBag.PlantOptions      = options.Plants;
         ViewBag.PoTypeOptions     = options.PoTypes;
         ViewBag.StorageLocOptions = options.StorageLocations;
-        ViewBag.PlantScopeLocked  = scoped;
+        ViewBag.PlantScopeLocked  = User.SinglePlantOrNull();
         return View(rows);
     }
 
@@ -59,12 +58,10 @@ public class ArrivalsController : Controller
     /// belongs to a different plant; null when access is OK.</summary>
     private async Task<IActionResult?> EnsureCanReadArrivalAsync(long arrivalId)
     {
-        var scoped = User.GetScopedPlant();
-        if (scoped == null) return null;
+        var scope = User.GetPlantScope();
+        if (scope.Unrestricted) return null;
         var plant = await _arrivals.GetPlantAsync(arrivalId);
-        return string.Equals(plant, scoped, StringComparison.OrdinalIgnoreCase)
-            ? null
-            : Forbid();
+        return scope.Allows(plant) ? null : Forbid();
     }
 
     /// <summary>
@@ -122,14 +119,74 @@ public class ArrivalsController : Controller
         return RedirectToAction(nameof(Pending));
     }
 
-    [RequireScreen(Screens.ArrivalsIndex, Seed.Everyone, "Open Arrivals")]
-    public async Task<IActionResult> Index(string? status, string? search)
+    /// <summary>
+    /// QC Manager / Admin: reassign a pending SAP container to a different plant.
+    /// The container moves into the target plant's Pending list (visible to that
+    /// plant's users) and out of the original's; the Arrival + Quality Order it
+    /// later becomes are created under the target plant. Passing the container's
+    /// own SAP plant clears a previous override. SAP data is left untouched.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Arrivals.OverridePlant, Seed.ManagerOrAdmin, "Override a pending container's plant")]
+    public async Task<IActionResult> OverridePlant(
+        string containerNo, string bolNo, string po, string plant,
+        [FromServices] ICodeDescriptionDirectory codes)
     {
-        var scoped = User.GetScopedPlant();
-        var rows = await _arrivals.ListAsync(string.IsNullOrEmpty(status) ? null : status, search, scoped);
-        ViewBag.Status = status;
-        ViewBag.Search = search;
-        ViewBag.PlantScopeLocked = scoped;
+        if (string.IsNullOrWhiteSpace(containerNo) || string.IsNullOrWhiteSpace(po) || string.IsNullOrWhiteSpace(plant))
+        {
+            TempData["Error"] = "Container, PO and target plant are required.";
+            return RedirectToAction(nameof(Pending));
+        }
+        bolNo = (bolNo ?? "").Trim();
+        plant = plant.Trim();
+
+        // Target must be a real plant code.
+        if (!codes.Plants.Any(p => string.Equals(p.Code, plant, StringComparison.OrdinalIgnoreCase)))
+        {
+            TempData["Error"] = $"Unknown plant '{plant}'.";
+            return RedirectToAction(nameof(Pending));
+        }
+
+        var scope = User.GetPlantScope();
+        // The container must currently be one the user can see, and a plant-scoped
+        // manager can only reassign into a plant they are allowed. Unrestricted
+        // managers/admins pass both.
+        var currentPlant = await _cache.GetEffectivePlantAsync(containerNo, bolNo, po);
+        if (currentPlant == null)
+        {
+            TempData["Error"] = "That container is no longer pending (it may already have an arrival).";
+            return RedirectToAction(nameof(Pending));
+        }
+        if (!scope.Unrestricted && (!scope.Allows(currentPlant) || !scope.Allows(plant)))
+            return Forbid();
+
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        var affected = await _cache.SetPlantOverrideAsync(containerNo, bolNo, po, plant, user);
+        if (affected == 0)
+        {
+            TempData["Error"] = "Nothing was changed — the container may no longer be pending.";
+        }
+        else
+        {
+            TempData["Success"] = string.Equals(plant, currentPlant, StringComparison.OrdinalIgnoreCase)
+                ? $"Container {containerNo} is already on plant {codes.PlantDisplay(plant)}."
+                : $"Container {containerNo} moved to plant {codes.PlantDisplay(plant)}. It is now visible to that plant's users; create the Quality Order from there.";
+        }
+        return RedirectToAction(nameof(Pending));
+    }
+
+    [RequireScreen(Screens.ArrivalsIndex, Seed.Everyone, "Open Arrivals")]
+    public async Task<IActionResult> Index([FromQuery] ArrivalListFilter filter)
+    {
+        // Plant-scoped operators can't widen their view: the scope overrides
+        // whatever the panel's plant dropdown posted (the view renders a locked
+        // badge + hidden input to match). Same pattern as Quality Orders.
+        var scope   = User.GetPlantScope();
+        var rows    = await _arrivals.ListAsync(filter, scope);
+        var options = await _arrivals.GetArrivalFilterOptionsAsync(scope);
+        ViewBag.Filter           = filter;
+        ViewBag.FilterOptions    = options;
+        ViewBag.PlantScopeLocked = User.SinglePlantOrNull();
         return View(rows);
     }
 
@@ -158,14 +215,12 @@ public class ArrivalsController : Controller
                 sapError = ex.Message;
             }
         }
-        // Plant-scope: drop rows that don't belong to the operator's plant.
-        var scoped = User.GetScopedPlant();
-        if (scoped != null)
-            results = results
-                .Where(r => string.Equals(r.Plant, scoped, StringComparison.OrdinalIgnoreCase))
-                .ToList();
+        // Plant-scope: drop rows that don't belong to the user's assigned plants.
+        var scope = User.GetPlantScope();
+        if (!scope.Unrestricted)
+            results = results.Where(r => scope.Allows(r.Plant)).ToList();
         ViewBag.SapError = sapError;
-        ViewBag.PlantScopeLocked = scoped;
+        ViewBag.PlantScopeLocked = User.SinglePlantOrNull();
 
         var distinctBols = results.Select(r => r.BolNo).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         bool ambiguous = !string.IsNullOrWhiteSpace(container)
@@ -265,19 +320,26 @@ public class ArrivalsController : Controller
             return RedirectToAction(nameof(Search));
         }
 
-        // Plant-scope: refuse to create an arrival outside the operator's plant.
-        var scoped = User.GetScopedPlant();
-        if (scoped != null &&
-            !matched.Any(r => string.Equals(r.Plant, scoped, StringComparison.OrdinalIgnoreCase)))
+        // A manager may have reassigned this container to another plant; the
+        // arrival (and the QO that inherits its plant) must land there. The
+        // effective plant is the override when present, else the SAP row's
+        // plant. Fallback (live-SAP, not in the pending cache) has no override.
+        var overridePlant  = await _cache.GetPlantOverrideAsync(containerNo, bolNo, po);
+        var effectivePlant = overridePlant ?? matched.FirstOrDefault()?.Plant;
+
+        // Plant-scope: refuse to create an arrival outside the user's plants.
+        var scope = User.GetPlantScope();
+        if (!scope.Unrestricted && !scope.Allows(effectivePlant))
         {
-            TempData["Error"] = $"This shipment belongs to plant {matched.FirstOrDefault()?.Plant ?? "(unknown)"}; you are scoped to {scoped}.";
+            var yours = scope.Plants.Count == 0 ? "(none)" : string.Join(", ", scope.Plants);
+            TempData["Error"] = $"This shipment belongs to plant {effectivePlant ?? "(unknown)"}; you are limited to {yours}.";
             return RedirectToAction(nameof(Pending));
         }
 
         try
         {
             var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
-            var arrivalId = await _arrivals.CreateFromSapAsync(matched, user);
+            var arrivalId = await _arrivals.CreateFromSapAsync(matched, user, overridePlant);
             await _cache.MarkArrivedAsync(containerNo, bolNo, po, arrivalId);
             TempData["Success"] = $"Arrival created from container {containerNo} / BOL {bolNo} / PO {po} ({matched.Count} material line(s)).";
             return RedirectToAction(nameof(Details), new { id = arrivalId });
@@ -326,9 +388,8 @@ public class ArrivalsController : Controller
         if (await EnsureCanReadArrivalAsync(checklist.ArrivalId) is { } block) return block;
         var arrival = await _arrivals.GetAsync(checklist.ArrivalId);
         if (arrival == null) return NotFound();
-        // V31 (2026-06-20): Supervisor and above can edit Completed arrivals.
-        // Draft is always editable by OperatorOrAbove (the controller-level
-        // policy). Cancelled is never editable.
+        // Draft is editable by OperatorOrAbove (controller policy); a Completed
+        // arrival is editable by the Administrator only. Cancelled is never editable.
         if (!CanEditArrival(arrival.StatusCode))
         {
             TempData["Error"] = $"Arrival is {arrival.StatusCode} — not editable.";
@@ -441,20 +502,17 @@ public class ArrivalsController : Controller
         return RedirectToAction(nameof(Index));
     }
 
-    // V31 (2026-06-20): combined status + role gate for arrival edits.
+    // Combined status + role gate for arrival edits.
     // Draft -> any OperatorOrAbove (controller-level policy).
-    // Completed -> Supervisor and above only (data fixes after completion).
-    // Cancelled -> nobody (even SiteAdmin, who would Reopen first).
+    // Completed -> ADMINISTRATOR ONLY (post-completion data fixes). The Role
+    //   claim carries the role CODE now, so this compares against RoleCodes.Admin
+    //   ("QcAdmin"); the previous UserRoles.SiteAdmin ("SiteAdmin") name never
+    //   matched the code and so silently blocked everyone.
+    // Cancelled -> nobody (Reopen first).
     private bool CanEditArrival(string statusCode)
     {
         if (statusCode == ArrivalStatus.Draft) return true;
-        if (statusCode == ArrivalStatus.Completed)
-        {
-            var role = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
-            return role == UserRoles.Supervisor
-                || role == UserRoles.Manager
-                || role == UserRoles.SiteAdmin;
-        }
+        if (statusCode == ArrivalStatus.Completed) return User.IsInRole(RoleCodes.Admin);
         return false;
     }
 }

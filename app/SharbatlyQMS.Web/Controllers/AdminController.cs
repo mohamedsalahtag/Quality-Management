@@ -33,32 +33,19 @@ public class AdminController : Controller
     private readonly IAuditService _audit;
     private readonly ICodeDescriptionDirectory _codes;
     private readonly IPermissionResolver _perms;
+    private readonly IUserAdminService _userAdmin;
 
     public AdminController(IDbService db, ISettingsService settings,
         ISapODataClient sapOData, ISapSyncService sapSync, IEmailService email,
         IAdService ad, IServiceScopeFactory scopeFactory, IWebHostEnvironment env,
         ILogger<AdminController> adminLog, ICatalogCache catalogCache, IMaraService mara,
-        IAuditService audit, ICodeDescriptionDirectory codes, IPermissionResolver perms)
+        IAuditService audit, ICodeDescriptionDirectory codes, IPermissionResolver perms,
+        IUserAdminService userAdmin)
     {
         _db = db; _settings = settings; _sapOData = sapOData; _sapSync = sapSync;
         _email = email; _ad = ad; _scopeFactory = scopeFactory; _env = env; _adminLog = adminLog;
         _catalogCache = catalogCache; _mara = mara; _audit = audit; _codes = codes; _perms = perms;
-    }
-
-    /// <summary>
-    /// True when removing, disabling or reassigning this user would leave nobody
-    /// able to reach the Security screen. Cheap to check and worth checking on
-    /// every path: with one role per user, "assign myself the new role to test
-    /// it" is the single most likely way to lose administration entirely.
-    /// </summary>
-    private async Task<bool> IsLastSecurityAdminAsync(User u)
-    {
-        if (!u.IsActive) return false;
-        if (!_perms.RoleHasSecurityAdmin(u.RoleCode)) return false;
-
-        var others = (await _db.ListUsersAsync(null, null, true))
-            .Count(x => x.UserId != u.UserId && _perms.RoleHasSecurityAdmin(x.RoleCode));
-        return others == 0;
+        _userAdmin = userAdmin;
     }
 
     [HttpGet]
@@ -81,6 +68,9 @@ public class AdminController : Controller
         // Sourced from the role table rather than a hard-coded list, so a role
         // composed on the Security screen is assignable the moment it exists.
         ViewBag.Roles        = await _db.ListAssignableRolesAsync();
+        // Per-user plant assignments drive the multi-select in the edit modal.
+        ViewBag.AllPlants    = await _db.ListAllPlantCodesAsync();
+        ViewBag.UserPlants   = await _db.GetPlantsForUsersAsync(users.Select(u => u.UserId));
         return View(users);
     }
 
@@ -94,66 +84,14 @@ public class AdminController : Controller
     [RequirePermission(Perm.Admin.UsersEdit, Seed.AdminOnly, "Add or edit a user")]
     public async Task<IActionResult> CreateUser(string username, string role, string? plantCode)
     {
-        // `role` is a role CODE, checked against the role table so a role
-        // composed on the Security screen is assignable straight away.
-        var target = (await _db.ListAssignableRolesAsync())
-            .FirstOrDefault(r => string.Equals(r.RoleCode, role, StringComparison.OrdinalIgnoreCase));
-        if (string.IsNullOrWhiteSpace(username) || target == null)
-        {
-            TempData["Error"] = "A username and an active role are required.";
-            return RedirectToAction(nameof(Users));
-        }
-        // Plant scope follows the role's own flag. Stripped on the server as
-        // well as hidden in the UI, so a crafted post cannot smuggle one in.
-        if (!target.IsPlantScoped || string.IsNullOrWhiteSpace(plantCode))
-            plantCode = null;
-        var adCfg = await _settings.GetAdConfigAsync();
-        if (!adCfg.IsConfigured)
-        {
-            TempData["Error"] = "Active Directory is not configured. Open Site Configuration → Active Directory first.";
-            return RedirectToAction(nameof(Users));
-        }
-        if (await _db.GetUserByUsernameAsync(username) != null)
-        {
-            TempData["Error"] = $"A user named '{username}' already exists.";
-            return RedirectToAction(nameof(Users));
-        }
-
-        // Fast path: the picker just rendered the full AD list and the
-        // service has it cached. Look the chosen username up in memory.
-        var cached = await _ad.ListUsersAsync(adCfg, null, max: int.MaxValue);
-        var info = cached.FirstOrDefault(u =>
-            string.Equals(u.Username, username, StringComparison.OrdinalIgnoreCase));
-        // Slow path / fallback: cache miss or stale entry. One direct
-        // LDAP lookup keeps Add working even after a server restart
-        // between the picker open and the Add click.
-        info ??= await _ad.GetUserInfoAsync(username, adCfg);
-        if (info == null)
-        {
-            TempData["Error"] = $"User '{username}' was not found in Active Directory.";
-            return RedirectToAction(nameof(Users));
-        }
-        await _db.CreateUserAsync(new User
-        {
-            Username     = info.Username,
-            FullName     = info.FullName,
-            Email        = info.Email,
-            Department   = info.Department,
-            Role         = target.LegacyName ?? target.RoleCode,
-            RoleCode     = target.RoleCode,
-            RoleName     = target.DisplayName,
-            IsPlantScoped= target.IsPlantScoped,
-            PlantCode    = plantCode,
-            PasswordHash = "",        // AD-managed; password lives in the directory
-            IsActive     = true,
-            CreatedBy    = GetCurrentUserId()
-        });
-        var createdUser = await _db.GetUserByUsernameAsync(info.Username);
-        await AuditAdminAsync(EntityTypes.User, createdUser?.UserId ?? 0, ActionCodes.Created,
-            null, new { info.Username, role, plantCode });
-        TempData["Success"] = plantCode != null
-            ? $"User '{info.Username}' added as {role} scoped to plant {plantCode}."
-            : $"User '{info.Username}' added with role {role}.";
+        var actor = User.FindFirstValue(ClaimTypes.Name) ?? "unknown";
+        var res = await _userAdmin.AddFromDirectoryAsync(username, role, plantCode, GetCurrentUserId(), actor);
+        if (!res.Ok)
+            TempData["Error"] = res.Error;
+        else
+            TempData["Success"] = res.EffectivePlant != null
+                ? $"User '{username}' added as {role} scoped to plant {res.EffectivePlant}."
+                : $"User '{username}' added with role {role}.";
         return RedirectToAction(nameof(Users));
     }
 
@@ -192,7 +130,7 @@ public class AdminController : Controller
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Admin.UsersEdit, Seed.AdminOnly, "Add or edit a user")]
     public async Task<IActionResult> EditUser(int userId, string fullName, string email,
-        string? department, string? employeeId, string role, string? plantCode)
+        string? department, string? employeeId, string role, string[]? plantCodes)
     {
         var u = await _db.GetUserByIdAsync(userId);
         if (u == null) return NotFound();
@@ -212,14 +150,15 @@ public class AdminController : Controller
         // Somebody has to stay able to administer. Refuse the change if this is
         // the last active user whose role can reach the Security screen.
         if (!string.Equals(u.RoleCode, target.RoleCode, StringComparison.OrdinalIgnoreCase)
-            && await IsLastSecurityAdminAsync(u))
+            && await _userAdmin.IsLastSecurityAdminAsync(u))
         {
             TempData["Error"] = $"'{u.Username}' is the only active user who can manage security. " +
                                 "Give somebody else that access first.";
             return RedirectToAction(nameof(Users));
         }
 
-        var beforeRole = u.RoleCode; var beforePlant = u.PlantCode;
+        var beforeRole = u.RoleCode;
+        var beforePlants = await _db.GetUserPlantsAsync(u.UserId);
         u.FullName   = fullName;
         u.Email      = email;
         u.Department = department;
@@ -227,15 +166,23 @@ public class AdminController : Controller
         u.RoleCode   = target.RoleCode;
         u.Role       = target.LegacyName ?? target.RoleCode;
         u.RoleName   = target.DisplayName;
-        // Plant scope follows a flag on the ROLE, not the literal name
-        // "Operator" -- otherwise a composed operator-style role would silently
-        // have been given sight of every plant.
-        u.IsPlantScoped = target.IsPlantScoped;
-        u.PlantCode     = target.IsPlantScoped && !string.IsNullOrWhiteSpace(plantCode) ? plantCode : null;
         await _db.UpdateUserAsync(u);
+
+        // Plant access is a per-USER assignment now, independent of the role.
+        // Administrators always see every plant, so we never store plants for
+        // them (their login issues an unrestricted claim regardless). Everyone
+        // else is limited to exactly the plants ticked here; none ticked means
+        // "sees no plant data until assigned".
+        var isAdmin = string.Equals(target.RoleCode, RoleCodes.Admin, StringComparison.OrdinalIgnoreCase);
+        var newPlants = isAdmin ? Array.Empty<string>() : (plantCodes ?? Array.Empty<string>());
+        await _db.SetUserPlantsAsync(u.UserId, newPlants);
+
         await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Updated,
-            new { role = beforeRole, plantCode = beforePlant },
-            new { role = u.RoleCode, plantCode = u.PlantCode });
+            new { role = beforeRole, plants = beforePlants },
+            new { role = u.RoleCode, plants = newPlants });
+        // Authorisation resolves a user's role from the permission snapshot, so a
+        // role change only takes effect once the snapshot is rebuilt.
+        await _perms.RefreshAsync();
         TempData["Success"] = $"User '{u.Username}' updated.";
         return RedirectToAction(nameof(Users));
     }
@@ -272,7 +219,7 @@ public class AdminController : Controller
         }
         var u = await _db.GetUserByIdAsync(userId);
         if (u == null) return NotFound();
-        if (u.IsActive && await IsLastSecurityAdminAsync(u))
+        if (u.IsActive && await _userAdmin.IsLastSecurityAdminAsync(u))
         {
             TempData["Error"] = $"'{u.Username}' is the only active user who can manage security. " +
                                 "Give somebody else that access before disabling them.";
@@ -281,6 +228,9 @@ public class AdminController : Controller
         await _db.SetUserActiveAsync(userId, !u.IsActive, current);
         await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Updated,
             new { isActive = u.IsActive }, new { isActive = !u.IsActive });
+        // Disabling drops the user from the snapshot's user->role map; refresh so
+        // the change is felt on the next request, not the next restart.
+        await _perms.RefreshAsync();
         TempData["Success"] = $"User '{u.Username}' is now {(!u.IsActive ? "active" : "disabled")}.";
         return RedirectToAction(nameof(Users));
     }
@@ -297,7 +247,7 @@ public class AdminController : Controller
         }
         var u = await _db.GetUserByIdAsync(userId);
         if (u == null) return NotFound();
-        if (await IsLastSecurityAdminAsync(u))
+        if (await _userAdmin.IsLastSecurityAdminAsync(u))
         {
             TempData["Error"] = $"'{u.Username}' is the only active user who can manage security. " +
                                 "Give somebody else that access before removing them.";
@@ -305,8 +255,11 @@ public class AdminController : Controller
         }
         var ok = await _db.TryDeleteUserAsync(userId);
         if (ok)
+        {
             await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Deleted,
                 new { u.Username, u.Role, u.PlantCode }, null);
+            await _perms.RefreshAsync();
+        }
         TempData[ok ? "Success" : "Error"] = ok
             ? $"User '{u.Username}' deleted."
             : $"User '{u.Username}' is referenced elsewhere - disable instead.";
@@ -337,6 +290,7 @@ public class AdminController : Controller
             }
             else blockedByFk++;
         }
+        if (deleted > 0) await _perms.RefreshAsync();
         var parts = new List<string> { $"{deleted} deleted" };
         if (blockedByFk > 0) parts.Add($"{blockedByFk} kept (referenced elsewhere)");
         if (skippedSelf > 0) parts.Add($"{skippedSelf} skipped (your own account)");
