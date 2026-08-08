@@ -18,20 +18,22 @@ public interface IContainerCacheService
     Task<int> UpsertAsync(IReadOnlyList<SapShipmentRow> rows, CancellationToken ct = default);
 
     /// <summary>
-    /// Lists every pending (Container, BOL, PO) triplet ready to be
-    /// promoted to an Arrival. Each row aggregates all SAP lines that
-    /// share the triplet for display on /Arrivals/Pending. No server-side
-    /// limit -- the page's client-side tablekit paginator handles long
-    /// lists. Optional filters narrow the result on the SQL side so the
-    /// search box on the page does not have to ship a huge HTML payload.
-    /// Plant and PoType are exact-match (sourced from the page's
-    /// dropdowns, which themselves come from
-    /// <see cref="GetPendingFilterOptionsAsync"/>).
+    /// Returns ONE page of pending (Container, BOL, PO) triplets ready to be
+    /// promoted to an Arrival, plus the total matching count for the pager.
+    /// Each row aggregates all SAP lines that share the triplet for display on
+    /// /Arrivals/Pending. Paging is server-side (OFFSET/FETCH): with thousands
+    /// of pending triplets, shipping them all as one HTML payload was the whole
+    /// page's slowness, so only <paramref name="pageSize"/> triplets — and only
+    /// the material lines belonging to them — are fetched and rendered.
+    /// Optional filters narrow the result on the SQL side. Plant and PoType are
+    /// exact-match (sourced from the page's dropdowns, which themselves come
+    /// from <see cref="GetPendingFilterOptionsAsync"/>).
     /// </summary>
-    Task<IReadOnlyList<PendingPickupRow>> ListPendingAsync(
+    Task<PendingPage> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
         string? plant = null, string? poType = null, string? storageLoc = null,
-        string? supplier = null, Models.PlantScope? scope = null,
+        string? supplier = null, int page = 1, int pageSize = 100,
+        Models.PlantScope? scope = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -138,6 +140,14 @@ public class ContainerPullStatus
     /// <summary>"Manual" or "Auto" for the in-flight pull.</summary>
     public string?   RunningTriggerSource { get; set; }
 }
+
+/// <summary>
+/// One server-side page of pending triplets: the rows to render plus the
+/// total count of matching triplets (so the view can draw the pager) and the
+/// page window that produced them.
+/// </summary>
+public sealed record PendingPage(
+    IReadOnlyList<PendingPickupRow> Rows, int Total, int Page, int PageSize);
 
 /// <summary>
 /// One row on /Arrivals/Pending: a (Container, BOL, PO) triplet ready to

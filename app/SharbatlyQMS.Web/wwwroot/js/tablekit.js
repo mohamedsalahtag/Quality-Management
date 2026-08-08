@@ -58,6 +58,12 @@
         var pageSize = resolveInitialPageSize(table);
         var state = { page: 1, sortTh: null, dir: 'asc' };
 
+        // Sort-only mode: the server already paginated this table (e.g. Pending
+        // Containers ships one server page at a time), so tablekit must NOT add
+        // its own client pager or hide rows -- it only wires up column sorting
+        // over the rows that are present.
+        var noPager = table.hasAttribute('data-no-pager');
+
         // ---- Sorting -----------------------------------------------------
         var headerRow = table.tHead ? table.tHead.rows[table.tHead.rows.length - 1] : null;
         var carets = [];
@@ -122,7 +128,12 @@
             render();
         }
 
-        // ---- Pager UI (always built; selector + info + page nav) ---------
+        // ---- Pager UI (skipped entirely in sort-only mode) ---------------
+        if (noPager) {
+            render();   // just ensures every row is visible after any sort
+            return;
+        }
+
         var pager = document.createElement('div');
         pager.className = 'tk-pager d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 border-top';
 
@@ -200,6 +211,11 @@
         }
 
         function render() {
+            // Sort-only mode: keep every row visible, no pager to update.
+            if (noPager) {
+                rows.forEach(function (r) { r.style.display = ''; });
+                return;
+            }
             var total = rows.length;
             var pageCount = Math.max(1, Math.ceil(total / pageSize));
             if (state.page > pageCount) state.page = pageCount;

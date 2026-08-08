@@ -30,13 +30,20 @@ public class ArrivalsController : Controller
     [RequireScreen(Screens.ArrivalsPending, Seed.OperatorOrAbove, "Open Pending Containers")]
     public async Task<IActionResult> Pending(
         string? container, string? bol, string? po,
-        string? plant, string? poType, string? storageLoc, string? supplier)
+        string? plant, string? poType, string? storageLoc, string? supplier,
+        int page = 1, int pageSize = 100)
     {
+        // Server-side paging: the pending cache holds thousands of triplets, so
+        // rendering them all in one payload was the page's slowness. Only one
+        // page of rows (and only their material lines) is fetched. pageSize is
+        // clamped to the two the UI offers.
+        if (pageSize != 50 && pageSize != 100) pageSize = 100;
+
         // Operator plant-scope: if the user is restricted to a plant, force
         // the dropdown value to it (and the view replaces the dropdown with
         // a locked badge). Manager / SiteAdmin / etc. pass null and see all.
         var scope   = User.GetPlantScope();
-        var rows    = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc, supplier, scope);
+        var result  = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc, supplier, page, pageSize, scope);
         var status  = await _cache.GetPullStatusAsync();
         var options = await _cache.GetPendingFilterOptionsAsync(scope);
         ViewBag.Container         = container;
@@ -51,7 +58,10 @@ public class ArrivalsController : Controller
         ViewBag.PoTypeOptions     = options.PoTypes;
         ViewBag.StorageLocOptions = options.StorageLocations;
         ViewBag.PlantScopeLocked  = User.SinglePlantOrNull();
-        return View(rows);
+        ViewBag.Page              = result.Page;
+        ViewBag.PageSize          = result.PageSize;
+        ViewBag.TotalCount        = result.Total;
+        return View(result.Rows);
     }
 
     /// <summary>Returns Forbid() when the user is plant-scoped and the arrival

@@ -25,12 +25,36 @@
     // QC Manager / Admin: reassign a pending container to another plant.
     var canOverridePlant = Perms.Can(Perm.Arrivals.OverridePlant);
     var allPlants        = Codes.Plants;
+    // Server-side paging state.
+    var pageNo    = ViewBag.Page      as int?  ?? 1;
+    var pageSize  = ViewBag.PageSize  as int?  ?? 100;
+    var totalCount= ViewBag.TotalCount as int? ?? Model.Count;
+    var pageCount = (int)Math.Ceiling((double)Math.Max(totalCount, 1) / pageSize);
+    var firstRow  = totalCount == 0 ? 0 : (pageNo - 1) * pageSize + 1;
+    var lastRow   = Math.Min(pageNo * pageSize, totalCount);
+    // Current filter values, so pager links keep the same view. Only non-empty
+    // filters are included so the URL stays clean; page + pageSize always ride.
+    Func<int, int, Dictionary<string, string>> pageRoute = (p, size) =>
+    {
+        var d = new Dictionary<string, string>();
+        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) d[k] = v!; }
+        Add("container", container);
+        Add("bol", bol);
+        Add("po", po);
+        Add("supplier", supplier);
+        Add("plant", plant);
+        Add("storageLoc", storageLoc);
+        Add("poType", poType);
+        d["page"]     = p.ToString();
+        d["pageSize"] = size.ToString();
+        return d;
+    };
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="h3 mb-0">
         <i class="bi bi-inbox me-1"></i>Pending Containers
-        <span class="badge bg-secondary ms-2">@Model.Count</span>
+        <span class="badge bg-secondary ms-2">@totalCount</span>
         <small class="text-muted fs-6 fw-normal ms-2">SAP containers without a QMS Arrival yet.</small>
     </h1>
     <div class="d-flex gap-2 flex-wrap">
@@ -243,8 +267,11 @@
            stable strings, not positions, so hiding survives a new column
            being added later. Action carries data-col-lock: hiding the only
            way to create an arrival would strand the page. *@
+        @* Server-side paged: the controller ships one page of rows, so tablekit
+           runs in sort-only mode (data-no-pager) and the pager below drives
+           page navigation. data-coltoggle still powers the Columns menu. *@
         <table id="pending-containers" class="table table-sm table-hover align-middle mb-0 pending-table"
-               data-tablekit data-page-size="50" data-coltoggle>
+               data-tablekit data-no-pager data-coltoggle>
             <thead class="table-light">
                 <tr>
                     <th data-sort data-col-key="container">Container</th>
@@ -327,59 +354,63 @@
                            code in the tooltip -- the name is what people read. *@
                         <td>
                             <div class="pp-stack">
-                                @if (!string.IsNullOrEmpty(r.Plant))
-                                {
-                                    <span class="badge @(r.IsPlantOverridden ? "bg-info-subtle text-info-emphasis border border-info" : "bg-light text-dark border")"
-                                          data-bs-toggle="tooltip"
-                                          title="@(r.IsPlantOverridden ? r.Plant + " — reassigned from " + r.OriginalPlant : r.Plant)">
-                                        @Codes.PlantDisplay(r.Plant)
-                                    </span>
-                                    @if (r.IsPlantOverridden && !string.IsNullOrEmpty(r.OriginalPlant))
+                                <div class="d-flex align-items-center gap-1">
+                                    @if (!string.IsNullOrEmpty(r.Plant))
                                     {
-                                        <span class="pp-sub"><span class="pp-sub-label">was</span>@Codes.PlantDisplay(r.OriginalPlant)</span>
+                                        <span class="badge @(r.IsPlantOverridden ? "bg-info-subtle text-info-emphasis border border-info" : "bg-light text-dark border")"
+                                              data-bs-toggle="tooltip"
+                                              title="@(r.IsPlantOverridden ? r.Plant + " — reassigned from " + r.OriginalPlant : r.Plant)">
+                                            @Codes.PlantDisplay(r.Plant)
+                                        </span>
                                     }
-                                }
-                                else
-                                {
-                                    <span class="text-muted">—</span>
-                                }
-                                @if (canOverridePlant)
-                                {
-                                    @* QC Manager / Admin: move the container to another plant.
-                                       The form posts to OverridePlant; picking the original
-                                       plant undoes a previous move. *@
-                                    <div class="dropdown">
-                                        <button type="button" class="btn btn-link btn-sm p-0 text-decoration-none"
-                                                data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
-                                                title="Reassign this container to another plant">
-                                            <i class="bi bi-pencil-square me-1"></i>Change plant
-                                        </button>
-                                        <div class="dropdown-menu p-2" style="min-width: 15rem;">
-                                            <form asp-action="OverridePlant" method="post" class="m-0">
-                                                @Html.AntiForgeryToken()
-                                                <input type="hidden" name="containerNo" value="@r.ContainerNo" />
-                                                <input type="hidden" name="bolNo"       value="@r.BolNo" />
-                                                <input type="hidden" name="po"          value="@r.Ebeln" />
-                                                <label class="form-label small mb-1">Move container to plant</label>
-                                                <select name="plant" class="form-select form-select-sm mb-2" required>
-                                                    @foreach (var pl in allPlants)
+                                    else
+                                    {
+                                        <span class="text-muted">—</span>
+                                    }
+                                    @if (canOverridePlant)
+                                    {
+                                        @* QC Manager / Admin: move the container to another plant.
+                                           A small pencil icon beside the plant (native-title tooltip;
+                                           it can't also be a Bootstrap tooltip because the click opens
+                                           the dropdown). The form posts to OverridePlant; picking the
+                                           original plant undoes a previous move. *@
+                                        <div class="dropdown">
+                                            <button type="button" class="btn btn-link btn-sm p-0 lh-1 text-secondary"
+                                                    data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                                                    aria-label="Change plant" title="Change plant">
+                                                <i class="bi bi-pencil-square"></i>
+                                            </button>
+                                            <div class="dropdown-menu p-2" style="min-width: 15rem;">
+                                                <form asp-action="OverridePlant" method="post" class="m-0">
+                                                    @Html.AntiForgeryToken()
+                                                    <input type="hidden" name="containerNo" value="@r.ContainerNo" />
+                                                    <input type="hidden" name="bolNo"       value="@r.BolNo" />
+                                                    <input type="hidden" name="po"          value="@r.Ebeln" />
+                                                    <label class="form-label small mb-1">Move container to plant</label>
+                                                    <select name="plant" class="form-select form-select-sm mb-2" required>
+                                                        @foreach (var pl in allPlants)
+                                                        {
+                                                            <option value="@pl.Code"
+                                                                    selected="@(string.Equals(pl.Code, r.Plant, StringComparison.OrdinalIgnoreCase))">
+                                                                @Codes.PlantLabel(pl.Code)
+                                                            </option>
+                                                        }
+                                                    </select>
+                                                    <button type="submit" class="btn btn-sm btn-primary w-100">
+                                                        <i class="bi bi-arrow-left-right me-1"></i>Move container
+                                                    </button>
+                                                    @if (r.IsPlantOverridden)
                                                     {
-                                                        <option value="@pl.Code"
-                                                                selected="@(string.Equals(pl.Code, r.Plant, StringComparison.OrdinalIgnoreCase))">
-                                                            @Codes.PlantLabel(pl.Code)
-                                                        </option>
+                                                        <div class="form-text mt-1">Pick @Codes.PlantDisplay(r.OriginalPlant) to undo the move.</div>
                                                     }
-                                                </select>
-                                                <button type="submit" class="btn btn-sm btn-primary w-100">
-                                                    <i class="bi bi-arrow-left-right me-1"></i>Move container
-                                                </button>
-                                                @if (r.IsPlantOverridden)
-                                                {
-                                                    <div class="form-text mt-1">Pick @Codes.PlantDisplay(r.OriginalPlant) to undo the move.</div>
-                                                }
-                                            </form>
+                                                </form>
+                                            </div>
                                         </div>
-                                    </div>
+                                    }
+                                </div>
+                                @if (r.IsPlantOverridden && !string.IsNullOrEmpty(r.OriginalPlant))
+                                {
+                                    <span class="pp-sub"><span class="pp-sub-label">was</span>@Codes.PlantDisplay(r.OriginalPlant)</span>
                                 }
                             </div>
                         </td>
@@ -468,8 +499,86 @@
             </tbody>
         </table>
     </div>
+
+    @* ---- Server-side pager ----
+       The controller ships one page at a time (pageSize 50/100). Each page is a
+       small fraction of the old whole-list render, so a normal ?page=N reload is
+       now fast — and keeping full navigation means tablekit sorting and the
+       Columns menu re-init cleanly on every load (they have no re-attach hook).
+       Links carry every active filter so paging never widens the view. *@
+    @if (totalCount > 0)
+    {
+        <div class="tk-pager d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 border-top"
+             data-pending-pager>
+            <div class="d-flex align-items-center gap-2 small text-muted">
+                <label class="mb-0">Show</label>
+                <select class="form-select form-select-sm" style="width:auto" data-pending-pagesize>
+                    @foreach (var n in new[] { 50, 100 })
+                    {
+                        <option value="@n" selected="@(n == pageSize)">@n</option>
+                    }
+                </select>
+                <span>per page</span>
+            </div>
+
+            <span class="text-muted small">Showing @firstRow–@lastRow of @totalCount</span>
+
+            @if (pageCount > 1)
+            {
+                <nav aria-label="Pending container pages">
+                    <ul class="pagination pagination-sm mb-0">
+                        @{
+                            var from = Math.Max(1, pageNo - 2);
+                            var to   = Math.Min(pageCount, pageNo + 2);
+                        }
+                        <li class="page-item @(pageNo == 1 ? "disabled" : "")">
+                            <a class="page-link" data-pending-page="@(pageNo - 1)"
+                               asp-action="Pending" asp-all-route-data="pageRoute(pageNo - 1, pageSize)" aria-label="Previous">«</a>
+                        </li>
+                        @if (from > 1)
+                        {
+                            <li class="page-item">
+                                <a class="page-link" data-pending-page="1"
+                                   asp-action="Pending" asp-all-route-data="pageRoute(1, pageSize)">1</a>
+                            </li>
+                            @if (from > 2)
+                            {
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                            }
+                        }
+                        @for (var pp = from; pp <= to; pp++)
+                        {
+                            <li class="page-item @(pp == pageNo ? "active" : "")">
+                                <a class="page-link" data-pending-page="@pp"
+                                   asp-action="Pending" asp-all-route-data="pageRoute(pp, pageSize)">@pp</a>
+                            </li>
+                        }
+                        @if (to < pageCount)
+                        {
+                            @if (to < pageCount - 1)
+                            {
+                                <li class="page-item disabled"><span class="page-link">…</span></li>
+                            }
+                            <li class="page-item">
+                                <a class="page-link" data-pending-page="@pageCount"
+                                   asp-action="Pending" asp-all-route-data="pageRoute(pageCount, pageSize)">@pageCount</a>
+                            </li>
+                        }
+                        <li class="page-item @(pageNo == pageCount ? "disabled" : "")">
+                            <a class="page-link" data-pending-page="@(pageNo + 1)"
+                               asp-action="Pending" asp-all-route-data="pageRoute(pageNo + 1, pageSize)" aria-label="Next">»</a>
+                        </li>
+                    </ul>
+                </nav>
+            }
+        </div>
+    }
 </div>
 
 @* Bootstrap tooltips are wired site-wide by site.js, and the plant -> storage
    narrowing now lives in wwwroot/js/plant-storage-filter.js (shared with the
-   Quality Orders filter panel) — this view needs no script block of its own. *@
+   Quality Orders filter panel). pending-pager.js only wires the "per page"
+   selector to reload at page 1 with the chosen size. *@
+@section Scripts {
+    <script src="~/js/pending-pager.js" asp-append-version="true"></script>
+}

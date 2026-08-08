@@ -84,13 +84,17 @@ public class ContainerCacheService : IContainerCacheService
         return affected;
     }
 
-    public async Task<IReadOnlyList<PendingPickupRow>> ListPendingAsync(
+    public async Task<PendingPage> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
         string? plant = null, string? poType = null, string? storageLoc = null,
-        string? supplier = null, Models.PlantScope? scope = null,
+        string? supplier = null, int page = 1, int pageSize = 100,
+        Models.PlantScope? scope = null,
         CancellationToken ct = default)
     {
         var sc = scope ?? Models.PlantScope.All;
+        if (pageSize < 1)  pageSize = 100;
+        if (page < 1)      page = 1;
+        var offset = (page - 1) * pageSize;
         using var c = Open();
         // Same filter clause is applied to both result sets so the
         // material-lines query never returns lines for triplets the
@@ -133,10 +137,27 @@ public class ContainerCacheService : IContainerCacheService
             PoType     = Exact(poType),
             StorageLoc = Exact(storageLoc),
             sUnrestricted = sc.Unrestricted,
-            sPlants       = sc.QueryPlants
+            sPlants       = sc.QueryPlants,
+            offset, pageSize
         };
 
+        // Three statements in one round trip:
+        //  1. total matching triplets (drives the pager).
+        //  2. the page's triplet aggregates, cut with OFFSET/FETCH and spilled
+        //     into #page so the next statement can reuse the exact same window.
+        //  3. material lines for ONLY the page's triplets (JOIN #page), instead
+        //     of every pending line in the cache -- this is the payload win.
+        // The aggregate query is fast; the old cost was rendering all ~2.4k
+        // triplets and ~12k lines into one page. filterClause matches on the
+        // EFFECTIVE plant (override when set) for count and page alike.
         using var grid = await c.QueryMultipleAsync($@"
+            SELECT COUNT(*) FROM (
+                SELECT container_no, bol_no, ebeln
+                FROM   qms_sap_container_cache
+                WHERE  {filterClause}
+                GROUP  BY container_no, bol_no, ebeln
+            ) AS t;
+
             SELECT
                 container_no       AS ContainerNo,
                 bol_no             AS BolNo,
@@ -155,25 +176,36 @@ public class ContainerCacheService : IContainerCacheService
                 MAX(receive_date)  AS ReceiveDate,
                 MAX(transit_days)  AS TransitDays,
                 MIN(first_seen_at) AS FirstSeenAt
+            INTO   #page
             FROM   qms_sap_container_cache
             WHERE  {filterClause}
             GROUP BY container_no, bol_no, ebeln
-            ORDER BY MAX(doc_date) DESC, container_no, bol_no, ebeln;
+            ORDER BY MAX(doc_date) DESC, container_no, bol_no, ebeln
+            OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
+
+            SELECT * FROM #page ORDER BY DocDate DESC, ContainerNo, BolNo, Ebeln;
 
             SELECT
-                container_no   AS ContainerNo,
-                bol_no         AS BolNo,
-                ebeln          AS Ebeln,
-                ebelp          AS Ebelp,
-                material_no    AS MaterialNo,
-                material_desc  AS MaterialDesc,
-                material_group AS MaterialGroup,
-                quantity       AS Quantity,
-                uom            AS Uom
-            FROM   qms_sap_container_cache
-            WHERE  {filterClause}
-            ORDER BY container_no, bol_no, ebeln, ebelp;", p);
+                cc.container_no   AS ContainerNo,
+                cc.bol_no         AS BolNo,
+                cc.ebeln          AS Ebeln,
+                cc.ebelp          AS Ebelp,
+                cc.material_no    AS MaterialNo,
+                cc.material_desc  AS MaterialDesc,
+                cc.material_group AS MaterialGroup,
+                cc.quantity       AS Quantity,
+                cc.uom            AS Uom
+            FROM   qms_sap_container_cache cc
+            JOIN   #page pg
+              ON   pg.ContainerNo = cc.container_no
+             AND   pg.BolNo       = cc.bol_no
+             AND   pg.Ebeln       = cc.ebeln
+            WHERE  cc.has_arrival = 0
+            ORDER BY cc.container_no, cc.bol_no, cc.ebeln, cc.ebelp;
 
+            DROP TABLE #page;", p);
+
+        var total    = await grid.ReadFirstAsync<int>();
         var triplets = (await grid.ReadAsync<PendingPickupRow>()).ToList();
         var lines    = (await grid.ReadAsync<PendingMaterialLine>()).ToList();
 
@@ -186,7 +218,7 @@ public class ContainerCacheService : IContainerCacheService
         {
             t.MaterialLines = byTriplet[$"{t.ContainerNo}|{t.BolNo}|{t.Ebeln}"].ToList();
         }
-        return triplets;
+        return new PendingPage(triplets, total, page, pageSize);
     }
 
     public async Task<PendingFilterOptions> GetPendingFilterOptionsAsync(
