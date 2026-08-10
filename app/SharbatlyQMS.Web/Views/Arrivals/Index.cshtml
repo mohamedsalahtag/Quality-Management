@@ -66,8 +66,8 @@
                 <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>Clear</a>
             }
         </div>
-        <div class="col">
-            <div class="btn-group w-100" role="group" aria-label="Filter by status">
+        <div class="col-auto">
+            <div class="btn-group" role="group" aria-label="Filter by status">
                 @foreach (var s in statuses)
                 {
                     <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)">@ChipLabel(s.Value)</button>
