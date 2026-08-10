@@ -70,7 +70,7 @@
             <div class="btn-group" role="group" aria-label="Filter by status">
                 @foreach (var s in statuses)
                 {
-                    <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)">@ChipLabel(s.Value)</button>
+                    <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)" style="min-width:6.5rem">@ChipLabel(s.Value)</button>
                 }
             </div>
         </div>
