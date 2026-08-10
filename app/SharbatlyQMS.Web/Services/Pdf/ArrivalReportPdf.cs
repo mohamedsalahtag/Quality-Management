@@ -67,8 +67,8 @@ public static class ArrivalReportPdf
             col.Item().Element(c => RenderSubHeader(c, "Temperature Unit Reading"));
             col.Item().Element(c => RenderQaTable(c, new[]
             {
-                ("Set Temp:",             d.Checklist.SetTemperature?.ToString("0.##") ?? ""),
-                ("Display Temp:",         d.Checklist.DisplayTemperature?.ToString("0.##") ?? ""),
+                ("Set Temp:",             Fmt.Dec2(d.Checklist.SetTemperature)),
+                ("Display Temp:",         Fmt.Dec2(d.Checklist.DisplayTemperature)),
                 ("Photo of display taken.", YN(d.Checklist.DisplayTempPhotoTaken))
             }));
 
@@ -95,7 +95,7 @@ public static class ArrivalReportPdf
                 ("Handover logger to Quality / Logistics for downloading temperature data",
                                                                    YN(d.Checklist.LoggerHandedOver)),
                 ("Check if logger is active and data available",   YN(d.Checklist.LoggerActiveDataAvailable)),
-                ("Data logger temperature",                        d.Checklist.LoggerTemperature?.ToString("0.##") ?? "")
+                ("Data logger temperature",                        Fmt.Dec2(d.Checklist.LoggerTemperature))
             }));
 
             // -- 5. Notes / Observations --
@@ -243,7 +243,7 @@ public static class ArrivalReportPdf
             void Row(string name, decimal? temp, bool? photo)
             {
                 t.Cell().Border(0.5f).BorderColor(GridLine).Padding(5).Text(name);
-                t.Cell().Border(0.5f).BorderColor(GridLine).Padding(5).Text(temp?.ToString("0.##") ?? "");
+                t.Cell().Border(0.5f).BorderColor(GridLine).Padding(5).Text(Fmt.Dec2(temp));
                 t.Cell().Border(0.5f).BorderColor(GridLine).Padding(5).Text(YN(photo));
             }
             // The user's sample shows two pulp readings (Temperature 1 / 2).

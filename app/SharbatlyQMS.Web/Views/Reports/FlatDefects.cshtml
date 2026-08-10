@@ -234,7 +234,7 @@
                     <td>@r.ContainerNo</td>
                     <td>@r.BolNo</td>
                     <td>@r.Ebeln</td>
-                    <td class="text-end">@(r.ArrivalItemQuantity?.ToString("0.###")) <small class="text-muted">@r.ArrivalItemUom</small></td>
+                    <td class="text-end">@Fmt.Dec2(r.ArrivalItemQuantity) <small class="text-muted">@r.ArrivalItemUom</small></td>
                     <td>@r.PoDate?.ToString("yyyy-MM-dd")</td>
                     <td>@r.ShippingDate?.ToString("yyyy-MM-dd")</td>
                     <td>@r.ArrivalDate?.ToString("yyyy-MM-dd")</td>
@@ -254,8 +254,8 @@
                     <td class="text-end">@r.SampleSize</td>
                     <td>@r.DefectName <small class="text-muted">@r.DefectCode</small></td>
                     <td>@r.DefectCategory</td>
-                    <td class="text-end">@(r.DefectValue?.ToString("0.###"))</td>
-                    <td class="text-end">@(r.DefectPercentage?.ToString("0.##"))</td>
+                    <td class="text-end">@Fmt.Dec2(r.DefectValue)</td>
+                    <td class="text-end">@Fmt.Dec2(r.DefectPercentage)</td>
                 </tr>
             }
             @if (shown == 0)

@@ -57,6 +57,11 @@ public class QualityOrderMaterial
     public string?  Variety             { get; set; }
     public string?  MaterialClass       { get; set; }
     public decimal? NetWeight           { get; set; }
+    /// <summary>Tare weight for this material, entered once in the Material
+    /// details card and shared by every sample: a sample's net weight is its
+    /// own gross minus this. Moved here from a per-sample TARA reading so it is
+    /// not retyped for each sample (qms_quality_order_material.tara_weight).</summary>
+    public decimal? TaraWeight          { get; set; }
     public string?  MaterialSize        { get; set; }
     public string?  MaterialGroup       { get; set; }
     public string?  MaterialGroupDesc   { get; set; }

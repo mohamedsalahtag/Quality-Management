@@ -1441,6 +1441,47 @@ public class AdminController : Controller
         return RedirectToAction(nameof(ArrivalFields));
     }
 
+    // ---- Arrival Field Rules (Parameters menu) ------------------------
+    //
+    // Per-field policy for the editable arrival fields (checklist + shipment):
+    // whether each is Mandatory (blocks Complete when empty) and whether it can
+    // be edited even after the arrival is Completed/closed. The field catalogue
+    // is code-defined (ArrivalFieldRegistry); only the two flags are stored.
+    [HttpGet]
+    [RequireScreen(Screens.ArrivalFieldRules, Seed.ManagerOrAdmin, "Open Arrival Field Rules")]
+    public async Task<IActionResult> ArrivalFieldRules()
+    {
+        var arrivals = HttpContext.RequestServices.GetRequiredService<IArrivalService>();
+        var policies = await arrivals.GetArrivalFieldPoliciesAsync();
+        // Ordered by form then registry order for a stable, grouped table.
+        var rows = ArrivalFieldRegistry.All
+            .Select(f => (Def: f, Policy: policies[f.Key]))
+            .ToList();
+        return View(rows);
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Parameters.ArrivalFieldRulesEdit, Seed.ManagerOrAdmin, "Edit Arrival Field Rules")]
+    public async Task<IActionResult> SaveArrivalFieldRules(string[]? mandatory, string[]? editableWhenClosed)
+    {
+        var arrivals = HttpContext.RequestServices.GetRequiredService<IArrivalService>();
+        var mand = new HashSet<string>(mandatory ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        var ewc  = new HashSet<string>(editableWhenClosed ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
+        // One row per registry field (checkboxes only post when ticked, so an
+        // absent key means "off").
+        var policies = ArrivalFieldRegistry.All.Select(f => new ArrivalFieldPolicy
+        {
+            FieldKey           = f.Key,
+            IsMandatory        = mand.Contains(f.Key),
+            EditableWhenClosed = ewc.Contains(f.Key)
+        }).ToList();
+        var user = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "system";
+        await arrivals.SaveArrivalFieldPoliciesAsync(policies, user);
+        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null, new { section = "Arrival Field Rules" });
+        TempData["Success"] = "Arrival field rules saved.";
+        return RedirectToAction(nameof(ArrivalFieldRules));
+    }
+
     // ---- Code Descriptions (M10, Parameters menu) ---------------------
     //
     // Friendly names for the raw SAP codes the lists used to print bare:

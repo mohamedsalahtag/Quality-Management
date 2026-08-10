@@ -8,8 +8,11 @@
     // bananas — configure Grower / Date Code / Brix / Firmness as reading TYPES
     // rather than header fields, and their codes differ, e.g. "PALLET_NO" vs
     // "Pallet No."), then the frozen legacy column. First non-empty wins.
-    string Val(string[] codes, string? fallback = null)
+    @* integer:true renders numeric values with no decimals (the date code is a
+       whole number, not a measurement); otherwise numbers show exactly 2 decimals. *@
+    string Val(string[] codes, string? fallback = null, bool integer = false)
     {
+        string Num(decimal? n) => integer ? Fmt.Int0(n) : Fmt.Dec2(n);
         foreach (var code in codes)
         {
             var v = Model.HeaderValues.FirstOrDefault(h => string.Equals(h.FieldCode, code, StringComparison.OrdinalIgnoreCase));
@@ -17,7 +20,7 @@
             {
                 var hv = v.ValueKind switch
                 {
-                    "Numeric" => v.NumericValue?.ToString("0.##"),
+                    "Numeric" => Num(v.NumericValue),
                     "Date"    => v.DateValue?.ToString("yyyy-MM-dd"),
                     _         => v.TextValue
                 };
@@ -29,7 +32,7 @@
             var r = Model.Readings.FirstOrDefault(x => string.Equals(x.ReadingTypeCode, code, StringComparison.OrdinalIgnoreCase));
             if (r != null)
             {
-                var rv = !string.IsNullOrWhiteSpace(r.TextValue) ? r.TextValue : r.NumericValue?.ToString("0.##");
+                var rv = !string.IsNullOrWhiteSpace(r.TextValue) ? r.TextValue : Num(r.NumericValue);
                 if (!string.IsNullOrWhiteSpace(rv)) return rv!;
             }
         }
@@ -54,7 +57,7 @@
     <td>@Val(growerCodes, s.Grower)</td>
     <td>@Val(palletCodes, s.PalletNo)</td>
     <td>@Val(lotCodes, s.LotNo)</td>
-    <td>@Val(dateCodeCodes, s.DateCode)</td>
+    <td>@Val(dateCodeCodes, s.DateCode, integer: true)</td>
     <td class="text-end">@Val(firmnessCodes)</td>
     <td class="text-end">@Val(brixCodes)</td>
     <td class="text-end">

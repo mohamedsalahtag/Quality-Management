@@ -32,7 +32,9 @@ public interface IContainerCacheService
     Task<PendingPage> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
         string? plant = null, string? poType = null, string? storageLoc = null,
-        string? supplier = null, int page = 1, int pageSize = 100,
+        string? supplier = null, string? material = null,
+        DateOnly? from = null, DateOnly? to = null,
+        int page = 1, int pageSize = 100,
         Models.PlantScope? scope = null,
         CancellationToken ct = default);
 

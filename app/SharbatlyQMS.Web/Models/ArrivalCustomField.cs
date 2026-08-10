@@ -1,5 +1,3 @@
-using System.Globalization;
-
 namespace SharbatlyQMS.Web.Models;
 
 /// <summary>
@@ -34,7 +32,7 @@ public class ArrivalCustomField
     /// <summary>The stored value rendered for display (Details page + PDF).</summary>
     public string DisplayValue => ValueKind switch
     {
-        "Numeric" => NumericValue?.ToString("0.####", CultureInfo.InvariantCulture) ?? "",
+        "Numeric" => Fmt.Dec2(NumericValue),
         "Date"    => DateValue?.ToString("yyyy-MM-dd") ?? "",
         _         => TextValue ?? "",
     };

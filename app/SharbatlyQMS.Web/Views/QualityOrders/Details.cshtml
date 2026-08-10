@@ -1192,24 +1192,39 @@
         });
     }
 
-    // ---- Net weight = Gross - Tara (read-only NET input) ------------------
+    // ---- Net weight = sample Gross - material Tara (read-only NET input) ---
+    // Tara is now a single material-level value (data-weight-role="mattara"),
+    // shared by every sample. If tara exceeds gross the net would be negative:
+    // we flag the field red, show the error and disable Save so the mistake
+    // can't be stored (the server re-checks too).
     function wireWeightCompute(scope) {
         scope.querySelectorAll('form.sample-form').forEach(form => {
             const gross = form.querySelector('[data-weight-role="gross"]');
-            const tara  = form.querySelector('[data-weight-role="tara"]');
+            const tara  = form.querySelector('[data-weight-role="mattara"]');
             const net   = form.querySelector('[data-weight-role="net"]');
-            if (!net || (!gross && !tara)) return;
+            if (!net) return;
+            const errEl   = form.querySelector('.net-weight-error');
+            const saveBtn = form.querySelector('button[type="submit"], input[type="submit"]');
             const recompute = () => {
                 const g = parseFloat(gross?.value);
                 const t = parseFloat(tara?.value);
                 if (!isNaN(g) && !isNaN(t)) {
-                    net.value = (Math.round((g - t) * 100) / 100).toString();
+                    const val = Math.round((g - t) * 100) / 100;
+                    net.value = val.toFixed(2);
+                    const bad = val < 0;
+                    net.classList.toggle('is-invalid', bad);
+                    if (errEl) errEl.classList.toggle('d-none', !bad);
+                    if (saveBtn) saveBtn.disabled = bad;
                 } else {
                     net.value = '';
+                    net.classList.remove('is-invalid');
+                    if (errEl) errEl.classList.add('d-none');
+                    if (saveBtn) saveBtn.disabled = false;
                 }
             };
             gross?.addEventListener('input', recompute);
             tara?.addEventListener('input', recompute);
+            recompute();
         });
     }
 

@@ -50,7 +50,7 @@ else
                 </div>
                 <div class="col-md-4">
                     <div class="qcs-f"><span>Sample Size</span><span>@g.SumSampleSize @g.SampleUnit</span></div>
-                    <div class="qcs-f"><span>PO Quantity</span><span>@g.SumPoQuantity.ToString("0.###")</span></div>
+                    <div class="qcs-f"><span>PO Quantity</span><span>@Fmt.Dec2(g.SumPoQuantity)</span></div>
                 </div>
             </div>
 
@@ -98,14 +98,14 @@ else
                                         {
                                             <tr>
                                                 <td>@dr.Name</td>
-                                                <td class="text-end">@dr.SumValue.ToString("0.##")</td>
-                                                <td class="text-end fw-semibold" style="color:@col">@dr.Percentage.ToString("0.##")%</td>
+                                                <td class="text-end">@Fmt.Dec2(dr.SumValue)</td>
+                                                <td class="text-end fw-semibold" style="color:@col">@Fmt.Dec2(dr.Percentage)%</td>
                                             </tr>
                                         }
                                         <tr class="qcs-total">
                                             <td class="fw-semibold">Total</td>
-                                            <td class="text-end fw-semibold">@sec.TotalPieces.ToString("0.##")</td>
-                                            <td class="text-end fw-bold" style="color:@col">@sec.TotalPct.ToString("0.##")%</td>
+                                            <td class="text-end fw-semibold">@Fmt.Dec2(sec.TotalPieces)</td>
+                                            <td class="text-end fw-bold" style="color:@col">@Fmt.Dec2(sec.TotalPct)%</td>
                                         </tr>
                                     }
                                 </tbody>

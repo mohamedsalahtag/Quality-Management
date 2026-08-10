@@ -133,6 +133,10 @@ public class WorkflowTests : IClassFixture<QmsAppFactory>
             var shipment = await arrivals.GetShipmentAsync(arrivalId);
             Assert.NotNull(shipment);
             shipment!.DischargeDate = new DateTime(2026, 7, 20);
+            // Unloading + Pull-out dates are mandatory-by-default (W6 Arrival
+            // Field Rules); set them so the arrival can be completed.
+            shipment.UnloadingDate  = new DateTime(2026, 7, 21);
+            shipment.PullOutDate    = new DateTime(2026, 7, 22);
             await arrivals.SaveShipmentAsync(shipment, TestUser);
 
             var reloaded = await arrivals.GetShipmentAsync(arrivalId);

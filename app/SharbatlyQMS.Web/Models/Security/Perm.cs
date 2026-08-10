@@ -86,6 +86,7 @@ public static class Perm
         public const string ReadingTypesEdit     = Screens.ReadingTypes     + ".Edit";
         public const string SampleHeadersEdit    = Screens.SampleHeaders    + ".Edit";
         public const string ArrivalFieldsEdit    = Screens.ArrivalFields    + ".Edit";
+        public const string ArrivalFieldRulesEdit= Screens.ArrivalFieldRules+ ".Edit";
         public const string ReportUnitsEdit      = Screens.ReportUnits      + ".Edit";
         public const string CodeDescriptionsEdit = Screens.CodeDescriptions + ".Edit";
         public const string MailTemplateEdit     = Screens.MailTemplate     + ".Edit";

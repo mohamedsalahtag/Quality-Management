@@ -316,7 +316,26 @@ public class QualityOrdersController : Controller
 
         var units     = await _qos.GetReportUnitsAsync();
         var summaries = await _qos.BuildGroupSummariesAsync(id, materials, units);
-        return PartialView("_QcSummary", summaries);
+
+        // Shipment Details header — same block the QC report PDF opens with.
+        var groups = materials.Select(m => m.MaterialGroup ?? "")
+                              .Where(g => g.Length > 0)
+                              .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        var custom = (await _arrivals.GetCustomFieldsAsync(qo.ArrivalId))
+                     .Where(f => groups.Contains(f.MaterialGroup, StringComparer.OrdinalIgnoreCase))
+                     .ToList();
+        var shipment = new ShipmentDetailsVm
+        {
+            Arrival      = await _arrivals.GetAsync(qo.ArrivalId) ?? new Arrival(),
+            Shipment     = await _arrivals.GetShipmentAsync(qo.ArrivalId),
+            Checklist    = await _arrivals.GetChecklistAsync(qo.ArrivalId),
+            CustomFields = custom,
+            GroupSampleSizeTotals = summaries
+                .GroupBy(g => g.MaterialGroup, StringComparer.OrdinalIgnoreCase)
+                .ToDictionary(g => g.Key, g => g.Sum(x => x.SumSampleSize), StringComparer.OrdinalIgnoreCase)
+        };
+
+        return PartialView("_QcSummaryPanel", new QcSummaryPanelVm { Shipment = shipment, Summaries = summaries });
     }
 
     /// <summary>Saves the per-material Sample Size + Material-scoped header
@@ -676,8 +695,12 @@ public class QualityOrdersController : Controller
         // so a failed save leaves no orphan rows behind. Browser-side
         // `required` attribute is a convenience -- this is the authoritative
         // check.
+        // Tara moved to the material level (Material details card), so a TARA
+        // reading type is no longer entered per sample — exclude it from the
+        // mandatory-reading check or every save would be rejected for a blank
+        // tara that no longer has an input.
         var missingMandatory = new List<string>();
-        foreach (var rt in readingTypes.Where(r => r.IsMandatory))
+        foreach (var rt in readingTypes.Where(r => r.IsMandatory && !IsTaraReading(r.ReadingTypeCode)))
         {
             var num  = form[$"reading_{rt.ReadingTypeCode}_num"].ToString();
             var text = form[$"reading_{rt.ReadingTypeCode}_text"].ToString();
@@ -706,6 +729,26 @@ public class QualityOrdersController : Controller
         if (missingMandatory.Count > 0)
             return (null, false, 0,
                 $"Sample cannot be saved — these mandatory fields have no value: {string.Join(", ", missingMandatory)}.");
+
+        // Weights: gross is this sample's reading; tara is the shared, material-
+        // level value posted from the Material details card (mat_tara). Net =
+        // gross - tara and must never be negative — reject BEFORE any DB write so
+        // the mistake is neither stored nor leaves an orphan sample row. The
+        // client also blocks this (red field + disabled Save), but this is the
+        // authoritative guard. (IsGrossReading/IsTaraReading are declared below;
+        // C# local functions are usable ahead of their definition.)
+        decimal? grossPosted = null;
+        foreach (var rt in readingTypes)
+        {
+            if (IsGrossReading(rt.ReadingTypeCode)
+                && decimal.TryParse(form[$"reading_{rt.ReadingTypeCode}_num"].ToString(), out var gv))
+                grossPosted = gv;
+        }
+        decimal? materialTara = decimal.TryParse(form["mat_tara"].ToString(), out var mtv) ? mtv : (decimal?)null;
+        if (grossPosted.HasValue && materialTara.HasValue && grossPosted.Value < materialTara.Value)
+            return (null, false, 0,
+                "Tare weight can't exceed gross weight — the net weight would be negative. " +
+                "Adjust the tare in Material details or the sample's gross weight.");
 
         // 2026-06-20: V24 override-detection restored. The sample-size input on
         // the form is editable; blank input falls back to the material's
@@ -762,16 +805,12 @@ public class QualityOrdersController : Controller
         bool IsNetReading(string c) =>
             string.Equals(c, "NET_WEIGHT",   StringComparison.OrdinalIgnoreCase) ||
             string.Equals(c, "NET",          StringComparison.OrdinalIgnoreCase);
-        decimal? grossPosted = null, taraPosted = null;
-        foreach (var rt in readingTypes)
-        {
-            var numStr = form[$"reading_{rt.ReadingTypeCode}_num"].ToString();
-            if (!decimal.TryParse(numStr, out var dval)) continue;
-            if (IsGrossReading(rt.ReadingTypeCode)) grossPosted = dval;
-            else if (IsTaraReading(rt.ReadingTypeCode)) taraPosted = dval;
-        }
-        decimal? netComputed = (grossPosted.HasValue && taraPosted.HasValue)
-            ? decimal.Round(grossPosted.Value - taraPosted.Value, 2)
+        // Persist the material-level tara (shared by every sample of this
+        // material); this also recomputes the net reading of the material's
+        // OTHER samples so they stay consistent when the tara changes.
+        await _qos.SetMaterialTaraAsync(resolvedQoMatId, materialTara, user);
+        decimal? netComputed = (grossPosted.HasValue && materialTara.HasValue)
+            ? decimal.Round(grossPosted.Value - materialTara.Value, 2)
             : (decimal?)null;
 
         var readings = new List<SampleReading>();

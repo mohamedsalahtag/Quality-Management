@@ -55,6 +55,11 @@ public interface IQualityOrderService
     Task SaveOverrideAsync(long qoMaterialId, string newSize, string? reason, string user);
     Task ClearOverrideAsync(long qoMaterialId, string user);
 
+    /// <summary>Sets the material-level tare weight (shared by every sample of
+    /// the material) and recomputes the NET reading of the material's samples so
+    /// net = gross − tara stays consistent when the shared tara changes.</summary>
+    Task SetMaterialTaraAsync(long qoMaterialId, decimal? tara, string user);
+
     // ----- Samples -----
     Task<IReadOnlyList<Sample>> ListSamplesAsync(long qualityOrderId);
     Task<Sample?> GetSampleAsync(long sampleId);

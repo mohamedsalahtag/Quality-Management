@@ -708,9 +708,21 @@ public class ArrivalService : IArrivalService
         if (arrival.StatusCode != ArrivalStatus.Draft)
             return (false, $"Arrival is already {arrival.StatusCode}; only Draft arrivals can be completed.");
 
-        // No mandatory checklist fields -- the inspector can complete the arrival
-        // with any combination of answers (including none). Anything still blank
-        // simply appears as "—" on the PDF report.
+        // Mandatory fields (admin-configured on the Arrival Field Rules page;
+        // e.g. Unloading/Pull-out/Discharge dates by default) must have a value
+        // before the arrival can be completed.
+        var policies  = await GetArrivalFieldPoliciesAsync();
+        var shipment  = await GetShipmentAsync(arrivalId);
+        var checklist = await GetChecklistAsync(arrivalId);
+        var missing = ArrivalFieldRegistry.All
+            .Where(f => policies.TryGetValue(f.Key, out var p) && p.IsMandatory)
+            .Where(f => !FieldHasValue(f.Key, shipment, checklist))
+            .Select(f => f.Display)
+            .ToList();
+        if (missing.Count > 0)
+            return (false, $"Cannot complete — these required fields are empty: {string.Join(", ", missing)}. " +
+                           "Set them (or an admin can change the rule under Parameters → Arrival Field Rules).");
+
         using var c = Open();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
@@ -743,6 +755,54 @@ public class ArrivalService : IArrivalService
             actor: user);
         tx.Commit();
         return (true, null);
+    }
+
+    public async Task<IReadOnlyDictionary<string, ArrivalFieldPolicy>> GetArrivalFieldPoliciesAsync()
+    {
+        using var c = Open();
+        var stored = (await c.QueryAsync<ArrivalFieldPolicy>(
+            "SELECT field_key FieldKey, is_mandatory IsMandatory, editable_when_closed EditableWhenClosed FROM qms_arrival_field_policy"))
+            .ToDictionary(p => p.FieldKey, StringComparer.OrdinalIgnoreCase);
+
+        // Every registry field gets an effective policy: the stored override
+        // when present, else the code default (so a field with no row still
+        // reflects the day-one seed, and new fields appear without a migration).
+        var result = new Dictionary<string, ArrivalFieldPolicy>(StringComparer.OrdinalIgnoreCase);
+        foreach (var f in ArrivalFieldRegistry.All)
+        {
+            result[f.Key] = stored.TryGetValue(f.Key, out var p)
+                ? p
+                : new ArrivalFieldPolicy
+                {
+                    FieldKey           = f.Key,
+                    IsMandatory        = ArrivalFieldRegistry.DefaultMandatory.Contains(f.Key),
+                    EditableWhenClosed = ArrivalFieldRegistry.DefaultEditableWhenClosed.Contains(f.Key)
+                };
+        }
+        return result;
+    }
+
+    public async Task SaveArrivalFieldPoliciesAsync(IEnumerable<ArrivalFieldPolicy> policies, string user)
+    {
+        using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+        foreach (var p in policies)
+        {
+            // Only keep real registry keys — ignore anything a crafted post adds.
+            if (ArrivalFieldRegistry.Find(p.FieldKey) is null) continue;
+            await c.ExecuteAsync(@"
+                MERGE qms_arrival_field_policy AS t
+                USING (SELECT @FieldKey AS field_key) AS s ON t.field_key = s.field_key
+                WHEN MATCHED THEN UPDATE SET
+                    is_mandatory = @IsMandatory, editable_when_closed = @EditableWhenClosed,
+                    updated_at = SYSUTCDATETIME(), updated_by = @user
+                WHEN NOT MATCHED THEN INSERT
+                    (field_key, is_mandatory, editable_when_closed, updated_at, updated_by)
+                    VALUES (@FieldKey, @IsMandatory, @EditableWhenClosed, SYSUTCDATETIME(), @user);",
+                new { p.FieldKey, p.IsMandatory, p.EditableWhenClosed, user }, tx);
+        }
+        tx.Commit();
     }
 
     public async Task<(bool ok, string? error)> ReopenForEditAsync(long arrivalId, string user, string? reason)
@@ -870,6 +930,44 @@ public class ArrivalService : IArrivalService
         // deleting them first would leave rows pointing at nothing.
         _docs.DeleteFiles(arrivalDocPaths.Concat(qoDocPaths));
         return (true, null);
+    }
+
+    /// <summary>Whether an editable arrival field currently holds a value —
+    /// the basis of the mandatory check. YesNo/Number/Date fields test null;
+    /// text fields test whitespace. Unknown keys are treated as present.</summary>
+    private static bool FieldHasValue(string key, ShipmentSnapshot? s, ArrivalChecklist? cl)
+    {
+        static bool T(string? v) => !string.IsNullOrWhiteSpace(v);
+        return key switch
+        {
+            "discharge_date"                => s?.DischargeDate != null,
+            "unloading_date"                => s?.UnloadingDate != null,
+            "pullout_date"                  => s?.PullOutDate != null,
+            "time_bar"                      => s?.TimeBar != null,
+            "arrival_place"                 => T(s?.ArrivalPlace),
+            "inspection_point"              => T(s?.InspectionPoint),
+            "joint_survey"                  => s?.JointSurvey != null,
+            "time_bar_exceeded"             => s?.TimeBarExceeded != null,
+            "seal_no"                       => T(cl?.SealNo),
+            "seal_intact"                   => cl?.SealIntact != null,
+            "seal_matches_documents"        => cl?.SealMatchesDocuments != null,
+            "external_damage_exists"        => cl?.ExternalDamageExists != null,
+            "set_temperature"               => cl?.SetTemperature != null,
+            "display_temperature"           => cl?.DisplayTemperature != null,
+            "cargo_smell_normal"            => cl?.CargoSmellNormal != null,
+            "visual_cargo_acceptable"       => cl?.VisualCargoAcceptable != null,
+            "cargo_shifted_collapsed_water" => cl?.CargoShiftedCollapsedWater != null,
+            "pulp_temp_front"               => cl?.PulpTempFront != null,
+            "pulp_temp_middle"              => cl?.PulpTempMiddle != null,
+            "pulp_temp_back"                => cl?.PulpTempBack != null,
+            "data_logger_located"           => cl?.DataLoggerLocated != null,
+            "data_logger_serial"            => T(cl?.DataLoggerSerial),
+            "logger_handed_over"            => cl?.LoggerHandedOver != null,
+            "logger_active_data_available"  => cl?.LoggerActiveDataAvailable != null,
+            "logger_temperature"            => cl?.LoggerTemperature != null,
+            "notes"                         => T(cl?.Notes),
+            _                               => true
+        };
     }
 
     private static string Sha256(string s)

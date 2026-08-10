@@ -87,7 +87,9 @@ public class ContainerCacheService : IContainerCacheService
     public async Task<PendingPage> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
         string? plant = null, string? poType = null, string? storageLoc = null,
-        string? supplier = null, int page = 1, int pageSize = 100,
+        string? supplier = null, string? material = null,
+        DateOnly? from = null, DateOnly? to = null,
+        int page = 1, int pageSize = 100,
         Models.PlantScope? scope = null,
         CancellationToken ct = default)
     {
@@ -106,15 +108,22 @@ public class ContainerCacheService : IContainerCacheService
         // Plant matching runs on the EFFECTIVE plant -- COALESCE(override_plant,
         // plant) -- so a manager-reassigned container shows in the target plant's
         // list (and the target plant's scope) and leaves the original's.
+        // Material is a contains-match on either the code or the description of
+        // ANY line in the triplet (grouping already collapses lines, so a plain
+        // predicate matches the whole triplet). doc_date is a SQL DATE, so the
+        // From/To range needs no timezone conversion (unlike the arrivals list).
         const string filterClause = @"
             has_arrival = 0
             AND (@Container  IS NULL OR container_no LIKE @Container)
             AND (@Bol        IS NULL OR bol_no       LIKE @Bol)
             AND (@Po         IS NULL OR ebeln        LIKE @Po)
             AND (@Supplier   IS NULL OR vendor_name  LIKE @Supplier OR vendor_no LIKE @Supplier)
+            AND (@Material   IS NULL OR material_no  LIKE @Material OR material_desc LIKE @Material)
             AND (@Plant      IS NULL OR COALESCE(override_plant, plant) = @Plant)
             AND (@PoType     IS NULL OR po_type      = @PoType)
             AND (@StorageLoc IS NULL OR storage_loc  = @StorageLoc)
+            AND (@From       IS NULL OR doc_date    >= @From)
+            AND (@To         IS NULL OR doc_date    <= @To)
             AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)";
 
         // SQL LIKE wildcards: empty input -> NULL (match everything);
@@ -133,9 +142,16 @@ public class ContainerCacheService : IContainerCacheService
             Bol        = Wrap(bol),
             Po         = Wrap(po),
             Supplier   = Wrap(supplier),
+            Material   = Wrap(material),
             Plant      = Exact(plant),
             PoType     = Exact(poType),
             StorageLoc = Exact(storageLoc),
+            // doc_date is a SQL DATE; pass DateTime (midnight) rather than
+            // DateOnly — this Dapper/SqlClient pairing doesn't bind DateOnly,
+            // which is why the arrivals list converts dates the same way. Both
+            // bounds are inclusive (doc_date has no time component).
+            From       = from?.ToDateTime(TimeOnly.MinValue),
+            To         = to?.ToDateTime(TimeOnly.MinValue),
             sUnrestricted = sc.Unrestricted,
             sPlants       = sc.QueryPlants,
             offset, pageSize

@@ -316,6 +316,13 @@ public class ReportsController : Controller
             defectsByGroup[grp] = await _qos.GetActiveDefectsForGroupAsync(grp);
         data.DefectsByGroup = defectsByGroup;
 
+        // Arrival custom fields (e.g. "Soft Green") for the Shipment Details
+        // block — only those whose material group is actually in this report.
+        var customFields = await _arrivals.GetCustomFieldsAsync(qo.ArrivalId);
+        data.CustomFields = customFields
+            .Where(f => distinctGroups.Contains(f.MaterialGroup, StringComparer.OrdinalIgnoreCase))
+            .ToList();
+
         // Defect category master (V22+) — drives the per-category sections + colours.
         data.Categories = await _qos.GetActiveCategoriesAsync();
 

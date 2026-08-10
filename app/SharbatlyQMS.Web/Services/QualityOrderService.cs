@@ -340,6 +340,7 @@ public class QualityOrderService : IQualityOrderService
                    m.variety                 Variety,
                    m.material_class          MaterialClass,
                    m.net_weight              NetWeight,
+                   m.tara_weight             TaraWeight,
                    m.material_size           MaterialSize,
                    m.material_group          MaterialGroup,
                    m.material_group_desc     MaterialGroupDesc,
@@ -496,6 +497,30 @@ public class QualityOrderService : IQualityOrderService
             }
         }
 
+        // Finish requires a photo on every sample. Hard rule (no bypass): a QO
+        // can't be closed with an undocumented sample. Checked inside the
+        // transaction so a photo deleted mid-finish can't slip through. An
+        // image is attached iff a qms_image_link row exists (delete is a hard
+        // DELETE, so there is no is_deleted flag to consider).
+        if (toStatus == "Closed")
+        {
+            var missingPhoto = (await c.QueryAsync<int>(@"
+                SELECT s.sample_no
+                FROM   qms_sample s
+                JOIN   qms_quality_order_material m ON m.qo_material_id = s.qo_material_id
+                WHERE  m.quality_order_id = @qoId AND s.is_deleted = 0
+                  AND  NOT EXISTS (SELECT 1 FROM qms_image_link il
+                                   WHERE il.owner_type = 'Sample' AND il.owner_id = s.sample_id)
+                ORDER  BY s.sample_no",
+                new { qoId }, tx)).ToList();
+            if (missingPhoto.Count > 0)
+            {
+                tx.Rollback();
+                var list = string.Join(", ", missingPhoto.Select(n => "#" + n));
+                return (false, $"Every sample must have at least one photo before finishing. Missing photo on sample {list}.");
+            }
+        }
+
         // Reopen physically lands as 'Open' so there's only one
         // editable state, but the reopened_* audit fields still get
         // stamped so we know it was re-opened (and the status history
@@ -644,6 +669,38 @@ public class QualityOrderService : IQualityOrderService
         await _audit.WriteAsync(c, tx,
             EntityTypes.QualityOrderMaterial, qoMaterialId, ActionCodes.OverrideCleared,
             oldValues: null, newValues: null, actor: user);
+        tx.Commit();
+    }
+
+    public async Task SetMaterialTaraAsync(long qoMaterialId, decimal? tara, string user)
+    {
+        using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+
+        await c.ExecuteAsync(
+            "UPDATE qms_quality_order_material SET tara_weight = @tara WHERE qo_material_id = @qoMaterialId",
+            new { tara, qoMaterialId }, tx);
+
+        // Keep every sample's NET reading in step with the shared tara:
+        // NET = GROSS - tara (rounded to 2). Only samples that already have both
+        // a NET and a GROSS reading are touched (no gross -> no net). Skipped
+        // when tara is cleared (null) — the per-sample save handles clearing its
+        // own net, and a bulk null would just blank every net ambiguously.
+        if (tara.HasValue)
+        {
+            await c.ExecuteAsync(@"
+                UPDATE net
+                SET    net.numeric_value = ROUND(g.numeric_value - @tara, 2)
+                FROM   qms_sample_reading net
+                JOIN   qms_sample s ON s.sample_id = net.sample_id AND s.is_deleted = 0
+                JOIN   qms_sample_reading g ON g.sample_id = net.sample_id
+                WHERE  s.qo_material_id = @qoMaterialId
+                  AND  net.reading_type_code IN ('NET', 'NET_WEIGHT')
+                  AND  g.reading_type_code   IN ('GROSS', 'GROSS_WEIGHT')
+                  AND  g.numeric_value IS NOT NULL",
+                new { tara, qoMaterialId }, tx);
+        }
         tx.Commit();
     }
 
@@ -1643,22 +1700,19 @@ public class QualityOrderService : IQualityOrderService
                                 .Count(r => r.NumericValue.HasValue
                                             || !string.IsNullOrWhiteSpace(r.TextValue))
                                 .ToString(),
-                    "sum" => rowsForType
+                    "sum" => Fmt.Dec2(rowsForType
                                 .Where(r => r.NumericValue.HasValue)
-                                .Sum(r => r.NumericValue!.Value)
-                                .ToString("0.##"),
+                                .Sum(r => r.NumericValue!.Value)),
                     // avg = Σ numeric ÷ sample count in the group (e.g. Gross /
                     // Net weight shown as the per-sample average). Uses the
                     // group's sample count as the divisor, blank when zero.
                     "avg" => groupSamples.Count > 0
-                                ? (rowsForType.Where(r => r.NumericValue.HasValue)
+                                ? Fmt.Dec2(rowsForType.Where(r => r.NumericValue.HasValue)
                                               .Sum(r => r.NumericValue!.Value) / groupSamples.Count)
-                                    .ToString("0.##")
                                 : "",
                     "sum_over_size" => sumSize > 0
-                                ? ((rowsForType.Where(r => r.NumericValue.HasValue)
-                                                .Sum(r => r.NumericValue!.Value) / sumSize) * 100m)
-                                    .ToString("0.##") + "%"
+                                ? Fmt.Dec2((rowsForType.Where(r => r.NumericValue.HasValue)
+                                                .Sum(r => r.NumericValue!.Value) / sumSize) * 100m) + "%"
                                 : "",
                     "formula" => "",
                     _ => ""

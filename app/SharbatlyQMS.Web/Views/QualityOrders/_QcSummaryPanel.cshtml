@@ -1,0 +1,12 @@
+@using SharbatlyQMS.Web.ViewModels
+@model QcSummaryPanelVm
+@*
+    The "Generate Summary" popup body: the Shipment Details header (same block as
+    the QC report) followed by the grouped material summary. Kept separate from
+    _QcSummary so the claim page can still render just the grouped summary inline.
+*@
+@if (Model.Shipment != null)
+{
+    <partial name="_ShipmentDetails" model="Model.Shipment" />
+}
+<partial name="_QcSummary" model="Model.Summaries" />

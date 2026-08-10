@@ -12,6 +12,12 @@ public class QualityReportData
     public Arrival              Arrival         { get; set; } = new();
     public ShipmentSnapshot?    Shipment        { get; set; }
     public ArrivalChecklist?    Checklist       { get; set; }
+
+    /// <summary>Admin-defined arrival custom fields (e.g. "Soft Green",
+    /// "Yellow Ripe") whose material group appears in this report. Shown in the
+    /// Shipment Details block; numeric ones also print a percentage of their
+    /// material group's total sample size. Populated by ReportsController.</summary>
+    public IReadOnlyList<ArrivalCustomField> CustomFields { get; set; } = Array.Empty<ArrivalCustomField>();
     public List<QualityOrderMaterial> Materials { get; set; } = new();
     public List<SampleBundle>   Samples         { get; set; } = new();
 

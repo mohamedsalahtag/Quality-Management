@@ -329,6 +329,40 @@ public static class QualityReportPdf
                     nc.Item().PaddingTop(1).Text(cl!.Notes!).FontSize(8);
                 });
             }
+
+            // Arrival custom fields for the material groups in this report.
+            // A numeric field also prints its share of that group's total sample
+            // size (e.g. "Soft Green: 12 (8.00%)").
+            if (d.CustomFields.Count > 0)
+            {
+                string CustomVal(SharbatlyQMS.Web.Models.ArrivalCustomField cf)
+                {
+                    var val = cf.DisplayValue;
+                    if (string.Equals(cf.ValueKind, "Numeric", StringComparison.OrdinalIgnoreCase) && cf.NumericValue.HasValue)
+                    {
+                        var denom = d.GroupSummaries
+                            .Where(g => string.Equals(g.MaterialGroup, cf.MaterialGroup, StringComparison.OrdinalIgnoreCase))
+                            .Sum(g => g.SumSampleSize);
+                        if (denom > 0)
+                            val += $" ({Fmt.Dec2(cf.NumericValue.Value / denom * 100m)}%)";
+                    }
+                    return val;
+                }
+                var list = d.CustomFields.OrderBy(f => f.SortOrder).ThenBy(f => f.FieldName).ToList();
+                col.Item().PaddingTop(4).Column(cc =>
+                {
+                    cc.Item().Text("additional fields").FontSize(8).FontColor(Colors.Grey.Darken1);
+                    cc.Item().PaddingTop(1).Row(row =>
+                    {
+                        var per = (int)Math.Ceiling(list.Count / 3.0);
+                        for (int i = 0; i < 3; i++)
+                        {
+                            var chunk = list.Skip(i * per).Take(per).ToList();
+                            row.RelativeItem().Column(c => { foreach (var f in chunk) Field(c, f.FieldName, CustomVal(f)); });
+                        }
+                    });
+                });
+            }
         });
     }
 
@@ -374,7 +408,7 @@ public static class QualityReportPdf
                     BodyCell(table.Cell()).Text(m.Origin ?? "");
                     BodyCell(table.Cell()).Text(m.MaterialGroup ?? "");
                     // Quantity + Unit joined from qms_arrival_item.
-                    BodyCell(table.Cell()).AlignRight().Text(m.Quantity?.ToString("0.###") ?? "");
+                    BodyCell(table.Cell()).AlignRight().Text(Fmt.Dec2(m.Quantity));
                     BodyCell(table.Cell()).Text(m.Uom ?? "");
                 }
             });
@@ -453,7 +487,7 @@ public static class QualityReportPdf
                     // group -- "Pieces" unless the group counts boxes, cartons, ...
                     Field(c, "Sample Size", g.SumSampleSize + " " + g.SampleUnit);
                     // PO Quantity shown on every summary (single or multi-material).
-                    Field(c, "PO Quantity", g.SumPoQuantity.ToString("0.###"));
+                    Field(c, "PO Quantity", Fmt.Dec2(g.SumPoQuantity));
                 });
             });
 
@@ -538,9 +572,9 @@ public static class QualityReportPdf
                 col.Item().Row(r =>
                 {
                     r.RelativeItem(3f).Text(dr.Name).FontSize(7);
-                    r.RelativeItem(1f).AlignRight().Text(dr.SumValue.ToString("0.##")).FontSize(7);
+                    r.RelativeItem(1f).AlignRight().Text(Fmt.Dec2(dr.SumValue)).FontSize(7);
                     r.RelativeItem(1.2f).AlignRight()
-                        .Text(dr.Percentage.ToString("0.##") + "%").SemiBold().FontColor(pctColor).FontSize(7);
+                        .Text(Fmt.Dec2(dr.Percentage) + "%").SemiBold().FontColor(pctColor).FontSize(7);
                 });
             }
 
@@ -551,9 +585,9 @@ public static class QualityReportPdf
             {
                 r.RelativeItem(3f).Text("Total").SemiBold().FontColor(Colors.Grey.Darken2).FontSize(7);
                 r.RelativeItem(1f).AlignRight()
-                    .Text(sec.TotalPieces.ToString("0.##")).SemiBold().FontColor(Colors.Grey.Darken2).FontSize(7);
+                    .Text(Fmt.Dec2(sec.TotalPieces)).SemiBold().FontColor(Colors.Grey.Darken2).FontSize(7);
                 r.RelativeItem(1.2f).AlignRight()
-                    .Text(sec.TotalPct.ToString("0.##") + "%").Bold().FontColor(pctColor).FontSize(7);
+                    .Text(Fmt.Dec2(sec.TotalPct) + "%").Bold().FontColor(pctColor).FontSize(7);
             });
         });
     }
@@ -665,7 +699,8 @@ public static class QualityReportPdf
             // Helper: format one MaterialHeaderValue's value by its kind.
             static string FormatValue(MaterialHeaderValue hv) => hv.ValueKind switch
             {
-                "Numeric" => hv.NumericValue?.ToString("0.##") ?? "",
+                "Numeric" => (Fmt.IsDateCode(hv.FieldCode) || Fmt.IsDateCode(hv.FieldName))
+                                ? Fmt.Int0(hv.NumericValue) : Fmt.Dec2(hv.NumericValue),
                 "Date"    => hv.DateValue?.ToString("yyyy-MM-dd") ?? "",
                 _         => hv.TextValue ?? ""
             };
@@ -887,7 +922,8 @@ public static class QualityReportPdf
             {
                 string val = hv.ValueKind switch
                 {
-                    "Numeric" => hv.NumericValue?.ToString("0.##") ?? "",
+                    "Numeric" => (Fmt.IsDateCode(hv.FieldCode) || Fmt.IsDateCode(hv.FieldName))
+                                    ? Fmt.Int0(hv.NumericValue) : Fmt.Dec2(hv.NumericValue),
                     "Date"    => hv.DateValue?.ToString("yyyy-MM-dd") ?? "",
                     _         => hv.TextValue ?? ""
                 };
@@ -924,9 +960,12 @@ public static class QualityReportPdf
             foreach (var r in shown)
             {
                 var label = string.IsNullOrWhiteSpace(r.UnitCode) ? r.ReadingName : $"{r.ReadingName} ({r.UnitCode})";
+                bool isDateCode = Fmt.IsDateCode(r.ReadingTypeCode) || Fmt.IsDateCode(r.ReadingName);
                 string value = string.Equals(r.ValueKind, "Text", StringComparison.OrdinalIgnoreCase)
                     ? (r.TextValue ?? "")
-                    : (r.NumericValue?.ToString("0.##") ?? r.TextValue ?? "");
+                    : (r.NumericValue.HasValue
+                        ? (isDateCode ? Fmt.Int0(r.NumericValue) : Fmt.Dec2(r.NumericValue))
+                        : (r.TextValue ?? ""));
                 table.Cell().PaddingVertical(1).PaddingRight(4).Text(label).FontColor(Colors.Grey.Darken1).FontSize(7);
                 table.Cell().PaddingVertical(1).PaddingRight(6)
                     .AlignRight().Text(value).Bold().FontSize(7);

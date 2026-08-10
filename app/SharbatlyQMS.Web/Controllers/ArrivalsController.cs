@@ -31,6 +31,7 @@ public class ArrivalsController : Controller
     public async Task<IActionResult> Pending(
         string? container, string? bol, string? po,
         string? plant, string? poType, string? storageLoc, string? supplier,
+        string? material, DateOnly? from, DateOnly? to,
         int page = 1, int pageSize = 100)
     {
         // Server-side paging: the pending cache holds thousands of triplets, so
@@ -43,13 +44,16 @@ public class ArrivalsController : Controller
         // the dropdown value to it (and the view replaces the dropdown with
         // a locked badge). Manager / SiteAdmin / etc. pass null and see all.
         var scope   = User.GetPlantScope();
-        var result  = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc, supplier, page, pageSize, scope);
+        var result  = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc, supplier, material, from, to, page, pageSize, scope);
         var status  = await _cache.GetPullStatusAsync();
         var options = await _cache.GetPendingFilterOptionsAsync(scope);
         ViewBag.Container         = container;
         ViewBag.Bol               = bol;
         ViewBag.Po                = po;
         ViewBag.Supplier          = supplier;
+        ViewBag.Material          = material;
+        ViewBag.From              = from;
+        ViewBag.To                = to;
         ViewBag.Plant             = plant;
         ViewBag.PoType            = poType;
         ViewBag.StorageLoc        = storageLoc;
@@ -387,7 +391,28 @@ public class ArrivalsController : Controller
         // V36: admin-defined fields whose material group appears on this
         // arrival's line items (empty list = the card isn't rendered).
         ViewBag.CustomFields = await _arrivals.GetCustomFieldsAsync(id);
+        // Per-field rules (W6): which editable fields are still editable given
+        // the arrival status, and which are mandatory (shown with a * marker).
+        var policies = await _arrivals.GetArrivalFieldPoliciesAsync();
+        var editable = await FieldEditableAsync(arrival.StatusCode);
+        ViewBag.FieldEditable = editable;
+        ViewBag.MandatoryKeys = new HashSet<string>(
+            policies.Where(kv => kv.Value.IsMandatory).Select(kv => kv.Key),
+            StringComparer.OrdinalIgnoreCase);
         return View(arrival);
+    }
+
+    /// <summary>Per-field editability for an arrival's forms. Draft: everything
+    /// editable. Completed: administrators still edit everything (unchanged), and
+    /// any field flagged "editable when closed" on the Arrival Field Rules page
+    /// stays editable for everyone (e.g. Joint Survey). Cancelled: nothing.</summary>
+    private async Task<Func<string, bool>> FieldEditableAsync(string status)
+    {
+        if (status == ArrivalStatus.Draft) return _ => true;
+        if (status != ArrivalStatus.Completed) return _ => false;
+        bool isAdmin = User.IsInRole(RoleCodes.Admin);
+        var policies = await _arrivals.GetArrivalFieldPoliciesAsync();
+        return key => isAdmin || (policies.TryGetValue(key, out var p) && p.EditableWhenClosed);
     }
 
 
@@ -398,9 +423,14 @@ public class ArrivalsController : Controller
         if (await EnsureCanReadArrivalAsync(checklist.ArrivalId) is { } block) return block;
         var arrival = await _arrivals.GetAsync(checklist.ArrivalId);
         if (arrival == null) return NotFound();
-        // Draft is editable by OperatorOrAbove (controller policy); a Completed
-        // arrival is editable by the Administrator only. Cancelled is never editable.
-        if (!CanEditArrival(arrival.StatusCode))
+        var editable = await FieldEditableAsync(arrival.StatusCode);
+        // Block only when nothing on the checklist may be edited. Photo-taken
+        // flags aren't in the registry, so editable("<no policy>") = admin-only —
+        // preserving the old "Completed → admin only" behaviour for them.
+        bool anyChecklistEditable =
+            ArrivalFieldRegistry.All.Any(f => f.Form == ArrivalFieldRegistry.Checklist && editable(f.Key))
+            || editable("__photo_flags__");   // true for Draft (all) or admin
+        if (!anyChecklistEditable)
         {
             TempData["Error"] = $"Arrival is {arrival.StatusCode} — not editable.";
             return RedirectToAction(nameof(Details), new { id = checklist.ArrivalId });
@@ -412,6 +442,44 @@ public class ArrivalsController : Controller
         // stored in. Overrides whatever the single-value model binding set.
         checklist.SealNo          = JoinMultiInput("SealNos", 4);
         checklist.DataLoggerSerial = JoinMultiInput("LoggerSerials", 4);
+        // Merge: on a non-Draft arrival keep the stored value for any field the
+        // user isn't allowed to change now (registry fields honour their policy;
+        // the photo-taken flags stay admin-only via editable("__photo_flags__")).
+        if (arrival.StatusCode != ArrivalStatus.Draft)
+        {
+            var cur = await _arrivals.GetChecklistAsync(checklist.ArrivalId) ?? checklist;
+            if (!editable("seal_no"))                       checklist.SealNo                     = cur.SealNo;
+            if (!editable("seal_intact"))                   checklist.SealIntact                 = cur.SealIntact;
+            if (!editable("seal_matches_documents"))        checklist.SealMatchesDocuments       = cur.SealMatchesDocuments;
+            if (!editable("external_damage_exists"))        checklist.ExternalDamageExists       = cur.ExternalDamageExists;
+            if (!editable("set_temperature"))               checklist.SetTemperature             = cur.SetTemperature;
+            if (!editable("display_temperature"))           checklist.DisplayTemperature         = cur.DisplayTemperature;
+            if (!editable("cargo_smell_normal"))            checklist.CargoSmellNormal           = cur.CargoSmellNormal;
+            if (!editable("visual_cargo_acceptable"))       checklist.VisualCargoAcceptable      = cur.VisualCargoAcceptable;
+            if (!editable("cargo_shifted_collapsed_water")) checklist.CargoShiftedCollapsedWater = cur.CargoShiftedCollapsedWater;
+            if (!editable("pulp_temp_front"))               checklist.PulpTempFront              = cur.PulpTempFront;
+            if (!editable("pulp_temp_middle"))              checklist.PulpTempMiddle             = cur.PulpTempMiddle;
+            if (!editable("pulp_temp_back"))                checklist.PulpTempBack               = cur.PulpTempBack;
+            if (!editable("data_logger_located"))           checklist.DataLoggerLocated          = cur.DataLoggerLocated;
+            if (!editable("data_logger_serial"))            checklist.DataLoggerSerial           = cur.DataLoggerSerial;
+            if (!editable("logger_handed_over"))            checklist.LoggerHandedOver           = cur.LoggerHandedOver;
+            if (!editable("logger_active_data_available"))  checklist.LoggerActiveDataAvailable  = cur.LoggerActiveDataAvailable;
+            if (!editable("logger_temperature"))            checklist.LoggerTemperature          = cur.LoggerTemperature;
+            if (!editable("notes"))                         checklist.Notes                      = cur.Notes;
+            // Photo-taken flags: admin-only on a closed arrival.
+            if (!editable("__photo_flags__"))
+            {
+                checklist.DataLoggerPhotoTaken          = cur.DataLoggerPhotoTaken;
+                checklist.DisplayTempPhotoTaken         = cur.DisplayTempPhotoTaken;
+                checklist.InternalInspectionPhotoTaken  = cur.InternalInspectionPhotoTaken;
+                checklist.PulpTempPhotoTaken            = cur.PulpTempPhotoTaken;
+                checklist.ContainerSealPhotoTaken       = cur.ContainerSealPhotoTaken;
+                checklist.ExternalContainerPhotoTaken   = cur.ExternalContainerPhotoTaken;
+                checklist.ExternalDamagePhotoTaken      = cur.ExternalDamagePhotoTaken;
+                checklist.FirstViewCargoPhotoTaken      = cur.FirstViewCargoPhotoTaken;
+                checklist.InternalDamagePhotoTaken      = cur.InternalDamagePhotoTaken;
+            }
+        }
         await _arrivals.SaveChecklistAsync(checklist, user);
         // V36.2: the "Additional fields" card lives inside the checklist form
         // (single Save button, per user request) — persist its cf_{fieldId}
@@ -459,11 +527,25 @@ public class ArrivalsController : Controller
         if (await EnsureCanReadArrivalAsync(shipment.ArrivalId) is { } block) return block;
         var arrival = await _arrivals.GetAsync(shipment.ArrivalId);
         if (arrival == null) return NotFound();
-        if (!CanEditArrival(arrival.StatusCode))
+        var editable = await FieldEditableAsync(arrival.StatusCode);
+        // Block only when NOTHING on this form may be edited (Cancelled, or a
+        // Completed arrival with no editable-when-closed field and not an admin).
+        if (!ArrivalFieldRegistry.All.Any(f => f.Form == ArrivalFieldRegistry.Shipment && editable(f.Key)))
         {
             TempData["Error"] = $"Arrival is {arrival.StatusCode} — not editable.";
             return RedirectToAction(nameof(Details), new { id = shipment.ArrivalId });
         }
+        // Keep the stored value for any field the user can't change now, so a
+        // crafted post can't slip a locked field through.
+        var cur = await _arrivals.GetShipmentAsync(shipment.ArrivalId) ?? new ShipmentSnapshot { ArrivalId = shipment.ArrivalId };
+        if (!editable("discharge_date"))    shipment.DischargeDate   = cur.DischargeDate;
+        if (!editable("unloading_date"))    shipment.UnloadingDate   = cur.UnloadingDate;
+        if (!editable("pullout_date"))      shipment.PullOutDate     = cur.PullOutDate;
+        if (!editable("time_bar"))          shipment.TimeBar         = cur.TimeBar;
+        if (!editable("arrival_place"))     shipment.ArrivalPlace    = cur.ArrivalPlace;
+        if (!editable("inspection_point"))  shipment.InspectionPoint = cur.InspectionPoint;
+        if (!editable("joint_survey"))      shipment.JointSurvey     = cur.JointSurvey;
+        if (!editable("time_bar_exceeded")) shipment.TimeBarExceeded = cur.TimeBarExceeded;
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         await _arrivals.SaveShipmentAsync(shipment, user);
         TempData["Success"] = "Shipment details saved.";
@@ -512,17 +594,4 @@ public class ArrivalsController : Controller
         return RedirectToAction(nameof(Index));
     }
 
-    // Combined status + role gate for arrival edits.
-    // Draft -> any OperatorOrAbove (controller-level policy).
-    // Completed -> ADMINISTRATOR ONLY (post-completion data fixes). The Role
-    //   claim carries the role CODE now, so this compares against RoleCodes.Admin
-    //   ("QcAdmin"); the previous UserRoles.SiteAdmin ("SiteAdmin") name never
-    //   matched the code and so silently blocked everyone.
-    // Cancelled -> nobody (Reopen first).
-    private bool CanEditArrival(string statusCode)
-    {
-        if (statusCode == ArrivalStatus.Draft) return true;
-        if (statusCode == ArrivalStatus.Completed) return User.IsInRole(RoleCodes.Admin);
-        return false;
-    }
 }

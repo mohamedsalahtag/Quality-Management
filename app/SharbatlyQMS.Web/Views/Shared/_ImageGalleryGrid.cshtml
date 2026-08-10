@@ -17,11 +17,13 @@
 }
 else
 {
-    <div class="d-flex flex-wrap gap-3">
+    @* data-lightbox-group scopes prev/next to this gallery's images; each
+       anchor keeps its href so middle-click / no-JS still opens the raw image. *@
+    <div class="d-flex flex-wrap gap-3" data-lightbox-group>
         @foreach (var img in images)
         {
             <div class="card ig-card" data-image-link-id="@img.ImageLinkId" style="width:@(thumb.ScreenWidth + 16)px">
-                <a href="@img.StorageUrl" target="_blank" class="text-decoration-none">
+                <a href="@img.StorageUrl" data-lightbox data-caption="@img.OriginalName" class="text-decoration-none">
                     <img src="@(img.ThumbnailUrl ?? img.StorageUrl)"
                          class="card-img-top" loading="lazy"
                          style="width:@(thumb.ScreenWidth)px;height:@(thumb.ScreenHeight)px;object-fit:@(thumb.FitMode.Equals("Cover", StringComparison.OrdinalIgnoreCase) ? "cover" : "contain")"

@@ -10,10 +10,16 @@
     var poType      = ViewBag.PoType     as string;
     var storageLoc  = ViewBag.StorageLoc as string;
     var supplier    = ViewBag.Supplier   as string;
+    var material    = ViewBag.Material   as string;
+    var fromDate    = ViewBag.From       as DateOnly?;
+    var toDate      = ViewBag.To         as DateOnly?;
+    string Dstr(DateOnly? d) => d?.ToString("yyyy-MM-dd") ?? "";
     bool filtered = !string.IsNullOrWhiteSpace(container)
                     || !string.IsNullOrWhiteSpace(bol)
                     || !string.IsNullOrWhiteSpace(po)
                     || !string.IsNullOrWhiteSpace(supplier)
+                    || !string.IsNullOrWhiteSpace(material)
+                    || fromDate.HasValue || toDate.HasValue
                     || !string.IsNullOrWhiteSpace(plant)
                     || !string.IsNullOrWhiteSpace(poType)
                     || !string.IsNullOrWhiteSpace(storageLoc);
@@ -42,6 +48,9 @@
         Add("bol", bol);
         Add("po", po);
         Add("supplier", supplier);
+        Add("material", material);
+        Add("from", Dstr(fromDate));
+        Add("to", Dstr(toDate));
         Add("plant", plant);
         Add("storageLoc", storageLoc);
         Add("poType", poType);
@@ -132,15 +141,32 @@
     </div>
 }
 
-@* ---- Filter form ----
-   Free-text contains-match on Container / BOL / PO; exact-match on the
-   three SAP-categorical dropdowns (Plant, PO Type, Storage Loc).
-   The Storage Loc dropdown is plant-scoped: each <option> carries the
-   parent plant code in `data-plant`; site-level JS narrows visible
-   options when the Plant dropdown changes (storage-loc codes repeat
-   across plants in SAP, so showing all of them un-scoped would be
-   ambiguous). *@
-<form method="get" class="row g-2 mb-3">
+@* ---- Filter form (collapsible) ----
+   Free-text contains-match on Container / BOL / PO / Supplier / Material;
+   exact-match on the SAP-categorical dropdowns (Plant, PO Type, Storage Loc);
+   a PO-date (doc_date) range. All filters live inside a Bootstrap `collapse`
+   panel to save vertical space; the panel opens automatically when any filter
+   is active so a bookmarked/filtered view isn't hidden.
+   The Storage Loc dropdown is plant-scoped via `data-plant` on each option
+   (storage-loc codes repeat across plants). *@
+@{
+    var activeCount =
+        new[] { container, bol, po, supplier, material, plant, poType, storageLoc }
+            .Count(x => !string.IsNullOrWhiteSpace(x))
+        + (fromDate.HasValue ? 1 : 0) + (toDate.HasValue ? 1 : 0);
+}
+<div class="mb-3">
+    <button type="button" class="btn btn-outline-secondary btn-sm"
+            data-bs-toggle="collapse" data-bs-target="#pendingFilters"
+            aria-expanded="@(filtered ? "true" : "false")" aria-controls="pendingFilters">
+        <i class="bi bi-funnel me-1"></i>Filters
+        @if (activeCount > 0)
+        {
+            <span class="badge bg-primary ms-1" title="Active filters">@activeCount</span>
+        }
+    </button>
+    <div class="collapse @(filtered ? "show" : "")" id="pendingFilters">
+<form method="get" class="row g-2 card card-body mt-2 mb-0">
     @* Container and BOL gave up a column each so Supplier could have two.
        All three are contains-matches, so a partial value is enough and the
        narrower boxes still show what you typed. *@
@@ -163,6 +189,12 @@
         <label class="form-label small mb-1">Supplier</label>
         <input type="text" name="supplier" value="@supplier" class="form-control form-control-sm"
                placeholder="part of the name" title="Supplier name or number — any part of it, no need to type it in full"
+               autocomplete="off" />
+    </div>
+    <div class="col-6 col-md-2">
+        <label class="form-label small mb-1">Material</label>
+        <input type="text" name="material" value="@material" class="form-control form-control-sm"
+               placeholder="code or description" title="Material number or description — any part of it"
                autocomplete="off" />
     </div>
     <div class="col-md-2">
@@ -214,7 +246,18 @@
             }
         </select>
     </div>
-    <div class="col-md-2 d-flex align-items-end gap-2">
+    @* PO-date (doc_date) range. doc_date is a SQL DATE, so no timezone dance. *@
+    <div class="col-6 col-md-2">
+        <label class="form-label small mb-1">PO date from</label>
+        <input type="date" name="from" value="@Dstr(fromDate)" class="form-control form-control-sm"
+               title="Show containers with a PO date on/after this date" />
+    </div>
+    <div class="col-6 col-md-2">
+        <label class="form-label small mb-1">PO date to</label>
+        <input type="date" name="to" value="@Dstr(toDate)" class="form-control form-control-sm"
+               title="Show containers with a PO date on/before this date" />
+    </div>
+    <div class="col-md-3 d-flex align-items-end gap-2">
         <button type="submit" class="btn btn-primary btn-sm">
             <i class="bi bi-funnel me-1"></i>Filter
         </button>
@@ -224,6 +267,8 @@
         }
     </div>
 </form>
+    </div>
+</div>
 
 <style>
     /* Compact grid: 13 columns wrapped on narrow screens. Combined cells
@@ -315,7 +360,7 @@
                                 "<span class='pp-tip-no'>" + System.Net.WebUtility.HtmlEncode(ml.MaterialNo ?? "") + "</span>" +
                                 System.Net.WebUtility.HtmlEncode(ml.MaterialDesc ?? "(no description)") +
                                 (ml.Quantity.HasValue && ml.Quantity.Value > 0
-                                    ? "<span class='pp-tip-qty'>" + ml.Quantity.Value.ToString("0.##") + " " + System.Net.WebUtility.HtmlEncode(ml.Uom ?? "") + "</span>"
+                                    ? "<span class='pp-tip-qty'>" + Fmt.Dec2(ml.Quantity.Value) + " " + System.Net.WebUtility.HtmlEncode(ml.Uom ?? "") + "</span>"
                                     : "") +
                             "</li>")) +
                         "</ul>";

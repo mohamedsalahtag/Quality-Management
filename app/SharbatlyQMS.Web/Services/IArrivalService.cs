@@ -60,6 +60,13 @@ public interface IArrivalService
     Task SaveShipmentAsync(ShipmentSnapshot ss, string updatedBy);
     Task<(bool ok, string? error)> CompleteAsync(long arrivalId, string user);
 
+    /// <summary>Every registry field's effective policy: the stored override
+    /// when present, otherwise the code default. Keyed by field_key.</summary>
+    Task<IReadOnlyDictionary<string, ArrivalFieldPolicy>> GetArrivalFieldPoliciesAsync();
+
+    /// <summary>Upserts the per-field policy rows edited on the admin page.</summary>
+    Task SaveArrivalFieldPoliciesAsync(IEnumerable<ArrivalFieldPolicy> policies, string user);
+
     /// <summary>Admin: take a Completed arrival back to Draft so the checklist
     /// can be edited again. Refuses if an active Quality Order exists.</summary>
     Task<(bool ok, string? error)> ReopenForEditAsync(long arrivalId, string user, string? reason);

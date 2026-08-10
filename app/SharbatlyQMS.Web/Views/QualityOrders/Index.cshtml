@@ -66,7 +66,7 @@
 @* One form for everything: the always-visible quick bar and the collapsible
    panel below it. Collapsed inputs still submit (display:none is not disabled),
    which is exactly what we want -- the two sets AND together. *@
-<form method="get" class="mb-3">
+<form method="get" class="mb-3" data-filter-memory="qo">
     <div class="row g-2 align-items-stretch">
         <div class="col-md-4">
             <input type="text" name="search" value="@search" class="form-control"
@@ -76,7 +76,7 @@
             <button type="submit" class="btn btn-outline-secondary flex-grow-1"><i class="bi bi-funnel me-1"></i>Filter</button>
             @if (f.Any)
             {
-                <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter">Clear</a>
+                <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>Clear</a>
             }
         </div>
         <div class="col-md-4">
@@ -262,7 +262,7 @@
                                 "<li>" +
                                     System.Net.WebUtility.HtmlEncode(ml.MaterialDesc ?? "(no description)") +
                                     (ml.Quantity.HasValue && ml.Quantity.Value > 0
-                                        ? "<span class='qo-tip-qty'>" + ml.Quantity.Value.ToString("0.##") + " " + System.Net.WebUtility.HtmlEncode(ml.Uom ?? "") + "</span>"
+                                        ? "<span class='qo-tip-qty'>" + Fmt.Dec2(ml.Quantity.Value) + " " + System.Net.WebUtility.HtmlEncode(ml.Uom ?? "") + "</span>"
                                         : "") +
                                 "</li>")) +
                             "</ul>";
@@ -332,3 +332,7 @@
         </table>
     </div>
 </div>
+
+@section Scripts {
+    <script src="~/js/list-filter-memory.js" asp-append-version="true"></script>
+}

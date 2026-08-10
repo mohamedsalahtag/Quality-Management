@@ -38,6 +38,7 @@ public static class Screens
     public const string ReadingTypes       = "Parameters.ReadingTypes";
     public const string SampleHeaders      = "Parameters.SampleHeaders";
     public const string ArrivalFields      = "Parameters.ArrivalFields";
+    public const string ArrivalFieldRules  = "Parameters.ArrivalFieldRules";
     public const string ReportUnits        = "Parameters.ReportUnits";
     public const string CodeDescriptions   = "Parameters.CodeDescriptions";
     public const string MailTemplate       = "Parameters.MailTemplate";
@@ -55,7 +56,7 @@ public static class Screens
         QoIndex, QoDetails, Claims,
         ReportsDataHub, ReportsBuilder,
         DefectCatalog, DefectCategories, ReadingTypes, SampleHeaders,
-        ArrivalFields, ReportUnits, CodeDescriptions, MailTemplate,
+        ArrivalFields, ArrivalFieldRules, ReportUnits, CodeDescriptions, MailTemplate,
         AdminSettings, AdminUsers, AdminAuditLog, AdminSecurity
     };
 
@@ -63,7 +64,7 @@ public static class Screens
     public static readonly string[] ParametersGroup =
     {
         DefectCatalog, DefectCategories, ReadingTypes, SampleHeaders,
-        ArrivalFields, ReportUnits, CodeDescriptions, MailTemplate
+        ArrivalFields, ArrivalFieldRules, ReportUnits, CodeDescriptions, MailTemplate
     };
 
     /// <summary>Screens whose nav entries live in the Admin dropdown.</summary>

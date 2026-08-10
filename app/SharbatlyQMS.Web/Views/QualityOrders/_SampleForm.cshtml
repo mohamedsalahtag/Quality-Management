@@ -219,18 +219,22 @@
                 && (!string.IsNullOrWhiteSpace(mv.TextValue) || mv.NumericValue.HasValue || mv.DateValue.HasValue);
             bool matIncomplete = Model.MaterialHeaderFields.Any(f => !MhFilled(f));
         }
-        @if (Model.MaterialHeaderFields.Count > 0)
+        @* Always rendered now — it also holds the material-level Tara weight,
+           which is shared by every sample (net = sample gross − material tara). *@
         {
             <div class="card mb-2 material-details-card @(matIncomplete ? "md-incomplete" : "md-complete")">
                 <div class="card-header d-flex justify-content-between align-items-center gap-2 py-1">
                     <span><i class="bi bi-box-seam me-1"></i>Material details</span>
-                    @if (matIncomplete)
+                    @if (Model.MaterialHeaderFields.Count > 0)
                     {
-                        <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Not filled in</span>
-                    }
-                    else
-                    {
-                        <span class="badge bg-success"><i class="bi bi-check2 me-1"></i>Filled</span>
+                        @if (matIncomplete)
+                        {
+                            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Not filled in</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-success"><i class="bi bi-check2 me-1"></i>Filled</span>
+                        }
                     }
                 </div>
                 <div class="card-body">
@@ -239,6 +243,15 @@
                         <div class="md-hint">Shared by all samples of this material — fill it here and it applies to every sample (past and future).</div>
                     }
                     <div class="row g-1">
+                        @* Tare weight: entered once per material; every sample's net
+                           weight is its own gross minus this value. *@
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">Tare weight</label>
+                            <input name="mat_tara" type="number" step="any" inputmode="decimal"
+                                   class="form-control form-control-sm" value="@qoMat?.TaraWeight"
+                                   data-weight-role="mattara"
+                                   title="Shared by all samples of this material. Net = gross − tara." />
+                        </div>
                         @foreach (var f in Model.MaterialHeaderFields)
                         {
                             mhByCode.TryGetValue(f.FieldCode, out var mexisting);
@@ -313,6 +326,9 @@
                 bool isGross = IsGrossCode(rt.ReadingTypeCode);
                 bool isTara  = IsTaraCode(rt.ReadingTypeCode);
                 bool isNet   = IsNetCode(rt.ReadingTypeCode);
+                // Tara moved to the Material details card (one value per material),
+                // so it no longer appears as a per-sample reading.
+                if (isTara) { continue; }
                 // Auto-fill rule: GROSS on a new sample defaults to the
                 // material weight when no operator entry exists yet.
                 decimal? autoFill = null;
@@ -327,8 +343,9 @@
                 if (isNet)
                 {
                     var effGross = grossStored ?? (isNewSampleForm && maraWeight.HasValue && maraWeight.Value > 0 ? maraWeight : null);
-                    if (effGross.HasValue && taraStored.HasValue)
-                        numValue = decimal.Round(effGross.Value - taraStored.Value, 2);
+                    var effTara  = qoMat?.TaraWeight;   // material-level tara
+                    if (effGross.HasValue && effTara.HasValue)
+                        numValue = decimal.Round(effGross.Value - effTara.Value, 2);
                 }
                 string weightRole = isGross ? "gross" : isTara ? "tara" : isNet ? "net" : "";
                 <div class="col-6 col-md-3">
@@ -351,6 +368,9 @@
                                    class="form-control form-control-sm bg-light"
                                    value="@numValue" readonly tabindex="-1"
                                    data-weight-role="net" />
+                            <div class="small text-danger net-weight-error d-none mt-1">
+                                <i class="bi bi-exclamation-triangle me-1"></i>Tare exceeds gross — net can't be negative.
+                            </div>
                         }
                         else
                         {
@@ -406,9 +426,9 @@
                         // Default to "0" instead of empty so downstream math (sums,
                         // averages) never sees nulls. Operator can type over it.
                         var valDisplay = v.HasValue
-                            ? (isDecimal ? v.Value.ToString("0.###") : ((int)Math.Round(v.Value)).ToString())
+                            ? (isDecimal ? Fmt.Dec2(v.Value) : ((int)Math.Round(v.Value)).ToString())
                             : "0";
-                        var pctDisplay = (p ?? 0m).ToString("0.##");
+                        var pctDisplay = Fmt.Dec2(p ?? 0m);
                         <div class="defect-row d-flex align-items-center gap-2 defect-stepper"
                              data-defect-id="@d.DefectId" data-value-type="@d.ValueType">
                             <div class="flex-grow-1 defect-name">@d.DefectName</div>
@@ -428,7 +448,7 @@
                             {
                                 <button type="button" class="btn btn-outline-secondary btn-step defect-plus" tabindex="-1">+</button>
                             }
-                            <span class="badge defect-pct-badge bg-light text-muted">@((p ?? 0m).ToString("0.#"))%</span>
+                            <span class="badge defect-pct-badge bg-light text-muted">@Fmt.Dec2(p ?? 0m)%</span>
                             <input name="defect_@(d.DefectId)_pct" type="hidden" value="@pctDisplay" />
                         </div>
                     }
