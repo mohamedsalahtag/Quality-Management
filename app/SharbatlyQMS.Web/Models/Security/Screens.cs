@@ -64,13 +64,13 @@ public static class Screens
     public static readonly string[] ParametersGroup =
     {
         DefectCatalog, DefectCategories, ReadingTypes, SampleHeaders,
-        ArrivalFields, ArrivalFieldRules, ReportUnits, CodeDescriptions, MailTemplate
+        ArrivalFields, ReportUnits, CodeDescriptions, MailTemplate
     };
 
     /// <summary>Screens whose nav entries live in the Admin dropdown.</summary>
     public static readonly string[] AdminGroup =
     {
-        AdminSettings, AdminUsers, AdminAuditLog, AdminSecurity
+        AdminSettings, AdminUsers, AdminAuditLog, AdminSecurity, ArrivalFieldRules
     };
 
     /// <summary>Screens whose nav entries live in the Reports dropdown.</summary>

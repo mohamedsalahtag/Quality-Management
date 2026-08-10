@@ -166,7 +166,8 @@
         }
     </button>
     <div class="collapse @(filtered ? "show" : "")" id="pendingFilters">
-<form method="get" class="row g-2 card card-body mt-2 mb-0">
+    <div class="card card-body mt-2">
+<form method="get" class="row g-2 mb-0">
     @* Container and BOL gave up a column each so Supplier could have two.
        All three are contains-matches, so a partial value is enough and the
        narrower boxes still show what you typed. *@
@@ -267,6 +268,7 @@
         }
     </div>
 </form>
+    </div>
     </div>
 </div>
 

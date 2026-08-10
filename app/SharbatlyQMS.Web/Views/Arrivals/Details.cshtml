@@ -515,14 +515,14 @@
                             <label class="col-5 col-form-label small">Set Temp (°C)</label>
                             <div class="col-7">
                                 <input name="SetTemperature" type="number" step="0.1" inputmode="decimal"
-                                       class="form-control form-control-sm text-end" value="@checklist.SetTemperature" />
+                                       class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.SetTemperature)" />
                             </div>
                         </div>
                         <div class="row g-2 align-items-center mb-2">
                             <label class="col-5 col-form-label small">Display Temp (°C)</label>
                             <div class="col-7">
                                 <input name="DisplayTemperature" type="number" step="0.1" inputmode="decimal"
-                                       class="form-control form-control-sm text-end" value="@checklist.DisplayTemperature" />
+                                       class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.DisplayTemperature)" />
                             </div>
                         </div>
                         <div class="border-top pt-2">
@@ -568,21 +568,21 @@
                             <label class="col-4 col-form-label small">Front (°C)</label>
                             <div class="col-8">
                                 <input name="PulpTempFront" type="number" step="0.1" inputmode="decimal"
-                                       class="form-control form-control-sm text-end" value="@checklist.PulpTempFront" />
+                                       class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.PulpTempFront)" />
                             </div>
                         </div>
                         <div class="row g-2 align-items-center mb-2">
                             <label class="col-4 col-form-label small">Middle (°C)</label>
                             <div class="col-8">
                                 <input name="PulpTempMiddle" type="number" step="0.1" inputmode="decimal"
-                                       class="form-control form-control-sm text-end" value="@checklist.PulpTempMiddle" />
+                                       class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.PulpTempMiddle)" />
                             </div>
                         </div>
                         <div class="row g-2 align-items-center mb-2">
                             <label class="col-4 col-form-label small">Back (°C)</label>
                             <div class="col-8">
                                 <input name="PulpTempBack" type="number" step="0.1" inputmode="decimal"
-                                       class="form-control form-control-sm text-end" value="@checklist.PulpTempBack" />
+                                       class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.PulpTempBack)" />
                             </div>
                         </div>
                         <div class="border-top pt-2">
@@ -634,7 +634,7 @@
                             <label class="col-5 col-form-label small">Logger temp (°C)</label>
                             <div class="col-7">
                                 <input name="LoggerTemperature" type="number" step="0.1" inputmode="decimal"
-                                       class="form-control form-control-sm text-end" value="@checklist.LoggerTemperature" />
+                                       class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.LoggerTemperature)" />
                             </div>
                         </div>
                         <div class="border-top pt-2">

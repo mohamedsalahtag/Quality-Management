@@ -59,7 +59,10 @@ GO
 -- attribute at startup; only the screen catalogue row needs seeding).
 IF NOT EXISTS (SELECT 1 FROM qms.qms_screen WHERE screen_key = 'Parameters.ArrivalFieldRules')
     INSERT INTO qms.qms_screen (screen_key, display_name, group_name, sort_order, supports_access_level)
-    VALUES ('Parameters.ArrivalFieldRules', N'Arrival Field Rules', 'Parameters', 345, 0);
+    VALUES ('Parameters.ArrivalFieldRules', N'Arrival Field Rules', 'Admin', 380, 0);
+-- Lives in the Admin menu (moved from Parameters); keep the matrix grouping in step.
+UPDATE qms.qms_screen SET group_name = 'Admin', sort_order = 380
+WHERE  screen_key = 'Parameters.ArrivalFieldRules' AND group_name <> 'Admin';
 GO
 
 SELECT 'arrival_field_rules_screen' AS check_item, COUNT(*) AS value

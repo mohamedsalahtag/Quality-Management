@@ -183,7 +183,7 @@
                                 {
                                     <input name="@(HfName(f.FieldCode))" type="number" step="any" inputmode="decimal"
                                            class="form-control form-control-sm"
-                                           value="@(existing?.NumericValue)"
+                                           value="@((Fmt.IsDateCode(f.FieldCode) || Fmt.IsDateCode(f.FieldName)) ? Fmt.Int0(existing?.NumericValue) : Fmt.Dec2(existing?.NumericValue))"
                                            required="@(f.IsMandatory)" />
                                 }
                                 else if (f.ValueKind == "Date")
@@ -248,7 +248,7 @@
                         <div class="col-6 col-md-3">
                             <label class="form-label">Tare weight</label>
                             <input name="mat_tara" type="number" step="any" inputmode="decimal"
-                                   class="form-control form-control-sm" value="@qoMat?.TaraWeight"
+                                   class="form-control form-control-sm" value="@Fmt.Dec2(qoMat?.TaraWeight)"
                                    data-weight-role="mattara"
                                    title="Shared by all samples of this material. Net = gross − tara." />
                         </div>
@@ -266,7 +266,7 @@
                                 @if (f.ValueKind == "Numeric")
                                 {
                                     <input name="@(MhName(f.FieldCode))" type="number" step="any" inputmode="decimal"
-                                           class="form-control form-control-sm" value="@(mexisting?.NumericValue)" />
+                                           class="form-control form-control-sm" value="@((Fmt.IsDateCode(f.FieldCode) || Fmt.IsDateCode(f.FieldName)) ? Fmt.Int0(mexisting?.NumericValue) : Fmt.Dec2(mexisting?.NumericValue))" />
                                 }
                                 else if (f.ValueKind == "Date")
                                 {
@@ -366,7 +366,7 @@
                         {
                             <input name="reading_@(rt.ReadingTypeCode)_num" type="number" step="any" inputmode="decimal"
                                    class="form-control form-control-sm bg-light"
-                                   value="@numValue" readonly tabindex="-1"
+                                   value="@Fmt.Dec2(numValue)" readonly tabindex="-1"
                                    data-weight-role="net" />
                             <div class="small text-danger net-weight-error d-none mt-1">
                                 <i class="bi bi-exclamation-triangle me-1"></i>Tare exceeds gross — net can't be negative.
@@ -376,7 +376,7 @@
                         {
                             <input name="reading_@(rt.ReadingTypeCode)_num" type="number" step="any" inputmode="decimal"
                                    class="form-control form-control-sm @(rt.IsMandatory ? "is-mandatory-reading" : "")"
-                                   value="@numValue" required="@(rt.IsMandatory)"
+                                   value="@((Fmt.IsDateCode(rt.ReadingTypeCode) || Fmt.IsDateCode(rt.ReadingName)) ? Fmt.Int0(numValue) : Fmt.Dec2(numValue))" required="@(rt.IsMandatory)"
                                    @(weightRole != "" ? $"data-weight-role={weightRole}" : "") />
                         }
                     }
