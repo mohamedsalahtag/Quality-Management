@@ -152,8 +152,21 @@ public class DbService : IDbService
     public async Task<User?> GetUserByUsernameAsync(string username)
     {
         using var c = Open();
-        return await c.QuerySingleOrDefaultAsync<User>(
-            UserSelect + " WHERE Username = @username", new { username });
+        // Login normalises the AD account to its sAMAccountName (no domain), e.g.
+        // "hamad.almuqati". Most portal.User rows store exactly that, but some
+        // SCM-created rows store the full UPN/email as the Username
+        // ("hamad.almuqati@sharbatlyfruit.com"). Match either the stored value
+        // as-is or its part before '@', preferring an exact match — otherwise a
+        // valid admin whose row happens to use the email form is refused sign-in
+        // with "no quality-system access". Shared portal.User data is untouched.
+        return await c.QueryFirstOrDefaultAsync<User>(
+            UserSelect + @"
+            WHERE Username = @username
+               OR LEFT(Username, CASE WHEN CHARINDEX('@', Username) > 0
+                                      THEN CHARINDEX('@', Username) - 1
+                                      ELSE LEN(Username) END) = @username
+            ORDER BY CASE WHEN Username = @username THEN 0 ELSE 1 END",
+            new { username });
     }
 
     public async Task<IReadOnlyList<User>> ListUsersAsync(string? search, string? role, bool? isActive)
