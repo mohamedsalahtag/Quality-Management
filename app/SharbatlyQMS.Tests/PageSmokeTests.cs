@@ -236,7 +236,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
 
     /// <summary>
     /// The Arrivals list now has the same filter surface as Quality Orders: a
-    /// status chip bar and a collapsible "More filters" panel. This exercises the
+    /// status chip bar and a collapsible "Filters" panel. This exercises the
     /// new ArrivalListFilter binding, the filtered query, and the options load.
     /// </summary>
     [Fact]
@@ -247,8 +247,8 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         var html = await client.GetStringAsync(
             "/Arrivals?status=Completed&container=C&from=2020-01-01&to=2030-01-01");
 
-        Assert.Contains("More filters", html);   // the panel toggle
-        Assert.Contains("arrFilters", html);      // the collapsible panel id
+        Assert.Contains("data-bs-target=\"#arrFilters\"", html); // the panel toggle
+        Assert.Contains("arrFilters", html);                     // the collapsible panel id
     }
 
     /// <summary>

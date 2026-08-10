@@ -67,19 +67,15 @@
    panel below it. Collapsed inputs still submit (display:none is not disabled),
    which is exactly what we want -- the two sets AND together. *@
 <form method="get" class="mb-3" data-filter-memory="qo">
+    @* Enter inside the search box triggers this plain submit rather than the
+       first status chip (which would change the status filter). *@
+    <button type="submit" class="visually-hidden" tabindex="-1" aria-hidden="true"></button>
     <div class="row g-2 align-items-stretch">
-        <div class="col-md-4">
+        <div class="col-md-5">
             <input type="text" name="search" value="@search" class="form-control"
                    placeholder="Search by QO #, container, BOL, PO, supplier, or user..." />
         </div>
-        <div class="col-md-2 d-flex gap-2">
-            <button type="submit" class="btn btn-outline-secondary flex-grow-1"><i class="bi bi-funnel me-1"></i>Filter</button>
-            @if (f.Any)
-            {
-                <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>Clear</a>
-            }
-        </div>
-        <div class="col-md-4">
+        <div class="col-md-5">
             <div class="btn-group w-100" role="group" aria-label="Filter by status">
                 @foreach (var s in statuses)
                 {
@@ -87,16 +83,22 @@
                 }
             </div>
         </div>
-        <div class="col-md-2">
-            <button class="btn btn-outline-primary w-100" type="button"
+        <div class="col-md-2 d-flex gap-2">
+            @* Filters toggle, styled like the Pending Containers page. The panel
+               itself carries the Apply/Reset buttons, so no separate Filter button. *@
+            <button class="btn btn-outline-secondary flex-grow-1" type="button"
                     data-bs-toggle="collapse" data-bs-target="#qoFilters"
                     aria-expanded="@(panelOpen ? "true" : "false")" aria-controls="qoFilters">
-                <i class="bi bi-sliders me-1"></i>More filters
+                <i class="bi bi-funnel me-1"></i>Filters
                 @if (f.PanelFilterCount > 0)
                 {
                     <span class="badge bg-primary ms-1">@f.PanelFilterCount</span>
                 }
             </button>
+            @if (f.Any)
+            {
+                <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>Clear</a>
+            }
         </div>
     </div>
 
