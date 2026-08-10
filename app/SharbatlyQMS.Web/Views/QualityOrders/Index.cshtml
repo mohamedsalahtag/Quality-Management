@@ -67,26 +67,14 @@
    panel below it. Collapsed inputs still submit (display:none is not disabled),
    which is exactly what we want -- the two sets AND together. *@
 <form method="get" class="mb-3" data-filter-memory="qo">
-    @* Enter inside the search box triggers this plain submit rather than the
-       first status chip (which would change the status filter). *@
+    @* Enter inside a panel field does this plain submit rather than the first
+       status chip (which would change the status filter). *@
     <button type="submit" class="visually-hidden" tabindex="-1" aria-hidden="true"></button>
     <div class="row g-2 align-items-stretch">
-        <div class="col-md-5">
-            <input type="text" name="search" value="@search" class="form-control"
-                   placeholder="Search by QO #, container, BOL, PO, supplier, or user..." />
-        </div>
-        <div class="col-md-5">
-            <div class="btn-group w-100" role="group" aria-label="Filter by status">
-                @foreach (var s in statuses)
-                {
-                    <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)">@ChipLabel(s.Value)</button>
-                }
-            </div>
-        </div>
-        <div class="col-md-2 d-flex gap-2">
-            @* Filters toggle, styled like the Pending Containers page. The panel
-               itself carries the Apply/Reset buttons, so no separate Filter button. *@
-            <button class="btn btn-outline-secondary flex-grow-1" type="button"
+        <div class="col-auto d-flex gap-2">
+            @* Filters toggle on the left, styled like the Pending Containers
+               page. The panel carries its own Apply/Reset buttons. *@
+            <button class="btn btn-outline-secondary" type="button"
                     data-bs-toggle="collapse" data-bs-target="#qoFilters"
                     aria-expanded="@(panelOpen ? "true" : "false")" aria-controls="qoFilters">
                 <i class="bi bi-funnel me-1"></i>Filters
@@ -99,6 +87,14 @@
             {
                 <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>Clear</a>
             }
+        </div>
+        <div class="col">
+            <div class="btn-group w-100" role="group" aria-label="Filter by status">
+                @foreach (var s in statuses)
+                {
+                    <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)">@ChipLabel(s.Value)</button>
+                }
+            </div>
         </div>
     </div>
 
