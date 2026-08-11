@@ -87,6 +87,10 @@ public static class PivotRegistry
             new PivotDimension("QualityOrderNo",   "QO Number",        "QualityOrderNo",   PivotCategories.QualityOrder),
             new PivotDimension("QoStatus",         "QO status",        "QoStatus",         PivotCategories.QualityOrder),
             // ---- Sample ----
+            new PivotDimension("SampleNo",         "Sample No",        "SampleNo",         PivotCategories.Sample),
+            // Sample size is also available as a measure (Avg/Min/Max); as a
+            // dimension it lets a user group/break down by the exact size.
+            new PivotDimension("SampleSize",       "Sample size",      "SampleSize",       PivotCategories.Sample),
             new PivotDimension("SampleScope",      "Sample scope",     "SampleScope",      PivotCategories.Sample),
             new PivotDimension("Grower",           "Grower",           "Grower",           PivotCategories.Sample),
             new PivotDimension("PalletNo",         "Pallet No",        "PalletNo",         PivotCategories.Sample),
