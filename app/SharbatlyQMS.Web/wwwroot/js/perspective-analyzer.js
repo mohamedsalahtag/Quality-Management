@@ -164,8 +164,11 @@
 
     // -- schema bootstrap ------------------------------------------------
     function loadSchema() {
-        return fetch("/Reports/PivotSchema?report=" + encodeURIComponent(REPORT), {
-            headers: { "X-Requested-With": "XMLHttpRequest" }
+        // cache:no-store + a nonce so a newly added field (dimension/measure)
+        // always shows without a manual hard refresh.
+        return fetch("/Reports/PivotSchema?report=" + encodeURIComponent(REPORT) + "&_=" + Date.now(), {
+            headers: { "X-Requested-With": "XMLHttpRequest" },
+            cache: "no-store"
         })
         .then(parseResponse)
         .then(function (s) {

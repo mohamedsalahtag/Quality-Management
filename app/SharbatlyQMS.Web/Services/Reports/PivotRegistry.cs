@@ -62,6 +62,7 @@ public static class PivotRegistry
         Dimensions: new []
         {
             // ---- Supplier / PO context ----
+            new PivotDimension("ArrivalNo",        "Arrival No",       "ArrivalNo",        PivotCategories.SupplierPo),
             new PivotDimension("Plant",            "Plant",            "Plant",            PivotCategories.SupplierPo),
             new PivotDimension("StorageLocation",  "Storage Loc.",     "StorageLocation",  PivotCategories.SupplierPo),
             new PivotDimension("VendorName",       "Supplier",         "VendorName",       PivotCategories.SupplierPo),
@@ -107,14 +108,27 @@ public static class PivotRegistry
             new PivotDimension("DefectCategory",   "Defect category",  "DefectCategory",   PivotCategories.Defect),
             new PivotDimension("SeverityCode",     "Severity",         "SeverityCode",     PivotCategories.Defect),
             // ---- Dates & time buckets ----
+            // Each real date is available both as an exact day (yyyy-MM-dd) and
+            // as a month bucket; PO date additionally has year/quarter buckets.
+            new PivotDimension("PoDate",           "PO date",          "FORMAT(PoDate, 'yyyy-MM-dd')", PivotCategories.Dates),
             new PivotDimension("PoYear",           "PO year",          "CAST(YEAR(PoDate) AS VARCHAR(4))", PivotCategories.Dates),
             new PivotDimension("PoMonth",          "PO month",         "FORMAT(PoDate, 'yyyy-MM')", PivotCategories.Dates),
             new PivotDimension("PoQuarter",        "PO quarter",       "CAST(YEAR(PoDate) AS VARCHAR(4)) + '-Q' + CAST(DATEPART(QUARTER, PoDate) AS VARCHAR(1))", PivotCategories.Dates),
+            new PivotDimension("LoadingDate",      "Loading date",     "FORMAT(LoadingDate, 'yyyy-MM-dd')", PivotCategories.Dates),
+            new PivotDimension("LoadingMonth",     "Loading month",    "FORMAT(LoadingDate, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("ShippingDate",     "Shipping date",    "FORMAT(ShippingDate, 'yyyy-MM-dd')", PivotCategories.Dates),
+            new PivotDimension("ShippingMonth",    "Shipping month",   "FORMAT(ShippingDate, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("ArrivalDate",      "Arrival date",     "FORMAT(ArrivalDate, 'yyyy-MM-dd')", PivotCategories.Dates),
             new PivotDimension("ArrivalMonth",     "Arrival month",    "FORMAT(ArrivalDate, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("ReceiveDate",      "Receive date",     "FORMAT(ReceiveDate, 'yyyy-MM-dd')", PivotCategories.Dates),
+            new PivotDimension("ReceiveMonth",     "Receive month",    "FORMAT(ReceiveDate, 'yyyy-MM')", PivotCategories.Dates),
             new PivotDimension("DischargeDate",    "Discharge date",   "FORMAT(DischargeDate, 'yyyy-MM-dd')", PivotCategories.Dates),
             new PivotDimension("DischargeMonth",   "Discharge month",  "FORMAT(DischargeDate, 'yyyy-MM')", PivotCategories.Dates),
-            new PivotDimension("ReceiveMonth",     "Receive month",    "FORMAT(ReceiveDate, 'yyyy-MM')", PivotCategories.Dates),
-            new PivotDimension("ShippingMonth",    "Shipping month",   "FORMAT(ShippingDate, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("InspectionDate",   "Inspection date",  "FORMAT(SampleCreatedAt, 'yyyy-MM-dd')", PivotCategories.Dates),
+            new PivotDimension("InspectionMonth",  "Inspection month", "FORMAT(SampleCreatedAt, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("QoCreatedMonth",   "QO created month", "FORMAT(QoCreatedAt, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("QoOpenedMonth",    "QO opened month",  "FORMAT(QoOpenedAt, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("QoClosedDate",     "QO finished date", "FORMAT(QoClosedAt, 'yyyy-MM-dd')", PivotCategories.Dates),
             new PivotDimension("QoClosedMonth",    "QO finished month","FORMAT(QoClosedAt, 'yyyy-MM')", PivotCategories.Dates),
         },
         Measures: new []
@@ -130,6 +144,10 @@ public static class PivotRegistry
             // inflating SUM(SampleSize). Avg/Min/Max remain (still defect-weighted,
             // but not additively wrong).
             new PivotMeasure("SampleSize",     "Sample size",     "SampleSize",
+                new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
+            // Material-level configured sample size (before any per-sample
+            // override). Same per-defect-row grain caveat as SampleSize, so no SUM.
+            new PivotMeasure("MaterialSampleSize","Material sample size","MaterialSampleSize",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
             // V37 (2026-07-07): PO line quantity from qms_arrival_item. Same
             // grain caveat as SampleSize — it repeats per defect row — so no SUM.

@@ -99,6 +99,23 @@ public class ClaimManagementController : Controller
 
         var (claim, notes) = await _claims.GetForQoAsync(id);
 
+        // The finisher's optional comment (stored as the QO close reason) shows
+        // as the first chat message on the claim page, attributed to whoever
+        // finished the order — visible even before a formal claim is opened.
+        IReadOnlyList<Models.ClaimNote> chatNotes = notes;
+        if (!string.IsNullOrWhiteSpace(qo.CloseReason))
+        {
+            var finishNote = new Models.ClaimNote
+            {
+                NoteText   = qo.CloseReason!,
+                NoteKind   = Models.ClaimNoteKind.Comment,
+                CreatedAt  = qo.ClosedAt ?? qo.CreatedAt,
+                CreatedBy  = qo.ClosedBy ?? "system",
+                AuthorRole = "Finish note"
+            };
+            chatNotes = new[] { finishNote }.Concat(notes).ToList();
+        }
+
         // Bump this user's read-marker so any "new" badges on the list page
         // for this claim disappear after they view the chat. No-op when the
         // QO has no claim row yet (MarkSeenAsync just won't find anything).
@@ -123,7 +140,7 @@ public class ClaimManagementController : Controller
         ViewBag.IsClaimContext  = true;
         ViewBag.GroupSummaries  = groupSummaries;
         ViewBag.Claim           = claim;
-        ViewBag.ClaimNotes      = notes;
+        ViewBag.ClaimNotes      = chatNotes;
         return View("/Views/QualityOrders/Details.cshtml", qo);
     }
 

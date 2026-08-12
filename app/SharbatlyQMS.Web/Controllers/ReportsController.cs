@@ -810,6 +810,11 @@ public class ReportsController : Controller
             || !PivotRegistry.All.TryGetValue(report, out var rpt))
             return BadRequest(new { error = $"Unknown report '{report}'" });
 
+        // Never let the browser serve a stale field list: when the registry
+        // gains a dimension/measure (e.g. Sample No), a cached schema would hide
+        // it until a hard refresh. The schema is tiny, so no-store is cheap.
+        Response.Headers.CacheControl = "no-store, no-cache, must-revalidate";
+
         return Json(new
         {
             report     = rpt.Key,
