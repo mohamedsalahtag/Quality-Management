@@ -202,9 +202,17 @@ public static class QualityReportPdf
     private static void RenderHeaderBand(QuestPDF.Infrastructure.IContainer container,
         QualityReportData d)
     {
+        // Logo size is admin-controlled (Site Configuration → Branding). The
+        // base header logo is 45pt tall; LogoScalePercent scales it (default
+        // 150 = 50% larger). Clamp so a stray value can't overflow the header.
+        // The logo column widens with the logo so a taller logo isn't squeezed
+        // by FitArea into the old 70pt slot.
+        float logoScale  = Math.Clamp(d.LogoScalePercent <= 0 ? 150 : d.LogoScalePercent, 50, 400) / 100f;
+        float logoHeight = 45f * logoScale;
+        float logoColW   = Math.Max(70f, logoHeight + 8f);
         container.Row(row =>
         {
-            row.ConstantItem(70).AlignMiddle().Element(e =>
+            row.ConstantItem(logoColW).AlignMiddle().Element(e =>
             {
                 // Branding logo from Site Configuration → Branding tab.
                 // Falls back to a "QMS" badge so the header always renders
@@ -216,10 +224,10 @@ public static class QualityReportPdf
                     // file would otherwise throw during GeneratePdf and break
                     // EVERY quality report (incl. supplier emails). Mirror the
                     // ArrivalReportPdf fallback.
-                    try { e.Height(45).AlignLeft().Image(d.LogoAbsolutePath).FitArea(); return; }
+                    try { e.Height(logoHeight).AlignLeft().Image(d.LogoAbsolutePath).FitArea(); return; }
                     catch { /* fall through to placeholder */ }
                 }
-                e.Width(45).Height(45)
+                e.Width(logoHeight).Height(logoHeight)
                     .Background(Accent)
                     .AlignCenter().AlignMiddle()
                     .Text("QMS").FontColor(Colors.White).FontSize(10).Bold();

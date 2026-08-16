@@ -308,7 +308,8 @@ public class SettingsService : ISettingsService
             SettingKeys.BrandingLogoFilename,
             SettingKeys.BrandingFooterLine,
             SettingKeys.BrandingFaviconChoice,
-            SettingKeys.BrandingFaviconCustomFilename
+            SettingKeys.BrandingFaviconCustomFilename,
+            SettingKeys.BrandingLogoScalePercent
         });
         var cfg = new BrandingConfig
         {
@@ -320,6 +321,9 @@ public class SettingsService : ISettingsService
         if (!string.IsNullOrWhiteSpace(company)) cfg.CompanyName = company;
         var footer = c.GetValueOrDefault(SettingKeys.BrandingFooterLine);
         if (!string.IsNullOrWhiteSpace(footer)) cfg.FooterLine = footer;
+        // Logo size (percent). Absent / unparseable → keep the default (150).
+        var scale = c.GetValueOrDefault(SettingKeys.BrandingLogoScalePercent);
+        if (int.TryParse(scale, out var sp) && sp > 0) cfg.LogoScalePercent = sp;
         return cfg;
     }
 
@@ -327,6 +331,10 @@ public class SettingsService : ISettingsService
     {
         await _db.SetConfigAsync(SettingKeys.BrandingCompanyName, cfg.CompanyName ?? "", updatedBy);
         await _db.SetConfigAsync(SettingKeys.BrandingFooterLine,  cfg.FooterLine ?? "",  updatedBy);
+        // Logo size — clamp to a sane range so a stray value can't blow up the
+        // report header; 0/blank falls back to the 150% default.
+        var scale = Math.Clamp(cfg.LogoScalePercent <= 0 ? 150 : cfg.LogoScalePercent, 50, 400);
+        await _db.SetConfigAsync(SettingKeys.BrandingLogoScalePercent, scale.ToString(), updatedBy);
         // LogoFilename / FaviconChoice are written by their own dedicated Save
         // methods after the relevant file / picker action succeeds.
     }

@@ -86,6 +86,11 @@ public class QualityReportData
     /// </summary>
     public string? LogoAbsolutePath { get; set; }
 
+    /// <summary>Company-logo size as a percentage of the base header size
+    /// (100 = original, 150 = 50% larger). From Site Configuration → Branding.
+    /// The header renderer clamps it to 50–400. Default 150.</summary>
+    public int LogoScalePercent { get; set; } = 150;
+
     public string GeneratedBy  { get; set; } = "system";
     public DateTime GeneratedAt{ get; set; } = DateTime.UtcNow;
 

@@ -551,6 +551,14 @@
                     <label class="form-label">Company name <span class="text-muted small">(shown above every report title)</span></label>
                     <input asp-for="Branding.CompanyName" class="form-control" />
                 </div>
+                <div class="col-md-6">
+                    <label class="form-label">Logo size <span class="text-muted small">(% of the original size)</span></label>
+                    <div class="input-group">
+                        <input asp-for="Branding.LogoScalePercent" type="number" min="50" max="400" step="10" class="form-control" />
+                        <span class="input-group-text">%</span>
+                    </div>
+                    <small class="text-muted">Company-logo size on the Quality Control Report. 100 = original, 150 = 50% larger. Allowed 50–400%.</small>
+                </div>
                 <div class="col-md-12">
                     <label class="form-label">Footer line <span class="text-muted small">(small text at the bottom of every PDF page)</span></label>
                     <input asp-for="Branding.FooterLine" class="form-control" />

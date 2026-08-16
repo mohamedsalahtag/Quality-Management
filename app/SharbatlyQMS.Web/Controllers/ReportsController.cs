@@ -262,6 +262,7 @@ public class ReportsController : Controller
         }
         if (!string.IsNullOrWhiteSpace(branding.CompanyName)) data.CompanyName   = branding.CompanyName;
         if (!string.IsNullOrWhiteSpace(branding.FooterLine))  data.CompanyFooter = branding.FooterLine;
+        data.LogoScalePercent = branding.LogoScalePercent;
 
         data.TimeBarBasis = (await _settings.GetReportConfigAsync()).TimeBarBasis;
 
