@@ -551,13 +551,37 @@
                     <label class="form-label">Company name <span class="text-muted small">(shown above every report title)</span></label>
                     <input asp-for="Branding.CompanyName" class="form-control" />
                 </div>
-                <div class="col-md-6">
-                    <label class="form-label">Logo size <span class="text-muted small">(% of the original size)</span></label>
-                    <div class="input-group">
-                        <input asp-for="Branding.LogoScalePercent" type="number" min="50" max="400" step="10" class="form-control" />
-                        <span class="input-group-text">%</span>
+                <div class="col-12">
+                    <label class="form-label">Logo size <span class="text-muted small">(company logo on the Quality Control Report — 100% = original, 150% = 50% larger)</span></label>
+                    <div class="d-flex align-items-center gap-3">
+                        <input asp-for="Branding.LogoScalePercent" type="range" min="50" max="400" step="5"
+                               class="form-range flex-grow-1" id="logoSizeRange" oninput="updateLogoPeek()" />
+                        <span class="badge bg-primary fs-6 text-nowrap" id="logoSizeVal" style="min-width:4.5rem;">@Model.Branding.LogoScalePercent%</span>
                     </div>
-                    <small class="text-muted">Company-logo size on the Quality Control Report. 100 = original, 150 = 50% larger. Allowed 50–400%.</small>
+                    <small class="text-muted">Drag the slider — the preview below shows the logo at the size it will print in the report header. Allowed 50–400%.</small>
+
+                    <div class="mt-2 small text-muted">Preview — top of the Quality Control Report:</div>
+                    <div class="border rounded bg-white px-3 py-2 mt-1" style="max-width:560px;">
+                        <div class="d-flex align-items-center" style="gap:10px; min-height:24px;">
+                            <div style="flex:0 0 auto; display:flex; align-items:center;">
+                                @if (Model.Branding.HasLogo)
+                                {
+                                    <img id="logoPeekImg" src="@Model.Branding.LogoWebPath" alt="logo preview"
+                                         style="height:68px; width:auto;" />
+                                }
+                                else
+                                {
+                                    <div id="logoPeekImg" class="d-flex align-items-center justify-content-center fw-bold"
+                                         style="height:68px; width:68px; background:#0d6efd; color:#fff; font-size:10px;">QMS</div>
+                                }
+                            </div>
+                            <div class="flex-grow-1 text-center" style="line-height:1.25;">
+                                <div class="fw-bold" style="font-size:13px;">@Model.Branding.CompanyName</div>
+                                <div class="fw-bold" style="font-size:16px; color:#0d6efd;">Quality Control Report</div>
+                            </div>
+                            <div class="text-muted text-nowrap" style="flex:0 0 auto; font-size:9px;">Page 1 / 5</div>
+                        </div>
+                    </div>
                 </div>
                 <div class="col-md-12">
                     <label class="form-label">Footer line <span class="text-muted small">(small text at the bottom of every PDF page)</span></label>
@@ -569,6 +593,26 @@
             </form>
         </div>
     </div>
+
+    <script>
+        function updateLogoPeek() {
+            var r = document.getElementById('logoSizeRange');
+            if (!r) return;
+            var pct = parseInt(r.value, 10) || 100;
+            var val = document.getElementById('logoSizeVal');
+            if (val) val.textContent = pct + '%';
+            // The report's base logo height is 45pt at 100%; this preview header is
+            // drawn ~1px per pt, so height = 45 * pct/100 px mirrors how large the
+            // logo will actually print relative to the report header.
+            var img = document.getElementById('logoPeekImg');
+            if (img) {
+                var h = 45 * pct / 100;
+                img.style.height = h + 'px';
+                if (img.tagName === 'DIV') img.style.width = h + 'px'; // keep the QMS placeholder square
+            }
+        }
+        document.addEventListener('DOMContentLoaded', updateLogoPeek);
+    </script>
 
     <div class="card">
         <div class="card-header bg-primary text-white"><i class="bi bi-image me-1"></i>Company logo</div>
