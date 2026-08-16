@@ -332,8 +332,8 @@ public class SettingsService : ISettingsService
         await _db.SetConfigAsync(SettingKeys.BrandingCompanyName, cfg.CompanyName ?? "", updatedBy);
         await _db.SetConfigAsync(SettingKeys.BrandingFooterLine,  cfg.FooterLine ?? "",  updatedBy);
         // Logo size — clamp to a sane range so a stray value can't blow up the
-        // report header; 0/blank falls back to the 150% default.
-        var scale = Math.Clamp(cfg.LogoScalePercent <= 0 ? 150 : cfg.LogoScalePercent, 50, 400);
+        // report header; 0/blank falls back to the 100% default.
+        var scale = Math.Clamp(cfg.LogoScalePercent <= 0 ? 100 : cfg.LogoScalePercent, 50, 400);
         await _db.SetConfigAsync(SettingKeys.BrandingLogoScalePercent, scale.ToString(), updatedBy);
         // LogoFilename / FaviconChoice are written by their own dedicated Save
         // methods after the relevant file / picker action succeeds.

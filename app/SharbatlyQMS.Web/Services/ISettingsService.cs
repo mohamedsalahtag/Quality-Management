@@ -146,7 +146,7 @@ public static class SettingKeys
     public const string BrandingFaviconChoice         = "Branding.FaviconChoice";
     public const string BrandingFaviconCustomFilename = "Branding.FaviconCustomFilename";
     // Company logo size on the Quality Control Report, as a percentage of the
-    // base size (100 = original). Default 150 (50% larger). See BrandingConfig.
+    // base size (100 = original). Default 100. See BrandingConfig.
     public const string BrandingLogoScalePercent      = "Branding.LogoScalePercent";
 
     // Mail template for "Send Quality Order report to supplier".
@@ -190,8 +190,9 @@ public class BrandingConfig
 
     /// <summary>Company-logo size on the Quality Control Report, as a percentage
     /// of the base size (100 = the original size, 150 = 50% larger). Admin sets
-    /// this on Site Configuration → Branding; the report clamps it to 50–400.</summary>
-    public int LogoScalePercent { get; set; } = 150;
+    /// this on Site Configuration → Branding; the report clamps it to 50–400.
+    /// Defaults to 100 (original size); the admin drags the slider to enlarge it.</summary>
+    public int LogoScalePercent { get; set; } = 100;
 
     /// <summary>Web path used by Razor img tags (e.g. /branding/logo.png) or empty.</summary>
     public string LogoWebPath => string.IsNullOrEmpty(LogoFilename) ? "" : $"/branding/{LogoFilename}";
