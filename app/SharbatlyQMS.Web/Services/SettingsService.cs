@@ -160,14 +160,16 @@ public class SettingsService : ISettingsService
     {
         var c = await _db.GetConfigManyAsync(new[] {
             SettingKeys.AlertStaleArrivalDays, SettingKeys.AlertOpenQoDays,
-            SettingKeys.AlertDefectPctRed,     SettingKeys.AlertDefectPctYellow
+            SettingKeys.AlertDefectPctRed,     SettingKeys.AlertDefectPctYellow,
+            SettingKeys.AlertDiskFullPercent
         });
         return new AlertConfig
         {
             StaleArrivalDays = ParseInt(c.GetValueOrDefault(SettingKeys.AlertStaleArrivalDays), 3),
             OpenQoDays       = ParseInt(c.GetValueOrDefault(SettingKeys.AlertOpenQoDays), 7),
             DefectPctRed     = ParseInt(c.GetValueOrDefault(SettingKeys.AlertDefectPctRed), 10),
-            DefectPctYellow  = ParseInt(c.GetValueOrDefault(SettingKeys.AlertDefectPctYellow), 5)
+            DefectPctYellow  = ParseInt(c.GetValueOrDefault(SettingKeys.AlertDefectPctYellow), 5),
+            DiskFullPercent  = ParseInt(c.GetValueOrDefault(SettingKeys.AlertDiskFullPercent), 90)
         };
     }
 
@@ -177,22 +179,44 @@ public class SettingsService : ISettingsService
         await _db.SetConfigAsync(SettingKeys.AlertOpenQoDays,       cfg.OpenQoDays.ToString(CultureInfo.InvariantCulture),       updatedBy);
         await _db.SetConfigAsync(SettingKeys.AlertDefectPctRed,     cfg.DefectPctRed.ToString(CultureInfo.InvariantCulture),     updatedBy);
         await _db.SetConfigAsync(SettingKeys.AlertDefectPctYellow,  cfg.DefectPctYellow.ToString(CultureInfo.InvariantCulture),  updatedBy);
+        // Disk-full alert threshold — clamp to a sensible range.
+        var disk = Math.Clamp(cfg.DiskFullPercent <= 0 ? 90 : cfg.DiskFullPercent, 50, 99);
+        await _db.SetConfigAsync(SettingKeys.AlertDiskFullPercent,  disk.ToString(CultureInfo.InvariantCulture),                updatedBy);
     }
 
     // ---- Report options ----
     public async Task<ReportConfig> GetReportConfigAsync()
     {
-        var raw = await _db.GetConfigAsync(SettingKeys.TimeBarBasis);
+        var c = await _db.GetConfigManyAsync(new[] {
+            SettingKeys.TimeBarBasis, SettingKeys.ReportLayoutVersion
+        });
+        var basis  = c.GetValueOrDefault(SettingKeys.TimeBarBasis);
+        var layout = c.GetValueOrDefault(SettingKeys.ReportLayoutVersion);
         return new ReportConfig
         {
-            TimeBarBasis = TimeBarBases.IsValid(raw) ? raw! : TimeBarBases.Discharge
+            TimeBarBasis  = TimeBarBases.IsValid(basis)   ? basis!  : TimeBarBases.Discharge,
+            LayoutVersion = ReportLayouts.IsValid(layout) ? layout! : ReportLayouts.Classic
         };
     }
 
     public async Task SaveReportConfigAsync(ReportConfig cfg, int? updatedBy)
     {
-        var basis = TimeBarBases.IsValid(cfg.TimeBarBasis) ? cfg.TimeBarBasis : TimeBarBases.Discharge;
-        await _db.SetConfigAsync(SettingKeys.TimeBarBasis, basis, updatedBy);
+        var basis  = TimeBarBases.IsValid(cfg.TimeBarBasis)    ? cfg.TimeBarBasis    : TimeBarBases.Discharge;
+        var layout = ReportLayouts.IsValid(cfg.LayoutVersion)  ? cfg.LayoutVersion   : ReportLayouts.Classic;
+        await _db.SetConfigAsync(SettingKeys.TimeBarBasis,        basis,  updatedBy);
+        await _db.SetConfigAsync(SettingKeys.ReportLayoutVersion, layout, updatedBy);
+    }
+
+    // ---- Storage (configurable uploads folder) ----
+    public async Task<StorageConfig> GetStorageConfigAsync()
+    {
+        var raw = await _db.GetConfigAsync(SettingKeys.StorageUploadsRoot);
+        return new StorageConfig { UploadsRoot = raw ?? "" };
+    }
+
+    public async Task SaveStorageConfigAsync(StorageConfig cfg, int? updatedBy)
+    {
+        await _db.SetConfigAsync(SettingKeys.StorageUploadsRoot, (cfg.UploadsRoot ?? "").Trim(), updatedBy);
     }
 
     // ---- SAP Container polling ----

@@ -191,7 +191,7 @@ public class ReportsController : Controller
             return Json(new { ok = false, error = "Recipient email is required." });
 
         var data  = await BuildDataAsync(qo);
-        var bytes = QualityReportPdf.Build(data);
+        var bytes = QualityReportRenderer.Build(data);
         var fileName = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf";
 
         var toList = SplitAddrs(to);
@@ -218,7 +218,7 @@ public class ReportsController : Controller
         ct.ThrowIfCancellationRequested();
 
         var data = await BuildDataAsync(qo);
-        var bytes = QualityReportPdf.Build(data);
+        var bytes = QualityReportRenderer.Build(data);
 
         // Record a report log entry so the admin audit shows the regeneration.
         try
@@ -264,7 +264,9 @@ public class ReportsController : Controller
         if (!string.IsNullOrWhiteSpace(branding.FooterLine))  data.CompanyFooter = branding.FooterLine;
         data.LogoScalePercent = branding.LogoScalePercent;
 
-        data.TimeBarBasis = (await _settings.GetReportConfigAsync()).TimeBarBasis;
+        var reportCfg = await _settings.GetReportConfigAsync();
+        data.TimeBarBasis  = reportCfg.TimeBarBasis;
+        data.LayoutVersion = reportCfg.LayoutVersion;
 
         // Who created this quality order, with their branch — shown in the report
         // header. Branch is the creator's own plant when set, otherwise the
@@ -333,10 +335,17 @@ public class ReportsController : Controller
         // suppliers. 2x the configured PDF dimensions gives QuestPDF headroom
         // for crisp on-screen and print zoom.
         var thumb = await _settings.GetThumbnailConfigAsync();
-        // 4x the display box (to match QuestPDF's 288 DPI = 4x72) so the embedded
-        // photo stays sharp at the same printed size and when zoomed. (2026-07-26)
-        var targetW = Math.Max(240, thumb.PdfWidth  * 4);
-        var targetH = Math.Max(180, thumb.PdfHeight * 4);
+        // Embedded photo resolution is now DECOUPLED from the printed cell size
+        // (2026-08-17). Suppliers zoom into the report to inspect defects, so we
+        // embed each photo at a high fixed resolution (longest side capped at
+        // ReportImageMaxPx) regardless of how small the cell prints. ~1200px @
+        // q90 ≈ 250-400 KB/photo — a big zoom improvement over the old ~480px
+        // while keeping the emailed PDF reasonable. The printed cell size still
+        // comes from thumb.PdfWidth/PdfHeight (data.ThumbnailW/H below), so the
+        // report LAYOUT is unchanged — only the embedded pixels are sharper.
+        const int ReportImageMaxPx = 1200;
+        var targetW = ReportImageMaxPx;
+        var targetH = ReportImageMaxPx;
 
         var samples = await _qos.ListSamplesAsync(qo.QualityOrderId);
 

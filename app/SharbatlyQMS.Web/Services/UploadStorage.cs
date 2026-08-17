@@ -28,9 +28,26 @@ public static class UploadStorage
     /// so this must not change or every existing link breaks.</summary>
     public const string RequestPath = "/uploads";
 
+    /// <summary>Admin-configured uploads folder (Site Configuration → Storage),
+    /// cached from the settings DB. Set ONCE at service startup (see Program.cs)
+    /// so every <see cref="Root"/> caller — including the static-file provider —
+    /// agrees on one location for the whole process lifetime. Changing the
+    /// setting requires a restart to take effect, which is intentional: the
+    /// static-file provider is bound only at boot, and photos must be moved to
+    /// the new folder before it serves them.</summary>
+    private static string? _configuredRoot;
+
+    /// <summary>Called once at startup with the DB-configured uploads root
+    /// (blank/null → fall back to appsettings/default).</summary>
+    public static void SetRoot(string? root)
+        => _configuredRoot = string.IsNullOrWhiteSpace(root) ? null : root;
+
     public static string Root(IWebHostEnvironment env, IConfiguration config)
     {
-        var configured = config[ConfigKey];
+        // Precedence: DB setting (startup cache) → appsettings key → default.
+        var configured = !string.IsNullOrWhiteSpace(_configuredRoot)
+            ? _configuredRoot
+            : config[ConfigKey];
         return string.IsNullOrWhiteSpace(configured)
             ? Path.Combine(env.WebRootPath, "uploads")
             : Path.GetFullPath(configured);

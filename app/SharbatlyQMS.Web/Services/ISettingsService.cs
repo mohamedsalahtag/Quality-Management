@@ -37,6 +37,10 @@ public interface ISettingsService
     Task<ReportConfig> GetReportConfigAsync();
     Task SaveReportConfigAsync(ReportConfig cfg, int? updatedBy);
 
+    // ---- Storage (configurable uploads folder) ----
+    Task<StorageConfig> GetStorageConfigAsync();
+    Task SaveStorageConfigAsync(StorageConfig cfg, int? updatedBy);
+
     // ---- SAP Container polling (Pending Containers feature) ----
     Task<ContainerPollConfig> GetContainerPollConfigAsync();
     Task SaveContainerPollConfigAsync(ContainerPollConfig cfg, int? updatedBy);
@@ -124,6 +128,12 @@ public static class SettingKeys
     public const string AlertOpenQoDays       = "alert_open_qo_days";
     public const string AlertDefectPctRed     = "alert_defect_pct_red";
     public const string AlertDefectPctYellow  = "alert_defect_pct_yellow";
+    // Disk-full alert: email admins when the uploads partition reaches this %.
+    public const string AlertDiskFullPercent  = "alert_disk_full_percent";
+
+    // Storage — configurable uploads folder + disk-alert bookkeeping.
+    public const string StorageUploadsRoot       = "Storage.UploadsRoot";
+    public const string StorageDiskAlertLastSent = "Storage.DiskAlertLastSentUtc";
 
     // SAP container polling (Pending Containers page)
     public const string ContainerStartDate   = "Container.PreCollectedStartDate";
@@ -158,6 +168,9 @@ public static class SettingKeys
     //   TimeBarBasis: which date the report Time Bar counts from to the QO
     //   finish date. "Discharge" (default) or "Arrival".
     public const string TimeBarBasis       = "Report.TimeBarBasis";
+    //   LayoutVersion: which visual layout the QO report PDF renders with.
+    //   "Classic" (default) or "Soft" — layout only, identical data.
+    public const string ReportLayoutVersion = "Report.LayoutVersion";
 
     // Active Directory (LDAP bind-only). Configured by SiteAdmin from
     // Admin -> AD Settings.
@@ -363,6 +376,11 @@ public class ReportConfig
     /// <summary>Which date the QO report Time Bar counts from to the QO finish
     /// date. One of <see cref="TimeBarBases"/>. Defaults to Discharge.</summary>
     public string TimeBarBasis { get; set; } = TimeBarBases.Discharge;
+
+    /// <summary>Which visual layout the QO report PDF renders with — one of
+    /// <see cref="ReportLayouts"/>. Layout only; the data/logic is identical
+    /// across versions. Defaults to Classic.</summary>
+    public string LayoutVersion { get; set; } = ReportLayouts.Classic;
 }
 
 /// <summary>Allowed values for <see cref="ReportConfig.TimeBarBasis"/>.</summary>
@@ -375,12 +393,37 @@ public static class TimeBarBases
         v == Discharge || v == Arrival;
 }
 
+/// <summary>Allowed values for <see cref="ReportConfig.LayoutVersion"/>. Each is
+/// a distinct QuestPDF renderer over the SAME QualityReportData — layout only.</summary>
+public static class ReportLayouts
+{
+    public const string Classic = "Classic";
+    public const string Soft    = "Soft";
+
+    public static bool IsValid(string? v) =>
+        v == Classic || v == Soft;
+}
+
 public class AlertConfig
 {
     public int StaleArrivalDays { get; set; } = 3;
     public int OpenQoDays       { get; set; } = 7;
     public int DefectPctRed     { get; set; } = 10;
     public int DefectPctYellow  { get; set; } = 5;
+    /// <summary>Email admins when the uploads partition reaches this % full.
+    /// Default 90. Clamped 50–99 on save.</summary>
+    public int DiskFullPercent  { get; set; } = 90;
+}
+
+/// <summary>Configurable storage locations (Site Configuration → Storage).</summary>
+public class StorageConfig
+{
+    /// <summary>Absolute filesystem folder where uploaded inspection photos are
+    /// stored and served from. Blank = fall back to appsettings
+    /// QMS:UploadsPhysicalRoot, then wwwroot/uploads. Applied at service startup
+    /// (see <see cref="UploadStorage"/>); changing it needs a restart + moving
+    /// the existing files.</summary>
+    public string UploadsRoot { get; set; } = "";
 }
 
 public class ContainerPollConfig

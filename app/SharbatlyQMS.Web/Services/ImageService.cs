@@ -219,13 +219,15 @@ public class ImageService : IImageService
 
             // Space saver (2026-07-26): phone/camera photos arrive up to 5 MB.
             // Cap the STORED original at MaxStoredDimension px and re-encode at a
-            // high but efficient quality — visually lossless for inspection use,
-            // and still far higher-res than any report or screen needs (the QO
-            // report only samples ~480px per cell), yet it cuts storage ~80-90%.
-            // Animated GIFs are left untouched to preserve animation.
+            // high but efficient quality. Raised 2026-08-17 (2500px/q85 → 3600px/
+            // q90, ~up to ~1.2 MB) so suppliers can zoom into defect detail on the
+            // QC report — the report now also embeds a much higher-resolution copy
+            // (see ReportsController image preprocessing). Still cuts storage vs.
+            // raw phone originals. Animated GIFs are left untouched.
             if (ext != ".gif")
             {
-                const int MaxStoredDimension = 2500;
+                const int MaxStoredDimension = 3600;
+                const int StoredQuality      = 90;
                 if (Math.Max(width, height) > MaxStoredDimension)
                     img.Mutate(x => x.Resize(new ResizeOptions
                     {
@@ -236,10 +238,10 @@ public class ImageService : IImageService
                 {
                     case ".jpg":
                     case ".jpeg":
-                        img.Save(fullPath, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 85 });
+                        img.Save(fullPath, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = StoredQuality });
                         break;
                     case ".webp":
-                        img.Save(fullPath, new SixLabors.ImageSharp.Formats.Webp.WebpEncoder { Quality = 85 });
+                        img.Save(fullPath, new SixLabors.ImageSharp.Formats.Webp.WebpEncoder { Quality = StoredQuality });
                         break;
                     case ".png":
                         img.Save(fullPath, new SixLabors.ImageSharp.Formats.Png.PngEncoder());

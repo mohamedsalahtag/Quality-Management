@@ -38,6 +38,11 @@
         </button>
     </li>
     <li class="nav-item">
+        <button class="@TabClass("storage")" data-bs-toggle="tab" data-bs-target="#tab-storage" type="button">
+            <i class="bi bi-hdd me-1"></i>Storage
+        </button>
+    </li>
+    <li class="nav-item">
         <button class="@TabClass("alerts")" data-bs-toggle="tab" data-bs-target="#tab-alerts" type="button">
             <i class="bi bi-bell me-1"></i>Alert Thresholds
         </button>
@@ -957,6 +962,38 @@
 </div>
 
 @* ===================== Alerts ===================== *@
+@* ===================== Storage ===================== *@
+<div class="@TabPaneClass("storage")" id="tab-storage">
+    <div class="card">
+        <div class="card-header bg-primary text-white"><i class="bi bi-hdd me-1"></i>Uploaded photo storage</div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                Folder where uploaded inspection photos are stored and served from. Point this at a disk with
+                enough capacity (e.g. a dedicated data drive) when the current one runs low. Leave blank to use
+                the server's default location.
+            </p>
+            <div class="alert alert-warning small py-2">
+                <i class="bi bi-exclamation-triangle me-1"></i>
+                Changing this takes two manual steps: <strong>(1)</strong> move the existing photos from the
+                current folder into the new folder, and <strong>(2)</strong> restart the SharbatlyQMS service.
+                Until the restart, the app keeps writing to and serving from the current folder. The
+                <code>/uploads/…</code> web addresses never change.
+            </div>
+            <form asp-action="SaveStorageSettings" method="post" class="row g-3">
+                @Html.AntiForgeryToken()
+                <div class="col-md-9">
+                    <label class="form-label">Uploads folder (absolute path)</label>
+                    <input asp-for="Storage.UploadsRoot" class="form-control" placeholder="e.g. D:\QMS\uploads  (blank = server default)" />
+                    <small class="text-muted">Validated on save — the folder is created if missing and a write test is run before it's accepted.</small>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>Save storage folder</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
 <div class="@TabPaneClass("alerts")" id="tab-alerts">
     <div class="card">
         <div class="card-header bg-primary text-white"><i class="bi bi-bell me-1"></i>Alert thresholds</div>
@@ -986,6 +1023,14 @@
                     <label class="form-label">Defect % yellow threshold</label>
                     <input asp-for="Alerts.DefectPctYellow" type="number" class="form-control" />
                     <small class="text-muted">Sample defect % above this is a warning.</small>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">Uploads disk full alert (%)</label>
+                    <div class="input-group">
+                        <input asp-for="Alerts.DiskFullPercent" type="number" min="50" max="99" class="form-control" />
+                        <span class="input-group-text">%</span>
+                    </div>
+                    <small class="text-muted">When the disk holding the uploads folder reaches this % full, all active admins are emailed (once per day). Allowed 50–99.</small>
                 </div>
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary">
@@ -1024,6 +1069,29 @@
                                checked="@(Model.Report.TimeBarBasis == TimeBarBases.Arrival)" />
                         <label class="form-check-label" for="tbb-arrival">
                             <strong>Arrival date</strong> — count from the SAP arrival date.
+                        </label>
+                    </div>
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label">Report layout version</label>
+                    <p class="text-muted small mb-2">
+                        The visual layout of the Quality Control Report PDF. All versions show the
+                        <strong>same data</strong> — only the styling differs, so you can switch or revert anytime.
+                    </p>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="LayoutVersion" id="lv-classic"
+                               value="@ReportLayouts.Classic"
+                               checked="@(Model.Report.LayoutVersion == ReportLayouts.Classic)" />
+                        <label class="form-check-label" for="lv-classic">
+                            <strong>Classic</strong> — the current layout (calm, hairline rules, minimal color).
+                        </label>
+                    </div>
+                    <div class="form-check">
+                        <input class="form-check-input" type="radio" name="LayoutVersion" id="lv-soft"
+                               value="@ReportLayouts.Soft"
+                               checked="@(Model.Report.LayoutVersion == ReportLayouts.Soft)" />
+                        <label class="form-check-label" for="lv-soft">
+                            <strong>Soft</strong> — soft-blue section bands and ruled tables with a gentle colour palette.
                         </label>
                     </div>
                 </div>

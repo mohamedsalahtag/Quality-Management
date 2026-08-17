@@ -91,6 +91,11 @@ public class QualityReportData
     /// The header renderer clamps it to 50–400. Default 100.</summary>
     public int LogoScalePercent { get; set; } = 100;
 
+    /// <summary>Which visual layout to render — one of <see cref="ReportLayouts"/>
+    /// (Classic / Soft). Layout only; the data is identical across versions.
+    /// Set from Site Configuration → Report. See <see cref="QualityReportRenderer"/>.</summary>
+    public string LayoutVersion { get; set; } = ReportLayouts.Classic;
+
     public string GeneratedBy  { get; set; } = "system";
     public DateTime GeneratedAt{ get; set; } = DateTime.UtcNow;
 

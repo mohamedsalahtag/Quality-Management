@@ -112,6 +112,7 @@ builder.Services.AddHostedService<AutoSyncService>();
 builder.Services.AddHostedService<AdCachePrimingService>();
 builder.Services.AddHostedService<CodeDescriptionPrimingService>();
 builder.Services.AddHostedService<ContainerPollingService>();
+builder.Services.AddHostedService<DiskSpaceMonitorService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IClaimsTransformation, ViewAsClaimsTransformer>();
@@ -257,6 +258,23 @@ app.UseStaticFiles();
 // delete them (see UploadStorage). They still have to answer on the same
 // /uploads/... URLs already recorded in qms_image_asset, so they get their own
 // file provider here.
+// The uploads folder is admin-configurable (Site Configuration → Storage); read
+// that DB setting ONCE here and cache it on UploadStorage so this provider and
+// every other Root() caller use the same location for the process lifetime.
+// (Changing the setting needs a restart — the provider below binds only here.)
+using (var startupScope = app.Services.CreateScope())
+{
+    try
+    {
+        var db = startupScope.ServiceProvider.GetRequiredService<SharbatlyQMS.Web.Services.IDbService>();
+        var configuredUploads = await db.GetConfigAsync(SharbatlyQMS.Web.Services.SettingKeys.StorageUploadsRoot);
+        UploadStorage.SetRoot(configuredUploads);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Could not read the configured uploads folder; falling back to appsettings/default.");
+    }
+}
 var uploadsRoot = UploadStorage.Root(app.Environment, app.Configuration);
 Directory.CreateDirectory(uploadsRoot);
 app.UseStaticFiles(new StaticFileOptions

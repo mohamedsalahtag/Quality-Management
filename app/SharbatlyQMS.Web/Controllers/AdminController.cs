@@ -518,6 +518,47 @@ public class AdminController : Controller
 
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
+    public async Task<IActionResult> SaveStorageSettings(StorageConfig storage)
+    {
+        var cfg  = storage ?? new StorageConfig();
+        var path = (cfg.UploadsRoot ?? "").Trim();
+
+        // A blank value resets to the appsettings/default location. A non-blank
+        // value must be an absolute, creatable, WRITABLE folder — otherwise a bad
+        // path would silently break photo uploads + serving after the restart.
+        if (!string.IsNullOrEmpty(path))
+        {
+            if (!Path.IsPathFullyQualified(path))
+            {
+                TempData["Error"] = "Uploads folder must be an absolute path (e.g. D:\\QMS\\uploads).";
+                return RedirectToAction(nameof(Settings), new { activeTab = "storage" });
+            }
+            try
+            {
+                Directory.CreateDirectory(path);
+                var probe = Path.Combine(path, ".qms_write_test");
+                await System.IO.File.WriteAllTextAsync(probe, "ok");
+                System.IO.File.Delete(probe);
+            }
+            catch (Exception ex)
+            {
+                TempData["Error"] = $"Cannot use that folder (create/write test failed): {ex.Message}";
+                return RedirectToAction(nameof(Settings), new { activeTab = "storage" });
+            }
+        }
+
+        cfg.UploadsRoot = path;
+        await _settings.SaveStorageConfigAsync(cfg, GetCurrentUserId());
+        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null,
+            new { section = "Storage", uploadsRoot = path });
+        TempData["Success"] = string.IsNullOrEmpty(path)
+            ? "Uploads folder reset to the default. Restart the service to apply."
+            : "Uploads folder saved. Move the existing photos into the new folder and RESTART the service to apply — until the restart the app keeps writing to and serving from the current folder.";
+        return RedirectToAction(nameof(Settings), new { activeTab = "storage" });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
     public async Task<IActionResult> SaveContainerPollSettings(ContainerPollConfig containerPoll)
     {
         var cfg = containerPoll ?? new ContainerPollConfig();
@@ -1775,6 +1816,7 @@ public class AdminController : Controller
             Alerts       = await _settings.GetAlertConfigAsync(),
             Report       = await _settings.GetReportConfigAsync(),
             Branding     = await _settings.GetBrandingConfigAsync(),
+            Storage      = await _settings.GetStorageConfigAsync(),
             Ad           = ad,
             MaterialSync = await _settings.GetEndpointSyncAsync(SyncableEndpoints.MaterialMaster),
             VendorSync   = await _settings.GetEndpointSyncAsync(SyncableEndpoints.VendorMaster),
@@ -2026,6 +2068,7 @@ public class SettingsVm
     public AlertConfig       Alerts       { get; set; } = new();
     public ReportConfig      Report       { get; set; } = new();
     public BrandingConfig    Branding     { get; set; } = new();
+    public StorageConfig     Storage      { get; set; } = new();
     public AdConfig          Ad           { get; set; } = new();
     public EndpointSyncConfig  MaterialSync  { get; set; } = new() { EndpointKey = SyncableEndpoints.MaterialMaster };
     public EndpointSyncConfig  VendorSync    { get; set; } = new() { EndpointKey = SyncableEndpoints.VendorMaster };
