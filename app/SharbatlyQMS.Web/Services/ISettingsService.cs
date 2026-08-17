@@ -424,6 +424,12 @@ public class StorageConfig
     /// (see <see cref="UploadStorage"/>); changing it needs a restart + moving
     /// the existing files.</summary>
     public string UploadsRoot { get; set; } = "";
+
+    /// <summary>Read-only display for the admin UI: the folder photos are
+    /// ACTUALLY stored/served from right now (the resolved
+    /// <see cref="UploadStorage.Root"/> — the saved value, else appsettings,
+    /// else wwwroot/uploads). Not persisted; populated by the controller.</summary>
+    public string EffectiveRoot { get; set; } = "";
 }
 
 public class ContainerPollConfig

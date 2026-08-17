@@ -1808,6 +1808,12 @@ public class AdminController : Controller
         // the field blank to keep the saved value (same convention as
         // SAP / SMTP passwords).
         ad.ServicePassword = "";
+        // Show the admin where photos physically live right now (resolved path),
+        // not just the saved override — a pending change still reads the old
+        // folder until the next restart.
+        var storage = await _settings.GetStorageConfigAsync();
+        storage.EffectiveRoot = UploadStorage.Root(_env,
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>());
         return new SettingsVm
         {
             Sap          = await _settings.GetSapConfigAsync(),
@@ -1816,7 +1822,7 @@ public class AdminController : Controller
             Alerts       = await _settings.GetAlertConfigAsync(),
             Report       = await _settings.GetReportConfigAsync(),
             Branding     = await _settings.GetBrandingConfigAsync(),
-            Storage      = await _settings.GetStorageConfigAsync(),
+            Storage      = storage,
             Ad           = ad,
             MaterialSync = await _settings.GetEndpointSyncAsync(SyncableEndpoints.MaterialMaster),
             VendorSync   = await _settings.GetEndpointSyncAsync(SyncableEndpoints.VendorMaster),
