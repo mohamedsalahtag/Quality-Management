@@ -493,11 +493,25 @@ public class ReportsController : Controller
         try
         {
             using var src = SixLabors.ImageSharp.Image.Load(origAbs);
-            src.Mutate(x => x.Resize(new SixLabors.ImageSharp.Processing.ResizeOptions
-            {
-                Mode = SixLabors.ImageSharp.Processing.ResizeMode.Max,
-                Size = new SixLabors.ImageSharp.Size(targetW, targetH)
-            }));
+            // Produce a CLEAN baseline sRGB JPEG so the embedded photo renders the
+            // same in every PDF viewer. QuestPDF's UseOriginalImage() embeds these
+            // bytes verbatim, and strict viewers (Adobe / Outlook preview) show
+            // certain streams as a BLACK box — specifically ones carrying an EXIF
+            // orientation tag, an ICC/colour profile, or leftover transparency
+            // (PNG/WEBP). So: bake the EXIF rotation into the pixels (AutoOrient),
+            // downscale, then flatten any alpha onto white. Metadata is stripped
+            // below before encoding. (2026-08-18)
+            src.Mutate(x => x
+                .AutoOrient()
+                .Resize(new SixLabors.ImageSharp.Processing.ResizeOptions
+                {
+                    Mode = SixLabors.ImageSharp.Processing.ResizeMode.Max,
+                    Size = new SixLabors.ImageSharp.Size(targetW, targetH)
+                })
+                .BackgroundColor(SixLabors.ImageSharp.Color.White));
+            src.Metadata.ExifProfile = null;
+            src.Metadata.IccProfile  = null;
+            src.Metadata.XmpProfile  = null;
             using var ms = new MemoryStream();
             src.Save(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 90 });
             return new SharbatlyQMS.Web.Services.Pdf.ImageRef
