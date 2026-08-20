@@ -1,4 +1,4 @@
-﻿namespace SharbatlyQMS.Web.Models;
+namespace SharbatlyQMS.Web.Models;
 
 public class QualityOrder
 {
@@ -16,6 +16,17 @@ public class QualityOrder
     public string?   ReopenReason   { get; set; }
     public DateTime  CreatedAt      { get; set; }
     public string    CreatedBy      { get; set; } = "";
+
+    /// <summary>Set when the order was archived off the active Claims list
+    /// (M20). An archived order is read-only in the claim workflow — see
+    /// <see cref="IsArchived"/>.</summary>
+    public DateTime? ArchivedAt     { get; set; }
+    public string?   ArchivedBy     { get; set; }
+
+    /// <summary>Archived orders are a historical record: no claim decision, no
+    /// note, no report send. Enforced in ClaimManagementController, not just in
+    /// the view — hiding a button leaves its POST endpoint reachable.</summary>
+    public bool IsArchived => ArchivedAt.HasValue;
 
     // Joined from qms_arrival so the QO list can show shipment identity.
     public string?  ContainerNo   { get; set; }

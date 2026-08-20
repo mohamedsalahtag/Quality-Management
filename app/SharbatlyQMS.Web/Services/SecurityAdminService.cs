@@ -44,14 +44,28 @@ public sealed class SecurityAdminService : ISecurityAdminService
     private readonly string _cs;
     private readonly IPermissionResolver _perms;
     private readonly IAuditService _audit;
+    private readonly IPermissionLogService _permLog;
 
-    public SecurityAdminService(IConfiguration cfg, IPermissionResolver perms, IAuditService audit)
+    public SecurityAdminService(IConfiguration cfg, IPermissionResolver perms,
+        IAuditService audit, IPermissionLogService permLog)
     {
         _cs = cfg.GetConnectionString("Default")
               ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
         _perms = perms;
         _audit = audit;
+        _permLog = permLog;
     }
+
+    /// <summary>Friendly label for a permission code, from the live catalogue.
+    /// Falls back to the code so a permission retired between the change and the
+    /// read still shows something.</summary>
+    private string PermissionLabel(string code) =>
+        _perms.Permissions.FirstOrDefault(p =>
+            string.Equals(p.Code, code, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? code;
+
+    private string RoleDisplayName(string roleCode) =>
+        _perms.Roles.FirstOrDefault(r =>
+            string.Equals(r.RoleCode, roleCode, StringComparison.OrdinalIgnoreCase))?.DisplayName ?? roleCode;
 
     private SqlConnection Open() => new(_cs);
 
@@ -112,11 +126,41 @@ public sealed class SecurityAdminService : ISecurityAdminService
                 new { roleCode, code, level = (byte)level, actor }, tx);
         }
 
+        var after = grants.Where(g => g.Value != AccessLevel.None)
+                          .ToDictionary(g => g.Key, g => (byte)g.Value, StringComparer.OrdinalIgnoreCase);
+
         await _audit.WriteAsync(c, tx, EntityTypes.Role, 0, ActionCodes.Updated,
             oldValues: new { roleCode, grants = before },
-            newValues: new { roleCode, grants = grants.Where(g => g.Value != AccessLevel.None)
-                                                      .ToDictionary(g => g.Key, g => (byte)g.Value) },
+            newValues: new { roleCode, grants = after },
             actor: actor);
+
+        // The readable record: one row per permission whose level actually
+        // moved. The audit row above keeps the whole map, but nobody can read a
+        // 200-key diff -- and because the map serialises in dictionary order, a
+        // save that changed nothing still shows old != new there. Comparing
+        // levels here means a no-op save writes nothing at all.
+        var roleName = RoleDisplayName(roleCode);
+        var touched  = before.Keys.Union(after.Keys, StringComparer.OrdinalIgnoreCase);
+        var entries  = new List<PermissionLogEntry>();
+        foreach (var code in touched)
+        {
+            var oldLevel = before.TryGetValue(code, out var b) ? AccessLevels.FromDb(b) : AccessLevel.None;
+            var newLevel = after.TryGetValue(code, out var a)  ? AccessLevels.FromDb(a) : AccessLevel.None;
+            if (oldLevel == newLevel) continue;
+            entries.Add(new PermissionLogEntry
+            {
+                ChangedBy   = actor,
+                SubjectType = PermissionSubjects.Role,
+                SubjectKey  = roleCode,
+                SubjectName = roleName,
+                ChangeType  = PermissionChangeTypes.Permission,
+                ItemCode    = code,
+                ItemName    = PermissionLabel(code),
+                OldValue    = AccessLevels.Label(oldLevel),
+                NewValue    = AccessLevels.Label(newLevel)
+            });
+        }
+        await _permLog.WriteAsync(c, tx, entries);
         tx.Commit();
 
         await _perms.RefreshAsync();
@@ -197,6 +241,21 @@ public sealed class SecurityAdminService : ISecurityAdminService
             oldValues: null,
             newValues: new { roleCode, displayName, description, isPlantScoped, copiedFrom = copyFromRoleCode },
             actor: actor);
+
+        await _permLog.WriteAsync(c, tx, new[]
+        {
+            new PermissionLogEntry
+            {
+                ChangedBy   = actor,
+                SubjectType = PermissionSubjects.Role,
+                SubjectKey  = roleCode,
+                SubjectName = displayName,
+                ChangeType  = PermissionChangeTypes.RoleCreated,
+                NewValue    = string.IsNullOrWhiteSpace(copyFromRoleCode)
+                    ? "Created"
+                    : $"Created, copying permissions from {copyFromRoleCode}"
+            }
+        });
         tx.Commit();
 
         await _perms.RefreshAsync();
@@ -239,11 +298,41 @@ public sealed class SecurityAdminService : ISecurityAdminService
                    updated_at = SYSUTCDATETIME(), updated_by = @actor
             WHERE  role_code = @roleCode",
             new { roleCode, displayName, description, isPlantScoped, isActive, actor }, tx);
+
+        // This path wrote NOTHING to any log before M21, even though it is where
+        // a role is deactivated -- which removes every holder from qms.AppUser
+        // and stops them signing in -- and where plant-scoping is flipped, which
+        // changes every holder's data visibility. One row per field that moved.
+        var settingChanges = new List<PermissionLogEntry>();
+        void Track(string field, string label, string? was, string? now)
+        {
+            if (string.Equals(was ?? "", now ?? "", StringComparison.Ordinal)) return;
+            settingChanges.Add(new PermissionLogEntry
+            {
+                ChangedBy   = actor,
+                SubjectType = PermissionSubjects.Role,
+                SubjectKey  = roleCode,
+                SubjectName = displayName,
+                ChangeType  = PermissionChangeTypes.RoleSetting,
+                ItemCode    = field,
+                ItemName    = label,
+                OldValue    = was,
+                NewValue    = now
+            });
+        }
+        Track("display_name",    "Role name",    role.DisplayName,            displayName);
+        Track("description",     "Description",  role.Description,            description);
+        Track("is_plant_scoped", "Plant-scoped", YesNo(role.IsPlantScoped),   YesNo(isPlantScoped));
+        Track("is_active",       "Active",       YesNo(role.IsActive),        YesNo(isActive));
+        await _permLog.WriteAsync(c, tx, settingChanges);
+
         tx.Commit();
 
         await _perms.RefreshAsync();
         return (true, null);
     }
+
+    private static string YesNo(bool b) => b ? "Yes" : "No";
 
     public async Task<(bool ok, string? error)> DeleteRoleAsync(string roleCode, string actor)
     {
@@ -263,6 +352,14 @@ public sealed class SecurityAdminService : ISecurityAdminService
 
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
+
+        // Snapshot the grants INSIDE the transaction, before the DELETE below,
+        // so the permission log can record what this role could do. Read after
+        // the delete and it is already gone.
+        var doomedGrants = (await c.QueryAsync<(string PermissionCode, byte AccessLevel)>(
+            "SELECT permission_code, access_level FROM qms_role_permission WHERE role_code = @roleCode",
+            new { roleCode }, tx)).ToList();
+
         // Grants cascade from qms_role, and qms_role cascades from portal.Role --
         // but delete in dependency order anyway so a missing cascade surfaces as
         // a foreign-key error rather than as an orphaned grant.
@@ -275,6 +372,33 @@ public sealed class SecurityAdminService : ISecurityAdminService
 
         await _audit.WriteAsync(c, tx, EntityTypes.Role, 0, ActionCodes.Deleted,
             oldValues: new { roleCode, role.DisplayName, role.Description }, newValues: null, actor: actor);
+
+        // One row per permission the role held. Without this a deleted role's
+        // access is irrecoverable -- the audit snapshot above records only the
+        // name and description, and the grant rows are gone.
+        var lost = doomedGrants.Select(g => new PermissionLogEntry
+        {
+            ChangedBy   = actor,
+            SubjectType = PermissionSubjects.Role,
+            SubjectKey  = roleCode,
+            SubjectName = role.DisplayName,
+            ChangeType  = PermissionChangeTypes.RoleDeleted,
+            ItemCode    = g.PermissionCode,
+            ItemName    = PermissionLabel(g.PermissionCode),
+            OldValue    = AccessLevels.Label(AccessLevels.FromDb(g.AccessLevel)),
+            NewValue    = "Role deleted"
+        }).ToList();
+        lost.Insert(0, new PermissionLogEntry
+        {
+            ChangedBy   = actor,
+            SubjectType = PermissionSubjects.Role,
+            SubjectKey  = roleCode,
+            SubjectName = role.DisplayName,
+            ChangeType  = PermissionChangeTypes.RoleDeleted,
+            OldValue    = $"{doomedGrants.Count} permission(s)",
+            NewValue    = "Role deleted"
+        });
+        await _permLog.WriteAsync(c, tx, lost);
         tx.Commit();
 
         await _perms.RefreshAsync();

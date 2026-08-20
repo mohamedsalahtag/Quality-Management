@@ -56,6 +56,7 @@ builder.Services.AddScoped<IQualityOrderService, QualityOrderService>();
 builder.Services.AddScoped<IClaimService, ClaimService>();
 builder.Services.AddScoped<IAuditContext, AuditContext>();
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddScoped<IPermissionLogService, PermissionLogService>();
 builder.Services.AddScoped<AuditContextActionFilter>();
 builder.Services.AddScoped<SharbatlyQMS.Web.Security.PermissionDecisionFilter>();
 builder.Services.AddScoped<IImageService, ImageService>();

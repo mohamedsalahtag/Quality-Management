@@ -138,6 +138,8 @@ public class ReportsController : Controller
         // can't pre-populate a dialog for an order that cannot be sent.
         if (qo.StatusCode != QualityOrderStatus.Closed)
             return Json(new { ok = false, error = "Report can only be sent for Closed Quality Orders." });
+        if (qo.IsArchived)
+            return Json(new { ok = false, error = "This order is archived and kept as a historical record. Its report cannot be sent." });
         var arrival = await _arrivals.GetAsync(qo.ArrivalId);
         var template = await _settings.GetQoMailTemplateAsync();
 
@@ -191,6 +193,8 @@ public class ReportsController : Controller
         // but a direct POST must not bypass that.
         if (qo.StatusCode != QualityOrderStatus.Closed)
             return Json(new { ok = false, error = "Report can only be sent for Closed Quality Orders." });
+        if (qo.IsArchived)
+            return Json(new { ok = false, error = "This order is archived and kept as a historical record. Its report cannot be sent." });
         if (string.IsNullOrWhiteSpace(to))
             return Json(new { ok = false, error = "Recipient email is required." });
 

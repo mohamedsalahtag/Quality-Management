@@ -1,0 +1,179 @@
+@using SharbatlyQMS.Web.Models
+@model IReadOnlyList<PermissionLogEntry>
+@{
+    ViewData["Title"] = "Permission changes";
+    var f    = ViewBag.Filter as PermissionLogFilter ?? new PermissionLogFilter();
+    var opts = ViewBag.FilterOptions as PermissionLogOptions ?? new PermissionLogOptions();
+    string D(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
+
+    // One plain sentence per row. This is the whole point of the page: the
+    // generic audit log stores the same events as JSON nobody can read.
+    string Sentence(PermissionLogEntry e)
+    {
+        var who     = e.ChangedBy;
+        var subject = string.IsNullOrWhiteSpace(e.SubjectName) ? e.SubjectKey : e.SubjectName;
+        var item    = string.IsNullOrWhiteSpace(e.ItemName) ? e.ItemCode : e.ItemName;
+
+        return e.ChangeType switch
+        {
+            PermissionChangeTypes.Permission =>
+                $"{who} changed “{item}” for the {subject} role from {e.OldValue} to {e.NewValue}.",
+            PermissionChangeTypes.Plant =>
+                e.NewValue == "Access granted"
+                    ? $"{who} gave {subject} access to {item}."
+                    : $"{who} removed {subject}’s access to {item}.",
+            PermissionChangeTypes.RoleAssignment =>
+                $"{who} moved {subject} from the {e.OldValue} role to {e.NewValue}.",
+            PermissionChangeTypes.RoleCreated =>
+                $"{who} created the {subject} role. {e.NewValue}",
+            PermissionChangeTypes.RoleDeleted =>
+                string.IsNullOrWhiteSpace(e.ItemCode)
+                    ? $"{who} deleted the {subject} role, which held {e.OldValue}."
+                    : $"{who} deleted the {subject} role — “{item}” ({e.OldValue}) was revoked with it.",
+            PermissionChangeTypes.RoleSetting =>
+                $"{who} changed {item} on the {subject} role from “{e.OldValue}” to “{e.NewValue}”.",
+            PermissionChangeTypes.Account =>
+                e.NewValue == "Account deleted"
+                    ? $"{who} deleted the account {subject} ({e.OldValue})."
+                    : $"{who} set {subject}’s account to {e.NewValue}.",
+            _ => $"{who} changed {item} on {subject} from {e.OldValue} to {e.NewValue}."
+        };
+    }
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">
+        <i class="bi bi-shield-lock me-1"></i>Permission changes
+        <small class="text-muted fs-6 fw-normal ms-2">Who changed access, when, and from what to what</small>
+    </h1>
+</div>
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item"><a class="nav-link" asp-action="Index"><i class="bi bi-journal-text me-1"></i>Activity log</a></li>
+    <li class="nav-item"><a class="nav-link active" asp-action="Permissions"><i class="bi bi-shield-lock me-1"></i>Permission changes</a></li>
+</ul>
+
+<form method="get" class="card card-body bg-body-tertiary mb-3">
+    <div class="row g-2 align-items-end">
+        <div class="col-12 col-md-3">
+            <label class="form-label small mb-1">Search</label>
+            <input type="text" name="search" value="@f.Search" class="form-control form-control-sm"
+                   placeholder="role, user, permission…" autocomplete="off" />
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small mb-1">Changed by</label>
+            <select name="actor" class="form-select form-select-sm">
+                <option value="">Anyone</option>
+                @foreach (var a in opts.Actors)
+                {
+                    <option value="@a" selected="@(string.Equals(a, f.Actor, StringComparison.OrdinalIgnoreCase))">@a</option>
+                }
+            </select>
+        </div>
+        <div class="col-6 col-md-3">
+            <label class="form-label small mb-1">Role or user</label>
+            <select name="subjectKey" class="form-select form-select-sm">
+                <option value="">All</option>
+                @foreach (var sub in opts.Subjects)
+                {
+                    var label = string.IsNullOrWhiteSpace(sub.SubjectName) ? sub.SubjectKey : $"{sub.SubjectName} ({sub.SubjectKey})";
+                    <option value="@sub.SubjectKey" selected="@(string.Equals(sub.SubjectKey, f.SubjectKey, StringComparison.OrdinalIgnoreCase))">
+                        @(sub.SubjectType == PermissionSubjects.Role ? "Role: " : "User: ")@label
+                    </option>
+                }
+            </select>
+        </div>
+        <div class="col-6 col-md-2">
+            <label class="form-label small mb-1">Kind of change</label>
+            <select name="changeType" class="form-select form-select-sm">
+                <option value="">All</option>
+                @foreach (var ct in opts.ChangeTypes)
+                {
+                    <option value="@ct" selected="@(string.Equals(ct, f.ChangeType, StringComparison.OrdinalIgnoreCase))">@PermissionChangeTypes.Label(ct)</option>
+                }
+            </select>
+        </div>
+        @* Local dates, converted to UTC in the service. The activity log's own
+           filter is UTC-based while its table renders local, which makes rows
+           near midnight look like they fall outside their own range. *@
+        <div class="col-6 col-md-1">
+            <label class="form-label small mb-1">From</label>
+            <input type="date" name="from" value="@D(f.From)" class="form-control form-control-sm" />
+        </div>
+        <div class="col-6 col-md-1">
+            <label class="form-label small mb-1">To</label>
+            <input type="date" name="to" value="@D(f.To)" class="form-control form-control-sm" />
+        </div>
+    </div>
+    <div class="mt-2 d-flex gap-2">
+        <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Apply</button>
+        @if (f.Any)
+        {
+            <a asp-action="Permissions" class="btn btn-outline-secondary btn-sm">Clear</a>
+        }
+    </div>
+</form>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="50">
+            <thead class="table-light">
+                <tr>
+                    <th data-sort style="width:11rem">When</th>
+                    <th data-sort style="width:9rem">Kind</th>
+                    <th>What happened</th>
+                    <th data-sort style="width:11rem">Changed by</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (!Model.Any())
+                {
+                    <tr><td colspan="4" class="text-center text-muted py-4">
+                        @(f.Any
+                            ? "No permission changes match these filters."
+                            : "No permission changes recorded yet. Changes made from today onward appear here.")
+                    </td></tr>
+                }
+                else
+                {
+                    foreach (var e in Model)
+                    {
+                        var local = e.ChangedAt.ToLocalTime();
+                        <tr>
+                            <td class="small text-nowrap">
+                                <div>@local.ToString("yyyy-MM-dd")</div>
+                                <div class="text-muted">@local.ToString("HH:mm")</div>
+                            </td>
+                            <td>
+                                <span class="badge @PermissionChangeTypes.BadgeCss(e.ChangeType)">
+                                    @PermissionChangeTypes.Label(e.ChangeType)
+                                </span>
+                            </td>
+                            <td>
+                                <div>@Sentence(e)</div>
+                                @if (!string.IsNullOrWhiteSpace(e.ItemCode) && e.ItemCode != e.ItemName)
+                                {
+                                    @* The technical code, for anyone cross-checking
+                                       against the Security screen. *@
+                                    <code class="small text-muted">@e.ItemCode</code>
+                                }
+                            </td>
+                            <td class="small">
+                                <div>@e.ChangedBy</div>
+                                @if (!string.IsNullOrWhiteSpace(e.SourceIp))
+                                {
+                                    <div class="text-muted">@e.SourceIp</div>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="text-muted small mt-2">
+    @Model.Count change(s) shown. This log starts from 20 August 2026, when it was introduced &mdash;
+    earlier permission changes exist only in the Activity log, in raw form.
+</div>

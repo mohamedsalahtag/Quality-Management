@@ -5,15 +5,19 @@
     var notes = (ViewBag.ClaimNotes as IReadOnlyList<ClaimNote>) ?? new List<ClaimNote>();
     var role  = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
 
+    // Archived orders are a closed book: every action below folds this in, so
+    // adding a new one cannot accidentally stay live on an archived order.
+    var isArchived  = Model.IsArchived;
+
     var isQm        = Perms.Can(Perm.Claims.MarkClaimRequest);
     var isCm        = Perms.Can(Perm.Claims.Approve);
-    var canComment  = isQm || isCm;
+    var canComment  = !isArchived && (isQm || isCm);
 
     // QM can only set/flip status while CM has not yet decided.
-    var qmCanAct = isQm && (claim == null || claim.DecidedAt == null);
+    var qmCanAct = !isArchived && isQm && (claim == null || claim.DecidedAt == null);
     // CM can act when claim exists AND (status = ClaimRequest OR already decided).
     // i.e. CM cannot act on PassedQC -- QM has already cleared it.
-    var cmCanAct = isCm && claim != null
+    var cmCanAct = !isArchived && isCm && claim != null
                    && (claim.ClaimStatus == ClaimStatus.ClaimRequest
                        || claim.DecidedAt != null);
 
@@ -132,12 +136,19 @@
                markup + JS live in QualityOrders/Details.cshtml (this panel is
                rendered inside that view in claim context, so the modal is in
                scope). *@
-            @if (Model.StatusCode == QualityOrderStatus.Closed)
+            @if (Model.StatusCode == QualityOrderStatus.Closed && !isArchived)
             {
                 <button type="button" class="btn btn-info"
                         data-bs-toggle="modal" data-bs-target="#sendReportModal">
                     <i class="bi bi-envelope-paper me-1"></i>Send report to supplier
                 </button>
+            }
+            @if (isArchived)
+            {
+                <span class="text-muted small align-self-center">
+                    <i class="bi bi-archive me-1"></i>
+                    Archived &mdash; this order is kept as a historical record and can no longer be changed.
+                </span>
             }
             @if (claim != null && !qmCanAct && !cmCanAct && canComment)
             {

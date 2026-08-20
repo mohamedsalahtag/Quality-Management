@@ -34,18 +34,19 @@ public class AdminController : Controller
     private readonly ICodeDescriptionDirectory _codes;
     private readonly IPermissionResolver _perms;
     private readonly IUserAdminService _userAdmin;
+    private readonly IPermissionLogService _permLog;
 
     public AdminController(IDbService db, ISettingsService settings,
         ISapODataClient sapOData, ISapSyncService sapSync, IEmailService email,
         IAdService ad, IServiceScopeFactory scopeFactory, IWebHostEnvironment env,
         ILogger<AdminController> adminLog, ICatalogCache catalogCache, IMaraService mara,
         IAuditService audit, ICodeDescriptionDirectory codes, IPermissionResolver perms,
-        IUserAdminService userAdmin)
+        IUserAdminService userAdmin, IPermissionLogService permLog)
     {
         _db = db; _settings = settings; _sapOData = sapOData; _sapSync = sapSync;
         _email = email; _ad = ad; _scopeFactory = scopeFactory; _env = env; _adminLog = adminLog;
         _catalogCache = catalogCache; _mara = mara; _audit = audit; _codes = codes; _perms = perms;
-        _userAdmin = userAdmin;
+        _userAdmin = userAdmin; _permLog = permLog;
     }
 
     [HttpGet]
@@ -180,6 +181,39 @@ public class AdminController : Controller
         await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Updated,
             new { role = beforeRole, plants = beforePlants },
             new { role = u.RoleCode, plants = newPlants });
+
+        // Readable log: the role move as one line, and each plant granted or
+        // revoked as its own line. The audit row above collapses plants into a
+        // single JSON array diff, which is the thing nobody could read.
+        var perm = new List<PermissionLogEntry>();
+        if (!string.Equals(beforeRole, u.RoleCode, StringComparison.OrdinalIgnoreCase))
+        {
+            var e = UserEntry(u, PermissionChangeTypes.RoleAssignment);
+            e.ItemCode = u.RoleCode;
+            e.ItemName = target.DisplayName;
+            e.OldValue = beforeRole;
+            e.NewValue = u.RoleCode;
+            perm.Add(e);
+        }
+        foreach (var added in newPlants.Except(beforePlants, StringComparer.OrdinalIgnoreCase))
+        {
+            var e = UserEntry(u, PermissionChangeTypes.Plant);
+            e.ItemCode = added;
+            e.ItemName = _codes.PlantDisplay(added);
+            e.OldValue = "No access";
+            e.NewValue = "Access granted";
+            perm.Add(e);
+        }
+        foreach (var removed in beforePlants.Except(newPlants, StringComparer.OrdinalIgnoreCase))
+        {
+            var e = UserEntry(u, PermissionChangeTypes.Plant);
+            e.ItemCode = removed;
+            e.ItemName = _codes.PlantDisplay(removed);
+            e.OldValue = "Access granted";
+            e.NewValue = "Access removed";
+            perm.Add(e);
+        }
+        await PermLogAsync(perm.ToArray());
         // Authorisation resolves a user's role from the permission snapshot, so a
         // role change only takes effect once the snapshot is rebuilt.
         await _perms.RefreshAsync();
@@ -228,6 +262,14 @@ public class AdminController : Controller
         await _db.SetUserActiveAsync(userId, !u.IsActive, current);
         await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Updated,
             new { isActive = u.IsActive }, new { isActive = !u.IsActive });
+        // Disabling an account revokes every permission the person had, so it
+        // belongs in the permission log as much as a role change does.
+        var toggled = UserEntry(u, PermissionChangeTypes.Account);
+        toggled.ItemCode = "is_active";
+        toggled.ItemName = "Account active";
+        toggled.OldValue = u.IsActive ? "Active" : "Disabled";
+        toggled.NewValue = !u.IsActive ? "Active" : "Disabled";
+        await PermLogAsync(toggled);
         // Disabling drops the user from the snapshot's user->role map; refresh so
         // the change is felt on the next request, not the next restart.
         await _perms.RefreshAsync();
@@ -258,6 +300,12 @@ public class AdminController : Controller
         {
             await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Deleted,
                 new { u.Username, u.Role, u.PlantCode }, null);
+            var gone = UserEntry(u, PermissionChangeTypes.Account);
+            gone.ItemCode = "deleted";
+            gone.ItemName = "Account deleted";
+            gone.OldValue = $"Role {u.RoleCode}";
+            gone.NewValue = "Account deleted";
+            await PermLogAsync(gone);
             await _perms.RefreshAsync();
         }
         TempData[ok ? "Success" : "Error"] = ok
@@ -287,6 +335,12 @@ public class AdminController : Controller
                 deleted++;
                 await AuditAdminAsync(EntityTypes.User, u.UserId, ActionCodes.Deleted,
                     new { u.Username, u.Role, u.PlantCode }, null);
+                var bulkGone = UserEntry(u, PermissionChangeTypes.Account);
+                bulkGone.ItemCode = "deleted";
+                bulkGone.ItemName = "Account deleted";
+                bulkGone.OldValue = $"Role {u.RoleCode}";
+                bulkGone.NewValue = "Account deleted";
+                await PermLogAsync(bulkGone);
             }
             else blockedByFk++;
         }
@@ -2074,6 +2128,26 @@ public class AdminController : Controller
     // Best-effort audit for administrative / master-data mutations. Uses the
     // self-contained (non-transactional) audit overload; a failure here is
     // logged and swallowed so it never blocks the admin action.
+    /// <summary>
+    /// Writes readable rows to the dedicated permission log (M21). Separate from
+    /// <see cref="AuditAdminAsync"/> on purpose: the audit row keeps the raw
+    /// before/after JSON, this keeps one plain line per thing that changed.
+    /// </summary>
+    private Task PermLogAsync(params PermissionLogEntry[] entries)
+    {
+        var actor = User.FindFirstValue(ClaimTypes.Name) ?? "unknown";
+        foreach (var e in entries) e.ChangedBy = actor;
+        return _permLog.WriteAsync(entries);
+    }
+
+    private PermissionLogEntry UserEntry(Models.User u, string changeType) => new()
+    {
+        SubjectType = PermissionSubjects.User,
+        SubjectKey  = u.Username,
+        SubjectName = string.IsNullOrWhiteSpace(u.FullName) ? u.Username : u.FullName,
+        ChangeType  = changeType
+    };
+
     private async Task AuditAdminAsync(string entityType, long entityId, string action,
         object? oldValues, object? newValues)
     {

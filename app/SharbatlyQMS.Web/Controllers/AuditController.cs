@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 using System.Security.Claims;
 using ClosedXML.Excel;
 using Microsoft.AspNetCore.Authorization;
@@ -23,6 +23,7 @@ namespace SharbatlyQMS.Web.Controllers;
 public class AuditController : Controller
 {
     private readonly IAuditService _audit;
+    private readonly IPermissionLogService _permLog;
 
     // T036 (US3) -- Single in-flight export per user (FR-021). Stale slots
     // older than 5 minutes are reclaimable automatically -- catches the case
@@ -33,9 +34,30 @@ public class AuditController : Controller
     // Soft cap (~spec.md) on rows per audit export to bound memory.
     private const int MaxAuditExportRows = 50_000;
 
-    public AuditController(IAuditService audit)
+    public AuditController(IAuditService audit, IPermissionLogService permLog)
     {
         _audit = audit;
+        _permLog = permLog;
+    }
+
+    /// <summary>
+    /// The dedicated permission-change log (M21). Deliberately a separate page
+    /// from the audit log rather than a filter on it: the shape is different
+    /// (one row per permission moved, already in words) and the question it
+    /// answers — "who changed this person's access, and to what" — is asked on
+    /// its own, usually under time pressure.
+    ///
+    /// Same screen permission as the audit log; both are admin forensic views.
+    /// </summary>
+    [HttpGet]
+    [RequireScreen(Screens.AdminAuditLog, Seed.AdminOnly, "Open the audit log")]
+    public async Task<IActionResult> Permissions([FromQuery] PermissionLogFilter filter)
+    {
+        var rows    = await _permLog.ListAsync(filter);
+        var options = await _permLog.GetOptionsAsync();
+        ViewBag.Filter        = filter;
+        ViewBag.FilterOptions = options;
+        return View(rows);
     }
 
     private bool TryAcquireExportSlot(string user)

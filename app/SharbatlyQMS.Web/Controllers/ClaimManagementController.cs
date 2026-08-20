@@ -193,11 +193,25 @@ public class ClaimManagementController : Controller
 
     // ---- Shared plumbing ------------------------------------------
 
+    /// <summary>
+    /// Every claim mutation funnels through here, so the archived check lives
+    /// here too rather than in five places. Hiding the buttons in the view is
+    /// not enough on its own — the POST endpoints stay reachable to a replayed
+    /// or hand-built request.
+    /// </summary>
     private async Task<IActionResult> ActAsync(
         long id, string note,
         Func<long, string, string, string, Task<(bool ok, string? error)>> serviceCall,
         string okFlash)
     {
+        var target = await _qos.GetAsync(id);
+        if (target == null) return NotFound();
+        if (target.IsArchived)
+        {
+            TempData["Error"] = "This order is archived and kept as a historical record. It can no longer be changed.";
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var role = User.FindFirst(ClaimTypes.Role)?.Value ?? "";
         var (ok, err) = await serviceCall(id, note ?? "", user, role);

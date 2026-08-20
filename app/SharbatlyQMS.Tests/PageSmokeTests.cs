@@ -50,6 +50,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         "/ClaimManagement/Archived?from=2026-07-01&to=2026-08-17",
         "/ClaimManagement?container=A&po=4&supplier=&plant=&closedBy=&claimOwner=&material=apple",
         "/Audit",
+        "/Audit/Permissions",
         "/Account/Profile",
         "/Admin/Users",
         "/Admin/Settings",

@@ -1,4 +1,4 @@
-﻿using System.Runtime.CompilerServices;
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Dapper;
 using Microsoft.Data.SqlClient;
@@ -40,6 +40,7 @@ public class QualityOrderService : IQualityOrderService
                qo.reopened_at       ReopenedAt,  qo.reopened_by  ReopenedBy,
                qo.reopen_reason     ReopenReason,
                qo.created_at        CreatedAt,   qo.created_by   CreatedBy,
+               qo.archived_at       ArchivedAt,  qo.archived_by  ArchivedBy,
                a.container_no       ContainerNo,
                a.bol_no             BolNo,
                a.ebeln              Ebeln,
