@@ -1,6 +1,7 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Dapper;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Models;
 
@@ -15,12 +16,14 @@ public class AuditService : IAuditService
 {
     private readonly string _cs;
     private readonly IAuditContext _ctx;
+    private readonly IMemoryCache _cache;
 
-    public AuditService(IConfiguration config, IAuditContext ctx)
+    public AuditService(IConfiguration config, IAuditContext ctx, IMemoryCache cache)
     {
         _cs = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
         _ctx = ctx;
+        _cache = cache;
     }
 
     private SqlConnection Open() => new(_cs);
@@ -178,9 +181,9 @@ public class AuditService : IAuditService
             }
             case EntityTypes.Claim:
             {
-                // ClaimNote rows are written with entity_id = claim_note_id.
+                // ClaimNote rows are written with entity_id = qms_claim_note.note_id.
                 var noteIds = (await c.QueryAsync<long>(@"
-                    SELECT claim_note_id FROM qms_claim_note WHERE claim_id = @id",
+                    SELECT note_id FROM qms_claim_note WHERE claim_id = @id",
                     new { id = entityId })).ToArray();
                 if (noteIds.Length > 0)
                 {
@@ -242,27 +245,39 @@ public class AuditService : IAuditService
             where.Add("changed_by IN @users");
             p.Add("users", users);
         }
-        if (filter.FromUtc.HasValue)
+        // The picked dates are LOCAL days; changed_at is UTC and the table
+        // renders local. Converting here is what stops rows either side of the
+        // +03:00 day boundary falling outside a range that visibly contains them.
+        if (filter.From.HasValue)
         {
             where.Add("changed_at >= @fromUtc");
-            p.Add("fromUtc", filter.FromUtc.Value);
+            p.Add("fromUtc", DateTime.SpecifyKind(filter.From.Value.Date, DateTimeKind.Local).ToUniversalTime());
         }
-        if (filter.ToUtc.HasValue)
+        if (filter.To.HasValue)
         {
-            // Include the whole "to" day -- 2026-05-21 means "<= 2026-05-21 23:59:59".
-            where.Add("changed_at <= @toUtc");
-            p.Add("toUtc", filter.ToUtc.Value.Date.AddDays(1).AddTicks(-1));
+            // Exclusive next-midnight rather than BETWEEN, which would drop
+            // everything after 00:00:00.000 on the To date.
+            where.Add("changed_at < @toUtc");
+            p.Add("toUtc", DateTime.SpecifyKind(filter.To.Value.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime());
         }
         if (entityTypes.Length > 0)
         {
             where.Add("entity_type IN @entityTypes");
             p.Add("entityTypes", entityTypes);
         }
+        else if (!filter.ShowTechnical)
+        {
+            // Only when the reader has not picked types themselves -- an explicit
+            // choice of "Sample" must not be silently overruled.
+            where.Add("entity_type NOT IN @noisyTypes");
+            p.Add("noisyTypes", AuditNarrator.NoisyEntityTypes);
+        }
         if (actionCodes.Length > 0)
         {
             where.Add("action_code IN @actionCodes");
             p.Add("actionCodes", actionCodes);
         }
+        var scope = BuildRecordScope(filter, p);
         // Keyset cursor -- composite tuple comparison so ordering is stable.
         if (filter.CursorTime.HasValue && filter.CursorId.HasValue)
         {
@@ -276,7 +291,7 @@ public class AuditService : IAuditService
         // COUNT(*) query; trimmed back to pageSize before returning.
         p.Add("take", pageSize + 1);
 
-        var sql = $@"
+        var sql = $@"{scope.Cte}
             SELECT TOP (@take)
                    audit_id          AS AuditId,
                    entity_type       AS EntityType,
@@ -289,7 +304,8 @@ public class AuditService : IAuditService
                    source_ip         AS SourceIp,
                    source_user_agent  AS SourceUserAgent,
                    source_device_name AS SourceDeviceName
-            FROM   qms_audit_log
+            FROM   qms_audit_log l
+            {scope.Join}
             {whereClause}
             ORDER  BY changed_at DESC, audit_id DESC";
 
@@ -297,6 +313,7 @@ public class AuditService : IAuditService
         var rows = (await c.QueryAsync<AuditEntryListRow>(sql, p)).ToList();
         foreach (var r in rows)
             r.DiffRows = ParseDiffs(r.OldValuesJson, r.NewValuesJson);
+        await ResolveLabelsAsync(c, rows);
         return rows;
     }
 
@@ -327,26 +344,35 @@ public class AuditService : IAuditService
                 where.Add("changed_by IN @users");
                 p.Add("users", users);
             }
-            if (filter.FromUtc.HasValue)
+            if (filter.From.HasValue)
             {
                 where.Add("changed_at >= @fromUtc");
-                p.Add("fromUtc", filter.FromUtc.Value);
+                p.Add("fromUtc", DateTime.SpecifyKind(filter.From.Value.Date, DateTimeKind.Local).ToUniversalTime());
             }
-            if (filter.ToUtc.HasValue)
+            if (filter.To.HasValue)
             {
                 where.Add("changed_at <= @toUtc");
-                p.Add("toUtc", filter.ToUtc.Value.Date.AddDays(1).AddTicks(-1));
+                p.Add("toUtc", DateTime.SpecifyKind(filter.To.Value.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime().AddTicks(-1));
             }
             if (entityTypes.Length > 0)
             {
                 where.Add("entity_type IN @entityTypes");
                 p.Add("entityTypes", entityTypes);
             }
+            else if (!filter.ShowTechnical)
+            {
+                // Mirrors the on-screen default. Without it the workbook would
+                // hold the 89% of bookkeeping rows the list deliberately hid,
+                // so what you exported never matched what you were looking at.
+                where.Add("entity_type NOT IN @noisyTypes");
+                p.Add("noisyTypes", AuditNarrator.NoisyEntityTypes);
+            }
             if (actionCodes.Length > 0)
             {
                 where.Add("action_code IN @actionCodes");
                 p.Add("actionCodes", actionCodes);
             }
+            var scope = BuildRecordScope(filter, p);
             if (cursorTime.HasValue && cursorId.HasValue)
             {
                 // Keyset pagination on (changed_at DESC, audit_id DESC).
@@ -362,7 +388,7 @@ public class AuditService : IAuditService
             }
             p.Add("take", chunk);
 
-            var sql = $@"
+            var sql = $@"{scope.Cte}
                 SELECT TOP (@take)
                        audit_id          AS AuditId,
                        entity_type       AS EntityType,
@@ -375,7 +401,8 @@ public class AuditService : IAuditService
                        source_ip         AS SourceIp,
                        source_user_agent  AS SourceUserAgent,
                    source_device_name AS SourceDeviceName
-                FROM   qms_audit_log
+                FROM   qms_audit_log l
+                {scope.Join}
                 {(where.Count == 0 ? "" : "WHERE " + string.Join(" AND ", where))}
                 ORDER  BY changed_at DESC, audit_id DESC";
 
@@ -528,5 +555,306 @@ public class AuditService : IAuditService
             // Malformed JSON (shouldn't happen — we wrote it ourselves) — log nothing.
             return new Dictionary<string, string?>(0);
         }
+    }
+
+    // ---- Record scope: QC number / container / supplier / plant -------------
+
+    /// <summary>
+    /// The SQL fragments that narrow the log to one quality order, container,
+    /// supplier or plant. Empty when no record filter is set.
+    /// </summary>
+    private readonly record struct RecordScope(string Cte, string Join)
+    {
+        public static readonly RecordScope None = new("", "");
+    }
+
+    /// <summary>
+    /// Builds the "everything that happened to this container" filter.
+    ///
+    /// This is the filter the log was missing. An audit row records
+    /// "SampleReading #91204" — nobody knows that number. People know the QC
+    /// number and the container, so the scope walks
+    /// arrival → quality order → material / sample / claim and matches any
+    /// audit row that lands anywhere on that tree.
+    ///
+    /// Shaped as a CTE that is JOINED to, rather than a correlated EXISTS in the
+    /// WHERE clause. The EXISTS form is the obvious way to write it and is
+    /// unusable: SQL Server re-evaluates it per audit row, which measured at
+    /// 31s for a container and timed out past 120s for a single QC number.
+    /// Materialising the target keys first and letting the join seek
+    /// IX_qms_audit_log_entity (entity_type, entity_id) brings the same queries
+    /// to ~250ms.
+    ///
+    /// The LEFT JOIN from the arrival side is deliberate: an arrival that has no
+    /// quality order yet still has audit rows, and filtering by container must
+    /// find them. Supplying a QC number forces the join to match, because an
+    /// arrival without a quality order has no number to compare.
+    /// </summary>
+    private static RecordScope BuildRecordScope(AuditFilter filter, DynamicParameters p)
+    {
+        if (!filter.HasRecordScope) return RecordScope.None;
+
+        p.Add("scopeQo",        Blank(filter.QoNo));
+        p.Add("scopeContainer", Blank(filter.Container));
+        p.Add("scopeVendor",    Blank(filter.Vendor));
+        p.Add("scopePlant",     Blank(filter.Plant));
+
+        const string cte = @"
+        WITH scope AS (
+            SELECT sa.arrival_id, sqo.quality_order_id
+            FROM   qms_arrival sa
+            LEFT   JOIN qms_quality_order sqo ON sqo.arrival_id = sa.arrival_id
+            WHERE  (@scopeQo        IS NULL OR sqo.quality_order_no LIKE '%' + @scopeQo + '%')
+              AND  (@scopeContainer IS NULL OR sa.container_no      LIKE '%' + @scopeContainer + '%')
+              AND  (@scopeVendor    IS NULL OR sa.vendor_name       LIKE '%' + @scopeVendor + '%')
+              AND  (@scopePlant     IS NULL OR sa.plant             =  @scopePlant)
+        ),
+        -- One row per (entity_type, entity_id) the scope covers. entity_id is
+        -- bigint in the log while the source keys are int, so every branch casts
+        -- up rather than letting the join convert the indexed column down.
+        targets AS (
+            SELECT 'QualityOrder' AS et, CAST(quality_order_id AS bigint) AS eid
+              FROM scope WHERE quality_order_id IS NOT NULL
+            UNION ALL SELECT 'Arrival',              CAST(arrival_id AS bigint) FROM scope
+            UNION ALL SELECT 'ArrivalChecklist',     CAST(arrival_id AS bigint) FROM scope
+            UNION ALL SELECT 'QualityOrderMaterial', CAST(m.qo_material_id AS bigint)
+                        FROM qms_quality_order_material m
+                        JOIN scope s ON s.quality_order_id = m.quality_order_id
+            UNION ALL SELECT 'Sample',               CAST(sp.sample_id AS bigint)
+                        FROM qms_sample sp JOIN scope s ON s.quality_order_id = sp.quality_order_id
+            UNION ALL SELECT 'SampleReading',        CAST(sp.sample_id AS bigint)
+                        FROM qms_sample sp JOIN scope s ON s.quality_order_id = sp.quality_order_id
+            UNION ALL SELECT 'SampleDefect',         CAST(sp.sample_id AS bigint)
+                        FROM qms_sample sp JOIN scope s ON s.quality_order_id = sp.quality_order_id
+            UNION ALL SELECT 'ArrivalItem',          CAST(ai.arrival_item_id AS bigint)
+                        FROM qms_arrival_item ai JOIN scope s ON s.arrival_id = ai.arrival_id
+            UNION ALL SELECT 'Claim',                CAST(cl.claim_id AS bigint)
+                        FROM qms_claim cl JOIN scope s ON s.quality_order_id = cl.quality_order_id
+            UNION ALL SELECT 'ClaimNote',            CAST(cn.note_id AS bigint)
+                        FROM qms_claim_note cn
+                        JOIN qms_claim cl ON cl.claim_id = cn.claim_id
+                        JOIN scope s ON s.quality_order_id = cl.quality_order_id
+        )";
+
+        // Sample readings, defects and header values all share the sample's id,
+        // so the UNION above repeats keys; DISTINCT stops one audit row being
+        // returned several times.
+        const string join = @"JOIN (SELECT DISTINCT et, eid FROM targets) t
+               ON t.et = l.entity_type AND t.eid = l.entity_id";
+
+        return new RecordScope(cte, join);
+    }
+
+    private static string? Blank(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+    // ---- Label resolution ---------------------------------------------------
+
+    /// <summary>
+    /// Turns each row's (entity_type, entity_id) back into the identifiers a
+    /// person recognises — QC number, container, username — so the list can say
+    /// "sample 3 of QO-2026-000353" instead of "#91204".
+    ///
+    /// Batched: one small query per entity family for the whole page, not one
+    /// per row. A page is 25 rows, so this is at most a handful of point lookups
+    /// against indexed keys.
+    /// </summary>
+    private async Task ResolveLabelsAsync(SqlConnection c, List<AuditEntryListRow> rows)
+    {
+        if (rows.Count == 0) return;
+
+        long[] IdsOf(params string[] types) => rows
+            .Where(r => types.Contains(r.EntityType, StringComparer.OrdinalIgnoreCase) && r.EntityId > 0)
+            .Select(r => r.EntityId).Distinct().ToArray();
+
+        var qoIds      = IdsOf(EntityTypes.QualityOrder);
+        var matIds     = IdsOf(EntityTypes.QualityOrderMaterial);
+        var sampleIds  = IdsOf(EntityTypes.Sample, EntityTypes.SampleReading, EntityTypes.SampleDefect);
+        var arrivalIds = IdsOf(EntityTypes.Arrival, EntityTypes.ArrivalChecklist);
+        var itemIds    = IdsOf(EntityTypes.ArrivalItem);
+        var claimIds   = IdsOf(EntityTypes.Claim);
+        var noteIds    = IdsOf(EntityTypes.ClaimNote);
+        var userIds    = IdsOf(EntityTypes.User);
+
+        var qo      = new Dictionary<long, RecordKey>();
+        var mat     = new Dictionary<long, RecordKey>();
+        var sample  = new Dictionary<long, RecordKey>();
+        var arrival = new Dictionary<long, RecordKey>();
+        var item    = new Dictionary<long, RecordKey>();
+        var claim   = new Dictionary<long, RecordKey>();
+        var note    = new Dictionary<long, RecordKey>();
+        var users   = new Dictionary<long, string>();
+
+        const string QoCols = @"qo.quality_order_no AS QoNo, a.container_no AS ContainerNo";
+
+        if (qoIds.Length > 0)
+            foreach (var r in await c.QueryAsync<RecordKeyRow>($@"
+                SELECT qo.quality_order_id AS Id, {QoCols}, NULL AS Extra
+                FROM   qms_quality_order qo
+                LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
+                WHERE  qo.quality_order_id IN @ids", new { ids = qoIds }))
+                qo[r.Id] = new RecordKey(r.QoNo, r.ContainerNo, null);
+
+        if (matIds.Length > 0)
+            foreach (var r in await c.QueryAsync<RecordKeyRow>($@"
+                SELECT m.qo_material_id AS Id, {QoCols}, m.material_no AS Extra
+                FROM   qms_quality_order_material m
+                JOIN   qms_quality_order qo ON qo.quality_order_id = m.quality_order_id
+                LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
+                WHERE  m.qo_material_id IN @ids", new { ids = matIds }))
+                mat[r.Id] = new RecordKey(r.QoNo, r.ContainerNo, r.Extra);
+
+        if (sampleIds.Length > 0)
+            foreach (var r in await c.QueryAsync<RecordKeyRow>($@"
+                SELECT s.sample_id AS Id, {QoCols}, CAST(s.sample_no AS nvarchar(20)) AS Extra
+                FROM   qms_sample s
+                JOIN   qms_quality_order qo ON qo.quality_order_id = s.quality_order_id
+                LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
+                WHERE  s.sample_id IN @ids", new { ids = sampleIds }))
+                sample[r.Id] = new RecordKey(r.QoNo, r.ContainerNo, r.Extra);
+
+        if (arrivalIds.Length > 0)
+            foreach (var r in await c.QueryAsync<RecordKeyRow>(@"
+                SELECT a.arrival_id AS Id, NULL AS QoNo, a.container_no AS ContainerNo,
+                       a.arrival_no AS Extra
+                FROM   qms_arrival a WHERE a.arrival_id IN @ids", new { ids = arrivalIds }))
+                arrival[r.Id] = new RecordKey(null, r.ContainerNo, r.Extra);
+
+        if (itemIds.Length > 0)
+            foreach (var r in await c.QueryAsync<RecordKeyRow>(@"
+                SELECT i.arrival_item_id AS Id, NULL AS QoNo, a.container_no AS ContainerNo,
+                       a.arrival_no AS Extra
+                FROM   qms_arrival_item i
+                JOIN   qms_arrival a ON a.arrival_id = i.arrival_id
+                WHERE  i.arrival_item_id IN @ids", new { ids = itemIds }))
+                item[r.Id] = new RecordKey(null, r.ContainerNo, r.Extra);
+
+        if (claimIds.Length > 0)
+            foreach (var r in await c.QueryAsync<RecordKeyRow>($@"
+                SELECT cl.claim_id AS Id, {QoCols}, NULL AS Extra
+                FROM   qms_claim cl
+                JOIN   qms_quality_order qo ON qo.quality_order_id = cl.quality_order_id
+                LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
+                WHERE  cl.claim_id IN @ids", new { ids = claimIds }))
+                claim[r.Id] = new RecordKey(r.QoNo, r.ContainerNo, null);
+
+        if (noteIds.Length > 0)
+            foreach (var r in await c.QueryAsync<RecordKeyRow>($@"
+                SELECT cn.note_id AS Id, {QoCols}, NULL AS Extra
+                FROM   qms_claim_note cn
+                JOIN   qms_claim cl ON cl.claim_id = cn.claim_id
+                JOIN   qms_quality_order qo ON qo.quality_order_id = cl.quality_order_id
+                LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
+                WHERE  cn.note_id IN @ids", new { ids = noteIds }))
+                note[r.Id] = new RecordKey(r.QoNo, r.ContainerNo, null);
+
+        if (userIds.Length > 0)
+            foreach (var r in await c.QueryAsync<UserKeyRow>(@"
+                SELECT UserId AS Id, Username FROM portal.[User] WHERE UserId IN @ids",
+                new { ids = userIds.Select(i => (int)i).ToArray() }))
+                users[r.Id] = r.Username;
+
+        foreach (var r in rows)
+        {
+            RecordKey? k = r.EntityType switch
+            {
+                EntityTypes.QualityOrder         => Look(qo,      r.EntityId),
+                EntityTypes.QualityOrderMaterial => Look(mat,     r.EntityId),
+                EntityTypes.Sample or EntityTypes.SampleReading or EntityTypes.SampleDefect
+                                                 => Look(sample,  r.EntityId),
+                EntityTypes.Arrival or EntityTypes.ArrivalChecklist
+                                                 => Look(arrival, r.EntityId),
+                EntityTypes.ArrivalItem          => Look(item,    r.EntityId),
+                EntityTypes.Claim                => Look(claim,   r.EntityId),
+                EntityTypes.ClaimNote            => Look(note,    r.EntityId),
+                _                                => null
+            };
+
+            if (k != null)
+            {
+                r.QoNo         = k.QoNo;
+                r.ContainerNo  = k.ContainerNo;
+                r.DisplayLabel = AuditNarrator.RecordLabel(r.EntityType, k.QoNo, k.ContainerNo, k.Extra);
+            }
+            else if (r.EntityType == EntityTypes.User && users.TryGetValue(r.EntityId, out var un))
+            {
+                r.DisplayLabel = AuditNarrator.RecordLabel(EntityTypes.User, null, null, un);
+            }
+            else if (r.EntityType == EntityTypes.Role)
+            {
+                // Role rows are written with entity_id 0 — the role code lives in
+                // the payload, which is the only place it can be recovered from.
+                var roleCode = AuditNarrator.RoleCodeFromJson(r.NewValuesJson ?? r.OldValuesJson);
+                r.DisplayLabel = AuditNarrator.RecordLabel(EntityTypes.Role, null, null, roleCode);
+            }
+        }
+
+        static RecordKey? Look(Dictionary<long, RecordKey> d, long id) =>
+            d.TryGetValue(id, out var v) ? v : null;
+    }
+
+    private sealed record RecordKey(string? QoNo, string? ContainerNo, string? Extra);
+
+    /// <summary>Dapper materialisation target for the label lookups. A class
+    /// rather than a positional record so every query can name its columns in
+    /// whatever order reads best.</summary>
+    private sealed class RecordKeyRow
+    {
+        public long    Id          { get; set; }
+        public string? QoNo        { get; set; }
+        public string? ContainerNo { get; set; }
+        public string? Extra       { get; set; }
+    }
+
+    private sealed class UserKeyRow
+    {
+        public long   Id       { get; set; }
+        public string Username { get; set; } = "";
+    }
+
+    // ---- Filter dropdown contents ------------------------------------------
+
+    /// <summary>
+    /// Suppliers, plants and actors that actually occur, for the filter panel.
+    /// Drawn from the data rather than a hard-coded list, so a new supplier
+    /// appears without a code change and no option can return nothing.
+    /// </summary>
+    /// <summary>How long the dropdown contents are reused. Three DISTINCT scans
+    /// on every page load would be a real cost for a list that gains an entry
+    /// when a new supplier ships — minutes of staleness are free here.</summary>
+    private static readonly TimeSpan FilterOptionsTtl = TimeSpan.FromMinutes(10);
+    private const string FilterOptionsCacheKey = "audit-filter-options";
+
+    public async Task<AuditFilterOptions> GetFilterOptionsAsync()
+    {
+        if (_cache.TryGetValue<AuditFilterOptions>(FilterOptionsCacheKey, out var cached) && cached != null)
+            return cached;
+
+        var options = await LoadFilterOptionsAsync();
+        _cache.Set(FilterOptionsCacheKey, options, FilterOptionsTtl);
+        return options;
+    }
+
+    private async Task<AuditFilterOptions> LoadFilterOptionsAsync()
+    {
+        using var c = Open();
+        using var grid = await c.QueryMultipleAsync(@"
+            SELECT DISTINCT vendor_name FROM qms_arrival
+            WHERE  vendor_name IS NOT NULL AND LTRIM(RTRIM(vendor_name)) <> ''
+            ORDER  BY vendor_name;
+
+            SELECT DISTINCT plant FROM qms_arrival
+            WHERE  plant IS NOT NULL AND LTRIM(RTRIM(plant)) <> ''
+            ORDER  BY plant;
+
+            SELECT DISTINCT changed_by FROM qms_audit_log
+            WHERE  changed_by IS NOT NULL AND LTRIM(RTRIM(changed_by)) <> ''
+            ORDER  BY changed_by;");
+
+        return new AuditFilterOptions
+        {
+            Vendors = (await grid.ReadAsync<string>()).ToList(),
+            Plants  = (await grid.ReadAsync<string>()).ToList(),
+            Actors  = (await grid.ReadAsync<string>()).ToList()
+        };
     }
 }

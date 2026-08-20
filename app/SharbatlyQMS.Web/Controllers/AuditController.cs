@@ -24,6 +24,7 @@ public class AuditController : Controller
 {
     private readonly IAuditService _audit;
     private readonly IPermissionLogService _permLog;
+    private readonly ISecurityLogService _securityLog;
 
     // T036 (US3) -- Single in-flight export per user (FR-021). Stale slots
     // older than 5 minutes are reclaimable automatically -- catches the case
@@ -34,30 +35,63 @@ public class AuditController : Controller
     // Soft cap (~spec.md) on rows per audit export to bound memory.
     private const int MaxAuditExportRows = 50_000;
 
-    public AuditController(IAuditService audit, IPermissionLogService permLog)
+    public AuditController(IAuditService audit, IPermissionLogService permLog,
+                           ISecurityLogService securityLog)
     {
         _audit = audit;
         _permLog = permLog;
+        _securityLog = securityLog;
     }
 
     /// <summary>
-    /// The dedicated permission-change log (M21). Deliberately a separate page
-    /// from the audit log rather than a filter on it: the shape is different
-    /// (one row per permission moved, already in words) and the question it
-    /// answers — "who changed this person's access, and to what" — is asked on
-    /// its own, usually under time pressure.
+    /// Users &amp; security: everything that changed about who exists and what
+    /// they can reach. Deliberately a separate page from the audit log rather
+    /// than a filter on it — the shape is different (one row per thing that
+    /// moved, already in words) and the question it answers, "who changed this
+    /// person's access, and to what", is asked on its own and usually under
+    /// time pressure.
+    ///
+    /// Merges the permission log with the User and Role rows of the audit log;
+    /// see <see cref="SecurityLogService"/> for why neither alone is enough.
     ///
     /// Same screen permission as the audit log; both are admin forensic views.
     /// </summary>
     [HttpGet]
     [RequireScreen(Screens.AdminAuditLog, Seed.AdminOnly, "Open the audit log")]
-    public async Task<IActionResult> Permissions([FromQuery] PermissionLogFilter filter)
+    public async Task<IActionResult> Security([FromQuery] SecurityLogFilter filter)
     {
-        var rows    = await _permLog.ListAsync(filter);
-        var options = await _permLog.GetOptionsAsync();
+        filter ??= new SecurityLogFilter();
+        var rows    = await _securityLog.ListAsync(filter);
+        var options = await _securityLog.GetOptionsAsync();
         ViewBag.Filter        = filter;
         ViewBag.FilterOptions = options;
         return View(rows);
+    }
+
+    /// <summary>
+    /// The old permission-log URL. Kept so bookmarks and the links already sent
+    /// round in e-mail still land somewhere useful.
+    /// </summary>
+    [HttpGet]
+    [RequireScreen(Screens.AdminAuditLog, Seed.AdminOnly, "Open the audit log")]
+    public IActionResult Permissions([FromQuery] PermissionLogFilter filter)
+    {
+        if (filter == null || !filter.Any) return RedirectToAction(nameof(Security));
+
+        // Old links carry changeType; the merged page calls the same thing
+        // category, because it now covers more than permission changes.
+        return RedirectToAction(nameof(Security), new
+        {
+            actor       = Trim(filter.Actor),
+            subjectKey  = Trim(filter.SubjectKey),
+            subjectType = Trim(filter.SubjectType),
+            category    = Trim(filter.ChangeType),
+            search      = Trim(filter.Search),
+            from        = filter.From?.ToString("yyyy-MM-dd"),
+            to          = filter.To?.ToString("yyyy-MM-dd")
+        });
+
+        static string? Trim(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
     }
 
     private bool TryAcquireExportSlot(string user)
@@ -91,6 +125,7 @@ public class AuditController : Controller
         if (filter.PageSize > 100) filter.PageSize = 100;
 
         var rows = await _audit.ListAsync(filter);
+        ViewBag.FilterOptions = await _audit.GetFilterOptionsAsync();
 
         // ListAsync requests pageSize+1 so the controller can compute HasMore
         // without a separate count query. Trim back to pageSize for display.
@@ -120,7 +155,7 @@ public class AuditController : Controller
     [RequirePermission(Perm.Admin.AuditExport, Seed.AdminOnly, "Export the audit log to Excel", ReadOnly = true)]
     public async Task<IActionResult> Export([FromQuery] AuditFilter filter, CancellationToken ct)
     {
-        if (filter == null || !filter.FromUtc.HasValue || !filter.ToUtc.HasValue)
+        if (filter == null || !filter.From.HasValue || !filter.To.HasValue)
         {
             TempData["Error"] = "Start date and end date are required for export.";
             return RedirectToAction(nameof(Index));
@@ -198,7 +233,7 @@ public class AuditController : Controller
             wb.SaveAs(ms);
             ms.Position = 0;
 
-            var fileName = $"qms-audit-{filter.FromUtc:yyyyMMdd}-to-{filter.ToUtc:yyyyMMdd}.xlsx";
+            var fileName = $"qms-audit-{filter.From:yyyyMMdd}-to-{filter.To:yyyyMMdd}.xlsx";
             return File(ms,
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 fileName);

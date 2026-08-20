@@ -1,0 +1,260 @@
+@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.Services
+@model IReadOnlyList<SecurityEvent>
+@{
+    ViewData["Title"] = "Users & security";
+    var f    = ViewBag.Filter as SecurityLogFilter ?? new SecurityLogFilter();
+    var opts = ViewBag.FilterOptions as SecurityLogOptions ?? new SecurityLogOptions();
+
+    string D(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
+    bool Sel(string? a, string? b) => string.Equals(a, b, StringComparison.OrdinalIgnoreCase);
+
+    // The page is capped; say so rather than letting a truncated list read as
+    // the whole story.
+    var atCap = Model.Count >= f.PageSize;
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">
+        <i class="bi bi-shield-lock me-1 text-primary"></i>Users &amp; security
+        <small class="text-muted fs-6 fw-normal ms-2">Who can reach what &mdash; and who changed it</small>
+    </h1>
+</div>
+
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item"><a class="nav-link" asp-action="Index"><i class="bi bi-journal-text me-1"></i>Activity log</a></li>
+    <li class="nav-item"><a class="nav-link active" asp-action="Security"><i class="bi bi-shield-lock me-1"></i>Users &amp; security</a></li>
+</ul>
+
+@* ---------------------------------------------------------------- filters *@
+<div class="filter-panel mb-3" data-filter-panel data-key="audit-security" data-has-filters="@(f.Any.ToString().ToLowerInvariant())">
+    <div class="filter-summary">
+        <button class="btn btn-sm btn-outline-secondary" type="button" data-filter-toggle
+                data-bs-toggle="collapse" data-bs-target="#secFilters" aria-controls="secFilters">
+            <i class="bi bi-funnel me-1"></i>Filters <i class="bi bi-chevron-down ms-1"></i>
+        </button>
+        @* Rendered server-side as well as by the script, so the count is right
+           on first paint instead of flashing "No filters" and correcting itself. *@
+        <span class="badge f-count @(f.ActiveCount > 0 ? "text-bg-primary" : "text-bg-secondary")" data-filter-count>
+            @(f.ActiveCount == 0 ? "No filters" : $"{f.ActiveCount} filter{(f.ActiveCount == 1 ? "" : "s")}")
+        </span>
+        <span class="filter-chips" data-filter-chips></span>
+        @if (f.Any)
+        {
+            <a asp-action="Security" class="btn btn-sm btn-link text-decoration-none">Clear all</a>
+        }
+    </div>
+
+    <div class="collapse filter-body" id="secFilters" data-filter-body>
+        <form method="get" class="p-3" data-filter-form>
+            <div class="row g-2 align-items-end">
+                <div class="col-12 col-md-3">
+                    <label class="form-label small mb-1">Search</label>
+                    <input type="text" name="search" value="@f.Search" data-chip="Search"
+                           class="form-control form-control-sm"
+                           placeholder="user, role, permission…" autocomplete="off" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">Changed by</label>
+                    <select name="actor" class="form-select form-select-sm" data-chip="Changed by">
+                        <option value="">Anyone</option>
+                        @foreach (var a in opts.Actors)
+                        {
+                            <option value="@a" selected="@Sel(a, f.Actor)">@a</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small mb-1">About</label>
+                    <select name="subjectKey" class="form-select form-select-sm" data-chip="About">
+                        <option value="">Any user or role</option>
+                        @foreach (var sub in opts.Subjects)
+                        {
+                            var label = string.IsNullOrWhiteSpace(sub.SubjectName)
+                                ? sub.SubjectKey : $"{sub.SubjectName} ({sub.SubjectKey})";
+                            <option value="@sub.SubjectKey" selected="@Sel(sub.SubjectKey, f.SubjectKey)">
+                                @(sub.SubjectType == PermissionSubjects.Role ? "Role: " : "User: ")@label
+                            </option>
+                        }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">From</label>
+                    <input type="date" name="from" value="@D(f.From)" data-chip="From"
+                           class="form-control form-control-sm" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">To</label>
+                    <input type="date" name="to" value="@D(f.To)" data-chip="To"
+                           class="form-control form-control-sm" />
+                </div>
+            </div>
+
+            <div class="row g-3 mt-1">
+                <div class="col-12 col-lg-8">
+                    <div class="small text-muted mb-1">Kind of change</div>
+                    @* A select rather than chips: these are mutually exclusive. *@
+                    <select name="category" class="form-select form-select-sm" data-chip="Kind">
+                        <option value="">Everything</option>
+                        @foreach (var c in opts.Categories)
+                        {
+                            <option value="@c" selected="@Sel(c, f.Category)">@SecurityCategories.Label(c)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-12 col-lg-4">
+                    <div class="small text-muted mb-1">Subject</div>
+                    <select name="subjectType" class="form-select form-select-sm" data-chip="Subject">
+                        <option value="">Users and roles</option>
+                        <option value="@PermissionSubjects.User" selected="@Sel(PermissionSubjects.User, f.SubjectType)">Users only</option>
+                        <option value="@PermissionSubjects.Role" selected="@Sel(PermissionSubjects.Role, f.SubjectType)">Roles only</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="d-flex gap-2 mt-3">
+                <button type="submit" class="btn btn-primary btn-sm" data-filter-apply>
+                    <i class="bi bi-funnel me-1"></i>Apply filters
+                </button>
+                <a asp-action="Security" class="btn btn-outline-secondary btn-sm">Clear</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+@* ----------------------------------------------------------------- events *@
+<div class="card">
+    <div class="card-header py-2 d-flex justify-content-between align-items-center">
+        <small>
+            @Model.Count change@(Model.Count == 1 ? "" : "s") shown
+            @if (atCap)
+            {
+                <span class="text-warning-emphasis ms-1">
+                    &mdash; the newest @f.PageSize only; narrow the dates to see further back.
+                </span>
+            }
+        </small>
+        <small class="text-muted">Newest first</small>
+    </div>
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:10rem">When</th>
+                    <th style="width:10rem">Kind</th>
+                    <th>What happened</th>
+                    <th style="width:11rem">Changed by</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Count == 0)
+            {
+                <tr><td colspan="4" class="text-center text-muted py-4">
+                    @(f.Any
+                        ? "No security changes match these filters."
+                        : "No user or security changes recorded yet.")
+                    @if (f.Any)
+                    {
+                        <a asp-action="Security" class="ms-1">Clear them</a>
+                    }
+                </td></tr>
+            }
+            else
+            {
+                var i = 0;
+                foreach (var e in Model)
+                {
+                    var local    = e.ChangedAt.ToLocalTime();
+                    var detailId = $"sec-{i++}";
+                    var hasDetail = e.Details.Count > 0
+                                    || !string.IsNullOrWhiteSpace(e.OldValuesJson)
+                                    || !string.IsNullOrWhiteSpace(e.NewValuesJson);
+                    <tr>
+                        <td class="small text-nowrap">
+                            <div>@local.ToString("yyyy-MM-dd")</div>
+                            <div class="text-muted">@local.ToString("HH:mm:ss")</div>
+                        </td>
+                        <td>
+                            <span class="badge @SecurityCategories.BadgeCss(e.Category)">
+                                <i class="bi @SecurityCategories.Icon(e.Category) me-1"></i>@SecurityCategories.Label(e.Category)
+                            </span>
+                        </td>
+                        <td>
+                            <div>@e.Headline</div>
+                            @if (e.Details.Count > 0)
+                            {
+                                <div class="mt-1">
+                                    @foreach (var d in e.Details.Take(3))
+                                    {
+                                        <partial name="_ValueChange" model="d" />
+                                    }
+                                    @if (e.Details.Count > 3)
+                                    {
+                                        <button class="btn btn-sm btn-link p-0 small" type="button"
+                                                data-bs-toggle="collapse" data-bs-target="#@detailId">
+                                            +@(e.Details.Count - 3) more
+                                        </button>
+                                    }
+                                </div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(e.ItemCode))
+                            {
+                                <code class="small text-muted">@e.ItemCode</code>
+                            }
+                            @if (hasDetail)
+                            {
+                                <div class="collapse mt-2" id="@detailId">
+                                    @if (e.Details.Count > 3)
+                                    {
+                                        foreach (var d in e.Details.Skip(3))
+                                        {
+                                            <partial name="_ValueChange" model="d" />
+                                        }
+                                    }
+                                    @if (e.FromAuditLog)
+                                    {
+                                        <details class="mt-2">
+                                            <summary class="small text-muted">Technical detail</summary>
+                                            <div class="row g-2 mt-1">
+                                                <div class="col-12 col-md-6">
+                                                    <div class="small text-muted">Before</div>
+                                                    <pre class="audit-json">@(e.OldValuesJson ?? "(none)")</pre>
+                                                </div>
+                                                <div class="col-12 col-md-6">
+                                                    <div class="small text-muted">After</div>
+                                                    <pre class="audit-json">@(e.NewValuesJson ?? "(none)")</pre>
+                                                </div>
+                                            </div>
+                                            <div class="small text-muted mt-1">Audit entry <code>#@e.AuditId</code></div>
+                                        </details>
+                                    }
+                                </div>
+                            }
+                        </td>
+                        <td class="small">
+                            <div>@e.ChangedBy</div>
+                            @if (!string.IsNullOrWhiteSpace(e.SourceIp))
+                            {
+                                <div class="text-muted">@e.SourceIp</div>
+                            }
+                        </td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="text-muted small mt-2">
+    The readable permission log starts on 20 August 2026. Earlier access changes,
+    and account creations, deletions and password resets from any date, are read
+    from the activity log and shown here in the same form.
+</div>
+
+<style>
+    .audit-json { font-size: .72rem; white-space: pre-wrap; word-break: break-all;
+                  max-height: 16rem; overflow: auto; margin: 0; }
+</style>
+
+<partial name="_FilterPanelAssets" />

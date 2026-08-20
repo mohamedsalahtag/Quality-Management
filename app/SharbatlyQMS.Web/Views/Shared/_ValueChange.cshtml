@@ -1,0 +1,36 @@
+@using SharbatlyQMS.Web.Services
+@model AuditNarrator.FriendlyDiff
+@*
+    One before/after pair, rendered so the change is visible at a glance rather
+    than reconstructed from two columns of JSON.
+
+    Three shapes, because "" → "Full access" and "Full access" → "" are not the
+    same event and should not look the same:
+      Added    a value where there was none   → only the new value, in green
+      Removed  a value that is now gone       → only the old value, struck out
+      Changed  one value for another          → old → new
+
+    Colour is never the only signal: the icon and the strike-through carry the
+    same meaning for anyone who cannot separate the two hues.
+*@
+
+<div class="vchange">
+    <span class="v-field">@Model.Field</span>
+
+    @switch (Model.Kind)
+    {
+        case AuditNarrator.DiffKind.Added:
+            <span class="v-new" title="Added"><i class="bi bi-plus-lg"></i> @Model.New</span>
+            break;
+
+        case AuditNarrator.DiffKind.Removed:
+            <span class="v-old" title="Removed"><i class="bi bi-dash-lg"></i> @Model.Old</span>
+            break;
+
+        default:
+            <span class="v-old" title="Before">@Model.Old</span>
+            <i class="bi bi-arrow-right v-arrow" aria-label="changed to"></i>
+            <span class="v-new" title="After">@Model.New</span>
+            break;
+    }
+</div>

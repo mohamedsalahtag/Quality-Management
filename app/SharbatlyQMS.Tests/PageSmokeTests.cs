@@ -50,7 +50,24 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         "/ClaimManagement/Archived?from=2026-07-01&to=2026-08-17",
         "/ClaimManagement?container=A&po=4&supplier=&plant=&closedBy=&claimOwner=&material=apple",
         "/Audit",
-        "/Audit/Permissions",
+        "/Audit/Security",
+        // Audit filters: the noise toggle, an admin entity type (previously
+        // unreachable from the UI at all) and the local-date range.
+        "/Audit?showTechnical=true",
+        "/Audit?entityTypes=Role&entityTypes=User&actionCodes=Updated",
+        "/Audit?from=2026-08-01&to=2026-08-20",
+        // Record scope: each of these drives the arrival -> QO -> sample EXISTS,
+        // so a broken join surfaces as a 500 rather than as an empty page.
+        "/Audit?qoNo=QO-2026",
+        "/Audit?container=A",
+        "/Audit?vendor=&plant=",
+        "/Audit?qoNo=QO-2026-000353&showTechnical=true",
+        // Users & security, unfiltered and through each filter path: the
+        // permission-log-only branch, the audit-log-only branch, and search.
+        "/Audit/Security?category=Permission",
+        "/Audit/Security?category=UserCreated",
+        "/Audit/Security?subjectType=User&search=a",
+        "/Audit/Security?from=2026-01-01&to=2026-08-20",
         "/Account/Profile",
         "/Admin/Users",
         "/Admin/Settings",

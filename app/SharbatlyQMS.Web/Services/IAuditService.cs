@@ -66,4 +66,11 @@ public interface IAuditService
     /// never buffered in memory.
     /// </summary>
     IAsyncEnumerable<AuditEntry> ExportAsync(AuditFilter filter, CancellationToken ct = default);
+
+    /// <summary>
+    /// Supplier, plant and actor values present in the data, for the activity
+    /// log's filter panel. Read from the data itself so a dropdown can never
+    /// offer an option that matches nothing, nor miss one that exists.
+    /// </summary>
+    Task<AuditFilterOptions> GetFilterOptionsAsync();
 }

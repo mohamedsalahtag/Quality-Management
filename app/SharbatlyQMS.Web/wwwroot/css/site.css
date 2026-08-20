@@ -120,3 +120,52 @@ input[type="number"] {
   -moz-appearance: textfield;
        appearance: textfield;
 }
+/* ---------------------------------------------------------------------------
+   Before/after value changes (audit log, Users & security).
+
+   Rendered by Views/Shared/_ValueChange.cshtml. The two values are the point of
+   the row, so they get the weight; the field name is context and stays quiet.
+   Colour is a second signal only -- the icon and the strike-through carry the
+   same meaning without it.
+   ------------------------------------------------------------------------- */
+.vchange {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .35rem;
+  font-size: .8rem;
+  line-height: 1.5;
+  padding: .1rem 0;
+}
+
+.vchange .v-field {
+  color: var(--bs-secondary-color);
+  min-width: 8rem;
+  flex: 0 0 auto;
+}
+
+.vchange .v-old,
+.vchange .v-new {
+  border-radius: .25rem;
+  padding: 0 .35rem;
+  max-width: 26rem;
+  overflow-wrap: anywhere;
+}
+
+.vchange .v-old {
+  background: var(--bs-danger-bg-subtle);
+  color: var(--bs-danger-text-emphasis);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--bs-danger-text-emphasis) 45%, transparent);
+}
+
+.vchange .v-new {
+  background: var(--bs-success-bg-subtle);
+  color: var(--bs-success-text-emphasis);
+  font-weight: 500;
+}
+
+.vchange .v-arrow {
+  color: var(--bs-secondary-color);
+  font-size: .7rem;
+}

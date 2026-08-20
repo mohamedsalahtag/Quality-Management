@@ -7,6 +7,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- The test project drives AuditService.ParseDiffs directly: the narrator's
+         behaviour only means anything on the diff shape production actually
+         produces, so the tests feed it real JSON rather than hand-built rows. -->
+    <InternalsVisibleTo Include="SharbatlyQMS.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="BCrypt.Net-Next" Version="4.1.0" />
     <PackageReference Include="ClosedXML" Version="0.105.0" />
     <PackageReference Include="Dapper" Version="2.1.72" />

@@ -1,0 +1,161 @@
+@*
+    Shared behaviour for the collapsible filter panels on the Activity log and
+    Users & security tabs.
+
+    The markup contract, so both pages stay in step:
+
+      <div class="filter-panel" data-filter-panel data-key="audit-activity">
+        <div class="filter-summary">            <- always visible
+          <button data-filter-toggle>…</button>
+          <span data-filter-chips></span>       <- chips are written here
+          <a data-filter-clear href="…">Clear</a>
+        </div>
+        <div class="collapse" data-filter-body>
+          <form method="get" data-filter-form> … inputs … </form>
+        </div>
+      </div>
+
+    Every control that should appear as a chip carries data-chip="Label". The
+    script reads the live form, so the chips reflect what you have typed but not
+    yet applied — which is the point: you can see what you are about to ask for.
+
+    Removing a chip clears that control and submits immediately, because
+    removing a filter is an unambiguous instruction; typing in a box is not, so
+    text inputs still wait for Apply or Enter.
+*@
+
+<style>
+    .filter-panel            { border: 1px solid var(--bs-border-color); border-radius: var(--bs-border-radius); background: var(--bs-body-bg); }
+    .filter-summary          { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; padding: .5rem .75rem; }
+    .filter-summary .f-count { font-size: .75rem; }
+    .filter-chips            { display: flex; flex-wrap: wrap; gap: .25rem; flex: 1 1 auto; min-width: 0; }
+    .filter-chip             { display: inline-flex; align-items: center; gap: .3rem; font-size: .75rem;
+                               background: var(--bs-secondary-bg); border: 1px solid var(--bs-border-color);
+                               border-radius: 2rem; padding: .1rem .3rem .1rem .6rem; max-width: 22rem; }
+    .filter-chip .c-label    { color: var(--bs-secondary-color); }
+    .filter-chip .c-value    { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .filter-chip button      { border: 0; background: transparent; line-height: 1; padding: 0 .2rem;
+                               color: var(--bs-secondary-color); border-radius: 50%; }
+    .filter-chip button:hover{ color: var(--bs-danger); background: var(--bs-danger-bg-subtle); }
+    .filter-chip.is-pending  { border-style: dashed; }
+    .filter-body             { border-top: 1px solid var(--bs-border-color); }
+    .chip-group              { display: flex; flex-wrap: wrap; gap: .25rem; }
+    .chip-group .form-check  { margin: 0; }
+    [data-filter-toggle] .bi { transition: transform .15s ease-in-out; }
+    [data-filter-toggle][aria-expanded="true"] .bi-chevron-down { transform: rotate(180deg); }
+</style>
+
+<script>
+(function () {
+    // A control's current value as text, or "" when it is not set.
+    function valueOf(form, name) {
+        var nodes = form.querySelectorAll('[name="' + CSS.escape(name) + '"]');
+        if (!nodes.length) return '';
+        var first = nodes[0];
+        if (first.type === 'checkbox') {
+            var on = Array.prototype.filter.call(nodes, function (n) { return n.checked; });
+            if (!on.length) return '';
+            // A lone checkbox is a yes/no switch; several are a multi-select.
+            if (nodes.length === 1) return first.getAttribute('data-chip-on') || 'Yes';
+            return on.map(function (n) {
+                return n.getAttribute('data-chip-value') || n.value;
+            }).join(', ');
+        }
+        if (first.tagName === 'SELECT') {
+            var opt = first.options[first.selectedIndex];
+            return first.value ? (opt ? opt.text.trim() : first.value) : '';
+        }
+        return (first.value || '').trim();
+    }
+
+    function clearControl(form, name) {
+        form.querySelectorAll('[name="' + CSS.escape(name) + '"]').forEach(function (n) {
+            if (n.type === 'checkbox' || n.type === 'radio') n.checked = false;
+            else n.value = '';
+        });
+    }
+
+    function build(panel) {
+        var form   = panel.querySelector('[data-filter-form]');
+        var chips  = panel.querySelector('[data-filter-chips]');
+        var count  = panel.querySelector('[data-filter-count]');
+        if (!form || !chips) return;
+
+        // Applied values come from the URL; anything else on the form is a
+        // pending edit, drawn dashed so it is clear it has not taken effect.
+        var applied = new URLSearchParams(window.location.search);
+
+        var names = [];
+        form.querySelectorAll('[data-chip]').forEach(function (el) {
+            if (el.name && names.indexOf(el.name) === -1) names.push(el.name);
+        });
+
+        chips.innerHTML = '';
+        var n = 0;
+        names.forEach(function (name) {
+            var text = valueOf(form, name);
+            if (!text) return;
+            n++;
+            var el = form.querySelector('[name="' + CSS.escape(name) + '"][data-chip]')
+                  || form.querySelector('[name="' + CSS.escape(name) + '"]');
+            var label = el ? (el.getAttribute('data-chip') || name) : name;
+            var isPending = !applied.has(name);
+
+            var chip = document.createElement('span');
+            chip.className = 'filter-chip' + (isPending ? ' is-pending' : '');
+            chip.innerHTML =
+                '<span class="c-label"></span><span class="c-value"></span>' +
+                '<button type="button" title="Remove this filter" aria-label="Remove filter">&times;</button>';
+            chip.querySelector('.c-label').textContent = label + ':';
+            chip.querySelector('.c-value').textContent = text;
+            chip.querySelector('button').addEventListener('click', function () {
+                clearControl(form, name);
+                form.submit();
+            });
+            chips.appendChild(chip);
+        });
+
+        if (count) {
+            count.textContent = n ? n + (n === 1 ? ' filter' : ' filters') : 'No filters';
+            count.className = 'badge f-count ' + (n ? 'text-bg-primary' : 'text-bg-secondary');
+        }
+
+        var apply = panel.querySelector('[data-filter-apply]');
+        if (apply) apply.disabled = false;
+    }
+
+    document.querySelectorAll('[data-filter-panel]').forEach(function (panel) {
+        var form = panel.querySelector('[data-filter-form]');
+        var body = panel.querySelector('[data-filter-body]');
+        var key  = 'qms-filter-' + (panel.getAttribute('data-key') || 'default');
+
+        build(panel);
+
+        // Open when something is already applied, otherwise honour the reader's
+        // last choice. A panel that reopens itself on every page load is as
+        // annoying as one that hides the filters you are using.
+        var hasApplied = panel.getAttribute('data-has-filters') === 'true';
+        var remembered = null;
+        try { remembered = window.localStorage.getItem(key); } catch (e) { /* private mode */ }
+        var open = remembered === null ? hasApplied : remembered === 'open';
+        if (body && open) body.classList.add('show');
+
+        var toggle = panel.querySelector('[data-filter-toggle]');
+        if (toggle) toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+
+        if (body) {
+            body.addEventListener('shown.bs.collapse', function () {
+                try { window.localStorage.setItem(key, 'open'); } catch (e) { }
+            });
+            body.addEventListener('hidden.bs.collapse', function () {
+                try { window.localStorage.setItem(key, 'closed'); } catch (e) { }
+            });
+        }
+
+        if (form) {
+            form.addEventListener('input',  function () { build(panel); });
+            form.addEventListener('change', function () { build(panel); });
+        }
+    });
+})();
+</script>
