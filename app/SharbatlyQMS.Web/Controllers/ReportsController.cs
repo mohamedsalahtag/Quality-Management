@@ -321,6 +321,9 @@ public class ReportsController : Controller
 
         var arrival = await _arrivals.GetAsync(qo.ArrivalId);
         if (arrival != null) data.Arrival = arrival;
+        // Resolved here, not in the renderer: PoTypeDisplay needs the code
+        // directory, and the PDF builders are static by design.
+        data.ProcurementType = _codes.PoTypeDisplay(data.Arrival.PoType);
         data.Shipment  = await _arrivals.GetShipmentAsync(qo.ArrivalId);
         data.Checklist = await _arrivals.GetChecklistAsync(qo.ArrivalId);
 

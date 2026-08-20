@@ -163,6 +163,7 @@ public static class QualityReportPdfSoft
             ("Bill of Lading No.",V(d.Arrival.BolNo)),
             ("Container",         V(d.Arrival.ContainerNo)),
             ("Purch.Doc.",        V(d.Arrival.Ebeln)),
+            ("Procurement Type",  V(d.ProcurementType)),
             ("Country Of Origin", V(s?.LoadingCountry)),
             ("Loading Port",      V(s?.LoadingPort)),
             ("Port Of Arrival",   V(s?.ArrivalPlace)),

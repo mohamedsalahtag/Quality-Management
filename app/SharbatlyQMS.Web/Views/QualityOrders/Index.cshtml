@@ -29,14 +29,11 @@
     .qo-tip li       { padding: 2px 0; border-bottom: 1px dashed rgba(255,255,255,.18); }
     .qo-tip li:last-child { border-bottom: 0; }
     .qo-tip .qo-tip-qty { opacity: .8; margin-left: .35rem; }
-    /* Smaller, denser table so more data fits on small screens without
-       shrinking the actual values away. */
-    .qo-index-table { font-size: .8rem; }
-    .qo-index-table > :not(caption) > * > * { padding-top: .35rem; padding-bottom: .35rem; }
-    .qo-index-table .badge { font-size: .68rem; }
+    /* The table's own density now comes from .qms-index-table in site.css, so
+       the Arrivals list renders at the same size. Only the peek width, which is
+       specific to this page, stays here. */
     .qo-peek { max-width: 240px; }
-    @@media (max-width: 991.98px) { .qo-index-table { font-size: .74rem; } }
-    @@media (max-width: 575.98px) { .qo-index-table { font-size: .7rem; } .qo-peek { max-width: 150px; } }
+    @@media (max-width: 575.98px) { .qo-peek { max-width: 150px; } }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -209,7 +206,7 @@
 
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0 qo-index-table" data-tablekit data-page-size="50">
+        <table class="table table-hover align-middle mb-0 qms-index-table" data-tablekit data-page-size="50">
             <thead class="table-light">
                 <tr>
                     <th data-sort>QO Number</th>

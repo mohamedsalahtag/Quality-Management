@@ -280,6 +280,7 @@ public static class QualityReportPdf
                     Field(c, "Bill of Lading No.", d.Arrival.BolNo);
                     Field(c, "Container",        d.Arrival.ContainerNo);
                     Field(c, "Purch.Doc.",       d.Arrival.Ebeln);
+                    Field(c, "Procurement Type", d.ProcurementType);
                     Field(c, "Country Of Origin",s?.LoadingCountry);
                     Field(c, "Loading Port",     s?.LoadingPort);
                     Field(c, "Port Of Arrival",  s?.ArrivalPlace);

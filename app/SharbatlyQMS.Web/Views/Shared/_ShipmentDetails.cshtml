@@ -22,6 +22,13 @@
             <div class="qcs-f"><span>Bill of Lading No.</span><span>@V(a.BolNo)</span></div>
             <div class="qcs-f"><span>Container</span><span>@V(a.ContainerNo)</span></div>
             <div class="qcs-f"><span>Purch.Doc.</span><span>@V(a.Ebeln)</span></div>
+            @* SAP's purchase-order document type (EKKO.BSART) — what the business
+               calls the procurement type. Shown by its configured name, with the
+               raw code on hover for anyone cross-checking against SAP. *@
+            <div class="qcs-f">
+                <span>Procurement Type</span>
+                <span title="@a.PoType">@V(Codes.PoTypeDisplay(a.PoType))</span>
+            </div>
             <div class="qcs-f"><span>Country Of Origin</span><span>@V(s?.LoadingCountry)</span></div>
             <div class="qcs-f"><span>Loading Port</span><span>@V(s?.LoadingPort)</span></div>
             <div class="qcs-f"><span>Port Of Arrival</span><span>@V(s?.ArrivalPlace)</span></div>

@@ -32,6 +32,16 @@ public class QualityReportData
     /// </summary>
     public DateTime? InspectionDate { get; set; }
 
+    /// <summary>
+    /// SAP's purchase-order document type (EKKO.BSART) for this shipment, as its
+    /// configured name rather than the raw code — "procurement type" to the
+    /// business. Resolved by ReportsController through
+    /// <see cref="Services.ICodeDescriptionDirectory"/>, because the renderers
+    /// are static and cannot reach it themselves. Falls back to the raw code
+    /// when no description has been configured, and is blank when SAP sent none.
+    /// </summary>
+    public string? ProcurementType { get; set; }
+
     /// <summary>Admin-defined arrival custom fields (e.g. "Soft Green",
     /// "Yellow Ripe") whose material group appears in this report. Shown in the
     /// Shipment Details block; numeric ones also print a percentage of their

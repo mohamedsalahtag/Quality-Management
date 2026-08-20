@@ -169,3 +169,21 @@ input[type="number"] {
   color: var(--bs-secondary-color);
   font-size: .7rem;
 }
+
+/* ---------------------------------------------------------------------------
+   Dense index tables (Quality Orders, Arrivals).
+
+   A list page carries a lot of columns; at the default table size the last few
+   fall off a laptop screen. These rules were written for the Quality Orders
+   list and lived in that view, which meant the Arrivals list beside it rendered
+   noticeably larger. Shared here so the two stay the same size rather than
+   drifting apart again.
+
+   Page-specific bits (the QO materials "quick peek", say) stay in their view.
+   ------------------------------------------------------------------------- */
+.qms-index-table { font-size: .8rem; }
+.qms-index-table > :not(caption) > * > * { padding-top: .35rem; padding-bottom: .35rem; }
+.qms-index-table .badge { font-size: .68rem; }
+
+@media (max-width: 991.98px) { .qms-index-table { font-size: .74rem; } }
+@media (max-width: 575.98px) { .qms-index-table { font-size: .7rem; } }
