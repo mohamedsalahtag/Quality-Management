@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Extensions;
@@ -46,13 +46,18 @@ public class ClaimManagementController : Controller
     }
 
     [RequireScreen(Screens.Claims, Seed.Everyone, "Open Claims")]
-    public async Task<IActionResult> Index(string? status, string? search)
+    public async Task<IActionResult> Index([FromQuery] ClaimListFilter filter)
     {
-        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
-        var rows = await _claims.ListClosedQosAsync(
-            string.IsNullOrEmpty(status) ? null : status, search, user);
-        ViewBag.Status = status;
-        ViewBag.Search = search;
+        // Plant-scoped users can't widen their view: the scope is applied in
+        // the query regardless of what the panel's plant dropdown posted (the
+        // view renders a locked badge + hidden input to match).
+        var user    = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        var scope   = User.GetPlantScope();
+        var rows    = await _claims.ListClosedQosAsync(filter, scope, user);
+        var options = await _claims.GetClaimFilterOptionsAsync(scope);
+        ViewBag.Filter           = filter;
+        ViewBag.FilterOptions    = options;
+        ViewBag.PlantScopeLocked = User.SinglePlantOrNull();
         return View(rows);
     }
 

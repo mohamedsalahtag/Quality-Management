@@ -1,6 +1,7 @@
-﻿using System.Net;
+using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.ViewModels;
 using SharbatlyQMS.Web.Models.Reports;
 using SharbatlyQMS.Web.Models.Security;
 using SharbatlyQMS.Web.Services;
@@ -40,6 +41,11 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         "/Arrivals/Search",
         "/QualityOrders",
         "/ClaimManagement",
+        // Claims filter panel: one URL per input shape (text LIKE, dropdown
+        // equality, date range, status chip) so a typo in the new WHERE clause
+        // fails here rather than on the Claims page.
+        "/ClaimManagement?status=Archived&from=2026-07-01&to=2026-08-17",
+        "/ClaimManagement?container=A&po=4&supplier=&plant=&closedBy=&claimOwner=&material=apple",
         "/Audit",
         "/Account/Profile",
         "/Admin/Users",
@@ -156,7 +162,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         {
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
             var qos    = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
-            var rows   = await claims.ListClosedQosAsync(null, null, "test");
+            var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
             foreach (var r in rows.Take(25))
             {
                 var samples = await qos.ListSamplesAsync(r.QualityOrderId);
@@ -187,7 +193,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         using (var scope = _factory.Services.CreateScope())
         {
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
-            var rows   = await claims.ListClosedQosAsync(null, null, "test");
+            var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
             qoId = rows.Select(r => r.QualityOrderId).FirstOrDefault();
         }
         if (qoId == 0) return;   // no quality orders to render
@@ -218,7 +224,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         {
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
             var qos    = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
-            var rows   = await claims.ListClosedQosAsync(null, null, "test");
+            var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
             foreach (var r in rows.Take(25))
             {
                 var samples = await qos.ListSamplesAsync(r.QualityOrderId);

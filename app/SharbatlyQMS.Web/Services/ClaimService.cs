@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Services;
 
@@ -20,13 +21,27 @@ public class ClaimService : IClaimService
 
     // ---- Read paths -------------------------------------------------
 
-    public async Task<IReadOnlyList<ClaimListRow>> ListClosedQosAsync(string? filter, string? search, string currentUser)
+    public async Task<IReadOnlyList<ClaimListRow>> ListClosedQosAsync(
+        ClaimListFilter f, PlantScope scope, string currentUser)
     {
         // Pending = a Closed QO with NO row in qms_claim yet.
-        // Other filters = qms_claim.claim_status equality.
+        // Other statuses = qms_claim.claim_status equality.
         // "All" / null = no claim-status WHERE clause.
-        var pendingFilter = filter == ClaimStatus.Pending;
-        var statusFilter  = !string.IsNullOrEmpty(filter) && !pendingFilter ? filter : null;
+        var pendingFilter = f.Status == ClaimStatus.Pending;
+        var statusFilter  = !string.IsNullOrEmpty(f.Status) && !pendingFilter ? f.Status : null;
+
+        static string? Trim(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+
+        // qo.closed_at is UTC; the list renders it local. Convert the picked
+        // LOCAL dates to UTC here, and make the upper bound exclusive-next-
+        // midnight rather than BETWEEN, which would drop everything after
+        // 00:00:00.000 on the To date. Same handling as QualityOrderService.
+        DateTime? fromUtc = f.From.HasValue
+            ? DateTime.SpecifyKind(f.From.Value.Date, DateTimeKind.Local).ToUniversalTime()
+            : null;
+        DateTime? toUtc = f.To.HasValue
+            ? DateTime.SpecifyKind(f.To.Value.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime()
+            : null;
 
         // Unread = notes added on this claim after the user's last_seen mark
         // AND not authored by the user themselves. If no read-marker row
@@ -67,6 +82,26 @@ public class ClaimService : IClaimService
             WHERE  qo.status_code = 'Closed'
               AND  (@pendingFilter = 0 OR cl.claim_id IS NULL)
               AND  (@statusFilter IS NULL OR cl.claim_status = @statusFilter)
+              -- Per-user plant scope. The Details action already enforces this;
+              -- without it here a plant-scoped user saw other plants' claims in
+              -- the list, and the new Plant dropdown would have widened that.
+              AND  (@sUnrestricted = 1 OR a.plant IN @sPlants)
+              AND  (@plant      IS NULL OR a.plant            = @plant)
+              AND  (@storageLoc IS NULL OR a.storage_location = @storageLoc)
+              AND  (@supplier   IS NULL OR a.vendor_name      = @supplier)
+              AND  (@closedBy   IS NULL OR qo.closed_by       = @closedBy)
+              AND  (@claimOwner IS NULL OR cl.last_changed_by = @claimOwner)
+              AND  (@container  IS NULL OR a.container_no LIKE '%' + @container + '%')
+              AND  (@bol        IS NULL OR a.bol_no       LIKE '%' + @bol       + '%')
+              AND  (@po         IS NULL OR a.ebeln        LIKE '%' + @po        + '%')
+              AND  (@arrivalNo  IS NULL OR a.arrival_no   LIKE '%' + @arrivalNo + '%')
+              AND  (@fromUtc    IS NULL OR qo.closed_at  >= @fromUtc)
+              AND  (@toUtc      IS NULL OR qo.closed_at   < @toUtc)
+              AND  (@material   IS NULL OR EXISTS (
+                        SELECT 1 FROM qms_quality_order_material m2
+                        WHERE  m2.quality_order_id = qo.quality_order_id
+                          AND (m2.material_no   LIKE '%' + @material + '%'
+                            OR m2.material_desc LIKE '%' + @material + '%')))
               AND  (@search IS NULL OR
                     qo.quality_order_no LIKE '%' + @search + '%' OR
                     a.container_no      LIKE '%' + @search + '%' OR
@@ -83,10 +118,83 @@ public class ClaimService : IClaimService
         {
             pendingFilter,
             statusFilter,
-            search = string.IsNullOrWhiteSpace(search) ? null : search,
+            sUnrestricted = scope.Unrestricted,
+            sPlants       = scope.QueryPlants,
+            plant         = Trim(f.Plant),
+            storageLoc    = Trim(f.StorageLoc),
+            supplier      = Trim(f.Supplier),
+            closedBy      = Trim(f.ClosedBy),
+            claimOwner    = Trim(f.ClaimOwner),
+            container     = Trim(f.Container),
+            bol           = Trim(f.Bol),
+            po            = Trim(f.Po),
+            arrivalNo     = Trim(f.ArrivalNo),
+            material      = Trim(f.Material),
+            search        = Trim(f.Search),
+            fromUtc,
+            toUtc,
             currentUser
         });
         return rows.ToList();
+    }
+
+    /// <summary>Dropdown sources for the Claims filter panel. Restricted to
+    /// Closed QOs inside the caller's plant scope, so an option can never come
+    /// back with zero matching rows.</summary>
+    public async Task<ClaimFilterOptions> GetClaimFilterOptionsAsync(PlantScope scope)
+    {
+        using var c = Open();
+        using var grid = await c.QueryMultipleAsync(@"
+            SELECT DISTINCT a.plant
+            FROM   qms_quality_order qo
+            JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
+            WHERE  qo.status_code = 'Closed'
+              AND  a.plant IS NOT NULL AND a.plant <> ''
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
+            ORDER  BY a.plant;
+
+            SELECT DISTINCT a.plant AS Plant, a.storage_location AS Code
+            FROM   qms_quality_order qo
+            JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
+            WHERE  qo.status_code = 'Closed'
+              AND  a.plant            IS NOT NULL AND a.plant            <> ''
+              AND  a.storage_location IS NOT NULL AND a.storage_location <> ''
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
+            ORDER  BY a.plant, a.storage_location;
+
+            SELECT DISTINCT a.vendor_name
+            FROM   qms_quality_order qo
+            JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
+            WHERE  qo.status_code = 'Closed'
+              AND  a.vendor_name IS NOT NULL AND a.vendor_name <> ''
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
+            ORDER  BY a.vendor_name;
+
+            SELECT DISTINCT qo.closed_by
+            FROM   qms_quality_order qo
+            LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
+            WHERE  qo.status_code = 'Closed'
+              AND  qo.closed_by IS NOT NULL AND qo.closed_by <> ''
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
+            ORDER  BY qo.closed_by;
+
+            SELECT DISTINCT cl.last_changed_by
+            FROM   qms_claim cl
+            JOIN   qms_quality_order qo ON qo.quality_order_id = cl.quality_order_id
+            LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
+            WHERE  cl.last_changed_by IS NOT NULL AND cl.last_changed_by <> ''
+              AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
+            ORDER  BY cl.last_changed_by;",
+            new { sUnrestricted = scope.Unrestricted, sPlants = scope.QueryPlants });
+
+        return new ClaimFilterOptions
+        {
+            Plants           = (await grid.ReadAsync<string>()).ToList(),
+            StorageLocations = (await grid.ReadAsync<QoPlantStorage>()).ToList(),
+            Suppliers        = (await grid.ReadAsync<string>()).ToList(),
+            ClosedBy         = (await grid.ReadAsync<string>()).ToList(),
+            ClaimOwners      = (await grid.ReadAsync<string>()).ToList()
+        };
     }
 
     public async Task MarkSeenAsync(long qualityOrderId, string user)

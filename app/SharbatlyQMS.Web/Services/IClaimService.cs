@@ -1,4 +1,5 @@
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Services;
 
@@ -6,12 +7,17 @@ public interface IClaimService
 {
     /// <summary>
     /// Lists every Closed Quality Order joined with its (optional) claim row.
-    /// `filter` accepts: null/"" = all, "Pending" = no claim row yet,
-    /// or any of the four claim status codes. `currentUser` drives the
-    /// per-row UnreadCount calculation (notes posted by someone else since
-    /// the user last opened that claim's Details).
+    /// `filter.Status` accepts: null/"" = all, "Pending" = no claim row yet,
+    /// or any claim status code; the rest of the filter narrows on the arrival
+    /// and QO the claim hangs off. `scope` limits the list to the caller's
+    /// plants. `currentUser` drives the per-row UnreadCount calculation (notes
+    /// posted by someone else since the user last opened that claim's Details).
     /// </summary>
-    Task<IReadOnlyList<ClaimListRow>> ListClosedQosAsync(string? filter, string? search, string currentUser);
+    Task<IReadOnlyList<ClaimListRow>> ListClosedQosAsync(
+        ClaimListFilter filter, PlantScope scope, string currentUser);
+
+    /// <summary>Dropdown sources for the Claims filter panel, plant-scoped.</summary>
+    Task<ClaimFilterOptions> GetClaimFilterOptionsAsync(PlantScope scope);
 
     Task<(QualityClaim? claim, IReadOnlyList<ClaimNote> notes)> GetForQoAsync(long qualityOrderId);
 

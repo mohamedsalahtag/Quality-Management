@@ -43,6 +43,12 @@ public static class ClaimStatus
     public const string ClaimRequestApproved = "ClaimRequestApproved";
     public const string HoldClaim            = "HoldClaim";
 
+    /// <summary>Closed before the 2026-08-18 go-live cut-over, so no claim
+    /// decision was ever made. Written in bulk by migration M17 to keep the
+    /// backlog out of the Pending worklist. A QM can still raise a real claim
+    /// on one; the CM has nothing to decide until they do.</summary>
+    public const string Archived             = "Archived";
+
     /// <summary>UI-only sentinel for a Closed QO that has no qms_claim row yet.</summary>
     public const string Pending              = "Pending";
 
@@ -52,6 +58,7 @@ public static class ClaimStatus
         PassedQC             => "Passed QC",
         ClaimRequestApproved => "Claim Request Approved",
         HoldClaim            => "Hold Claim",
+        Archived             => "Archived",
         Pending              => "Pending",
         null or ""           => "Pending",
         _                    => s
@@ -67,6 +74,7 @@ public static class ClaimStatus
         ClaimRequestApproved => "bg-dark text-white",
         HoldClaim            => "bg-warning text-dark",
         PassedQC             => "bg-success text-white",
+        Archived             => "bg-light text-muted border",
         _                    => "bg-secondary text-white"
     };
 }

@@ -2,7 +2,7 @@
 
 > **For any AI agent (Claude Code, OpenAI Codex, Cursor, ChatGPT, GitHub Copilot, ...) picking up this project: read this file first.** It captures the live state of the QMS web application — what is built, where it runs, the decisions that shaped it, and the files that contain the authoritative truth.
 
-Last updated: **2026-07-23** (production moved to the dedicated server KSAJEDSVAIP001 / 192.168.3.17; this copy of the repo is now the source of truth).
+Last updated: **2026-08-20** (Claims: pre-go-live backlog archived via M17, full filter panel added — see §8).
 
 ---
 
@@ -212,6 +212,16 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 ---
 
 ## 8. Decisions log (newest first)
+
+### 2026-08-20 (Claims: pre-go-live backlog archived, full filter panel)
+
+Two changes to the **Claims** screen, made together for the 2026-08-18 go-live on the new claim workflow.
+
+- **The 218-order backlog was archived, not deleted.** The request was to "delete all pending claims prior to August 18". *"Pending" is not a stored record* — `ClaimStatus.Pending` is a UI-only sentinel (`Models/Claim.cs`) for a **Closed Quality Order with no `qms_claim` row yet**, so the only thing a delete could remove is the quality order itself. Measured first: that would have destroyed **218 of 306 closed QOs (71%) and 2,295 samples** with their readings, defects, photos and reprintable reports. `QualityOrderService.DeleteAsync` already refuses to delete anything past Open for exactly this reason. Instead, `M17__claim_archive_pre_golive.sql` adds a fifth claim status **`Archived`** and writes one settled claim row + explanatory note per pre-cut-over QO. After: 218 Archived, 64 genuinely Pending (all closed on/after Aug 18), 24 real claims untouched, **0 rows deleted**.
+- **`Archived` deliberately leaves `decided_at` NULL.** A Quality Manager can still raise a real claim on an old order (`QmTransitionAsync` only blocks once the CM has decided); the Claim Manager has nothing to decide until they do, because `CmTransitionAsync`'s allow-list excludes `Archived`. `PassedQC` was rejected as the archive status — it asserts a QM cleared the order, which never happened.
+- **Cut-over instant is `2026-08-17T21:00:00Z`** (2026-08-18 00:00 Riyadh). `closed_at` is stored UTC. No rows fall in the 21:00–24:00Z window, so the local-vs-UTC reading of "prior to August 18" selects the same 218 rows either way. The migration is idempotent — re-running inserts nothing (verified).
+- **The Claims list gained the Quality Orders filter panel**, on the explicit ask that the two pages work the same way. `ClaimListFilter` / `ClaimFilterOptions` mirror `QoListFilter` / `QoFilterOptions`: container, BOL, PO, arrival no., material, supplier, plant, storage location, closed-by, claim-owner, and a date range — collapsible, with an active-count badge, `data-filter-memory="claim"` and the shared plant→storage narrowing. **The dates filter `closed_at`, not `created_at`** (for a claim, the date that matters is when the inspection finished), with the same local→UTC exclusive-next-midnight conversion.
+- **The Claims list now applies the caller's plant scope.** `Details` always enforced it, but `Index` did not — a plant-scoped user could see other plants' claims in the list, and the new Plant dropdown would have widened that. Fixed in the same query.
 
 ### 2026-07-30 (security matrix — phases 2–6: permissions replace roles everywhere)
 
