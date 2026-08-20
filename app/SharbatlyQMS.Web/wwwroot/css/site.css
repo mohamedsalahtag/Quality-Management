@@ -185,5 +185,16 @@ input[type="number"] {
 .qms-index-table > :not(caption) > * > * { padding-top: .35rem; padding-bottom: .35rem; }
 .qms-index-table .badge { font-size: .68rem; }
 
+/* Buttons set the row height, and .btn-sm's 14px font and 21px line-height are
+   absolute -- they do not shrink with the table, so a row of 12.8px text was
+   still 43px tall to fit a 31px button. Letting the button inherit the table's
+   size puts the row back in proportion to its own text. */
+.qms-index-table .btn {
+  font-size: inherit;
+  padding: .15rem .45rem;
+  line-height: 1.4;
+}
+.qms-index-table .btn i { font-size: .95em; }
+
 @media (max-width: 991.98px) { .qms-index-table { font-size: .74rem; } }
 @media (max-width: 575.98px) { .qms-index-table { font-size: .7rem; } }
