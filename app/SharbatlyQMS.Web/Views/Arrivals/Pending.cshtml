@@ -281,8 +281,38 @@
     /* Size and padding now come from .qms-index-table in site.css, the same
        as the Arrivals, Quality Orders and Claims lists. Only what is specific
        to this page's stacked cells stays here. */
-    .pending-table th           { vertical-align: middle; font-weight: 600; }
-    .pending-table td           { vertical-align: middle; }
+    /* ---- Never scroll sideways ----
+       12 columns of SAP data needed 1600px while a 1366 screen offers 1316,
+       so the table used to overflow and the Action button fell off the right
+       edge. Capping the wide columns only moves the threshold; a fixed layout
+       removes it, because the table then divides the width it is GIVEN instead
+       of demanding the width its content wants. Columns share it by the
+       proportions below and long values ellipsize, with the full text already
+       available in each cell's tooltip. */
+    .pending-table              { table-layout: fixed; width: 100%; }
+    .pending-table th,
+    .pending-table td           { vertical-align: middle; overflow: hidden; text-overflow: ellipsis; }
+    .pending-table th           { font-weight: 600; }
+    /* Flex children need min-width:0 or they refuse to shrink below content. */
+    .pending-table .pp-stack > *,
+    .pending-table .pp-stack    { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* Percentages, not pixels, so every width scales with the window. They sum
+       to 100. Vendor, Materials and BOL carry the reductions -- BOL is a fixed
+       length code that never needed 189px, and Vendor/Materials were simply
+       taking whatever their longest value asked for. */
+    .pending-table th:nth-child(1)  { width:  8%; }   /* Container  */
+    .pending-table th:nth-child(2)  { width:  8%; }   /* BOL        */
+    .pending-table th:nth-child(3)  { width:  8%; }   /* PO / STO   */
+    .pending-table th:nth-child(4)  { width:  5%; }   /* Type       */
+    .pending-table th:nth-child(5)  { width:13.5%; }  /* Vendor     */
+    .pending-table th:nth-child(6)  { width:  7%; }   /* Plant      */
+    .pending-table th:nth-child(7)  { width:  9%; }   /* Storage    */
+    .pending-table th:nth-child(8)  { width:4.5%; }   /* Lines      */
+    .pending-table th:nth-child(9)  { width:13.5%; }  /* Materials  */
+    .pending-table th:nth-child(10) { width:  9%; }   /* Dates      */
+    .pending-table th:nth-child(11) { width:  6%; }   /* Transit    */
+    .pending-table th:nth-child(12) { width:8.5%; }   /* Action     */
     .pp-code                    { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     /* The secondary line under a value (STO, vendor code, "was" plant). Tight
        leading and no margin so a two-value cell costs a few pixels, not a
@@ -293,16 +323,29 @@
     .pp-stack                   { display: flex; flex-direction: column; gap: 0; }
     .pp-stack .pp-badges        { display: flex; gap: .2rem; flex-wrap: wrap; }
     /* Badges sit on their own baseline inside stacked cells; without this they
-       carry Bootstrap's full line-height and re-inflate the row. */
-    .pending-table .badge       { line-height: 1.15; }
+       carry Bootstrap's full line-height and re-inflate the row. The side
+       padding comes down too: Plant and Storage are narrow columns, and the
+       badge's default .65em a side was spending room the name needed. */
+    .pending-table .badge       { line-height: 1.15; padding: .2rem .35rem; max-width: 100%;
+                                  overflow: hidden; text-overflow: ellipsis; }
+    /* Gap between the plant badge and its edit pencil. */
+    .pending-table .pp-stack .d-flex { gap: .15rem; }
 
     /* Materials "peek": first material inline + count badge if there's
        more. Full list lives in the Bootstrap tooltip so the row stays
        on one line but the operator can hover to read everything. */
     .pp-peek         { display: flex; align-items: center; gap: .35rem;
-                       max-width: 320px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-    .pp-peek .pp-no  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-                       font-size: .75rem; color: var(--bs-secondary-color, #6c757d); }
+                       max-width: 100%; min-width: 0;
+                       overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .pp-peek .pp-name{ min-width: 0; }
+    /* The 19-character SAP material code was taking the whole column once the
+       widths were fixed, leaving one letter of the description showing. The
+       description is what people read; the code is still in the tooltip below,
+       alongside every other material on the container. */
+    .pp-peek .pp-no  { display: none; }
+    .pp-peek .pp-name{ flex: 1 1 auto; }
+    /* Keep the "+N more" count from being clipped away to a bare "+". */
+    .pp-peek .badge  { flex: 0 0 auto; }
     .pp-peek .pp-name{ text-overflow: ellipsis; overflow: hidden; }
     /* The tooltip body is rendered as HTML so we can lay it out cleanly. */
     .tooltip-inner   { max-width: 460px; text-align: left; }
@@ -374,7 +417,7 @@
                         "</ul>";
                     <tr>
                         <td class="pp-code"><strong>@r.ContainerNo</strong></td>
-                        <td class="pp-code">@r.BolNo</td>
+                        <td class="pp-code" title="@r.BolNo">@r.BolNo</td>
                         <td class="pp-code">
                             <div class="pp-stack">
                                 <span><strong>@r.Ebeln</strong></span>
@@ -395,7 +438,10 @@
                                 <span class="text-muted">—</span>
                             }
                         </td>
-                        <td>
+                        @* Fixed column widths mean a long supplier name is
+                           clipped, so the full name has to live somewhere the
+                           reader can reach -- this cell had no tooltip before. *@
+                        <td title="@r.VendorName">
                             @r.VendorName
                             @if (!string.IsNullOrEmpty(r.VendorNo))
                             {
@@ -471,7 +517,8 @@
                             @if (!string.IsNullOrEmpty(r.StorageLocation))
                             {
                                 <span class="badge bg-light text-dark border"
-                                      data-bs-toggle="tooltip" title="@r.StorageLocation">@Codes.StorageLocationDisplay(r.Plant, r.StorageLocation)</span>
+                                      data-bs-toggle="tooltip"
+                                      title="@Codes.StorageLocationDisplay(r.Plant, r.StorageLocation) (@r.StorageLocation)">@Codes.StorageLocationDisplay(r.Plant, r.StorageLocation)</span>
                             }
                             else
                             {
