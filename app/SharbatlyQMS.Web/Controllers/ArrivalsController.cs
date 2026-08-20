@@ -196,12 +196,17 @@ public class ArrivalsController : Controller
         // whatever the panel's plant dropdown posted (the view renders a locked
         // badge + hidden input to match). Same pattern as Quality Orders.
         var scope   = User.GetPlantScope();
-        var rows    = await _arrivals.ListAsync(filter, scope);
+        var result  = await _arrivals.ListAsync(filter, scope);
         var options = await _arrivals.GetArrivalFilterOptionsAsync(scope);
         ViewBag.Filter           = filter;
         ViewBag.FilterOptions    = options;
         ViewBag.PlantScopeLocked = User.SinglePlantOrNull();
-        return View(rows);
+        // Page window for the server-side pager. The view keeps taking the row
+        // list as its model so only the pager markup had to change.
+        ViewBag.Total    = result.Total;
+        ViewBag.Page     = result.Page;
+        ViewBag.PageSize = result.PageSize;
+        return View(result.Rows);
     }
 
     [HttpGet]

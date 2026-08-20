@@ -278,17 +278,23 @@
        supporting CSS below keeps each header on one line, codes in
        monospace + nowrap, and stacks the secondary value as a muted
        sub-line so primary sortable data still wins the eye. */
-    .pending-table              { font-size: .875rem; }
-    .pending-table th           { white-space: nowrap; vertical-align: middle; font-weight: 600; }
+    /* Size and padding now come from .qms-index-table in site.css, the same
+       as the Arrivals, Quality Orders and Claims lists. Only what is specific
+       to this page's stacked cells stays here. */
+    .pending-table th           { vertical-align: middle; font-weight: 600; }
     .pending-table td           { vertical-align: middle; }
-    .pp-code                    { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-                                  white-space: nowrap; }
-    .pp-sub                     { font-size: .72rem; line-height: 1.15; color: var(--bs-secondary-color, #6c757d);
-                                  white-space: nowrap; }
+    .pp-code                    { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    /* The secondary line under a value (STO, vendor code, "was" plant). Tight
+       leading and no margin so a two-value cell costs a few pixels, not a
+       second row's worth of height. */
+    .pp-sub                     { font-size: .7rem; line-height: 1.1; color: var(--bs-secondary-color, #6c757d); }
     .pp-sub-label               { font-weight: 600; opacity: .65; margin-right: .2rem;
                                   text-transform: uppercase; letter-spacing: .02em; }
-    .pp-stack                   { display: flex; flex-direction: column; gap: 1px; }
-    .pp-stack .pp-badges        { display: flex; gap: .25rem; flex-wrap: wrap; }
+    .pp-stack                   { display: flex; flex-direction: column; gap: 0; }
+    .pp-stack .pp-badges        { display: flex; gap: .2rem; flex-wrap: wrap; }
+    /* Badges sit on their own baseline inside stacked cells; without this they
+       carry Bootstrap's full line-height and re-inflate the row. */
+    .pending-table .badge       { line-height: 1.15; }
 
     /* Materials "peek": first material inline + count badge if there's
        more. Full list lives in the Bootstrap tooltip so the row stays
@@ -317,7 +323,7 @@
         @* Server-side paged: the controller ships one page of rows, so tablekit
            runs in sort-only mode (data-no-pager) and the pager below drives
            page navigation. data-coltoggle still powers the Columns menu. *@
-        <table id="pending-containers" class="table table-sm table-hover align-middle mb-0 pending-table"
+        <table id="pending-containers" class="table table-hover align-middle mb-0 pending-table qms-index-table"
                data-tablekit data-no-pager data-coltoggle>
             <thead class="table-light">
                 <tr>
@@ -559,7 +565,7 @@
              data-pending-pager>
             <div class="d-flex align-items-center gap-2 small text-muted">
                 <label class="mb-0">Show</label>
-                <select class="form-select form-select-sm" style="width:auto" data-pending-pagesize>
+                <select class="form-select form-select-sm" style="width:auto" data-pagesize-select>
                     @foreach (var n in new[] { 50, 100 })
                     {
                         <option value="@n" selected="@(n == pageSize)">@n</option>
@@ -627,5 +633,5 @@
    Quality Orders filter panel). pending-pager.js only wires the "per page"
    selector to reload at page 1 with the chosen size. *@
 @section Scripts {
-    <script src="~/js/pending-pager.js" asp-append-version="true"></script>
+    <script src="~/js/list-pager.js" asp-append-version="true"></script>
 }

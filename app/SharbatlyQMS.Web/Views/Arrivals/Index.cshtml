@@ -14,6 +14,32 @@
     // filters -- otherwise a bookmarked link shows a short list with no reason.
     var panelOpen = f.AnyPanelFilter;
     string D(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
+
+    // ---- Server-side page window ----
+    var totalCount = ViewBag.Total    as int? ?? Model.Count;
+    var pageNo     = ViewBag.Page     as int? ?? 1;
+    var pageSize   = ViewBag.PageSize as int? ?? 50;
+    var pageCount  = Math.Max(1, (int)Math.Ceiling(totalCount / (double)pageSize));
+    var firstRow   = totalCount == 0 ? 0 : (pageNo - 1) * pageSize + 1;
+    var lastRow    = Math.Min(pageNo * pageSize, totalCount);
+
+    // Every page link carries the active filters, so paging never silently
+    // widens the result the way a bare ?page=2 would.
+    Dictionary<string, string> pageRoute(int p, int size)
+    {
+        var d = new Dictionary<string, string>();
+        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) d[k] = v!; }
+        Add("status", f.Status);        Add("search", f.Search);
+        Add("container", f.Container);  Add("bol", f.Bol);
+        Add("po", f.Po);                Add("arrivalNo", f.ArrivalNo);
+        Add("material", f.Material);    Add("supplier", f.Supplier);
+        Add("plant", f.Plant);          Add("storageLoc", f.StorageLoc);
+        Add("createdBy", f.CreatedBy);
+        Add("from", D(f.From));         Add("to", D(f.To));
+        d["page"]     = p.ToString();
+        d["pageSize"] = size.ToString();
+        return d;
+    }
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -187,7 +213,12 @@
 
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0 qms-index-table" data-tablekit data-page-size="50">
+        @* Server-side paged: the controller ships one page, so tablekit runs in
+   sort-only mode (data-no-pager) and the pager below navigates. Before
+   this the page shipped every arrival and the browser paginated, which
+   is what made the list paint wide for ~2.5s on each load. *@
+        <table class="table table-hover align-middle mb-0 qms-index-table"
+               data-tablekit data-no-pager>
             <thead class="table-light">
                 <tr>
                     <th data-sort>Arrival #</th>
@@ -316,6 +347,74 @@
             </tbody>
         </table>
     </div>
+
+    @* ---- Server-side pager ----
+       Mirrors /Arrivals/Pending: plain links that reload, which keeps tablekit
+       sorting re-initialising cleanly (it has no re-attach hook) and is cheap
+       now that a page is 50 rows rather than the whole table. *@
+    @if (totalCount > 0)
+    {
+        <div class="tk-pager d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 border-top">
+            <div class="d-flex align-items-center gap-2 small text-muted">
+                <label class="mb-0">Show</label>
+                <select class="form-select form-select-sm" style="width:auto" data-pagesize-select>
+                    @foreach (var n in new[] { 25, 50, 100 })
+                    {
+                        <option value="@n" selected="@(n == pageSize)">@n</option>
+                    }
+                </select>
+                <span>per page</span>
+            </div>
+
+            <span class="text-muted small">Showing @firstRow&ndash;@lastRow of @totalCount</span>
+
+            @if (pageCount > 1)
+            {
+                <nav aria-label="Arrival pages">
+                    <ul class="pagination pagination-sm mb-0">
+                        @{
+                            var pFrom = Math.Max(1, pageNo - 2);
+                            var pTo   = Math.Min(pageCount, pageNo + 2);
+                        }
+                        <li class="page-item @(pageNo == 1 ? "disabled" : "")">
+                            <a class="page-link" asp-action="Index"
+                               asp-all-route-data="pageRoute(pageNo - 1, pageSize)" aria-label="Previous">&laquo;</a>
+                        </li>
+                        @if (pFrom > 1)
+                        {
+                            <li class="page-item">
+                                <a class="page-link" asp-action="Index" asp-all-route-data="pageRoute(1, pageSize)">1</a>
+                            </li>
+                            @if (pFrom > 2)
+                            {
+                                <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                            }
+                        }
+                        @for (var pp = pFrom; pp <= pTo; pp++)
+                        {
+                            <li class="page-item @(pp == pageNo ? "active" : "")">
+                                <a class="page-link" asp-action="Index" asp-all-route-data="pageRoute(pp, pageSize)">@pp</a>
+                            </li>
+                        }
+                        @if (pTo < pageCount)
+                        {
+                            @if (pTo < pageCount - 1)
+                            {
+                                <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                            }
+                            <li class="page-item">
+                                <a class="page-link" asp-action="Index" asp-all-route-data="pageRoute(pageCount, pageSize)">@pageCount</a>
+                            </li>
+                        }
+                        <li class="page-item @(pageNo == pageCount ? "disabled" : "")">
+                            <a class="page-link" asp-action="Index"
+                               asp-all-route-data="pageRoute(pageNo + 1, pageSize)" aria-label="Next">&raquo;</a>
+                        </li>
+                    </ul>
+                </nav>
+            }
+        </div>
+    }
 </div>
 
 @* ---- Manager+ : list-level delete confirmation ---- *@
@@ -348,6 +447,7 @@
 
     @section Scripts {
         <script src="~/js/list-filter-memory.js" asp-append-version="true"></script>
+        <script src="~/js/list-pager.js" asp-append-version="true"></script>
         <script>
             // Wire delete modal: each trigger button carries the arrival id +
             // arrival-no in data-* attrs. We rewrite the form action when shown.

@@ -59,11 +59,16 @@ public class ArrivalService : IArrivalService
             ORDER  BY quality_order_id DESC
         ) qo";
 
-    public async Task<IReadOnlyList<Arrival>> ListAsync(ViewModels.ArrivalListFilter f, Models.PlantScope scope)
+    public async Task<ViewModels.ArrivalPage> ListAsync(ViewModels.ArrivalListFilter f, Models.PlantScope scope)
     {
         using var c = Open();
 
         static string? Trim(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
+
+        // Clamped to the sizes the pager offers, so a hand-edited query string
+        // cannot ask for the whole table back.
+        var pageSize = f.PageSize is 25 or 50 or 100 ? f.PageSize : 50;
+        var page     = f.Page < 1 ? 1 : f.Page;
 
         // a.created_at is UTC; the list renders it local. Convert the picked LOCAL
         // dates to UTC here, upper bound exclusive-next-midnight (mirrors the QO
@@ -91,11 +96,34 @@ public class ArrivalService : IArrivalService
             material   = Trim(f.Material),
             supplier   = Trim(f.Supplier),
             fromUtc,
-            toUtc
+            toUtc,
+            offset   = (page - 1) * pageSize,
+            pageSize
         };
 
-        var rows = await c.QueryAsync<Arrival>(ArrivalSelect + @"
-            WHERE  (@status     IS NULL OR a.status_code     = @status)
+        // Two result sets off one round trip: the total for the pager, then the
+        // page itself. The WHERE is shared so the count can never disagree with
+        // the rows it is counting.
+        using var grid = await c.QueryMultipleAsync(@"
+            SELECT COUNT(*) FROM qms_arrival a
+            WHERE " + ArrivalWhere + @";
+        " + ArrivalSelect + @"
+            WHERE " + ArrivalWhere + @"
+            -- arrival_id breaks ties on created_at so a row can never sit on two
+            -- pages, or on none, when several arrivals share a timestamp.
+            ORDER BY a.created_at DESC, a.arrival_id DESC
+            OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY", p);
+
+        var total = await grid.ReadFirstAsync<int>();
+        var rows  = (await grid.ReadAsync<Arrival>()).ToList();
+        return new ViewModels.ArrivalPage(rows, total, page, pageSize);
+    }
+
+    /// <summary>
+    /// Shared by the count and the page query so the pager can never disagree
+    /// with the rows it is counting.
+    /// </summary>
+    private const string ArrivalWhere = @"(@status     IS NULL OR a.status_code     = @status)
               AND  (@plant      IS NULL OR a.plant           = @plant)
               AND  (@sUnrestricted = 1 OR a.plant IN @sPlants)
               AND  (@container  IS NULL OR a.container_no     LIKE '%' + @container + '%')
@@ -118,10 +146,7 @@ public class ArrivalService : IArrivalService
                     OR a.bol_no       LIKE '%' + @search + '%'
                     OR a.ebeln        LIKE '%' + @search + '%'
                     OR a.vendor_name  LIKE '%' + @search + '%'
-                    OR a.created_by   LIKE '%' + @search + '%')
-            ORDER BY a.created_at DESC", p);
-        return rows.ToList();
-    }
+                    OR a.created_by   LIKE '%' + @search + '%')";
 
     /// <summary>
     /// Dropdown sources for the Arrivals filter panel: distinct plants, (plant,

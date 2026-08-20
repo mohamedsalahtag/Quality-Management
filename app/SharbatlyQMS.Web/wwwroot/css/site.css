@@ -218,3 +218,24 @@ input[type="number"] {
 
 @media (max-width: 991.98px) { .qms-index-table { font-size: .74rem; } }
 @media (max-width: 575.98px) { .qms-index-table { font-size: .7rem; } }
+
+/* ---------------------------------------------------------------------------
+   Pre-pagination guard for client-paged tables (tablekit).
+
+   tablekit only runs at DOMContentLoaded, after the whole document is built.
+   Until then the browser has painted every row -- and because an auto-layout
+   table takes its column widths from every rendered row, the table paints wider
+   than it will end up, then snaps narrower once the script hides the overflow.
+   On a 364-row list that flash lasted well over a second.
+
+   Hiding the overflow rows up front means the first paint is already the right
+   width. The rule stops applying the moment tablekit sets data-tk-ready, so it
+   never fights the script's own show/hide.
+
+   50 matches tablekit's default page size. A reader who has chosen 25 or 100
+   sees a small adjustment instead of the full-width flash.
+   Server-paged tables (data-no-pager) render one page already -- excluded.
+   ------------------------------------------------------------------------- */
+table[data-tablekit]:not([data-tk-ready]):not([data-no-pager]) tbody tr:nth-child(n + 51) {
+  display: none;
+}

@@ -9,7 +9,12 @@ public interface IArrivalService
     /// <summary>The Arrivals list, filtered by the quick bar + "More filters"
     /// panel. <paramref name="plantScope"/> forces the plant for plant-restricted
     /// operators and overrides whatever the panel posted.</summary>
-    Task<IReadOnlyList<Arrival>> ListAsync(ArrivalListFilter filter, Models.PlantScope scope);
+    /// <summary>
+    /// One server-side page of arrivals plus the total matching count, so the
+    /// view can draw a pager. Paged rather than returning everything: see
+    /// <see cref="ArrivalListFilter.Page"/>.
+    /// </summary>
+    Task<ArrivalPage> ListAsync(ArrivalListFilter filter, Models.PlantScope scope);
 
     /// <summary>Dropdown sources for the Arrivals filter panel (plants, storage
     /// locations, creators), drawn only from arrivals that exist.</summary>

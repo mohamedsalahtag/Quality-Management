@@ -48,6 +48,12 @@
         var tbody = table.tBodies[0];
         if (!tbody) return;
 
+        // Tell the stylesheet we have taken over. Until this lands, CSS hides
+        // everything past the first page: a table sizes its columns from every
+        // rendered row, so painting all of them first makes the list appear too
+        // wide and then snap narrower when this script finally runs.
+        table.setAttribute('data-tk-ready', '');
+
         var allRows = Array.prototype.slice.call(tbody.rows);
         // Data rows = real rows; skip placeholder rows that span columns.
         var rows = allRows.filter(function (r) {
