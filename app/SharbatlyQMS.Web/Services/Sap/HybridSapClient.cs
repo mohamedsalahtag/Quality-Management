@@ -246,6 +246,10 @@ public class HybridSapClient : ISapClient
         // sparse / unreliable). Both properties read the same source for now.
         ArrivalDate       = ParseDate(Get(d, "Receive_Date")),
         ReceiveDate       = ParseDate(Get(d, "Receive_Date")),
+        // The genuine port-arrival date, kept separate so the line above keeps
+        // feeding /Arrivals/Pending unchanged. Only the QC report reads it, and
+        // it is left blank rather than substituted when SAP has no value.
+        PortArrivalDate   = ParseDate(Get(d, "Arrival_Date")),
         TransitDays       = ParseShort(Get(d, "Transit_Days")),
         LoadingPort       = Get(d, "Loading_Port") ?? "",
         LoadingCountry    = Get(d, "Loading_Country") ?? "",

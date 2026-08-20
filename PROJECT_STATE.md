@@ -2,7 +2,7 @@
 
 > **For any AI agent (Claude Code, OpenAI Codex, Cursor, ChatGPT, GitHub Copilot, ...) picking up this project: read this file first.** It captures the live state of the QMS web application — what is built, where it runs, the decisions that shaped it, and the files that contain the authoritative truth.
 
-Last updated: **2026-08-20** (Claims: pre-go-live backlog archived via M17, full filter panel added — see §8).
+Last updated: **2026-08-20** (QC report date logic corrected, supplier e-mail store, Claims filter panel + pre-go-live archive — see §8).
 
 ---
 
@@ -212,6 +212,15 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 ---
 
 ## 8. Decisions log (newest first)
+
+### 2026-08-20 (QC report dates corrected; supplier e-mail store; mail-template placeholder guide)
+
+- **"Inspection Date" now means the QO open date.** The report printed `qms_shipment_snapshot.inspection_date`, which is the **arrival checklist** date — on QO-2026-000399 that is 2026-08-11 while the order was opened 2026-08-18. `QualityReportData.InspectionDate` is now `qo.opened_at` (falling back to `created_at`), converted UTC→local in `BuildDataAsync` rather than in the renderer. The header "Date" strip in both renderers reads the same value, so it cannot disagree with the field below it.
+- **"Arrival Date" now prints the real port arrival from SAP.** It printed `Receive_Date`, because `HybridSapClient` maps **both** `ArrivalDate` and `ReceiveDate` from `Receive_Date` — so "Arrival Date" and "Receive Date" showed the *identical value on every report*. `SapShipmentRow.PortArrivalDate` carries `ZQC_Data.Arrival_Date` separately and `M18` stores it as `qms_sap_container_cache.port_arrival_date`. **The old `ArrivalDate` mapping is untouched**, so `/Arrivals/Pending` keeps the Receive_Date column the operator asked for.
+- **On "Arrival_Date is sparse".** The 2026 code comment saying so was right about the *whole* feed (33% populated over 1,000 unfiltered rows, which reach back to 2023) but wrong about current data: over `Doc_Date >= 2026-05-01` it is **100% populated (20,373/20,373)**. 16,489 of 16,551 cache rows were filled; 305 of 308 closed QOs print an Arrival Date. Blank is deliberate when SAP has none — no substituting a goods-receipt date under an arrival label.
+- **SAP has no supplier e-mail — at all.** `dbo.SAP_Vendors` has exactly two columns (`VendorId`, `VendorName`) and the ZQC_Data feed exposes 35 fields, none of them contact details. So "check whether it is maintained in SAP" is unanswerable today, and the send dialog's empty To field was structural, not a bug. `M19` adds `qms.qms_vendor_contact` (one address per vendor) and the dialog saves the address **after a successful send only** — remembering one that just bounced would bake the mistake in. `VendorService` still reads SAP first and falls back to the QMS store, so a real vendor-master feed later takes precedence without a code change. The Remember box is disabled when the address already came from SAP (no stale shadow copy) or when the arrival has no vendor number.
+- **"Send report to supplier" shows on every closed order in the Claims list.** It was gated on `ClaimStatus.ClaimRequestApproved`, true for only 9 of 306 closed orders, so it was invisible almost everywhere. `Mail.QualityReport.Enabled` was already `true` — the status gate was the real reason it seemed missing. `SendQualityReport` still re-checks Closed server-side.
+- **The Mail Template page documents its placeholders.** All six (`{QO_NO}`, `{CONTAINER}`, `{BOL}`, `{PO}`, `{SUPPLIER}`, `{TODAY}`) with meaning, example and click-to-insert, plus the two real gotchas: unknown/mistyped tokens are **not** replaced and reach the supplier as literal text, and substitution runs once when the dialog opens, so a token typed inside the dialog is sent as-is. The only substitution code is `ReportsController.PrepareSendQualityReport` — keep the table in step with it.
 
 ### 2026-08-20 (Claims: pre-go-live backlog archived, full filter panel)
 

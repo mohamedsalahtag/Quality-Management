@@ -1,4 +1,4 @@
-﻿@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.ViewModels
 @using SharbatlyQMS.Web.Services.Pdf
 @model QualityOrder
@@ -644,15 +644,34 @@
                         <div class="small mt-2">Preparing email…</div>
                     </div>
                     <form id="srm-form" class="d-none">
+                        @* Three states, one banner slot: no address on file (warn),
+                           address remembered in QMS (info), address from SAP (info). *@
                         <div id="srm-no-email" class="alert alert-warning small d-none">
                             <i class="bi bi-exclamation-triangle me-1"></i>
-                            The supplier's email is not maintained in Vendor Master.
-                            Please enter it manually in the <strong>To</strong> field below.
+                            No e-mail address is on file for <strong id="srm-supplier-a">this supplier</strong>.
+                            SAP's vendor master does not carry supplier e-mail addresses, so QMS keeps its own.
+                            Type the address below and tick <em>Remember</em> to save it for next time.
+                        </div>
+                        <div id="srm-email-qms" class="alert alert-info small d-none">
+                            <i class="bi bi-bookmark-check me-1"></i>
+                            Using the address saved in QMS for <strong id="srm-supplier-b">this supplier</strong>.
+                            Editing it below and leaving <em>Remember</em> ticked updates it.
+                        </div>
+                        <div id="srm-email-sap" class="alert alert-info small d-none">
+                            <i class="bi bi-database-check me-1"></i>
+                            Address taken from the SAP vendor master.
                         </div>
                         <div class="mb-2">
                             <label class="form-label">To *</label>
                             <input id="srm-to" name="to" class="form-control" placeholder="supplier@example.com" required />
                             <div class="form-text">Comma- or semicolon-separated for multiple recipients.</div>
+                            <div class="form-check mt-1">
+                                <input class="form-check-input" type="checkbox" id="srm-remember" checked />
+                                <label class="form-check-label small" for="srm-remember">
+                                    Remember the first address for this supplier
+                                    <span class="text-muted">(reused next time; CC is never saved)</span>
+                                </label>
+                            </div>
                         </div>
                         <div class="mb-2">
                             <label class="form-label">CC</label>
@@ -1235,6 +1254,7 @@
     }
 
     // ---- Send report to supplier modal -------------------------------
+    let SRM_VENDOR_NO = '';
     const srmEl = document.getElementById('sendReportModal');
     if (srmEl) {
         srmEl.addEventListener('show.bs.modal', async () => {
@@ -1249,8 +1269,28 @@
                 document.getElementById('srm-subject').value = data.subject || '';
                 document.getElementById('srm-body').value    = data.body || '';
                 document.getElementById('srm-filename').textContent = data.fileName || 'report.pdf';
-                const warn = document.getElementById('srm-no-email');
-                if (data.emailKnown) warn.classList.add('d-none'); else warn.classList.remove('d-none');
+                SRM_VENDOR_NO = data.vendorNo || '';
+
+                const name = data.supplierName || 'this supplier';
+                document.getElementById('srm-supplier-a').textContent = name;
+                document.getElementById('srm-supplier-b').textContent = name;
+                // Exactly one banner is visible at a time.
+                const banners = {
+                    none: document.getElementById('srm-no-email'),
+                    qms:  document.getElementById('srm-email-qms'),
+                    sap:  document.getElementById('srm-email-sap')
+                };
+                Object.values(banners).forEach(b => b.classList.add('d-none'));
+                const which = !data.emailKnown ? 'none' : (data.emailSource === 'sap' ? 'sap' : 'qms');
+                banners[which].classList.remove('d-none');
+
+                // Nothing to store an address against without a vendor number,
+                // and an address already coming FROM SAP should not be shadowed
+                // by a QMS copy that would then go stale.
+                const remember = document.getElementById('srm-remember');
+                const canRemember = !!SRM_VENDOR_NO && which !== 'sap';
+                remember.checked  = canRemember;
+                remember.disabled = !canRemember;
                 document.getElementById('srm-load').classList.add('d-none');
                 document.getElementById('srm-form').classList.remove('d-none');
             } catch (e) {
@@ -1273,6 +1313,20 @@
             try {
                 const data = await postForm('@Url.Action("SendQualityReport", "Reports")', fd);
                 if (data.ok) {
+                    // Only after a successful send -- remembering an address that
+                    // just bounced would bake the mistake in for everyone.
+                    const remember = document.getElementById('srm-remember');
+                    if (remember.checked && !remember.disabled && SRM_VENDOR_NO) {
+                        const vf = new FormData();
+                        vf.append('vendorNo', SRM_VENDOR_NO);
+                        vf.append('email',    document.getElementById('srm-to').value);
+                        try {
+                            const sv = await postForm('@Url.Action("SaveSupplierEmail", "Reports")', vf);
+                            if (!sv.ok) showToast('Report sent, but the address was not saved: ' + (sv.error || 'unknown error'), 'warning');
+                        } catch (e) {
+                            showToast('Report sent, but the address was not saved: ' + e.message, 'warning');
+                        }
+                    }
                     bootstrap.Modal.getInstance(srmEl)?.hide();
                     showToast('Report sent.');
                 } else {

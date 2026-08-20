@@ -59,7 +59,7 @@ public static class QualityReportPdfSoft
             col.Spacing(7);
 
             // 2. Top reference strip (right-aligned)
-            var date = d.Shipment?.InspectionDate?.ToString("dd/MM/yyyy")
+            var date = d.InspectionDate?.ToString("dd/MM/yyyy")
                        ?? d.GeneratedAt.ToLocalTime().ToString("dd/MM/yyyy");
             col.Item().AlignRight().Column(rc =>
             {
@@ -171,11 +171,11 @@ public static class QualityReportPdfSoft
         var col2 = new List<(string, string)>
         {
             ("Vessel Name",       V(s?.VesselName)),
-            ("Arrival Date",      Dt(s?.ArrivalDate)),
+            ("Arrival Date",      Dt(d.PortArrivalDate)),
             ("Pullout Date",      Dt(s?.PullOutDate)),
             ("Receive Date",      Dt(s?.ReceiveDate)),
             ("Unloading Date",    Dt(s?.UnloadingDate)),
-            ("Inspection Date",   Dt(s?.InspectionDate)),
+            ("Inspection Date",   Dt(d.InspectionDate)),
             ("Transit Days",      s?.TransitDays?.ToString() ?? "—"),
             ("Discharge Date",    Dt(s?.DischargeDate)),
             ($"Time Bar ({basisLabel})", (TimeBarDays(basisDate, d.QualityOrder.ClosedAt ?? d.GeneratedAt) ?? "—") + " days"),

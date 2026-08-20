@@ -52,6 +52,9 @@ public class ContainerCacheService : IContainerCacheService
                 doc_date       = @DocDate,
                 arrival_date   = @ArrivalDate,
                 receive_date   = @ReceiveDate,
+                -- Only overwrite when SAP actually supplied one, so a later
+                -- page that happens to omit it cannot blank a known date.
+                port_arrival_date = COALESCE(@PortArrivalDate, T.port_arrival_date),
                 quantity       = @Quantity,
                 uom            = @Uom,
                 transit_days   = @TransitDays,
@@ -60,11 +63,11 @@ public class ContainerCacheService : IContainerCacheService
             WHEN NOT MATCHED THEN INSERT
                 (container_no, bol_no, ebeln, ebelp, material_no, plant, storage_loc, batch_no,
                  vendor_no, vendor_name, material_desc, material_group, po_type, sto,
-                 doc_date, arrival_date, receive_date, quantity, uom, transit_days, payload_json)
+                 doc_date, arrival_date, receive_date, port_arrival_date, quantity, uom, transit_days, payload_json)
             VALUES
                 (@ContainerNo, @BolNo, @Ebeln, @Ebelp, @MaterialNo, @Plant, @StorageLoc, @BatchNo,
                  @VendorNo, @VendorName, @MaterialDesc, @MaterialGroup, @PoType, @Sto,
-                 @DocDate, @ArrivalDate, @ReceiveDate, @Quantity, @Uom, @TransitDays, @PayloadJson);";
+                 @DocDate, @ArrivalDate, @ReceiveDate, @PortArrivalDate, @Quantity, @Uom, @TransitDays, @PayloadJson);";
         foreach (var r in rows)
         {
             ct.ThrowIfCancellationRequested();
@@ -77,6 +80,7 @@ public class ContainerCacheService : IContainerCacheService
                 DocDate     = r.DocDate.HasValue     ? (DateTime?)r.DocDate.Value.ToDateTime(TimeOnly.MinValue)     : null,
                 ArrivalDate = r.ArrivalDate.HasValue ? (DateTime?)r.ArrivalDate.Value.ToDateTime(TimeOnly.MinValue) : null,
                 ReceiveDate = r.ReceiveDate.HasValue ? (DateTime?)r.ReceiveDate.Value.ToDateTime(TimeOnly.MinValue) : null,
+                PortArrivalDate = r.PortArrivalDate.HasValue ? (DateTime?)r.PortArrivalDate.Value.ToDateTime(TimeOnly.MinValue) : null,
                 r.Quantity, r.Uom, r.TransitDays,
                 PayloadJson = json
             });

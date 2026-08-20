@@ -100,6 +100,12 @@ public class SapShipmentRow
     public DateOnly? SailingDate     { get; set; }
     public DateOnly? ExaminationDate { get; set; }
     public DateOnly? ArrivalDate     { get; set; }
+    /// <summary>ZQC_Data.Arrival_Date — the date the vessel actually reached the
+    /// port of arrival. Sparse in SAP (~33% populated as of 2026-08), which is
+    /// why <see cref="ArrivalDate"/> deliberately carries Receive_Date instead
+    /// for the /Arrivals/Pending grid. Only the QC report reads this one, and it
+    /// prints blank when SAP has no value.</summary>
+    public DateOnly? PortArrivalDate { get; set; }
     public DateOnly? UnloadingDate   { get; set; }
     public DateOnly? ReceiveDate     { get; set; }
     public short?    TransitDays     { get; set; }

@@ -1,4 +1,4 @@
-﻿@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.Models
 @model QualityOrder
 @{
     var claim = ViewBag.Claim as QualityClaim;
@@ -124,13 +124,16 @@
                     <i class="bi bi-pause-circle me-1"></i>Hold Claim
                 </button>
             }
-            @* "Send report to supplier" is available only after the claim is
-               approved. The modal markup + JS live in QualityOrders/Details.cshtml
-               (this panel is rendered inside that view in claim context, so the
-               modal is in scope). *@
+            @* "Send report to supplier" is available on every closed order in
+               the Claims list, not just approved claims -- gating it on
+               ClaimRequestApproved hid it on all but a handful of orders. The
+               server re-checks Closed in SendQualityReport, and the Claims list
+               only ever contains Closed orders, so the two agree. The modal
+               markup + JS live in QualityOrders/Details.cshtml (this panel is
+               rendered inside that view in claim context, so the modal is in
+               scope). *@
             @if ((bool?)ViewBag.SendMailEnabled == true
-                 && claim != null
-                 && claim.ClaimStatus == ClaimStatus.ClaimRequestApproved)
+                 && Model.StatusCode == QualityOrderStatus.Closed)
             {
                 <button type="button" class="btn btn-info"
                         data-bs-toggle="modal" data-bs-target="#sendReportModal">

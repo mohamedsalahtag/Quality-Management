@@ -1,8 +1,9 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using ClosedXML.Excel;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using MimeKit;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Models.Security;
@@ -161,6 +162,13 @@ public class ReportsController : Controller
             to            = vendor?.Email ?? "",
             supplierName  = qo.VendorName ?? vendor?.Name ?? "",
             emailKnown    = !string.IsNullOrWhiteSpace(vendor?.Email),
+            // "sap" | "qms" | null -- lets the dialog say WHERE the address came
+            // from instead of just whether one exists. SAP carries no supplier
+            // e-mail today (dbo.SAP_Vendors has none, and ZQC_Data has none), so
+            // in practice this is "qms" or null until a vendor-master feed with
+            // e-mail is configured.
+            emailSource   = vendor?.EmailSource,
+            vendorNo      = arrival?.VendorNo ?? "",
             subject       = Substitute(template.Subject),
             body          = Substitute(template.Body),
             fileName      = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf"
@@ -203,6 +211,36 @@ public class ReportsController : Controller
         if (!ok) return Json(new { ok = false, error = error ?? "Send failed." });
         _log.LogInformation("QO {Qo} report emailed to {To} (cc={Cc})", qo.QualityOrderNo, string.Join(",", toList), string.Join(",", ccList));
         return Json(new { ok = true });
+    }
+
+    /// <summary>
+    /// Stores the supplier e-mail typed in the send dialog so the next send for
+    /// the same vendor pre-fills it. Needed because there is no SAP source for
+    /// it: dbo.SAP_Vendors has only (VendorId, VendorName) and the ZQC_Data feed
+    /// exposes no e-mail field, so without this the operator retypes the address
+    /// every single time.
+    ///
+    /// Gated on the same permission as sending -- saving an address is part of
+    /// the send flow, and anyone who may e-mail a supplier may record where.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier")]
+    public async Task<IActionResult> SaveSupplierEmail(string vendorNo, string? email)
+    {
+        if (string.IsNullOrWhiteSpace(vendorNo))
+            return Json(new { ok = false, error = "This arrival has no SAP supplier number, so an address cannot be stored against it." });
+
+        // Store ONE address, not the operator's whole To line -- the To field
+        // accepts a comma-separated list and CC recipients are per-send, so
+        // saving the raw string would resurrect somebody's ad-hoc CC next time.
+        var first = SplitAddrs(email ?? "").FirstOrDefault() ?? "";
+        if (first.Length > 0 && !MailboxAddress.TryParse(first, out _))
+            return Json(new { ok = false, error = $"'{first}' is not a valid e-mail address." });
+
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        await _vendors.SaveEmailAsync(vendorNo, first, user);
+        _log.LogInformation("Supplier e-mail for vendor {Vendor} set to {Email} by {User}", vendorNo, first, user);
+        return Json(new { ok = true, saved = first });
     }
 
     private static IEnumerable<string> SplitAddrs(string s) =>
@@ -283,6 +321,34 @@ public class ReportsController : Controller
         if (arrival != null) data.Arrival = arrival;
         data.Shipment  = await _arrivals.GetShipmentAsync(qo.ArrivalId);
         data.Checklist = await _arrivals.GetChecklistAsync(qo.ArrivalId);
+
+        // "Inspection Date" is when the QO was opened, NOT the arrival
+        // checklist date the shipment snapshot carries -- those differ by days
+        // (QO-2026-000399: checklist 08-11, opened 08-18). opened_at is UTC and
+        // the report prints local, so convert here rather than in the renderer.
+        var inspectedAtUtc = qo.OpenedAt ?? qo.CreatedAt;
+        data.InspectionDate = inspectedAtUtc == default
+            ? null
+            : DateTime.SpecifyKind(inspectedAtUtc, DateTimeKind.Utc).ToLocalTime();
+
+        // "Arrival Date" is the real port arrival from SAP (ZQC_Data.Arrival_Date),
+        // held in the container cache alongside -- not instead of -- the
+        // Receive_Date that arrival_date carries for /Arrivals/Pending. Same
+        // deterministic newest-row pick as the flat-defects view, so a container
+        // matched by several PO lines resolves reproducibly.
+        if (arrival != null)
+        {
+            using var cc = new SqlConnection(_config.GetConnectionString("Default"));
+            data.PortArrivalDate = await cc.ExecuteScalarAsync<DateTime?>(@"
+                SELECT TOP 1 c.port_arrival_date
+                FROM   qms_sap_container_cache c
+                WHERE  c.container_no = @container
+                  AND  c.bol_no       = @bol
+                  AND  c.ebeln        = @ebeln
+                  AND  c.port_arrival_date IS NOT NULL
+                ORDER  BY c.doc_date DESC, c.sto",
+                new { container = arrival.ContainerNo, bol = arrival.BolNo, ebeln = arrival.Ebeln });
+        }
 
         var materials = (await _qos.GetMaterialsAsync(qo.QualityOrderId)).ToList();
 

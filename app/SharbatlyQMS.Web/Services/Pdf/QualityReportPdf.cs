@@ -120,7 +120,9 @@ public static class QualityReportPdf
             col.Item().AlignRight().Text(t =>
             {
                 t.Span("Date  ").FontColor(Colors.Grey.Darken1);
-                t.Span(d.Shipment?.InspectionDate?.ToString("dd/MM/yyyy")
+                // Same value as the Inspection Date field below -- both are the
+                // QO open date now, so the header strip cannot disagree with it.
+                t.Span(d.InspectionDate?.ToString("dd/MM/yyyy")
                        ?? d.GeneratedAt.ToLocalTime().ToString("dd/MM/yyyy")).Bold();
             });
             col.Item().AlignRight().Text(t =>
@@ -285,11 +287,13 @@ public static class QualityReportPdf
                 });
                 row.RelativeItem().Column(c => {
                     Field(c, "Vessel Name",      s?.VesselName);
-                    Field(c, "Arrival Date",     s?.ArrivalDate?.ToString("MMM dd, yyyy"));
+                    // Real port arrival from SAP; blank when SAP has none. Reading
+                    // s?.ArrivalDate here would reprint the Receive Date below it.
+                    Field(c, "Arrival Date",     d.PortArrivalDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Pullout Date",     s?.PullOutDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Receive Date",     s?.ReceiveDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Unloading Date",   s?.UnloadingDate?.ToString("MMM dd, yyyy"));
-                    Field(c, "Inspection Date",  s?.InspectionDate?.ToString("MMM dd, yyyy"));
+                    Field(c, "Inspection Date",  d.InspectionDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Transit Days",     s?.TransitDays?.ToString());
                     Field(c, "Discharge Date",   s?.DischargeDate?.ToString("MMM dd, yyyy"));
                     // Time Bar = whole days between the chosen basis date and the

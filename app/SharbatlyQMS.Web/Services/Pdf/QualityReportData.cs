@@ -1,4 +1,4 @@
-﻿using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Models;
 
 namespace SharbatlyQMS.Web.Services.Pdf;
 
@@ -12,6 +12,25 @@ public class QualityReportData
     public Arrival              Arrival         { get; set; } = new();
     public ShipmentSnapshot?    Shipment        { get; set; }
     public ArrivalChecklist?    Checklist       { get; set; }
+
+    /// <summary>
+    /// The real port-arrival date from SAP (ZQC_Data.Arrival_Date), resolved
+    /// through the container cache. Deliberately NOT <c>Shipment.ArrivalDate</c>
+    /// — that one carries SAP's Receive_Date and therefore printed the same
+    /// value as the report's own "Receive Date" field on every report.
+    /// Null when SAP has no port-arrival date; the report then prints blank
+    /// rather than substituting a goods-receipt date under an arrival label.
+    /// </summary>
+    public DateTime? PortArrivalDate { get; set; }
+
+    /// <summary>
+    /// When the Quality Order was opened — what "Inspection Date" means to the
+    /// business. The report used to print <c>Shipment.InspectionDate</c>, which
+    /// is the ARRIVAL CHECKLIST date and can be days earlier (QO-2026-000399:
+    /// checklist 2026-08-11 vs QO opened 2026-08-18). Falls back to the QO's
+    /// created_at for an order that was never formally opened.
+    /// </summary>
+    public DateTime? InspectionDate { get; set; }
 
     /// <summary>Admin-defined arrival custom fields (e.g. "Soft Green",
     /// "Yellow Ripe") whose material group appears in this report. Shown in the
