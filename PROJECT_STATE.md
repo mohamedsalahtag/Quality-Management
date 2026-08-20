@@ -2,7 +2,7 @@
 
 > **For any AI agent (Claude Code, OpenAI Codex, Cursor, ChatGPT, GitHub Copilot, ...) picking up this project: read this file first.** It captures the live state of the QMS web application — what is built, where it runs, the decisions that shaped it, and the files that contain the authoritative truth.
 
-Last updated: **2026-08-20** (Claims split into active/Archived tabs via an order-level archive flag; QC report dates corrected; supplier e-mail store — see §8).
+Last updated: **2026-08-20** (standing CC on supplier mail; Claims active/Archived tabs; QC report dates corrected; supplier e-mail store — see §8).
 
 ---
 
@@ -212,6 +212,14 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 ---
 
 ## 8. Decisions log (newest first)
+
+### 2026-08-20 (standing CC on supplier report mail)
+
+- **Parameters → Mail Template gained an "Always CC" list** (`Mail.QualityReport.Cc`), copied on every supplier report on top of whatever the sender types.
+- **Enforced at send time, not pre-filled.** `SendQualityReport` reads the setting itself and folds it in — a standing CC the sender can delete is not a standing CC, and pre-filling the editable CC box would have made it look removable. The dialog shows it read-only above the CC field instead, so the sender can see who is copied without being able to drop them.
+- **`Services/MailAddresses.cs` (new) is the single splitter/merger** used by all three places that touch these lists — validation on save, the dialog pre-fill, and the send path. `Merge` dedupes case-insensitively and drops anyone already on the To line, so typing an address that is already on the standing CC does not copy them twice. `ReportsController.SplitAddrs` is gone in favour of it. Covered by `MailAddressesTests` (12 cases) because a bug here silently changes every outgoing mail in one of two invisible directions.
+- **The CC list is validated when saved, not when sent.** An invalid standing CC would otherwise fail every send with an error naming the *supplier's* address, and nobody would think to look in Parameters.
+- **Archive cut-over confirmed correct, no change made.** "Up to 18 August but not including 18 August" is exactly what `< 2026-08-17T21:00:00Z` (= 18 Aug 00:00 Riyadh) already does. Verified against live data: latest archived order 2026-08-17 18:28 local, earliest active 2026-08-18 08:36 local, **zero** archived orders dated 18 Aug or later, **zero** active orders dated earlier.
 
 ### 2026-08-20 (archive becomes a flag; Archived tab; mail "Enabled" switch removed)
 

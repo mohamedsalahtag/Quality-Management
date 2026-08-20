@@ -676,6 +676,13 @@
                                 </label>
                             </div>
                         </div>
+                        @* Read-only: the send path applies these whatever the box
+                           below says, so showing them as editable would lie. *@
+                        <div class="mb-2 d-none" id="srm-alwayscc-wrap">
+                            <label class="form-label">Always CC</label>
+                            <div class="form-control bg-body-secondary" id="srm-alwayscc"></div>
+                            <div class="form-text">Set in Parameters &rarr; Mail Template. Copied on every supplier report.</div>
+                        </div>
                         <div class="mb-2">
                             <label class="form-label">CC</label>
                             <input id="srm-cc" name="cc" class="form-control" placeholder="optional, comma-separated" />
@@ -1273,6 +1280,11 @@
                 document.getElementById('srm-body').value    = data.body || '';
                 document.getElementById('srm-filename').textContent = data.fileName || 'report.pdf';
                 SRM_VENDOR_NO = data.vendorNo || '';
+
+                const always = data.alwaysCc || [];
+                const wrap = document.getElementById('srm-alwayscc-wrap');
+                document.getElementById('srm-alwayscc').textContent = always.join(', ');
+                wrap.classList.toggle('d-none', always.length === 0);
 
                 const name = data.supplierName || 'this supplier';
                 document.getElementById('srm-supplier-a').textContent = name;

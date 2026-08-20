@@ -133,10 +133,9 @@ public class ReportsController : Controller
     {
         var qo = await _qos.GetAsync(id);
         if (qo == null) return NotFound();
-        // Server-side gates: the UI hides the dialog unless the QO is Closed
-        // and the mail template is enabled, but a direct GET would bypass both
-        // checks. Refuse here so a tampered request can't pre-populate a
-        // dialog for a non-closeable QO or a disabled feature.
+        // Server-side gate: the UI only offers the dialog on a closed order, but
+        // a direct GET would bypass that. Refuse here so a tampered request
+        // can't pre-populate a dialog for an order that cannot be sent.
         if (qo.StatusCode != QualityOrderStatus.Closed)
             return Json(new { ok = false, error = "Report can only be sent for Closed Quality Orders." });
         var arrival = await _arrivals.GetAsync(qo.ArrivalId);
@@ -167,6 +166,10 @@ public class ReportsController : Controller
             // e-mail is configured.
             emailSource   = vendor?.EmailSource,
             vendorNo      = arrival?.VendorNo ?? "",
+            // Shown read-only in the dialog. Deliberately NOT pre-filled into
+            // the editable CC box: the send path adds it regardless, and an
+            // editable copy would imply the sender can drop it.
+            alwaysCc      = MailAddresses.Split(template.Cc),
             subject       = Substitute(template.Subject),
             body          = Substitute(template.Body),
             fileName      = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf"
@@ -195,8 +198,15 @@ public class ReportsController : Controller
         var bytes = QualityReportRenderer.Build(data);
         var fileName = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf";
 
-        var toList = SplitAddrs(to);
-        var ccList = SplitAddrs(cc ?? "");
+        // The standing CC from Parameters -> Mail Template is applied here, not
+        // taken from the request, so it holds even if the dialog is bypassed or
+        // the sender clears the CC box. Merge dedupes case-insensitively so an
+        // address typed by hand is not copied twice.
+        var template = await _settings.GetQoMailTemplateAsync();
+        var toList = MailAddresses.Split(to);
+        var ccList = MailAddresses.Merge(cc, template.Cc)
+                                  .Where(a => !toList.Contains(a, StringComparer.OrdinalIgnoreCase))
+                                  .ToList();
         var (ok, error) = await _email.SendWithAttachmentsAsync(
             toList, ccList, subject, body, bodyIsHtml: false,
             attachments: new[] { (bytes, fileName, "application/pdf") });
@@ -226,7 +236,7 @@ public class ReportsController : Controller
         // Store ONE address, not the operator's whole To line -- the To field
         // accepts a comma-separated list and CC recipients are per-send, so
         // saving the raw string would resurrect somebody's ad-hoc CC next time.
-        var first = SplitAddrs(email ?? "").FirstOrDefault() ?? "";
+        var first = MailAddresses.Split(email).FirstOrDefault() ?? "";
         if (first.Length > 0 && !MailboxAddress.TryParse(first, out _))
             return Json(new { ok = false, error = $"'{first}' is not a valid e-mail address." });
 
@@ -235,11 +245,6 @@ public class ReportsController : Controller
         _log.LogInformation("Supplier e-mail for vendor {Vendor} set to {Email} by {User}", vendorNo, first, user);
         return Json(new { ok = true, saved = first });
     }
-
-    private static IEnumerable<string> SplitAddrs(string s) =>
-        (s ?? "").Split(new[] { ',', ';', '\n', '\r' }, StringSplitOptions.RemoveEmptyEntries)
-                .Select(a => a.Trim())
-                .Where(a => a.Length > 0);
 
     [RequirePermission(Perm.Qo.Pdf, Seed.Everyone, "Download the quality report PDF", ReadOnly = true)]
     public async Task<IActionResult> QualityOrderPdf(long id, CancellationToken ct = default)

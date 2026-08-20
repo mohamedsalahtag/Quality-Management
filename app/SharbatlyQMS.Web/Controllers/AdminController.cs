@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -1795,8 +1795,25 @@ public class AdminController : Controller
     [RequirePermission(Perm.Parameters.MailTemplateEdit, Seed.ManagerOrAdmin, "Edit the Mail Template")]
     public async Task<IActionResult> SaveMailTemplate(QoMailTemplate template)
     {
+        template ??= new QoMailTemplate();
+
+        // Validate here rather than at send time. A malformed standing CC would
+        // otherwise fail every send with an error pointing at the supplier's
+        // address, and nobody would think to look in Parameters.
+        var bad = MailAddresses.Split(template.Cc)
+            .Where(a => !MimeKit.MailboxAddress.TryParse(a, out _))
+            .ToList();
+        if (bad.Count > 0)
+        {
+            TempData["Error"] = bad.Count == 1
+                ? $"'{bad[0]}' is not a valid e-mail address. Nothing was saved."
+                : $"These are not valid e-mail addresses: {string.Join(", ", bad)}. Nothing was saved.";
+            return RedirectToAction(nameof(MailTemplate));
+        }
+        template.Cc = string.Join(", ", MailAddresses.Split(template.Cc));
+
         var userId = (int?)null; // _settings doesn't currently look it up by id; pass null
-        await _settings.SaveQoMailTemplateAsync(template ?? new QoMailTemplate(), userId);
+        await _settings.SaveQoMailTemplateAsync(template, userId);
         TempData["Success"] = "Mail template saved.";
         return RedirectToAction(nameof(MailTemplate));
     }

@@ -32,6 +32,16 @@
                     <input name="Subject" id="m-subject" class="form-control" value="@Model.Subject" required data-token-target />
                 </div>
                 <div class="mb-3">
+                    <label class="form-label" for="m-cc">Always CC</label>
+                    <input name="Cc" id="m-cc" class="form-control" value="@Model.Cc"
+                           placeholder="quality@sharbatlyfruit.com, manager@sharbatlyfruit.com" />
+                    <div class="form-text">
+                        Copied on <strong>every</strong> report sent to a supplier, on top of any CC
+                        the sender adds. Comma- or semicolon-separated; leave blank for none.
+                        The sender can see these in the send dialog but cannot remove them.
+                    </div>
+                </div>
+                <div class="mb-3">
                     <label class="form-label" for="m-body">Body *</label>
                     <textarea name="Body" id="m-body" class="form-control" rows="12" required data-token-target>@Model.Body</textarea>
                     <div class="form-text">Plain text. Newlines preserved. HTML is not rendered to the supplier.</div>

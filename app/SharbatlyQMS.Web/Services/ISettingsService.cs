@@ -162,6 +162,9 @@ public static class SettingKeys
     // Mail template for "Send Quality Order report to supplier".
     public const string QoMailSubject = "Mail.QualityReport.Subject";
     public const string QoMailBody    = "Mail.QualityReport.Body";
+    /// <summary>Standing CC list applied to every supplier report mail.
+    /// Comma/semicolon separated.</summary>
+    public const string QoMailCc      = "Mail.QualityReport.Cc";
     // Mail.QualityReport.Enabled was removed 2026-08-20. It gated a "Send report
     // to supplier" button on the QO Details page that no longer exists -- sending
     // happens from the Claims page -- so the switch controlled nothing a user
@@ -192,6 +195,13 @@ public class QoMailTemplate
         "Please find attached the Quality Control Report for Quality Order {QO_NO}\n" +
         "(Container {CONTAINER}, BOL {BOL}, PO {PO}).\n\n" +
         "Best regards,\nSharbatly Quality Team";
+
+    /// <summary>Addresses copied on EVERY supplier report mail, on top of
+    /// whatever the sender types. Enforced server-side in
+    /// ReportsController.SendQualityReport, not just pre-filled in the dialog —
+    /// a standing CC that the sender can delete is not a standing CC.
+    /// Comma- or semicolon-separated; blank means none.</summary>
+    public string Cc { get; set; } = "";
 }
 
 public class BrandingConfig
