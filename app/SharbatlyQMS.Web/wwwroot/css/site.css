@@ -182,7 +182,12 @@ input[type="number"] {
    Page-specific bits (the QO materials "quick peek", say) stay in their view.
    ------------------------------------------------------------------------- */
 .qms-index-table { font-size: .8rem; }
-.qms-index-table > :not(caption) > * > * { padding-top: .35rem; padding-bottom: .35rem; }
+.qms-index-table > :not(caption) > * > * {
+  padding-top: .35rem; padding-bottom: .35rem;
+  /* Horizontal too: Bootstrap's .5rem a side costs ~190px across a 12-column
+     list, which is most of what pushes the row past a laptop screen. */
+  padding-left: .4rem; padding-right: .4rem;
+}
 .qms-index-table .badge { font-size: .68rem; }
 
 /* Buttons set the row height, and .btn-sm's 14px font and 21px line-height are
@@ -195,6 +200,21 @@ input[type="number"] {
   line-height: 1.4;
 }
 .qms-index-table .btn i { font-size: .95em; }
+
+/* One row = one line. A single long supplier name used to wrap and take the
+   whole row down with it -- 37px became 62px at 1440 and 91px at 1152, so the
+   list read as double-spaced on any laptop screen. Long free text is clipped
+   with an ellipsis instead; .table-responsive still scrolls sideways when the
+   columns genuinely need more room. Cells that clip carry the full value in a
+   title attribute, so nothing becomes unreadable. */
+.qms-index-table th,
+.qms-index-table td { white-space: nowrap; }
+
+.qms-index-table td.cell-clip {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 @media (max-width: 991.98px) { .qms-index-table { font-size: .74rem; } }
 @media (max-width: 575.98px) { .qms-index-table { font-size: .7rem; } }
