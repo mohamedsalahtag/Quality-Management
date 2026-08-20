@@ -132,8 +132,7 @@
                markup + JS live in QualityOrders/Details.cshtml (this panel is
                rendered inside that view in claim context, so the modal is in
                scope). *@
-            @if ((bool?)ViewBag.SendMailEnabled == true
-                 && Model.StatusCode == QualityOrderStatus.Closed)
+            @if (Model.StatusCode == QualityOrderStatus.Closed)
             {
                 <button type="button" class="btn btn-info"
                         data-bs-toggle="modal" data-bs-target="#sendReportModal">

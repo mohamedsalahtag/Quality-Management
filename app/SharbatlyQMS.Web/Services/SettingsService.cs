@@ -382,14 +382,13 @@ public class SettingsService : ISettingsService
     {
         var c = await _db.GetConfigManyAsync(new[]
         {
-            SettingKeys.QoMailSubject, SettingKeys.QoMailBody, SettingKeys.QoMailEnabled
+            SettingKeys.QoMailSubject, SettingKeys.QoMailBody
         });
         var cfg = new QoMailTemplate();
         var sub  = c.GetValueOrDefault(SettingKeys.QoMailSubject);
         var body = c.GetValueOrDefault(SettingKeys.QoMailBody);
         if (!string.IsNullOrWhiteSpace(sub))  cfg.Subject = sub;
         if (!string.IsNullOrWhiteSpace(body)) cfg.Body    = body;
-        cfg.Enabled = ParseBool(c.GetValueOrDefault(SettingKeys.QoMailEnabled), false);
         return cfg;
     }
 
@@ -397,7 +396,6 @@ public class SettingsService : ISettingsService
     {
         await _db.SetConfigAsync(SettingKeys.QoMailSubject, cfg.Subject ?? "", updatedBy);
         await _db.SetConfigAsync(SettingKeys.QoMailBody,    cfg.Body    ?? "", updatedBy);
-        await _db.SetConfigAsync(SettingKeys.QoMailEnabled, cfg.Enabled ? "true" : "false", updatedBy);
     }
 
     // ---- Active Directory ----

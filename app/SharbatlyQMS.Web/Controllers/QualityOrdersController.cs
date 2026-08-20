@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Extensions;
@@ -18,16 +18,15 @@ public class QualityOrdersController : Controller
     private readonly IImageService _images;
     private readonly IMaraService _mara;
     private readonly ICatalogCache _cat;
-    private readonly ISettingsService _settings;
     private readonly IUserPermissions _perms;
     private readonly ILogger<QualityOrdersController> _log;
 
     public QualityOrdersController(IQualityOrderService qos, IArrivalService arrivals,
         IImageService images, IMaraService mara, ICatalogCache cat,
-        ISettingsService settings, IUserPermissions perms, ILogger<QualityOrdersController> log)
+        IUserPermissions perms, ILogger<QualityOrdersController> log)
     {
         _qos = qos; _arrivals = arrivals; _images = images; _mara = mara;
-        _cat = cat; _settings = settings; _perms = perms; _log = log;
+        _cat = cat; _perms = perms; _log = log;
     }
 
     [RequireScreen(Screens.QoIndex, Seed.Everyone, "Open Quality Orders")]
@@ -126,8 +125,6 @@ public class QualityOrdersController : Controller
 
         var editable = qo.StatusCode == QualityOrderStatus.Open;
 
-        var mailTemplate = await _settings.GetQoMailTemplateAsync();
-
         ViewBag.Arrival             = arrival;
         ViewBag.Shipment            = shipment;
         ViewBag.Materials           = materials;
@@ -137,7 +134,6 @@ public class QualityOrdersController : Controller
         ViewBag.SampleReadings      = sampleReadings;
         ViewBag.HeaderComplete      = headerComplete;
         ViewBag.Editable            = editable;
-        ViewBag.SendMailEnabled     = mailTemplate.Enabled;
         return View(qo);
     }
 

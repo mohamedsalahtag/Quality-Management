@@ -629,7 +629,10 @@
 @* ---- Send report to supplier modal (visible only when enabled in
        Parameters → Mail Template). Body + subject load from server-side
        template via PrepareSendQualityReport AJAX. ---- *@
-@if ((bool?)ViewBag.SendMailEnabled == true)
+@* Rendered in claim context, where the chat panel's send button targets it.
+   The old Parameters -> Mail Template "Enabled" switch that used to gate this
+   was removed: it controlled a QO-page button that no longer exists. *@
+@if ((bool?)ViewBag.IsClaimContext == true)
 {
     <div class="modal fade" id="sendReportModal" tabindex="-1">
         <div class="modal-dialog modal-lg">

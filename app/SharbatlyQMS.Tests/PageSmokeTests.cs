@@ -44,7 +44,10 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         // Claims filter panel: one URL per input shape (text LIKE, dropdown
         // equality, date range, status chip) so a typo in the new WHERE clause
         // fails here rather than on the Claims page.
-        "/ClaimManagement?status=Archived&from=2026-07-01&to=2026-08-17",
+        "/ClaimManagement?status=PassedQC&from=2026-07-01&to=2026-08-17",
+        // Archived is its own tab (own action), not a claim status.
+        "/ClaimManagement/Archived",
+        "/ClaimManagement/Archived?from=2026-07-01&to=2026-08-17",
         "/ClaimManagement?container=A&po=4&supplier=&plant=&closedBy=&claimOwner=&material=apple",
         "/Audit",
         "/Account/Profile",

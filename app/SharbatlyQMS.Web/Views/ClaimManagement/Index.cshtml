@@ -25,7 +25,6 @@
         (ClaimStatus.ClaimRequestApproved,  "Claim Request Approved", "btn-outline-dark"),
         (ClaimStatus.HoldClaim,             "Hold Claim",             "btn-outline-warning"),
         (ClaimStatus.PassedQC,              "Passed QC",              "btn-outline-success"),
-        (ClaimStatus.Archived,              "Archived",               "btn-outline-secondary"),
     };
     string ActiveClass(string v, string baseCss) =>
         (status ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
@@ -44,14 +43,37 @@
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0"><i class="bi bi-shield-exclamation me-1 text-danger"></i>Claims</h1>
+    <h1 class="h3 mb-0">
+        <i class="bi bi-shield-exclamation me-1 text-danger"></i>Claims
+        @if (f.Archived)
+        {
+            <small class="text-muted fs-6 fw-normal ms-2">Archived &mdash; orders from before the 18 Aug go-live</small>
+        }
+    </h1>
 </div>
+
+@* Two lists, two URLs. The active tab is the day-to-day worklist; Archived
+   holds the pre-go-live backlog, whatever each order's status. Filters are
+   NOT carried across the tabs -- a supplier that narrows one list to three
+   rows would silently narrow the other to none. *@
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <a class="nav-link @(f.Archived ? "" : "active")" asp-action="Index">
+            <i class="bi bi-list-check me-1"></i>Claims
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link @(f.Archived ? "active" : "")" asp-action="Archived">
+            <i class="bi bi-archive me-1"></i>Archived
+        </a>
+    </li>
+</ul>
 
 @* One form for everything: the always-visible quick bar and the collapsible
    panel below it. Collapsed inputs still submit (display:none is not disabled),
    which is exactly what we want -- the two sets AND together. Mirrors the
    Quality Orders page so there is only one filter UI to learn. *@
-<form method="get" class="mb-3" data-filter-memory="claim">
+<form method="get" class="mb-3" data-filter-memory="@(f.Archived ? "claim-archived" : "claim")">
     @* Enter inside a panel field does this plain submit rather than the first
        status chip (which would change the status filter). *@
     <button type="submit" class="visually-hidden" tabindex="-1" aria-hidden="true"></button>
@@ -68,7 +90,8 @@
             </button>
             @if (f.Any)
             {
-                <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>Clear</a>
+                <a asp-action="@(f.Archived ? "Archived" : "Index")" class="btn btn-outline-secondary"
+                   title="Clear every filter" data-filter-clear>Clear</a>
             }
         </div>
         <div class="col-md-4">
@@ -198,7 +221,7 @@
                 <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Apply filters</button>
                 @if (f.AnyPanelFilter)
                 {
-                    <a asp-action="Index" asp-route-status="@status" asp-route-search="@search"
+                    <a asp-action="@(f.Archived ? "Archived" : "Index")" asp-route-status="@status" asp-route-search="@search"
                        class="btn btn-outline-secondary btn-sm">Reset these filters</a>
                 }
             </div>
@@ -216,6 +239,12 @@
                     <th>BOL</th>
                     <th>PO</th>
                     <th>Supplier</th>
+                    @if (f.Archived)
+                    {
+                        @* The archive also holds orders that were never finished,
+                           so their state is worth a column of its own. *@
+                        <th>Order Status</th>
+                    }
                     <th>Closed</th>
                     <th>Closed By</th>
                     <th>Claim Status</th>
@@ -227,8 +256,10 @@
             <tbody>
                 @if (!Model.Any())
                 {
-                    <tr><td colspan="11" class="text-center text-muted py-4">
-                        No closed Quality Orders match the current filters.
+                    <tr><td colspan="@(f.Archived ? 12 : 11)" class="text-center text-muted py-4">
+                        @(f.Archived
+                            ? "No archived Quality Orders match the current filters."
+                            : "No closed Quality Orders match the current filters.")
                     </td></tr>
                 }
                 else
@@ -245,6 +276,10 @@
                             <td>@r.BolNo</td>
                             <td>@r.Ebeln</td>
                             <td>@r.VendorName</td>
+                            @if (f.Archived)
+                            {
+                                <td><span class="badge bg-secondary">@QualityOrderStatus.DisplayName(r.StatusCode)</span></td>
+                            }
                             <td>@(r.ClosedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
                             <td>@r.ClosedBy</td>
                             <td><span class="badge @badge">@label</span></td>

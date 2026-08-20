@@ -16,8 +16,9 @@ public interface IClaimService
     Task<IReadOnlyList<ClaimListRow>> ListClosedQosAsync(
         ClaimListFilter filter, PlantScope scope, string currentUser);
 
-    /// <summary>Dropdown sources for the Claims filter panel, plant-scoped.</summary>
-    Task<ClaimFilterOptions> GetClaimFilterOptionsAsync(PlantScope scope);
+    /// <summary>Dropdown sources for the Claims filter panel, plant-scoped and
+    /// drawn from the tab being shown so no option comes back empty.</summary>
+    Task<ClaimFilterOptions> GetClaimFilterOptionsAsync(PlantScope scope, bool archived = false);
 
     Task<(QualityClaim? claim, IReadOnlyList<ClaimNote> notes)> GetForQoAsync(long qualityOrderId);
 

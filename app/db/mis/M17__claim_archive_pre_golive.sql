@@ -30,6 +30,20 @@
 --  Idempotent: safe to re-run — Part B inserts only where no claim row exists.
 -- ============================================================================
 
+--  ####  SUPERSEDED BY M20 (2026-08-20)  ####
+--  M20 replaced status-based archiving with qms_quality_order.archived_at and
+--  deleted every row this script wrote. Re-running M17 afterwards would
+--  resurrect the 'Archived' claim status and undo that. Every batch below is
+--  therefore guarded: once M20 has run, this script does nothing. Kept for the
+--  historical record, not for re-execution.
+
+IF COL_LENGTH('qms.qms_quality_order', 'archived_at') IS NOT NULL
+BEGIN
+    PRINT 'M17 skipped -- superseded by M20 (archive is a flag on qms_quality_order).';
+    SET NOEXEC ON;
+END
+GO
+
 -- Part A ---------------------------------------------------------------
 IF EXISTS (SELECT 1 FROM sys.check_constraints
            WHERE name = 'CK_qms_claim_status'
@@ -80,4 +94,8 @@ UNION ALL
 SELECT 'quality_orders_total', COUNT(*) FROM qms.qms_quality_order
 UNION ALL
 SELECT 'samples_total', COUNT(*) FROM qms.qms_sample;
+GO
+
+-- Release the guard so the session stays usable for the next script.
+SET NOEXEC OFF;
 GO

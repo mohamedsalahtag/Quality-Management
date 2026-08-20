@@ -16,6 +16,12 @@ namespace SharbatlyQMS.Web.ViewModels;
 /// </summary>
 public class ClaimListFilter
 {
+    /// <summary>Which tab is showing. False = the active Claims worklist
+    /// (unarchived, Closed only); true = the Archived tab, which carries every
+    /// archived order whatever its QO status. Set by the controller action, not
+    /// bound from the query string, so it cannot be spoofed into a mixed list.</summary>
+    public bool Archived { get; set; }
+
     // ---- Quick bar (always visible) ----
     /// <summary>"" = all, "Pending" = no claim row yet, otherwise a claim status code.</summary>
     public string? Status     { get; set; }

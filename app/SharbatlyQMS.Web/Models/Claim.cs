@@ -43,11 +43,11 @@ public static class ClaimStatus
     public const string ClaimRequestApproved = "ClaimRequestApproved";
     public const string HoldClaim            = "HoldClaim";
 
-    /// <summary>Closed before the 2026-08-18 go-live cut-over, so no claim
-    /// decision was ever made. Written in bulk by migration M17 to keep the
-    /// backlog out of the Pending worklist. A QM can still raise a real claim
-    /// on one; the CM has nothing to decide until they do.</summary>
-    public const string Archived             = "Archived";
+    // There is deliberately NO "Archived" status. Archiving is a flag on the
+    // quality order (qms_quality_order.archived_at, M20), not a claim decision
+    // -- an order carrying a real decision can be archived without losing it,
+    // and an order that was never Closed can be archived at all. M17's
+    // status-based approach could do neither.
 
     /// <summary>UI-only sentinel for a Closed QO that has no qms_claim row yet.</summary>
     public const string Pending              = "Pending";
@@ -58,7 +58,6 @@ public static class ClaimStatus
         PassedQC             => "Passed QC",
         ClaimRequestApproved => "Claim Request Approved",
         HoldClaim            => "Hold Claim",
-        Archived             => "Archived",
         Pending              => "Pending",
         null or ""           => "Pending",
         _                    => s
@@ -74,7 +73,6 @@ public static class ClaimStatus
         ClaimRequestApproved => "bg-dark text-white",
         HoldClaim            => "bg-warning text-dark",
         PassedQC             => "bg-success text-white",
-        Archived             => "bg-light text-muted border",
         _                    => "bg-secondary text-white"
     };
 }
@@ -92,6 +90,12 @@ public class ClaimListRow
     public string?   VendorName     { get; set; }
     public DateTime? ClosedAt       { get; set; }
     public string?   ClosedBy       { get; set; }
+
+    /// <summary>QO status — always "Closed" on the active Claims tab, but the
+    /// Archived tab also carries Submitted orders, which show it as a column.</summary>
+    public string    StatusCode     { get; set; } = "";
+    /// <summary>Non-null once the order has been archived off the active list.</summary>
+    public DateTime? ArchivedAt     { get; set; }
 
     // From qms_claim (NULL when no claim row yet -- treat as Pending in UI).
     public string?   ClaimStatus    { get; set; }

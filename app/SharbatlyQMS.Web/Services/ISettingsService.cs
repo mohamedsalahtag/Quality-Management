@@ -162,7 +162,10 @@ public static class SettingKeys
     // Mail template for "Send Quality Order report to supplier".
     public const string QoMailSubject = "Mail.QualityReport.Subject";
     public const string QoMailBody    = "Mail.QualityReport.Body";
-    public const string QoMailEnabled = "Mail.QualityReport.Enabled";   // "true" / "false"
+    // Mail.QualityReport.Enabled was removed 2026-08-20. It gated a "Send report
+    // to supplier" button on the QO Details page that no longer exists -- sending
+    // happens from the Claims page -- so the switch controlled nothing a user
+    // could see. The stored setting row is left in place, unread.
 
     // QO report options.
     //   TimeBarBasis: which date the report Time Bar counts from to the QO
@@ -189,8 +192,6 @@ public class QoMailTemplate
         "Please find attached the Quality Control Report for Quality Order {QO_NO}\n" +
         "(Container {CONTAINER}, BOL {BOL}, PO {PO}).\n\n" +
         "Best regards,\nSharbatly Quality Team";
-    /// <summary>Controls whether the Send Report button is shown on the QO Details page.</summary>
-    public bool   Enabled  { get; set; } = false;
 }
 
 public class BrandingConfig

@@ -29,7 +29,6 @@ public class ClaimManagementController : Controller
     private readonly IArrivalService _arrivals;
     private readonly IImageService _images;
     private readonly IMaraService _mara;
-    private readonly ISettingsService _settings;
     private readonly ILogger<ClaimManagementController> _log;
 
     public ClaimManagementController(
@@ -38,15 +37,31 @@ public class ClaimManagementController : Controller
         IArrivalService arrivals,
         IImageService images,
         IMaraService mara,
-        ISettingsService settings,
         ILogger<ClaimManagementController> log)
     {
         _claims = claims; _qos = qos; _arrivals = arrivals;
-        _images = images; _mara = mara; _settings = settings; _log = log;
+        _images = images; _mara = mara; _log = log;
+    }
+
+    /// <summary>Archived orders — everything dated before the 2026-08-18 go-live
+    /// cut-over, whatever its status. Same view, same filters; the tab strip
+    /// switches between them. Kept as its own action rather than a query-string
+    /// flag so the two lists get their own URLs and cannot be mixed.</summary>
+    [RequireScreen(Screens.Claims, Seed.Everyone, "Open Claims")]
+    public Task<IActionResult> Archived([FromQuery] ClaimListFilter filter)
+    {
+        filter.Archived = true;
+        return ListAsync(filter);
     }
 
     [RequireScreen(Screens.Claims, Seed.Everyone, "Open Claims")]
-    public async Task<IActionResult> Index([FromQuery] ClaimListFilter filter)
+    public Task<IActionResult> Index([FromQuery] ClaimListFilter filter)
+    {
+        filter.Archived = false;
+        return ListAsync(filter);
+    }
+
+    private async Task<IActionResult> ListAsync(ClaimListFilter filter)
     {
         // Plant-scoped users can't widen their view: the scope is applied in
         // the query regardless of what the panel's plant dropdown posted (the
@@ -54,11 +69,12 @@ public class ClaimManagementController : Controller
         var user    = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var scope   = User.GetPlantScope();
         var rows    = await _claims.ListClosedQosAsync(filter, scope, user);
-        var options = await _claims.GetClaimFilterOptionsAsync(scope);
+        var options = await _claims.GetClaimFilterOptionsAsync(scope, filter.Archived);
         ViewBag.Filter           = filter;
         ViewBag.FilterOptions    = options;
         ViewBag.PlantScopeLocked = User.SinglePlantOrNull();
-        return View(rows);
+        // Both actions render the Claims list; the tab strip reads Filter.Archived.
+        return View("Index", rows);
     }
 
     /// <summary>
@@ -127,13 +143,6 @@ public class ClaimManagementController : Controller
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         await _claims.MarkSeenAsync(id, user);
 
-        // The "Send report to supplier" button now lives in the claim
-        // chat-panel action bar, gated by ClaimRequestApproved status -- we
-        // need this flag to reflect the real mail-template setting so both
-        // the button (in _ClaimChatPanel) and the modal markup (in QO
-        // Details.cshtml) render correctly. (It used to be hardcoded false
-        // when the button lived on the QO action bar.)
-        var mailTemplate = await _settings.GetQoMailTemplateAsync();
 
         ViewBag.Arrival         = arrival;
         ViewBag.Shipment        = shipment;
@@ -141,7 +150,6 @@ public class ClaimManagementController : Controller
         ViewBag.Samples         = samples;
         ViewBag.PhotoCounts     = photoCounts;
         ViewBag.Editable        = false;             // hard-locked in claim context
-        ViewBag.SendMailEnabled = mailTemplate.Enabled;
         ViewBag.IsClaimContext  = true;
         ViewBag.GroupSummaries  = groupSummaries;
         ViewBag.Claim           = claim;

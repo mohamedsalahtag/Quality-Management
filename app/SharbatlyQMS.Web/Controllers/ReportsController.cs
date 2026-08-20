@@ -141,8 +141,6 @@ public class ReportsController : Controller
             return Json(new { ok = false, error = "Report can only be sent for Closed Quality Orders." });
         var arrival = await _arrivals.GetAsync(qo.ArrivalId);
         var template = await _settings.GetQoMailTemplateAsync();
-        if (!template.Enabled)
-            return Json(new { ok = false, error = "Sending the quality report by email is disabled in Settings." });
 
         VendorInfo? vendor = null;
         if (!string.IsNullOrWhiteSpace(arrival?.VendorNo))
@@ -186,15 +184,10 @@ public class ReportsController : Controller
     {
         var qo = await _qos.GetAsync(id);
         if (qo == null) return Json(new { ok = false, error = "Quality Order not found." });
-        // Server-side gates -- the UI hides the button when these are false,
-        // but a direct POST must not bypass them. Closed QO + mail template
-        // enabled. Order matters: state check first so a feature-flag error
-        // doesn't leak QO existence.
+        // Server-side gate -- the UI only offers the button on a closed order,
+        // but a direct POST must not bypass that.
         if (qo.StatusCode != QualityOrderStatus.Closed)
             return Json(new { ok = false, error = "Report can only be sent for Closed Quality Orders." });
-        var template = await _settings.GetQoMailTemplateAsync();
-        if (!template.Enabled)
-            return Json(new { ok = false, error = "Sending the quality report by email is disabled in Settings." });
         if (string.IsNullOrWhiteSpace(to))
             return Json(new { ok = false, error = "Recipient email is required." });
 

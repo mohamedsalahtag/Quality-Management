@@ -2,7 +2,7 @@
 
 > **For any AI agent (Claude Code, OpenAI Codex, Cursor, ChatGPT, GitHub Copilot, ...) picking up this project: read this file first.** It captures the live state of the QMS web application — what is built, where it runs, the decisions that shaped it, and the files that contain the authoritative truth.
 
-Last updated: **2026-08-20** (QC report date logic corrected, supplier e-mail store, Claims filter panel + pre-go-live archive — see §8).
+Last updated: **2026-08-20** (Claims split into active/Archived tabs via an order-level archive flag; QC report dates corrected; supplier e-mail store — see §8).
 
 ---
 
@@ -212,6 +212,14 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 ---
 
 ## 8. Decisions log (newest first)
+
+### 2026-08-20 (archive becomes a flag; Archived tab; mail "Enabled" switch removed)
+
+- **M20 supersedes M17: archive is a flag on the order, not a claim status.** M17 archived the backlog by writing a fifth claim status `Archived`, which conflated *where an order is filed* with *what the claim decision on it is*. Two consequences showed up at once: an order carrying a real decision (`ClaimRequestApproved`, `PassedQC`, …) could only be archived by **destroying** that decision, and an order that was never Closed has no `qms_claim` row so it could not be archived at all. `qms_quality_order.archived_at` / `archived_by` fixes both. M20 deletes the 217 placeholder claim rows M17 wrote (notes and read markers follow by `ON DELETE CASCADE`) and drops `Archived` from `CK_qms_claim_status`.
+- **Everything before the cut-over is archived, whatever its status** — `COALESCE(closed_at, opened_at, created_at) < 2026-08-17T21:00:00Z`. Result: **233 archived** (223 Closed + 10 Submitted), **104 active**, 0 pre-cut-over left unarchived, 337 orders total — nothing deleted. The 6 pre-cut-over orders with real decisions (2 Approved, 2 ClaimRequest, 2 PassedQC) are archived **with their decisions intact and visible**, which is the whole point of the flag.
+- **M17 is now guarded and inert.** The migration tool has no version table, so scripts are re-runnable by hand and a stray M17 re-run would resurrect the `Archived` status and undo M20. M17 now short-circuits (`SET NOEXEC ON`) when `qms_quality_order.archived_at` exists. Kept for the historical record, not for re-execution.
+- **Two tabs, two URLs, one view.** `/ClaimManagement` is the active worklist (unarchived **and** Closed — a claim decision presupposes a finished inspection); `/ClaimManagement/Archived` holds every archived order whatever its status, with an extra Order Status column since it carries Submitted ones. `ClaimListFilter.Archived` is set by the action, never bound from the query string, so the two buckets cannot be mixed. Filters deliberately do **not** carry across tabs — a supplier that narrows one list to three rows would silently narrow the other to none. Filter memory is keyed per tab.
+- **The Mail Template "Enabled" switch is gone.** It gated a *Quality Order page* send button that no longer exists (sending moved to Claims), so the switch controlled nothing visible — it read `true` in production while appearing to do something. `QoMailTemplate.Enabled`, the `Mail.QualityReport.Enabled` key read, and all three view gates are removed; the send modal now renders on `ViewBag.IsClaimContext`. The stored setting row is left in the table, unread. `SendQualityReport` still enforces the Closed check server-side — that gate was real and stays.
 
 ### 2026-08-20 (QC report dates corrected; supplier e-mail store; mail-template placeholder guide)
 

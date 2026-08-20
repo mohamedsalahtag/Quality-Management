@@ -57,6 +57,8 @@ public class ClaimService : IClaimService
                    a.vendor_name         AS VendorName,
                    qo.closed_at          AS ClosedAt,
                    qo.closed_by          AS ClosedBy,
+                   qo.status_code        AS StatusCode,
+                   qo.archived_at        AS ArchivedAt,
                    cl.claim_status       AS ClaimStatus,
                    cl.last_changed_at    AS LastActivityAt,
                    cl.decided_at         AS DecidedAt,
@@ -79,7 +81,14 @@ public class ClaimService : IClaimService
                   AND  cn.created_by <> @currentUser
                   AND  (rm.last_seen_at IS NULL OR cn.created_at > rm.last_seen_at)
             ) uc
-            WHERE  qo.status_code = 'Closed'
+            -- Two mutually exclusive buckets. The active worklist is Closed
+            -- orders only (a claim decision presupposes a finished inspection);
+            -- the archive holds every archived order whatever its status, which
+            -- is why the status test is inside the @archived branch.
+            WHERE  (
+                     (@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
+                  OR (@archived = 1 AND qo.archived_at IS NOT NULL)
+                   )
               AND  (@pendingFilter = 0 OR cl.claim_id IS NULL)
               AND  (@statusFilter IS NULL OR cl.claim_status = @statusFilter)
               -- Per-user plant scope. The Details action already enforces this;
@@ -110,7 +119,7 @@ public class ClaimService : IClaimService
                     a.vendor_name       LIKE '%' + @search + '%' OR
                     qo.closed_by        LIKE '%' + @search + '%')
             ORDER BY
-                COALESCE(cl.last_changed_at, qo.closed_at) DESC,
+                COALESCE(cl.last_changed_at, qo.closed_at, qo.opened_at, qo.created_at) DESC,
                 qo.quality_order_id DESC";
 
         using var c = Open();
@@ -118,6 +127,7 @@ public class ClaimService : IClaimService
         {
             pendingFilter,
             statusFilter,
+            archived      = f.Archived,
             sUnrestricted = scope.Unrestricted,
             sPlants       = scope.QueryPlants,
             plant         = Trim(f.Plant),
@@ -141,14 +151,17 @@ public class ClaimService : IClaimService
     /// <summary>Dropdown sources for the Claims filter panel. Restricted to
     /// Closed QOs inside the caller's plant scope, so an option can never come
     /// back with zero matching rows.</summary>
-    public async Task<ClaimFilterOptions> GetClaimFilterOptionsAsync(PlantScope scope)
+    public async Task<ClaimFilterOptions> GetClaimFilterOptionsAsync(PlantScope scope, bool archived = false)
     {
         using var c = Open();
+        // @bucket repeats the list's own WHERE so a dropdown never offers a
+        // value that returns nothing on the tab you are looking at.
         using var grid = await c.QueryMultipleAsync(@"
             SELECT DISTINCT a.plant
             FROM   qms_quality_order qo
             JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
-            WHERE  qo.status_code = 'Closed'
+            WHERE  ((@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
+                   OR (@archived = 1 AND qo.archived_at IS NOT NULL))
               AND  a.plant IS NOT NULL AND a.plant <> ''
               AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
             ORDER  BY a.plant;
@@ -156,7 +169,8 @@ public class ClaimService : IClaimService
             SELECT DISTINCT a.plant AS Plant, a.storage_location AS Code
             FROM   qms_quality_order qo
             JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
-            WHERE  qo.status_code = 'Closed'
+            WHERE  ((@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
+                   OR (@archived = 1 AND qo.archived_at IS NOT NULL))
               AND  a.plant            IS NOT NULL AND a.plant            <> ''
               AND  a.storage_location IS NOT NULL AND a.storage_location <> ''
               AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
@@ -165,7 +179,8 @@ public class ClaimService : IClaimService
             SELECT DISTINCT a.vendor_name
             FROM   qms_quality_order qo
             JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
-            WHERE  qo.status_code = 'Closed'
+            WHERE  ((@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
+                   OR (@archived = 1 AND qo.archived_at IS NOT NULL))
               AND  a.vendor_name IS NOT NULL AND a.vendor_name <> ''
               AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
             ORDER  BY a.vendor_name;
@@ -173,7 +188,8 @@ public class ClaimService : IClaimService
             SELECT DISTINCT qo.closed_by
             FROM   qms_quality_order qo
             LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
-            WHERE  qo.status_code = 'Closed'
+            WHERE  ((@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
+                   OR (@archived = 1 AND qo.archived_at IS NOT NULL))
               AND  qo.closed_by IS NOT NULL AND qo.closed_by <> ''
               AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
             ORDER  BY qo.closed_by;
@@ -182,10 +198,12 @@ public class ClaimService : IClaimService
             FROM   qms_claim cl
             JOIN   qms_quality_order qo ON qo.quality_order_id = cl.quality_order_id
             LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
-            WHERE  cl.last_changed_by IS NOT NULL AND cl.last_changed_by <> ''
+            WHERE  ((@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
+                   OR (@archived = 1 AND qo.archived_at IS NOT NULL))
+              AND  cl.last_changed_by IS NOT NULL AND cl.last_changed_by <> ''
               AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
             ORDER  BY cl.last_changed_by;",
-            new { sUnrestricted = scope.Unrestricted, sPlants = scope.QueryPlants });
+            new { sUnrestricted = scope.Unrestricted, sPlants = scope.QueryPlants, archived });
 
         return new ClaimFilterOptions
         {
