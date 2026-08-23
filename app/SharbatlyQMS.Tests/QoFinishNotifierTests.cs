@@ -84,8 +84,12 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         var (subject, html) = built!.Value;
 
         Assert.Contains("QC finished", subject);
-        // The basics the reader needs before opening the system at all.
-        Assert.Contains("QC number", html);
+        // The basics the reader needs before opening the system at all. Assert on
+        // the VALUE, not a field label: the order number moved into the header
+        // band during the redesign and a label check would have called that a
+        // regression when nothing was actually lost.
+        var qo = await scope.ServiceProvider.GetRequiredService<IQualityOrderService>().GetAsync(qoId);
+        Assert.Contains(qo!.QualityOrderNo, html);
         Assert.Contains("Supplier", html);
         Assert.Contains("Shipment", html);
         // And the reason the mail exists: the result, not just a "it finished".

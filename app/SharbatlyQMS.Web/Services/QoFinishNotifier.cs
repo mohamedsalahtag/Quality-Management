@@ -1,6 +1,7 @@
 using Dapper;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Services.Pdf;
 
 namespace SharbatlyQMS.Web.Services;
 
@@ -180,14 +181,15 @@ public class QoFinishNotifier : IQoFinishNotifier
 
     // ---- The mail itself ----------------------------------------------------
 
-    // A muted palette that survives Outlook: every colour is inline, no classes,
-    // no external stylesheet, and tables do the layout because Outlook's engine
-    // still ignores most of flex/grid.
-    private const string Ink    = "#212529";
-    private const string Muted  = "#6c757d";
-    private const string Line   = "#dee2e6";
-    private const string Accent = "#0d6efd";
-    private const string Wash   = "#f8f9fa";
+    // Every colour is inline and every layout is a table: Outlook still ignores
+    // most of flex and grid, and drops <style> blocks entirely in some versions.
+    private const string Ink    = "#1f2933";
+    private const string Muted  = "#7b8794";
+    private const string Line   = "#e4e7eb";
+    private const string Wash   = "#f5f7fa";
+    private const string Brand  = "#0b5ed7";
+    private const string Deep   = "#0a4bb0";
+    private const string Good   = "#0f7b4f";
 
     private async Task<(string subject, string html)?> BuildAsync(long qualityOrderId, string finishedBy)
     {
@@ -215,133 +217,202 @@ public class QoFinishNotifier : IQoFinishNotifier
                     + (string.IsNullOrWhiteSpace(arrival?.ContainerNo) ? "" : $" — {arrival!.ContainerNo}");
 
         var sb = new System.Text.StringBuilder();
-        sb.Append($"<div style=\"font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:{Ink};" +
-                   "max-width:820px;margin:0 auto\">");
+        sb.Append($"<div style=\"background:{Wash};padding:16px 0;font-family:Segoe UI,Roboto,Arial,sans-serif\">");
+        sb.Append("<table role=\"presentation\" align=\"center\" width=\"640\" cellpadding=\"0\" cellspacing=\"0\" " +
+                  $"style=\"width:640px;max-width:100%;border-collapse:collapse;background:#fff;" +
+                  $"border:1px solid {Line};border-radius:8px;overflow:hidden\">");
 
-        // ---- header band ----
-        sb.Append($"<div style=\"background:{Accent};color:#fff;padding:14px 18px;border-radius:6px 6px 0 0\">" +
-                  $"<div style=\"font-size:18px;font-weight:600\">Quality order finished</div>" +
-                  $"<div style=\"opacity:.9;font-size:13px;margin-top:2px\">{H(qo.QualityOrderNo)}" +
-                  (string.IsNullOrWhiteSpace(arrival?.ContainerNo) ? "" : $" &nbsp;&middot;&nbsp; {H(arrival!.ContainerNo)}") +
-                  $" &nbsp;&middot;&nbsp; finished by {H(finishedBy)} on " +
-                  $"{(qo.ClosedAt ?? DateTime.UtcNow).ToLocalTime():yyyy-MM-dd HH:mm}</div></div>");
-        sb.Append($"<div style=\"border:1px solid {Line};border-top:0;border-radius:0 0 6px 6px;padding:18px\">");
+        // ---- header ----------------------------------------------------------
+        sb.Append($"<tr><td style=\"background:{Brand};background-image:linear-gradient(135deg,{Brand},{Deep});" +
+                   "padding:16px 20px\">");
+        sb.Append("<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse\"><tr>");
+        sb.Append($"<td style=\"color:#fff;font-size:20px;font-weight:700;letter-spacing:.2px\">{H(qo.QualityOrderNo)}</td>");
+        sb.Append("<td align=\"right\"><span style=\"background:rgba(255,255,255,.22);color:#fff;font-size:11px;" +
+                  "font-weight:700;letter-spacing:.06em;text-transform:uppercase;padding:4px 10px;" +
+                  "border-radius:20px\">Finished</span></td>");
+        sb.Append("</tr></table>");
+        var sub = new[] { arrival?.ContainerNo, arrival?.VendorName }
+                  .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => H(x)).ToArray();
+        if (sub.Length > 0)
+            sb.Append($"<div style=\"color:#e8effb;font-size:13px;margin-top:3px\">{string.Join(" &nbsp;·&nbsp; ", sub)}</div>");
+        sb.Append($"<div style=\"color:#c3d6f5;font-size:12px;margin-top:2px\">by {H(finishedBy)} · " +
+                  $"{(qo.ClosedAt ?? DateTime.UtcNow).ToLocalTime():dd MMM yyyy HH:mm}</div>");
+        sb.Append("</td></tr>");
 
-        // ---- the finisher's comment, first and unmissable ----
+        sb.Append("<tr><td style=\"padding:18px 20px\">");
+
+        // ---- the finisher's comment, first and unmissable ---------------------
         // This is the decision criterion: whoever reads this mail is deciding
         // whether to raise a claim, and the inspector's note is the argument.
         if (!string.IsNullOrWhiteSpace(qo.CloseReason))
         {
-            sb.Append($"<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;margin-bottom:18px\"><tr>" +
-                      $"<td style=\"background:#fff3cd;border:1px solid #ffe69c;border-left:5px solid #ffc107;" +
-                       "border-radius:4px;padding:12px 14px\">" +
-                      $"<div style=\"font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#8a6d3b;" +
-                       "font-weight:700;margin-bottom:4px\">Inspector's note on finishing</div>" +
-                      $"<div style=\"font-size:15px;line-height:1.45\">{H(qo.CloseReason)}</div>" +
-                      $"</td></tr></table>");
+            sb.Append("<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;margin-bottom:14px\"><tr>" +
+                      "<td style=\"background:#fff8e6;border:1px solid #ffe3a3;border-left:4px solid #f0a500;" +
+                       "border-radius:6px;padding:10px 14px\">" +
+                      "<div style=\"font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#9a6b00;" +
+                       "font-weight:700;margin-bottom:3px\">Inspector&rsquo;s note on finishing</div>" +
+                      $"<div style=\"font-size:14px;line-height:1.45;color:#4a3600\">{H(qo.CloseReason)}</div>" +
+                      "</td></tr></table>");
         }
 
-        // ---- open in QMS ----
-        if (!string.IsNullOrWhiteSpace(link))
-        {
-            sb.Append($"<table role=\"presentation\" style=\"border-collapse:collapse;margin-bottom:18px\"><tr><td " +
-                      $"style=\"background:{Accent};border-radius:4px\">" +
-                      $"<a href=\"{H(link)}\" style=\"display:inline-block;padding:9px 18px;color:#fff;" +
-                       "text-decoration:none;font-weight:600;font-size:14px\">Open the quality order &rarr;</a>" +
-                      $"</td></tr></table>");
-        }
-
-        // ---- shipment basics ----
+        // ---- shipment facts, two columns so the block stays short -------------
         sb.Append(Heading("Shipment"));
-        sb.Append("<table role=\"presentation\" style=\"border-collapse:collapse;font-size:13px\">");
-        Row(sb, "QC number",        qo.QualityOrderNo);
-        Row(sb, "Container",        arrival?.ContainerNo);
-        Row(sb, "Bill of lading",   arrival?.BolNo);
-        Row(sb, "Purch. doc.",      arrival?.Ebeln);
-        Row(sb, "Procurement type", _codes.PoTypeDisplay(arrival?.PoType));
-        Row(sb, "Supplier",         arrival?.VendorName);
-        Row(sb, "Plant",            _codes.PlantDisplay(arrival?.Plant));
-        Row(sb, "Arrival",          arrival?.ArrivalNo);
-        Row(sb, "Vessel",           shipment?.VesselName);
-        Row(sb, "Discharge date",   shipment?.DischargeDate?.ToString("yyyy-MM-dd"));
-        Row(sb, "Opened",           qo.OpenedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
-        Row(sb, "Finished",         qo.ClosedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm"));
-        Row(sb, "Samples",          samples.Count.ToString());
+        var facts = new List<(string, string?)>
+        {
+            ("Container",        arrival?.ContainerNo),
+            ("Supplier",         arrival?.VendorName),
+            ("Bill of lading",   arrival?.BolNo),
+            ("Plant",            _codes.PlantDisplay(arrival?.Plant)),
+            ("Purch. doc.",      arrival?.Ebeln),
+            ("Procurement type", _codes.PoTypeDisplay(arrival?.PoType)),
+            ("Arrival",          arrival?.ArrivalNo),
+            ("Vessel",           shipment?.VesselName),
+            ("Discharge date",   shipment?.DischargeDate?.ToString("yyyy-MM-dd")),
+            ("Finished",         qo.ClosedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm")),
+            ("Samples",          samples.Count.ToString()),
+        }.Where(f => !string.IsNullOrWhiteSpace(f.Item2)).ToList();
+
+        sb.Append("<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;font-size:13px\">");
+        for (var i = 0; i < facts.Count; i += 2)
+        {
+            sb.Append("<tr>");
+            sb.Append(FactCell(facts[i]));
+            sb.Append(i + 1 < facts.Count ? FactCell(facts[i + 1]) : "<td colspan=\"2\"></td>");
+            sb.Append("</tr>");
+        }
         sb.Append("</table>");
 
-        // ---- the QC summary, per material group ----
-        // Deliberately the FULL rollup -- readings as well as defects -- so this
-        // mail says the same thing as the Summary on the quality order page. A
-        // shorter version would send people back into the system to see whether
-        // anything was actually wrong, which is the opposite of the point.
+        // ---- QC summary -------------------------------------------------------
+        // The FULL rollup -- readings as well as defects -- so this mail says the
+        // same thing as the Summary on the quality order page. A shorter version
+        // sends people back into the system to find out whether anything was
+        // actually wrong, which is the opposite of the point.
         sb.Append(Heading("QC summary"));
         if (summaries.Count == 0)
-        {
-            sb.Append($"<div style=\"color:{Muted}\">No samples were recorded on this order.</div>");
-        }
+            sb.Append($"<div style=\"color:{Muted};font-size:13px\">No samples were recorded on this order.</div>");
+
         foreach (var g in summaries)
         {
             var title = string.IsNullOrWhiteSpace(g.MaterialGroupDesc) ? g.MaterialGroup : g.MaterialGroupDesc!;
             var key = new[] { g.Brand, g.Variety, g.Grade }
                       .Where(x => !string.IsNullOrWhiteSpace(x)).Select(x => H(x)).ToArray();
+            var sections  = g.DefectSections.Where(s => s.Rows.Any(r => r.SumValue > 0)).ToList();
+            var defectSum = sections.Sum(s => s.Rows.Sum(r => r.SumValue));
+            var defectPct = g.SumSampleSize > 0 ? defectSum / g.SumSampleSize * 100m : 0m;
 
-            sb.Append($"<div style=\"border:1px solid {Line};border-radius:4px;margin:0 0 14px\">");
-            sb.Append($"<div style=\"background:{Wash};border-bottom:1px solid {Line};padding:8px 12px\">" +
-                      $"<div style=\"font-weight:600\">{H(title)}</div>" +
-                      (key.Length > 0
-                          ? $"<div style=\"color:{Muted};font-size:12px\">{string.Join(" &middot; ", key)}</div>"
-                          : "") +
-                      $"<div style=\"color:{Muted};font-size:12px;margin-top:2px\">" +
-                      $"{g.MaterialCount} material(s) &middot; {g.SampleCount} sample(s) &middot; " +
-                      $"{g.SumSampleSize:N0} {H(g.SampleUnit)} inspected</div></div>");
-            sb.Append("<div style=\"padding:10px 12px\">");
+            sb.Append($"<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;border:1px solid {Line};" +
+                       "border-radius:6px;margin:0 0 12px\">");
 
-            // Readings first: they describe the fruit, before the faults.
-            var readings = g.Readings.Where(r => !string.IsNullOrWhiteSpace(r.DisplayValue)).ToList();
+            // card header: name on the left, the one number that matters on the right
+            sb.Append($"<tr><td style=\"background:{Wash};border-bottom:1px solid {Line};padding:9px 12px\">");
+            sb.Append("<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse\"><tr>");
+            sb.Append($"<td><span style=\"font-size:15px;font-weight:700;color:{Ink}\">{H(title)}</span>");
+            if (key.Length > 0)
+                sb.Append($"<span style=\"color:{Muted};font-size:12px\"> &nbsp;{string.Join(" · ", key)}</span>");
+            sb.Append($"<div style=\"color:{Muted};font-size:11px;margin-top:2px\">" +
+                      $"{g.MaterialCount} material(s) · {g.SampleCount} sample(s) · " +
+                      $"{g.SumSampleSize:N0} {H(g.SampleUnit)} inspected</div></td>");
+            sb.Append("<td align=\"right\" valign=\"top\">" + (sections.Count == 0
+                ? $"<span style=\"background:#e6f5ee;color:{Good};font-size:11px;font-weight:700;" +
+                   "padding:4px 10px;border-radius:20px;white-space:nowrap\">No defects</span>"
+                : $"<span style=\"background:{Ink};color:#fff;font-size:12px;font-weight:700;" +
+                  $"padding:4px 10px;border-radius:20px;white-space:nowrap\">{defectPct:N2}% defects</span>")
+                + "</td>");
+            sb.Append("</tr></table></td></tr>");
+
+            sb.Append("<tr><td style=\"padding:10px 12px\">");
+
+            // Readings as inline chips: a dozen label/value rows was most of the
+            // mail's height, and these are context rather than the finding.
+            // The SAME filter the QC report and the on-screen summary use: it
+            // drops the not-yet-designed formula rows and the identifier fields
+            // (PUC, grower, lot, date code) that mean nothing rolled up across a
+            // group. Without it the mail showed readings the summary it claims to
+            // mirror does not.
+            var readings = SummaryReadingFilter.VisibleSummaryReadings(g.Readings)
+                .Where(r => !string.IsNullOrWhiteSpace(r.DisplayValue))
+                .ToList();
             if (readings.Count > 0)
             {
-                sb.Append($"<div style=\"font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:{Muted};" +
-                           "font-weight:700;margin-bottom:4px\">Readings</div>");
-                sb.Append("<table role=\"presentation\" style=\"border-collapse:collapse;font-size:13px;margin-bottom:12px\">");
+                sb.Append($"<div style=\"font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:{Muted};" +
+                           "font-weight:700;margin-bottom:5px\">Readings</div><div style=\"margin-bottom:10px\">");
                 foreach (var r in readings)
-                    Row(sb, r.Name, r.DisplayValue + (string.IsNullOrWhiteSpace(r.Unit) ? "" : " " + r.Unit));
-                sb.Append("</table>");
+                    sb.Append($"<span style=\"display:inline-block;background:{Wash};border:1px solid {Line};" +
+                              $"border-radius:14px;padding:2px 9px;margin:0 4px 4px 0;font-size:12px;color:{Ink}\">" +
+                              $"<span style=\"color:{Muted}\">{H(r.Name)}</span> <b>{H(r.DisplayValue)}" +
+                              (string.IsNullOrWhiteSpace(r.Unit) ? "" : " " + H(r.Unit)) + "</b></span>");
+                sb.Append("</div>");
             }
 
-            var sections = g.DefectSections.Where(sec => sec.Rows.Any(r => r.SumValue > 0)).ToList();
             if (sections.Count == 0)
             {
-                sb.Append("<div style=\"color:#198754;font-weight:600\">No defects recorded.</div>");
+                sb.Append($"<div style=\"color:{Good};font-size:13px;font-weight:600\">No defects recorded.</div>");
             }
             else
             {
                 foreach (var sec in sections)
                 {
+                    // The category's OWN configured colour, darkened for white by
+                    // the same helper the on-screen summary uses -- so the mail and
+                    // the app agree instead of inventing a second palette.
+                    var col   = SummaryReadingFilter.ReadableOnWhite(sec.ColorHex);
                     var total = sec.Rows.Sum(r => r.SumValue);
                     var pct   = g.SumSampleSize > 0 ? total / g.SumSampleSize * 100m : 0m;
-                    sb.Append($"<div style=\"font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:{Muted};" +
-                               "font-weight:700;margin:8px 0 4px\">" + H(sec.CategoryName) +
-                              $" <span style=\"color:{Ink}\">&mdash; {total:N2} ({pct:N2}%)</span></div>");
-                    sb.Append($"<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;font-size:13px\">");
+
+                    sb.Append("<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;margin-bottom:8px\">");
+                    sb.Append($"<tr><td style=\"border-left:3px solid {col};padding:0 0 0 8px\">");
+
+                    sb.Append("<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse\"><tr>" +
+                              $"<td style=\"font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;" +
+                              $"color:{col}\">{H(sec.CategoryName)}</td>" +
+                              $"<td align=\"right\" style=\"font-size:12px;color:{Ink}\"><b>{total:N2}</b> " +
+                              $"<span style=\"color:{Muted}\">({pct:N2}%)</span></td></tr></table>");
+
+                    // A proportion bar, drawn with table cells because a div with a
+                    // percentage width is unreliable in Outlook.
+                    var w = (int)Math.Round(Math.Clamp(pct, 0, 100));
+                    sb.Append($"<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;margin:4px 0 5px\">" +
+                              $"<tr><td style=\"height:4px;background:{col};width:{w}%;font-size:0;line-height:0\">&nbsp;</td>" +
+                              $"<td style=\"height:4px;background:{Line};width:{100 - w}%;font-size:0;line-height:0\">&nbsp;</td>" +
+                              "</tr></table>");
+
+                    sb.Append($"<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;font-size:12.5px\">");
                     foreach (var r in sec.Rows.Where(r => r.SumValue > 0).OrderByDescending(r => r.SumValue))
                         sb.Append("<tr>"
-                            + $"<td style=\"padding:2px 10px 2px 0;border-bottom:1px solid {Wash}\">{H(r.Name)}</td>"
-                            + $"<td style=\"padding:2px 10px 2px 0;text-align:right;border-bottom:1px solid {Wash}\">{r.SumValue:N2}</td>"
-                            + $"<td style=\"padding:2px 0;text-align:right;width:70px;border-bottom:1px solid {Wash};font-weight:600\">{r.Percentage:N2}%</td>"
+                            + $"<td style=\"padding:2px 8px 2px 0;color:{Ink}\">{H(r.Name)}</td>"
+                            + $"<td align=\"right\" style=\"padding:2px 10px 2px 0;color:{Muted};width:72px\">{r.SumValue:N2}</td>"
+                            + $"<td align=\"right\" style=\"padding:2px 0;width:60px;font-weight:700;color:{Ink}\">{r.Percentage:N2}%</td>"
                             + "</tr>");
                     sb.Append("</table>");
+
+                    sb.Append("</td></tr></table>");
                 }
             }
-            sb.Append("</div></div>");
+            sb.Append("</td></tr></table>");
         }
 
-        sb.Append($"<div style=\"color:{Muted};font-size:12px;border-top:1px solid {Line};padding-top:10px;margin-top:6px\">" +
+        // ---- call to action, after the reader knows what they are opening -----
+        if (!string.IsNullOrWhiteSpace(link))
+        {
+            sb.Append("<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;margin:4px 0 2px\"><tr>" +
+                      $"<td align=\"center\" style=\"background:{Brand};border-radius:6px\">" +
+                      $"<a href=\"{H(link)}\" style=\"display:block;padding:11px 20px;color:#fff;text-decoration:none;" +
+                       "font-weight:600;font-size:14px\">Open the quality order &rarr;</a></td></tr></table>");
+        }
+
+        sb.Append("</td></tr>");
+        sb.Append($"<tr><td style=\"background:{Wash};border-top:1px solid {Line};padding:10px 20px;" +
+                  $"color:{Muted};font-size:11px;line-height:1.5\">" +
                    "Sent automatically by Sharbatly QMS when a quality order is finished. " +
-                   "The full report, with photos, is available in the system.</div>");
-        sb.Append("</div></div>");
+                   "The full report, with photos, is in the system.</td></tr>");
+        sb.Append("</table></div>");
 
         return (subject, sb.ToString());
     }
+
+    private static string FactCell((string Label, string? Value) f) =>
+        $"<td style=\"padding:3px 14px 3px 0;color:{Muted};white-space:nowrap;width:1%\">{H(f.Label)}</td>" +
+        $"<td style=\"padding:3px 18px 3px 0;font-weight:600;color:{Ink}\">{H(f.Value)}</td>";
 
     /// <summary>
     /// Absolute link to the order. Built from Site Configuration's site URL,
@@ -358,15 +429,8 @@ public class QoFinishNotifier : IQoFinishNotifier
     }
 
     private static string Heading(string title) =>
-        $"<div style=\"font-weight:600;font-size:15px;border-bottom:2px solid {Line};" +
-        $"padding-bottom:4px;margin:20px 0 10px\">{title}</div>";
-
-    private static void Row(System.Text.StringBuilder sb, string label, string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value)) return;   // an empty row tells the reader nothing
-        sb.Append($"<tr><td style=\"padding:3px 16px 3px 0;color:{Muted};vertical-align:top\">{H(label)}</td>"
-                + $"<td style=\"padding:3px 0;font-weight:600\">{H(value!)}</td></tr>");
-    }
+        $"<div style=\"font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;" +
+        $"color:{Muted};border-bottom:1px solid {Line};padding-bottom:5px;margin:14px 0 9px\">{title}</div>";
 
     private static string H(string? s) => System.Net.WebUtility.HtmlEncode(s ?? "");
 }
