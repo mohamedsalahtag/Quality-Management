@@ -297,6 +297,15 @@
     .pending-table .pp-stack > *,
     .pending-table .pp-stack    { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+    /* ...except the cell holding the plant dropdown. A Bootstrap menu is a CHILD
+       of the cell it opens from, so the ellipsis clipping above swallowed it
+       whole: it opened at 240x113 and painted nothing, which read as "the plant
+       override stopped working". Nothing overflows visually as a result -- the
+       badge inside carries its own max-width and ellipsis. */
+    .pending-table td.pp-has-menu,
+    .pending-table td.pp-has-menu .pp-stack,
+    .pending-table td.pp-has-menu .pp-stack > * { overflow: visible; }
+
     /* Percentages, not pixels, so every width scales with the window. They sum
        to 100. Vendor, Materials and BOL carry the reductions -- BOL is a fixed
        length code that never needed 189px, and Vendor/Materials were simply
@@ -450,8 +459,11 @@
                         </td>
                         @* Plant and storage are separate columns so each can be
                            sorted and hidden on its own. Name in the badge, SAP
-                           code in the tooltip -- the name is what people read. *@
-                        <td>
+                           code in the tooltip -- the name is what people read.
+                           pp-has-menu: this cell also holds the "move container
+                           to another plant" dropdown, which must not be clipped
+                           by the column's ellipsis rules -- see the stylesheet. *@
+                        <td class="pp-has-menu">
                             <div class="pp-stack">
                                 <div class="d-flex align-items-center gap-1">
                                     @if (!string.IsNullOrEmpty(r.Plant))
