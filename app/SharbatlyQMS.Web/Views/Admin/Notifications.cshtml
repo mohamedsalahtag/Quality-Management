@@ -1,0 +1,137 @@
+@using SharbatlyQMS.Web.Services
+@{
+    ViewData["Title"] = "Notifications";
+    var people   = ViewBag.Candidates as IReadOnlyList<NotifyCandidate> ?? new List<NotifyCandidate>();
+    var canEdit  = Perms.Can(Perm.Parameters.NotificationsEdit);
+    var selected = people.Count(p => p.Selected);
+    var mailable = people.Where(p => p.IsActive && p.CanBeMailed).ToList();
+    var noEmail  = people.Where(p => p.IsActive && !p.CanBeMailed).ToList();
+    var inactive = people.Where(p => !p.IsActive && p.Selected).ToList();
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">
+        <i class="bi bi-bell me-1 text-primary"></i>Notifications
+        <small class="text-muted fs-6 fw-normal ms-2">Who is emailed when a quality order is finished</small>
+    </h1>
+</div>
+
+<div class="alert alert-light border d-flex gap-2 align-items-start">
+    <i class="bi bi-info-circle mt-1 text-primary"></i>
+    <div class="small">
+        The moment an order is finished, everyone ticked below receives a mail with the
+        shipment's basic details and the QC summary &mdash; samples inspected and the
+        defect breakdown per material group.
+        <strong>Nobody ticked means nobody is mailed</strong>, which is how the notification
+        is switched off.
+        <div class="text-muted mt-1">
+            Addresses come from each person's profile, so a changed address follows them
+            automatically and a deactivated account stops receiving mail on its own.
+        </div>
+    </div>
+</div>
+
+<form method="post" asp-action="SaveNotifications">
+    @Html.AntiForgeryToken()
+
+    <div class="card mb-3">
+        <div class="card-header py-2 d-flex justify-content-between align-items-center">
+            <span>
+                <i class="bi bi-people me-1"></i>Recipients
+                <span class="badge text-bg-@(selected > 0 ? "primary" : "secondary") ms-1">@selected selected</span>
+            </span>
+            @if (canEdit && mailable.Count > 0)
+            {
+                <span class="small">
+                    <a href="#" class="text-decoration-none" data-select-all>Select all</a>
+                    <span class="text-muted mx-1">&middot;</span>
+                    <a href="#" class="text-decoration-none" data-select-none>Clear</a>
+                </span>
+            }
+        </div>
+
+        @if (mailable.Count == 0)
+        {
+            <div class="card-body text-muted">
+                No active user has an email address on their profile, so there is nobody to
+                notify yet. Add addresses on <a asp-action="Users">Users</a> first.
+            </div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0 qms-index-table">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width:3rem"></th>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th style="width:11rem">Role</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var p in mailable)
+                        {
+                            <tr>
+                                <td>
+                                    <input class="form-check-input" type="checkbox" name="userIds"
+                                           value="@p.UserId" id="nu-@p.UserId"
+                                           checked="@p.Selected" disabled="@(!canEdit)" />
+                                </td>
+                                <td><label class="mb-0" for="nu-@p.UserId">@p.FullName</label></td>
+                                <td class="text-muted">@p.Email</td>
+                                <td><span class="badge bg-light text-dark border">@p.RoleName</span></td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+
+    @* People who cannot be reached are listed rather than silently omitted -- an
+       admin who ticks nobody because a colleague is missing should be able to see
+       why they are missing. *@
+    @if (noEmail.Count > 0)
+    {
+        <div class="alert alert-warning small">
+            <i class="bi bi-exclamation-triangle me-1"></i>
+            @noEmail.Count active user(s) have no email address and cannot be notified:
+            <strong>@string.Join(", ", noEmail.Select(p => p.FullName))</strong>.
+            Add an address on the <a asp-action="Users">Users</a> screen to make them selectable.
+        </div>
+    }
+    @if (inactive.Count > 0)
+    {
+        <div class="alert alert-secondary small">
+            <i class="bi bi-person-dash me-1"></i>
+            @inactive.Count selected recipient(s) are deactivated and are being skipped:
+            <strong>@string.Join(", ", inactive.Select(p => p.FullName))</strong>.
+            Saving this page removes them from the list.
+        </div>
+    }
+
+    @if (canEdit)
+    {
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-save me-1"></i>Save recipients
+        </button>
+    }
+</form>
+
+@section Scripts {
+    <script>
+        (function () {
+            function setAll(on) {
+                document.querySelectorAll('input[name="userIds"]:not([disabled])')
+                        .forEach(function (c) { c.checked = on; });
+            }
+            document.querySelector('[data-select-all]')?.addEventListener('click', function (e) {
+                e.preventDefault(); setAll(true);
+            });
+            document.querySelector('[data-select-none]')?.addEventListener('click', function (e) {
+                e.preventDefault(); setAll(false);
+            });
+        })();
+    </script>
+}

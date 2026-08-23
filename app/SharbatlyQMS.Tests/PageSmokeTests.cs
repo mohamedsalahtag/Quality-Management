@@ -78,6 +78,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         "/Admin/ArrivalFields",
         "/Admin/SampleHeaders",
         "/Admin/MailTemplate",
+        "/Admin/Notifications",
         "/Reports/FlatDefects",
         "/Reports/Perspectives?report=flat_defects",
         "/Reports/PivotSchema?report=flat_defects",

@@ -60,6 +60,9 @@ builder.Services.AddScoped<IPermissionLogService, PermissionLogService>();
 // Reads both the permission log and the audit log to build the Users &
 // security feed; neither table holds the whole story on its own.
 builder.Services.AddScoped<ISecurityLogService, SecurityLogService>();
+// Emails the people chosen in Parameters -> Notifications when a quality
+// order is finished.
+builder.Services.AddScoped<IQoFinishNotifier, QoFinishNotifier>();
 builder.Services.AddScoped<AuditContextActionFilter>();
 builder.Services.AddScoped<SharbatlyQMS.Web.Security.PermissionDecisionFilter>();
 builder.Services.AddScoped<IImageService, ImageService>();

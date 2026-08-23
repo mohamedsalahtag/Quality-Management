@@ -20,13 +20,17 @@ public class QualityOrdersController : Controller
     private readonly ICatalogCache _cat;
     private readonly IUserPermissions _perms;
     private readonly ILogger<QualityOrdersController> _log;
+    /// <summary>The finish notification runs after the response, so it needs
+    /// its own scope rather than this request's disposed services.</summary>
+    private readonly IServiceScopeFactory _scopeFactory;
 
     public QualityOrdersController(IQualityOrderService qos, IArrivalService arrivals,
         IImageService images, IMaraService mara, ICatalogCache cat,
-        IUserPermissions perms, ILogger<QualityOrdersController> log)
+        IUserPermissions perms, ILogger<QualityOrdersController> log,
+        IServiceScopeFactory scopeFactory)
     {
         _qos = qos; _arrivals = arrivals; _images = images; _mara = mara;
-        _cat = cat; _perms = perms; _log = log;
+        _cat = cat; _perms = perms; _log = log; _scopeFactory = scopeFactory;
     }
 
     [RequireScreen(Screens.QoIndex, Seed.Everyone, "Open Quality Orders")]
@@ -494,7 +498,24 @@ public class QualityOrdersController : Controller
             TempData["Error"] = "A reason is required to finish with materials that have no samples.";
             return RedirectToAction(nameof(Details), new { id });
         }
-        return await TransitionAsync(id, (qos, user, r) => qos.CloseAsync(id, user, r, bypassNoSamples), reason);
+        var result = await TransitionAsync(id, (qos, user, r) => qos.CloseAsync(id, user, r, bypassNoSamples), reason);
+
+        // Tell whoever Parameters -> Notifications lists. Deliberately after the
+        // transition and deliberately not awaited into the response: the order is
+        // already finished, so a slow or dead mail server must not hold up the
+        // operator's redirect or turn their success into an error. The notifier
+        // swallows and logs its own failures.
+        if (await _qos.GetAsync(id) is { StatusCode: "Closed" })
+        {
+            var actor = User.FindFirstValue(ClaimTypes.Name) ?? "unknown";
+            _ = Task.Run(async () =>
+            {
+                using var scope = _scopeFactory.CreateScope();
+                var notifier = scope.ServiceProvider.GetRequiredService<IQoFinishNotifier>();
+                await notifier.NotifyFinishedAsync(id, actor);
+            });
+        }
+        return result;
     }
 
     [HttpPost, ValidateAntiForgeryToken]

@@ -90,6 +90,7 @@ public static class Perm
         public const string ReportUnitsEdit      = Screens.ReportUnits      + ".Edit";
         public const string CodeDescriptionsEdit = Screens.CodeDescriptions + ".Edit";
         public const string MailTemplateEdit     = Screens.MailTemplate     + ".Edit";
+        public const string NotificationsEdit    = Screens.Notifications    + ".Edit";
     }
 
     public static class Admin

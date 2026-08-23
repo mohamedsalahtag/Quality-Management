@@ -35,18 +35,20 @@ public class AdminController : Controller
     private readonly IPermissionResolver _perms;
     private readonly IUserAdminService _userAdmin;
     private readonly IPermissionLogService _permLog;
+    private readonly IQoFinishNotifier _notifier;
 
     public AdminController(IDbService db, ISettingsService settings,
         ISapODataClient sapOData, ISapSyncService sapSync, IEmailService email,
         IAdService ad, IServiceScopeFactory scopeFactory, IWebHostEnvironment env,
         ILogger<AdminController> adminLog, ICatalogCache catalogCache, IMaraService mara,
         IAuditService audit, ICodeDescriptionDirectory codes, IPermissionResolver perms,
-        IUserAdminService userAdmin, IPermissionLogService permLog)
+        IUserAdminService userAdmin, IPermissionLogService permLog,
+        IQoFinishNotifier notifier)
     {
         _db = db; _settings = settings; _sapOData = sapOData; _sapSync = sapSync;
         _email = email; _ad = ad; _scopeFactory = scopeFactory; _env = env; _adminLog = adminLog;
         _catalogCache = catalogCache; _mara = mara; _audit = audit; _codes = codes; _perms = perms;
-        _userAdmin = userAdmin; _permLog = permLog;
+        _userAdmin = userAdmin; _permLog = permLog; _notifier = notifier;
     }
 
     [HttpGet]
@@ -1838,6 +1840,30 @@ public class AdminController : Controller
 
     // ---- Mail template (Parameters menu) -----------------------------
     [HttpGet]
+    [RequireScreen(Screens.Notifications, Seed.ManagerOrAdmin, "Open Notifications")]
+    public async Task<IActionResult> Notifications()
+    {
+        ViewBag.Candidates = await _notifier.ListCandidatesAsync();
+        return View();
+    }
+
+    /// <summary>
+    /// Replaces the recipient list. Posting no checkboxes is a valid choice --
+    /// it turns the notification off -- so an absent list means empty, not
+    /// "leave as it was".
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Parameters.NotificationsEdit, Seed.ManagerOrAdmin, "Choose who is notified")]
+    public async Task<IActionResult> SaveNotifications(int[]? userIds)
+    {
+        var ids = userIds ?? Array.Empty<int>();
+        await _notifier.SaveRecipientsAsync(ids, User.FindFirstValue(ClaimTypes.Name) ?? "unknown");
+        TempData["Success"] = ids.Length == 0
+            ? "Nobody will be emailed when a quality order is finished."
+            : $"{ids.Length} recipient(s) will be emailed when a quality order is finished.";
+        return RedirectToAction(nameof(Notifications));
+    }
+
     [RequireScreen(Screens.MailTemplate, Seed.ManagerOrAdmin, "Open the Mail Template")]
     public async Task<IActionResult> MailTemplate()
     {

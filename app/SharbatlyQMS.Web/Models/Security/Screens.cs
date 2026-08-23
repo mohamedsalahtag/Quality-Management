@@ -42,6 +42,8 @@ public static class Screens
     public const string ReportUnits        = "Parameters.ReportUnits";
     public const string CodeDescriptions   = "Parameters.CodeDescriptions";
     public const string MailTemplate       = "Parameters.MailTemplate";
+    /// <summary>Who is emailed when a quality order is finished.</summary>
+    public const string Notifications      = "Parameters.Notifications";
 
     // ---- Admin ----
     public const string AdminSettings      = "Admin.Settings";
@@ -57,6 +59,7 @@ public static class Screens
         ReportsDataHub, ReportsBuilder,
         DefectCatalog, DefectCategories, ReadingTypes, SampleHeaders,
         ArrivalFields, ArrivalFieldRules, ReportUnits, CodeDescriptions, MailTemplate,
+        Notifications,
         AdminSettings, AdminUsers, AdminAuditLog, AdminSecurity
     };
 
@@ -64,7 +67,7 @@ public static class Screens
     public static readonly string[] ParametersGroup =
     {
         DefectCatalog, DefectCategories, ReadingTypes, SampleHeaders,
-        ArrivalFields, ReportUnits, CodeDescriptions, MailTemplate
+        ArrivalFields, ReportUnits, CodeDescriptions, MailTemplate, Notifications
     };
 
     /// <summary>Screens whose nav entries live in the Admin dropdown.</summary>
