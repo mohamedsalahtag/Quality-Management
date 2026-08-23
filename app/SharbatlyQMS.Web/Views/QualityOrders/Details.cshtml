@@ -732,7 +732,19 @@
                             <textarea id="srm-body" name="body" class="form-control" rows="8" required></textarea>
                             <div class="form-text">Plain text. The PDF report is attached automatically.</div>
                         </div>
-                        <div class="small text-muted"><i class="bi bi-paperclip me-1"></i><span id="srm-filename">report.pdf</span> (generated when you press Send)</div>
+                        <div class="small text-muted mb-2"><i class="bi bi-paperclip me-1"></i><span id="srm-filename">report.pdf</span> (generated when you press Send)</div>
+
+                        @* Documents already on the order or its arrival. Offered
+                           here so a packing list or certificate can go with the
+                           report without leaving the dialog to find it. *@
+                        <div id="srm-docs-wrap" class="d-none">
+                            <label class="form-label mb-1">Also attach</label>
+                            <div id="srm-docs" class="border rounded p-2" style="max-height:12rem;overflow:auto"></div>
+                            <div class="form-text d-flex justify-content-between">
+                                <span>From this quality order and its arrival.</span>
+                                <span id="srm-docs-total" class="text-muted"></span>
+                            </div>
+                        </div>
                     </form>
                 </div>
                 <div class="modal-footer">
@@ -1300,6 +1312,54 @@
     }
 
     // ---- Send report to supplier modal -------------------------------
+    // Groups the offered documents by where they live, and keeps a running
+    // total: mail servers reject oversized messages, and the sender should see
+    // the weight building up rather than discover it from a bounce.
+    function renderSrmDocs(docs) {
+        const wrap = document.getElementById('srm-docs-wrap');
+        const box  = document.getElementById('srm-docs');
+        if (!wrap || !box) return;
+        box.innerHTML = '';
+        if (!docs.length) { wrap.classList.add('d-none'); return; }
+        wrap.classList.remove('d-none');
+
+        const bySource = {};
+        docs.forEach(d => { (bySource[d.source] = bySource[d.source] || []).push(d); });
+        Object.keys(bySource).forEach(src => {
+            const h = document.createElement('div');
+            h.className = 'text-muted small fw-semibold mt-1 mb-1';
+            h.textContent = src;
+            box.appendChild(h);
+            bySource[src].forEach(d => {
+                const row = document.createElement('div');
+                row.className = 'form-check';
+                const id = 'srm-doc-' + d.id;
+                row.innerHTML =
+                    '<input class="form-check-input" type="checkbox" value="' + d.id + '" id="' + id + '">' +
+                    '<label class="form-check-label small" for="' + id + '"></label>';
+                const lbl = row.querySelector('label');
+                lbl.textContent = d.name;
+                const meta = document.createElement('span');
+                meta.className = 'text-muted';
+                meta.textContent = '  ' + (d.category || '') + ' · ' + d.sizeKb + ' KB';
+                lbl.appendChild(meta);
+                row.querySelector('input').addEventListener('change', srmDocTotal);
+                box.appendChild(row);
+            });
+        });
+        srmDocTotal();
+
+        function srmDocTotal() {
+            let kb = 0;
+            document.querySelectorAll('#srm-docs input[type=checkbox]:checked').forEach(c => {
+                const d = docs.find(x => String(x.id) === c.value);
+                if (d) kb += d.sizeKb;
+            });
+            const el = document.getElementById('srm-docs-total');
+            el.textContent = kb === 0 ? '' : (kb / 1024).toFixed(1) + ' MB selected, plus the report';
+        }
+    }
+
     let SRM_VENDOR_NO = '';
     const srmEl = document.getElementById('sendReportModal');
     if (srmEl) {
@@ -1342,6 +1402,8 @@
                 const canRemember = !!SRM_VENDOR_NO && which !== 'sap';
                 remember.checked  = canRemember;
                 remember.disabled = !canRemember;
+                renderSrmDocs(data.documents || []);
+
                 document.getElementById('srm-load').classList.add('d-none');
                 document.getElementById('srm-form').classList.remove('d-none');
             } catch (e) {
@@ -1356,6 +1418,8 @@
             fd.append('cc',      document.getElementById('srm-cc').value);
             fd.append('subject', document.getElementById('srm-subject').value);
             fd.append('body',    document.getElementById('srm-body').value);
+            document.querySelectorAll('#srm-docs input[type=checkbox]:checked')
+                    .forEach(c => fd.append('documentIds', c.value));
             if (!fd.get('to') || !fd.get('subject') || !fd.get('body')) {
                 showToast('Recipient, subject and body are required.', 'warning'); return;
             }

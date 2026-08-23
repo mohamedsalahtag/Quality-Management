@@ -35,6 +35,7 @@ public class ReportsController : Controller
     private readonly ILogger<ReportsController> _log;
     private readonly IDbService _db;
     private readonly ICodeDescriptionDirectory _codes;
+    private readonly IDocumentService _docs;
 
     // Hard cap on rows in a single flat-defects Excel export to bound memory.
     private const int MaxExportRows = 250_000;
@@ -45,7 +46,7 @@ public class ReportsController : Controller
         IPivotService pivot, IPerspectiveService perspectives,
         IReportBuilderExporter reportBuilder,
         IConfiguration config, IWebHostEnvironment env, ILogger<ReportsController> log,
-        IDbService db, ICodeDescriptionDirectory codes)
+        IDbService db, ICodeDescriptionDirectory codes, IDocumentService docs)
     {
         _qos = qos; _arrivals = arrivals; _images = images;
         _settings = settings; _mara = mara;
@@ -53,7 +54,7 @@ public class ReportsController : Controller
         _pivot = pivot; _perspectives = perspectives;
         _reportBuilder = reportBuilder;
         _config = config; _env = env; _log = log;
-        _db = db; _codes = codes;
+        _db = db; _codes = codes; _docs = docs;
     }
 
     /// <summary>
@@ -174,7 +175,18 @@ public class ReportsController : Controller
             alwaysCc      = MailAddresses.Split(template.Cc),
             subject       = Substitute(template.Subject),
             body          = Substitute(template.Body),
-            fileName      = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf"
+            fileName      = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf",
+            // Documents already on this order and on its arrival, so the sender
+            // can add a packing list or certificate without leaving the dialog
+            // to go and find them.
+            documents     = (await AttachableDocumentsAsync(qo)).Select(d => new
+            {
+                id       = d.Doc.DocumentId,
+                name     = d.Doc.OriginalName,
+                category = d.Doc.Category,
+                sizeKb   = (int)Math.Ceiling(d.Doc.FileSizeBytes / 1024.0),
+                source   = d.Source
+            })
         });
     }
 
@@ -185,7 +197,8 @@ public class ReportsController : Controller
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier")]
-    public async Task<IActionResult> SendQualityReport(long id, string to, string? cc, string subject, string body, CancellationToken ct = default)
+    public async Task<IActionResult> SendQualityReport(long id, string to, string? cc, string subject, string body,
+        long[]? documentIds = null, CancellationToken ct = default)
     {
         var qo = await _qos.GetAsync(id);
         if (qo == null) return Json(new { ok = false, error = "Quality Order not found." });
@@ -211,13 +224,78 @@ public class ReportsController : Controller
         var ccList = MailAddresses.Merge(cc, template.Cc)
                                   .Where(a => !toList.Contains(a, StringComparer.OrdinalIgnoreCase))
                                   .ToList();
+        var attachments = new List<(byte[] bytes, string fileName, string mediaType)>
+        {
+            (bytes, fileName, "application/pdf")
+        };
+
+        // Documents the sender ticked. Every id is checked against the documents
+        // that actually belong to THIS order or its arrival -- the ids arrive
+        // from the browser, and without that check any document in the system
+        // could be mailed out by guessing a number.
+        var picked = new List<string>();
+        if (documentIds is { Length: > 0 })
+        {
+            var allowed = (await AttachableDocumentsAsync(qo)).ToDictionary(d => d.Doc.DocumentId);
+            foreach (var docId in documentIds.Distinct())
+            {
+                if (!allowed.TryGetValue(docId, out var hit))
+                {
+                    _log.LogWarning("QO {Qo}: refused to attach document {DocId} -- not on this order or its arrival.",
+                        qo.QualityOrderNo, docId);
+                    return Json(new { ok = false, error = "One of the selected documents does not belong to this order." });
+                }
+                var abs = _docs.ResolveAbsolutePath(hit.Doc);
+                if (abs == null || !System.IO.File.Exists(abs))
+                    return Json(new { ok = false, error = $"'{hit.Doc.OriginalName}' is no longer on disk." });
+
+                attachments.Add((await System.IO.File.ReadAllBytesAsync(abs, ct),
+                                 hit.Doc.OriginalName,
+                                 string.IsNullOrWhiteSpace(hit.Doc.ContentType) ? "application/octet-stream" : hit.Doc.ContentType));
+                picked.Add(hit.Doc.OriginalName);
+            }
+        }
+
+        // Mail servers reject oversized messages outright, and the sender would
+        // see only a generic failure. Say which limit was hit, before sending.
+        var totalBytes = attachments.Sum(a => (long)a.bytes.Length);
+        if (totalBytes > MaxMailAttachmentBytes)
+            return Json(new
+            {
+                ok = false,
+                error = $"The attachments total {totalBytes / 1024.0 / 1024.0:N1} MB, over the "
+                      + $"{MaxMailAttachmentBytes / 1024 / 1024} MB limit most mail servers accept. "
+                      + "Untick some documents and send again."
+            });
+
         var (ok, error) = await _email.SendWithAttachmentsAsync(
-            toList, ccList, subject, body, bodyIsHtml: false,
-            attachments: new[] { (bytes, fileName, "application/pdf") });
+            toList, ccList, subject, body, bodyIsHtml: false, attachments: attachments);
 
         if (!ok) return Json(new { ok = false, error = error ?? "Send failed." });
-        _log.LogInformation("QO {Qo} report emailed to {To} (cc={Cc})", qo.QualityOrderNo, string.Join(",", toList), string.Join(",", ccList));
+        _log.LogInformation("QO {Qo} report emailed to {To} (cc={Cc}) with {Count} extra document(s): {Docs}",
+            qo.QualityOrderNo, string.Join(",", toList), string.Join(",", ccList), picked.Count, string.Join(",", picked));
         return Json(new { ok = true });
+    }
+
+    /// <summary>Total attachment budget for one supplier mail. Exchange defaults
+    /// to 25 MB inbound and most relays sit at or below that; the QC report alone
+    /// can be a good share of it once photos are in.</summary>
+    private const long MaxMailAttachmentBytes = 20L * 1024 * 1024;
+
+    /// <summary>
+    /// The documents a supplier mail may carry: those on the quality order and
+    /// those on the arrival behind it. One list, one place, used both to OFFER
+    /// them in the dialog and to VALIDATE what comes back — so the two can never
+    /// disagree about what is attachable.
+    /// </summary>
+    private async Task<List<(DocumentInfo Doc, string Source)>> AttachableDocumentsAsync(Models.QualityOrder qo)
+    {
+        var list = new List<(DocumentInfo, string)>();
+        foreach (var d in await _docs.ListAsync("QualityOrder", qo.QualityOrderId))
+            list.Add((d, "Quality order"));
+        foreach (var d in await _docs.ListAsync("Arrival", qo.ArrivalId))
+            list.Add((d, "Arrival"));
+        return list;
     }
 
     /// <summary>
