@@ -222,6 +222,13 @@
                 <div class="col-md-3"><strong>BOL:</strong> @arrival.BolNo</div>
                 <div class="col-md-3"><strong>Vendor:</strong> @arrival.VendorName</div>
                 <div class="col-md-3"><strong>PO:</strong> @arrival.Ebeln</div>
+                @* SAP's purchase-order document type, the same "Procurement Type"
+                   the QC report prints. Shown here so the claim page carries it
+                   too -- this view serves both. *@
+                <div class="col-md-3">
+                    <strong>Procurement Type:</strong>
+                    <span title="@arrival.PoType">@Codes.PoTypeDisplay(arrival.PoType)</span>
+                </div>
                 <div class="col-md-3"><strong>Vessel:</strong> @shipment.VesselName / @shipment.VoyageNumber</div>
                 <div class="col-md-3"><strong>Loading:</strong> @shipment.LoadingPort, @shipment.LoadingCountry</div>
                 <div class="col-md-3"><strong>Sailing:</strong> @shipment.SailingDate?.ToString("yyyy-MM-dd")</div>
@@ -489,6 +496,35 @@
                     };
                 }
                 <partial name="_DocumentList" model="qoDocsVm" />
+
+                @* Documents that live on the ARRIVAL, shown here read-only so
+                   nobody has to navigate back to the arrival to read a packing
+                   list or certificate. Read-only on purpose: they belong to the
+                   arrival, and editing them from here would hide which record
+                   they are actually attached to. *@
+                @if (arrival != null)
+                {
+                    <hr class="my-4" />
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="mb-0">
+                            <i class="bi bi-box-arrow-in-down me-1"></i>From the arrival
+                            <span class="text-muted fw-normal small ms-1">@arrival.ArrivalNo</span>
+                        </h6>
+                        <a class="small text-decoration-none" asp-controller="Arrivals"
+                           asp-action="Details" asp-route-id="@arrival.ArrivalId">
+                            Open arrival <i class="bi bi-box-arrow-up-right"></i>
+                        </a>
+                    </div>
+                    var arrivalDocsVm = new SharbatlyQMS.Web.ViewModels.DocumentListVm
+                    {
+                        OwnerType  = "Arrival",
+                        OwnerId    = arrival.ArrivalId,
+                        Editable   = false,
+                        Ajax       = true,
+                        Categories = Array.Empty<string>()
+                    };
+                    <partial name="_DocumentList" model="arrivalDocsVm" />
+                }
             </div>
         </div>
     </div>
