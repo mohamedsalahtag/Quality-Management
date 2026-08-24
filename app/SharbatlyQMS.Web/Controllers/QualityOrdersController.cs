@@ -428,6 +428,29 @@ public class QualityOrdersController : Controller
             + ". Add at least one sample per material first.";
     }
 
+    /// <summary>
+    /// Every sample must carry at least one photo before the order can be
+    /// submitted. Photographic evidence is the whole basis of a claim, and a
+    /// sample recorded without it cannot be re-examined once the fruit is gone.
+    ///
+    /// Unlike the "all materials sampled" rule beside it, this one has no
+    /// bypass: a missing photo cannot be justified after the fact the way an
+    /// unsampled material sometimes can, because the evidence no longer exists
+    /// to supply. Returns the user-facing message, or null when every sample is
+    /// covered.
+    /// </summary>
+    private async Task<string?> CheckAllSamplesPhotographedAsync(long id)
+    {
+        var samples   = await _qos.ListSamplesAsync(id);
+        var counts    = await _images.CountByOwnersAsync("Sample", samples.Select(s => s.SampleId));
+        var materials = (await _qos.GetMaterialsAsync(id))
+            .ToDictionary(m => m.QoMaterialId, m => m.MaterialNo);
+
+        // The rule itself lives in SamplePhotoRule so it can be tested without a
+        // database and without posting a real submit to prove it works.
+        return SamplePhotoRule.Check(samples, counts, materials);
+    }
+
     /// <summary>V31 (2026-06-20): operator marks data entry complete. Locks the
     /// QO until a Supervisor finishes or cancel-submits it.
     /// V38 (2026-07-08): the "all materials sampled" precondition became a
@@ -439,6 +462,16 @@ public class QualityOrdersController : Controller
     public async Task<IActionResult> Submit(long id, bool bypassNoSamples = false, string? reason = null)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
+
+        // Checked before the bypassable rule and NOT bypassable itself: the
+        // "Submit anyway" path exists for missing samples, and letting it carry
+        // a missing photo through would defeat the point of the rule.
+        if (await CheckAllSamplesPhotographedAsync(id) is { } photoErr)
+        {
+            TempData["Error"] = photoErr;
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
         if (!bypassNoSamples && await CheckAllMaterialsSampledAsync(id) is { } err)
         {
             TempData["BypassWarning"] = err;
