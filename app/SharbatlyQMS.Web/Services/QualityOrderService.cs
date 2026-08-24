@@ -69,6 +69,7 @@ public class QualityOrderService : IQualityOrderService
           AND  (@container  IS NULL OR a.container_no    LIKE '%' + @container + '%')
           AND  (@bol        IS NULL OR a.bol_no          LIKE '%' + @bol       + '%')
           AND  (@po         IS NULL OR a.ebeln           LIKE '%' + @po        + '%')
+          AND  (@qoNo       IS NULL OR qo.quality_order_no LIKE '%' + @qoNo + '%')
           AND  (@arrivalNo  IS NULL OR a.arrival_no      LIKE '%' + @arrivalNo + '%')
           AND  (@storageLoc IS NULL OR a.storage_location = @storageLoc)
           AND  (@supplier   IS NULL OR a.vendor_name      = @supplier)
@@ -118,6 +119,7 @@ public class QualityOrderService : IQualityOrderService
             container  = Trim(f.Container),
             bol        = Trim(f.Bol),
             po         = Trim(f.Po),
+            qoNo       = Trim(f.QoNo),
             arrivalNo  = Trim(f.ArrivalNo),
             storageLoc = Trim(f.StorageLoc),
             material   = Trim(f.Material),

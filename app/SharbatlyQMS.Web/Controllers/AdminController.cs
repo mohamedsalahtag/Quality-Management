@@ -1843,7 +1843,8 @@ public class AdminController : Controller
     [RequireScreen(Screens.Notifications, Seed.ManagerOrAdmin, "Open Notifications")]
     public async Task<IActionResult> Notifications()
     {
-        ViewBag.Candidates = await _notifier.ListCandidatesAsync();
+        ViewBag.Candidates   = await _notifier.ListCandidatesAsync();
+        ViewBag.ScopeOptions = await _notifier.GetScopeOptionsAsync();
         return View();
     }
 
@@ -1857,7 +1858,16 @@ public class AdminController : Controller
     public async Task<IActionResult> SaveNotifications(int[]? userIds)
     {
         var ids = userIds ?? Array.Empty<int>();
-        await _notifier.SaveRecipientsAsync(ids, User.FindFirstValue(ClaimTypes.Name) ?? "unknown");
+
+        // Scope arrives as plants_<userId> / poTypes_<userId>, so an unticked
+        // person's leftover boxes are simply never read.
+        var recipients = ids.Select(id => new NotifyRecipientInput(
+            id,
+            Request.Form[$"plants_{id}"].Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!).ToArray(),
+            Request.Form[$"poTypes_{id}"].Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!).ToArray()
+        )).ToList();
+
+        await _notifier.SaveRecipientsAsync(recipients, User.FindFirstValue(ClaimTypes.Name) ?? "unknown");
         TempData["Success"] = ids.Length == 0
             ? "Nobody will be emailed when a quality order is finished."
             : $"{ids.Length} recipient(s) will be emailed when a quality order is finished.";

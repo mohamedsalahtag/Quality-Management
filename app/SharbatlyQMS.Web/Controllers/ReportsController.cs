@@ -277,10 +277,10 @@ public class ReportsController : Controller
         return Json(new { ok = true });
     }
 
-    /// <summary>Total attachment budget for one supplier mail. Exchange defaults
-    /// to 25 MB inbound and most relays sit at or below that; the QC report alone
-    /// can be a good share of it once photos are in.</summary>
-    private const long MaxMailAttachmentBytes = 20L * 1024 * 1024;
+    /// <summary>Total attachment budget for one supplier mail, matching the 25 MB
+    /// Exchange accepts inbound by default. The report itself is now held under
+    /// 20 MB (see EmbedTiers), which leaves room for a document or two.</summary>
+    private const long MaxMailAttachmentBytes = 25L * 1024 * 1024;
 
     /// <summary>
     /// The documents a supplier mail may carry: those on the quality order and
@@ -492,15 +492,19 @@ public class ReportsController : Controller
         // while keeping the emailed PDF reasonable. The printed cell size still
         // comes from thumb.PdfWidth/PdfHeight (data.ThumbnailW/H below), so the
         // report LAYOUT is unchanged — only the embedded pixels are sharper.
-        // 1200 was chosen for zoom headroom, but it is far past what the page
-        // needs: the photo prints in a 120x90pt cell, so even 900px is ~540 DPI
-        // there, and 900px is still a lot of pixels to zoom into on screen.
-        // Measured on the heaviest real report (QO-482, 130 photos, all 3600px
-        // originals): 1200px q90 = 27.2 MB of images, 900px q82 = 11.7 MB.
-        // (2026-08-23)
-        const int ReportImageMaxPx = 900;
-        var targetW = ReportImageMaxPx;
-        var targetH = ReportImageMaxPx;
+        // How sharp each embedded photo is depends on HOW MANY there are. A
+        // fixed size cannot hold a size limit: the same 900px that gives a
+        // 60-photo report 12 MB gives a 292-photo one 34 MB, which is what made
+        // the New Zealand Apple reports unusable. Pick the tier from the count
+        // so every report lands under the budget. (2026-08-24)
+        var photoCount = await CountReportPhotosAsync(qo);
+        var tier = ChooseEmbedTier(photoCount);
+        if (tier.MaxPx != EmbedTiers[0].MaxPx)
+            _log.LogInformation(
+                "QO {Qo}: {Count} photos, embedding at {Px}px q{Q} to stay inside the report size budget.",
+                qo.QualityOrderNo, photoCount, tier.MaxPx, tier.Quality);
+        var targetW = tier.MaxPx;
+        var targetH = tier.MaxPx;
 
         var samples = await _qos.ListSamplesAsync(qo.QualityOrderId);
 
@@ -552,7 +556,7 @@ public class ReportsController : Controller
         var sampleImages = new Dictionary<long, List<SharbatlyQMS.Web.Services.Pdf.ImageRef>>();
         foreach (var (sampleId, task) in sampleImageTasks)
         {
-            var imgs = await PreprocessImagesAsync(await task, targetW, targetH);
+            var imgs = await PreprocessImagesAsync(await task, targetW, targetH, tier.Quality);
             if (imgs.Count > 0) sampleImages[sampleId] = imgs;
         }
         foreach (var s in samples)
@@ -580,7 +584,7 @@ public class ReportsController : Controller
         // owner_type='QualityOrderMaterial' rows stay on disk + in DB but
         // are not surfaced in new reports.
         data.ArrivalImages = await PreprocessImagesAsync(
-            await _images.ListAsync("Arrival", qo.ArrivalId), targetW, targetH);
+            await _images.ListAsync("Arrival", qo.ArrivalId), targetW, targetH, tier.Quality);
         data.MaterialImages = new Dictionary<long, List<SharbatlyQMS.Web.Services.Pdf.ImageRef>>();
 
         data.ThumbnailW = thumb.PdfWidth;
@@ -626,7 +630,8 @@ public class ReportsController : Controller
     // with many photos doesn't serialize 100ms+ resizes on the request
     // thread.
     private async Task<List<SharbatlyQMS.Web.Services.Pdf.ImageRef>> PreprocessImagesAsync(
-        IEnumerable<ViewModels.ImageInfo> assets, int targetW, int targetH)
+        IEnumerable<ViewModels.ImageInfo> assets, int targetW, int targetH,
+        int quality = ReportJpegQuality)
     {
         var inputs = assets.ToArray();
         if (inputs.Length == 0) return new List<SharbatlyQMS.Web.Services.Pdf.ImageRef>();
@@ -635,9 +640,65 @@ public class ReportsController : Controller
         // dispatch to the thread pool with Task.Run, then await Task.WhenAll
         // so the request thread is freed while the workers run. Replaces a
         // sync-over-async Task.WaitAll that risked thread-pool starvation.
-        var tasks = inputs.Select(i => Task.Run(() => TryPreprocess(i, targetW, targetH))).ToArray();
+        var tasks = inputs.Select(i => Task.Run(() => TryPreprocess(i, targetW, targetH, quality))).ToArray();
         var results = await Task.WhenAll(tasks);
         return results.Where(r => r != null).Cast<SharbatlyQMS.Web.Services.Pdf.ImageRef>().ToList();
+    }
+
+    /// <summary>One embedded-photo setting: longest side and JPEG quality.</summary>
+    private readonly record struct EmbedTier(int MaxPx, int Quality, int TypicalKb);
+
+    /// <summary>
+    /// Sharpest first. TypicalKb is what one photo actually costs at that tier,
+    /// measured over the two heaviest real reports (QO-2026-000403 with 292
+    /// photos and -000442 with 275, all 3600px originals):
+    ///
+    ///     900px q82  32.2 MB / 292 = 110 KB      800px q80  24.3 MB = 83 KB
+    ///     700px q78  18.2 MB       =  62 KB      640px q75  14.1 MB = 48 KB
+    ///     560px q74  11.3 MB       =  39 KB
+    ///
+    /// The last tier exists as a floor for a report far larger than any seen so
+    /// far; it is deliberately still legible rather than a thumbnail.
+    /// </summary>
+    private static readonly EmbedTier[] EmbedTiers =
+    {
+        new(900, 82, 110), new(800, 80, 83), new(700, 78, 62),
+        new(640, 75, 48),  new(560, 74, 39), new(480, 72, 30),
+    };
+
+    /// <summary>
+    /// Image budget for one report. The PDF's own text, tables and logo add
+    /// roughly 1.5 MB on a large order, and the per-photo figures above are
+    /// averages -- a set of unusually detailed photos costs more. 17 MB landed
+    /// the worst real report at 19.4 MB, which is inside 20 but with little to
+    /// spare, so the budget keeps a margin rather than sitting on the limit.
+    /// </summary>
+    private const long ReportImageBudgetBytes = 16L * 1024 * 1024;
+
+    /// <summary>
+    /// The sharpest tier whose typical cost keeps the whole set inside the
+    /// budget. Small reports are unaffected and still embed at 900px; only the
+    /// photo-heavy ones step down, and they are the only ones that had to.
+    /// </summary>
+    private static EmbedTier ChooseEmbedTier(int photoCount)
+    {
+        if (photoCount <= 0) return EmbedTiers[0];
+        foreach (var t in EmbedTiers)
+            if ((long)photoCount * t.TypicalKb * 1024 <= ReportImageBudgetBytes)
+                return t;
+        return EmbedTiers[^1];
+    }
+
+    /// <summary>
+    /// How many photos the report will embed: every sample's, plus the
+    /// arrival's. Counted before any encoding so the tier is known up front.
+    /// </summary>
+    private async Task<int> CountReportPhotosAsync(Models.QualityOrder qo)
+    {
+        var samples = await _qos.ListSamplesAsync(qo.QualityOrderId);
+        var counts  = await _images.CountByOwnersAsync("Sample", samples.Select(s => s.SampleId));
+        var arrival = await _images.ListAsync("Arrival", qo.ArrivalId);
+        return counts.Values.Sum() + arrival.Count;
     }
 
     /// <summary>
@@ -651,7 +712,7 @@ public class ReportsController : Controller
     private const int ReportJpegQuality = 82;
 
     private SharbatlyQMS.Web.Services.Pdf.ImageRef? TryPreprocess(
-        ViewModels.ImageInfo i, int targetW, int targetH)
+        ViewModels.ImageInfo i, int targetW, int targetH, int quality)
     {
         var origAbs = ToAbsolute(i.StorageUrl);
         if (!System.IO.File.Exists(origAbs)) return null;
@@ -688,7 +749,7 @@ public class ReportsController : Controller
             src.Metadata.IccProfile  = null;
             src.Metadata.XmpProfile  = null;
             using var ms = new MemoryStream();
-            src.Save(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = ReportJpegQuality });
+            src.Save(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = quality });
             return new SharbatlyQMS.Web.Services.Pdf.ImageRef
             {
                 InlineBytes  = ms.ToArray(),

@@ -25,6 +25,11 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
 
     private IServiceScope Scope() => _factory.Services.CreateScope();
 
+    /// <summary>A recipient with no plant or procurement-type restriction —
+    /// how every recipient behaved before scoping existed.</summary>
+    private static NotifyRecipientInput NoScope(int userId) =>
+        new(userId, Array.Empty<string>(), Array.Empty<string>());
+
     [Fact]
     public async Task Candidates_flag_who_can_actually_be_mailed()
     {
@@ -53,18 +58,18 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
                 .Where(p => p.CanBeMailed).Take(2).Select(p => p.UserId).ToArray();
             if (pick.Length == 0) return;   // no mailable users in this database
 
-            await notifier.SaveRecipientsAsync(pick, "test");
+            await notifier.SaveRecipientsAsync(pick.Select(NoScope), "test");
             var after = (await notifier.ListCandidatesAsync()).Where(p => p.Selected).Select(p => p.UserId).ToArray();
             Assert.Equal(pick.OrderBy(x => x), after.OrderBy(x => x));
 
             // Saving nothing is a real choice -- it is how the notification is
             // turned off -- and must clear the list rather than be ignored.
-            await notifier.SaveRecipientsAsync(Array.Empty<int>(), "test");
+            await notifier.SaveRecipientsAsync(Array.Empty<NotifyRecipientInput>(), "test");
             Assert.DoesNotContain(await notifier.ListCandidatesAsync(), p => p.Selected);
         }
         finally
         {
-            await notifier.SaveRecipientsAsync(before, "test-restore");
+            await notifier.SaveRecipientsAsync(before.Select(NoScope), "test-restore");
         }
     }
 
@@ -167,14 +172,14 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         var before = (await notifier.ListCandidatesAsync()).Where(p => p.Selected).Select(p => p.UserId).ToArray();
         try
         {
-            await notifier.SaveRecipientsAsync(Array.Empty<int>(), "test");
+            await notifier.SaveRecipientsAsync(Array.Empty<NotifyRecipientInput>(), "test");
             // An empty list is how the feature is switched off; it must not fall
             // back to "mail everyone", and must not throw.
             Assert.Equal(0, await notifier.NotifyFinishedAsync(1, "test"));
         }
         finally
         {
-            await notifier.SaveRecipientsAsync(before, "test-restore");
+            await notifier.SaveRecipientsAsync(before.Select(NoScope), "test-restore");
         }
     }
 

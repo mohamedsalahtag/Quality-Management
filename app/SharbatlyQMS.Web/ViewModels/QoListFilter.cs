@@ -17,6 +17,11 @@ public class QoListFilter
     public string? Search     { get; set; }
 
     // ---- Collapsible panel ----
+    /// <summary>Quality-order number, partial match. The quick-bar search
+    /// already covers it among six other columns, but people who know the QC
+    /// number want to search on that alone rather than sift the matches a
+    /// container or vendor also produced.</summary>
+    public string? QoNo       { get; set; }
     public string? Container  { get; set; }
     public string? Bol        { get; set; }
     public string? Po         { get; set; }
@@ -39,7 +44,8 @@ public class QoListFilter
     /// the panel on load so a bookmarked or shared URL doesn't look like an
     /// unexplained short list.</summary>
     public bool AnyPanelFilter =>
-        !string.IsNullOrWhiteSpace(Container)
+        !string.IsNullOrWhiteSpace(QoNo)
+        || !string.IsNullOrWhiteSpace(Container)
         || !string.IsNullOrWhiteSpace(Bol)
         || !string.IsNullOrWhiteSpace(Po)
         || !string.IsNullOrWhiteSpace(ArrivalNo)

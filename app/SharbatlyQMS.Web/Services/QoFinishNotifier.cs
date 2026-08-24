@@ -25,8 +25,12 @@ public interface IQoFinishNotifier
     /// so the screen can explain why they cannot be selected.</summary>
     Task<IReadOnlyList<NotifyCandidate>> ListCandidatesAsync();
 
-    /// <summary>Replaces the recipient list wholesale with the given users.</summary>
-    Task SaveRecipientsAsync(IEnumerable<int> userIds, string actor);
+    /// <summary>Replaces the recipient list wholesale, scope included.</summary>
+    Task SaveRecipientsAsync(IEnumerable<NotifyRecipientInput> recipients, string actor);
+
+    /// <summary>Plants and procurement types the screen can offer, drawn from
+    /// the arrivals that exist so an option always matches something.</summary>
+    Task<NotifyScopeOptions> GetScopeOptionsAsync();
 
     /// <summary>Builds and sends the "quality order finished" mail. Best-effort:
     /// returns the number of addresses mailed, and never throws.</summary>
@@ -35,6 +39,17 @@ public interface IQoFinishNotifier
     /// <summary>The mail body for a quality order, for the settings screen's
     /// preview. Same builder the real send uses, so the preview cannot drift.</summary>
     Task<(string subject, string html)?> BuildPreviewAsync(long qualityOrderId);
+}
+
+/// <summary>What the screen posts back for one ticked person.</summary>
+public sealed record NotifyRecipientInput(int UserId, string[] Plants, string[] PoTypes);
+
+/// <summary>Choices offered by the notification screen's scope pickers.</summary>
+public class NotifyScopeOptions
+{
+    /// <summary>Plant code -> display name.</summary>
+    public IReadOnlyList<(string Code, string Name)> Plants  { get; init; } = Array.Empty<(string, string)>();
+    public IReadOnlyList<(string Code, string Name)> PoTypes { get; init; } = Array.Empty<(string, string)>();
 }
 
 /// <summary>One selectable person on the notification screen.</summary>
@@ -47,6 +62,14 @@ public class NotifyCandidate
     public string? RoleName  { get; set; }
     public bool    IsActive  { get; set; }
     public bool    Selected  { get; set; }
+
+    /// <summary>Plants this person is notified for. EMPTY MEANS ALL — that is
+    /// how every recipient behaved before scoping existed, so an untouched list
+    /// keeps working rather than quietly going silent.</summary>
+    public List<string> Plants  { get; set; } = new();
+    /// <summary>Procurement types this person is notified for. Empty means all.</summary>
+    public List<string> PoTypes { get; set; } = new();
+
     public bool    CanBeMailed => !string.IsNullOrWhiteSpace(Email);
 }
 
@@ -80,8 +103,15 @@ public class QoFinishNotifier : IQoFinishNotifier
         var users = await _db.ListUsersAsync(null, null, null);
 
         using var c = new SqlConnection(_cs);
-        var chosen = (await c.QueryAsync<int>(
-            "SELECT user_id FROM qms_qo_notify_recipient")).ToHashSet();
+        using var grid = await c.QueryMultipleAsync(@"
+            SELECT user_id FROM qms_qo_notify_recipient;
+            SELECT user_id AS UserId, plant   AS Value FROM qms_qo_notify_plant;
+            SELECT user_id AS UserId, po_type AS Value FROM qms_qo_notify_potype;");
+        var chosen  = (await grid.ReadAsync<int>()).ToHashSet();
+        var plants  = (await grid.ReadAsync<ScopeRow>()).GroupBy(r => r.UserId)
+                          .ToDictionary(g => g.Key, g => g.Select(r => r.Value).ToList());
+        var poTypes = (await grid.ReadAsync<ScopeRow>()).GroupBy(r => r.UserId)
+                          .ToDictionary(g => g.Key, g => g.Select(r => r.Value).ToList());
 
         return users
             .Select(u => new NotifyCandidate
@@ -92,7 +122,9 @@ public class QoFinishNotifier : IQoFinishNotifier
                 Email    = u.Email,
                 RoleName = u.RoleName,
                 IsActive = u.IsActive,
-                Selected = chosen.Contains(u.UserId)
+                Selected = chosen.Contains(u.UserId),
+                Plants   = plants.TryGetValue(u.UserId, out var pl) ? pl : new List<string>(),
+                PoTypes  = poTypes.TryGetValue(u.UserId, out var pt) ? pt : new List<string>()
             })
             // Selected first so a long user list always opens on what is set.
             .OrderByDescending(x => x.Selected)
@@ -100,9 +132,12 @@ public class QoFinishNotifier : IQoFinishNotifier
             .ToList();
     }
 
-    public async Task SaveRecipientsAsync(IEnumerable<int> userIds, string actor)
+    public async Task SaveRecipientsAsync(IEnumerable<NotifyRecipientInput> recipients, string actor)
     {
-        var ids = userIds.Distinct().ToArray();
+        var rows = recipients
+            .GroupBy(r => r.UserId)          // one row per user even if the form repeats one
+            .Select(g => g.First())
+            .ToArray();
 
         using var c = new SqlConnection(_cs);
         await c.OpenAsync();
@@ -110,23 +145,80 @@ public class QoFinishNotifier : IQoFinishNotifier
 
         // Replace wholesale inside one transaction: a half-applied list would
         // quietly mail the wrong people until someone noticed.
+        await c.ExecuteAsync("DELETE FROM qms_qo_notify_plant",     transaction: tx);
+        await c.ExecuteAsync("DELETE FROM qms_qo_notify_potype",    transaction: tx);
         await c.ExecuteAsync("DELETE FROM qms_qo_notify_recipient", transaction: tx);
-        if (ids.Length > 0)
+
+        if (rows.Length > 0)
+        {
             await c.ExecuteAsync(
-                "INSERT INTO qms_qo_notify_recipient (user_id, added_by) VALUES (@id, @actor)",
-                ids.Select(id => new { id, actor }), tx);
+                "INSERT INTO qms_qo_notify_recipient (user_id, added_by) VALUES (@UserId, @actor)",
+                rows.Select(r => new { r.UserId, actor }), tx);
+
+            var plantRows = rows.SelectMany(r => Clean(r.Plants).Select(p => new { r.UserId, plant = p })).ToList();
+            if (plantRows.Count > 0)
+                await c.ExecuteAsync(
+                    "INSERT INTO qms_qo_notify_plant (user_id, plant) VALUES (@UserId, @plant)", plantRows, tx);
+
+            var poRows = rows.SelectMany(r => Clean(r.PoTypes).Select(p => new { r.UserId, poType = p })).ToList();
+            if (poRows.Count > 0)
+                await c.ExecuteAsync(
+                    "INSERT INTO qms_qo_notify_potype (user_id, po_type) VALUES (@UserId, @poType)", poRows, tx);
+        }
 
         tx.Commit();
+
+        static IEnumerable<string> Clean(string[]? v) =>
+            (v ?? Array.Empty<string>())
+                .Where(x => !string.IsNullOrWhiteSpace(x))
+                .Select(x => x.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase);
     }
 
-    private async Task<IReadOnlyList<string>> ResolveAddressesAsync()
+    public async Task<NotifyScopeOptions> GetScopeOptionsAsync()
+    {
+        using var c = new SqlConnection(_cs);
+        using var grid = await c.QueryMultipleAsync(@"
+            SELECT DISTINCT plant   FROM qms_arrival WHERE plant   IS NOT NULL AND LTRIM(RTRIM(plant))   <> '' ORDER BY plant;
+            SELECT DISTINCT po_type FROM qms_arrival WHERE po_type IS NOT NULL AND LTRIM(RTRIM(po_type)) <> '' ORDER BY po_type;");
+        var plants  = (await grid.ReadAsync<string>()).ToList();
+        var poTypes = (await grid.ReadAsync<string>()).ToList();
+        return new NotifyScopeOptions
+        {
+            Plants  = plants .Select(p => (p, _codes.PlantDisplay(p))).ToList(),
+            PoTypes = poTypes.Select(p => (p, _codes.PoTypeDisplay(p))).ToList()
+        };
+    }
+
+    private sealed class ScopeRow
+    {
+        public int    UserId { get; set; }
+        public string Value  { get; set; } = "";
+    }
+
+    /// <summary>
+    /// Who should hear about THIS order. A recipient with no plants chosen hears
+    /// about every plant, and likewise for procurement type — empty means all,
+    /// so a recipient nobody has scoped keeps behaving as before.
+    /// </summary>
+    private async Task<IReadOnlyList<string>> ResolveAddressesAsync(string? plant, string? poType)
     {
         var candidates = await ListCandidatesAsync();
         return candidates
             .Where(x => x.Selected && x.IsActive && x.CanBeMailed)
+            .Where(x => Matches(x.Plants,  plant))
+            .Where(x => Matches(x.PoTypes, poType))
             .Select(x => x.Email!.Trim())
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
+
+        // An order with no plant (or no procurement type) recorded still reaches
+        // the unscoped recipients: silence would hide the order from everybody,
+        // which is worse than telling someone who did not narrowly ask.
+        static bool Matches(List<string> scope, string? value) =>
+            scope.Count == 0 ||
+            (!string.IsNullOrWhiteSpace(value) &&
+             scope.Contains(value!.Trim(), StringComparer.OrdinalIgnoreCase));
     }
 
     // ---- Sending ------------------------------------------------------------
@@ -135,8 +227,19 @@ public class QoFinishNotifier : IQoFinishNotifier
     {
         try
         {
-            var addresses = await ResolveAddressesAsync();
-            if (addresses.Count == 0) return 0;
+            // The order's plant and procurement type decide who is in scope, so
+            // they have to be known before the recipient list is resolved.
+            var qoForScope = await _qos.GetAsync(qualityOrderId);
+            var arrivalForScope = qoForScope == null ? null : await _arrivals.GetAsync(qoForScope.ArrivalId);
+
+            var addresses = await ResolveAddressesAsync(arrivalForScope?.Plant, arrivalForScope?.PoType);
+            if (addresses.Count == 0)
+            {
+                _log.LogInformation(
+                    "QO {QoId}: nobody is subscribed to plant '{Plant}' / procurement type '{PoType}'.",
+                    qualityOrderId, arrivalForScope?.Plant, arrivalForScope?.PoType);
+                return 0;
+            }
 
             var built = await BuildAsync(qualityOrderId, finishedBy);
             if (built == null) return 0;
@@ -218,8 +321,8 @@ public class QoFinishNotifier : IQoFinishNotifier
 
         var sb = new System.Text.StringBuilder();
         sb.Append($"<div style=\"background:{Wash};padding:16px 0;font-family:Segoe UI,Roboto,Arial,sans-serif\">");
-        sb.Append("<table role=\"presentation\" align=\"center\" width=\"640\" cellpadding=\"0\" cellspacing=\"0\" " +
-                  $"style=\"width:640px;max-width:100%;border-collapse:collapse;background:#fff;" +
+        sb.Append("<table role=\"presentation\" align=\"center\" width=\"760\" cellpadding=\"0\" cellspacing=\"0\" " +
+                  $"style=\"width:760px;max-width:100%;border-collapse:collapse;background:#fff;" +
                   $"border:1px solid {Line};border-radius:8px;overflow:hidden\">");
 
         // ---- header ----------------------------------------------------------
@@ -251,7 +354,7 @@ public class QoFinishNotifier : IQoFinishNotifier
                        "border-radius:6px;padding:10px 14px\">" +
                       "<div style=\"font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:#9a6b00;" +
                        "font-weight:700;margin-bottom:3px\">Inspector&rsquo;s note on finishing</div>" +
-                      $"<div style=\"font-size:14px;line-height:1.45;color:#4a3600\">{H(qo.CloseReason)}</div>" +
+                      $"<div style=\"font-size:15.5px;line-height:1.5;color:#4a3600\">{H(qo.CloseReason)}</div>" +
                       "</td></tr></table>");
         }
 
@@ -272,7 +375,7 @@ public class QoFinishNotifier : IQoFinishNotifier
             ("Samples",          samples.Count.ToString()),
         }.Where(f => !string.IsNullOrWhiteSpace(f.Item2)).ToList();
 
-        sb.Append("<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;font-size:13px\">");
+        sb.Append("<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;font-size:14.5px\">");
         for (var i = 0; i < facts.Count; i += 2)
         {
             sb.Append("<tr>");
@@ -289,7 +392,7 @@ public class QoFinishNotifier : IQoFinishNotifier
         // actually wrong, which is the opposite of the point.
         sb.Append(Heading("QC summary"));
         if (summaries.Count == 0)
-            sb.Append($"<div style=\"color:{Muted};font-size:13px\">No samples were recorded on this order.</div>");
+            sb.Append($"<div style=\"color:{Muted};font-size:14.5px\">No samples were recorded on this order.</div>");
 
         foreach (var g in summaries)
         {
@@ -306,10 +409,10 @@ public class QoFinishNotifier : IQoFinishNotifier
             // card header: name on the left, the one number that matters on the right
             sb.Append($"<tr><td style=\"background:{Wash};border-bottom:1px solid {Line};padding:9px 12px\">");
             sb.Append("<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse\"><tr>");
-            sb.Append($"<td><span style=\"font-size:15px;font-weight:700;color:{Ink}\">{H(title)}</span>");
+            sb.Append($"<td><span style=\"font-size:16px;font-weight:700;color:{Ink}\">{H(title)}</span>");
             if (key.Length > 0)
-                sb.Append($"<span style=\"color:{Muted};font-size:12px\"> &nbsp;{string.Join(" · ", key)}</span>");
-            sb.Append($"<div style=\"color:{Muted};font-size:11px;margin-top:2px\">" +
+                sb.Append($"<span style=\"color:{Muted};font-size:13px\"> &nbsp;{string.Join(" · ", key)}</span>");
+            sb.Append($"<div style=\"color:{Muted};font-size:12.5px;margin-top:2px\">" +
                       $"{g.MaterialCount} material(s) · {g.SampleCount} sample(s) · " +
                       $"{g.SumSampleSize:N0} {H(g.SampleUnit)} inspected</div></td>");
             sb.Append("<td align=\"right\" valign=\"top\">" + (sections.Count == 0
@@ -338,7 +441,7 @@ public class QoFinishNotifier : IQoFinishNotifier
                            "font-weight:700;margin-bottom:5px\">Readings</div><div style=\"margin-bottom:10px\">");
                 foreach (var r in readings)
                     sb.Append($"<span style=\"display:inline-block;background:{Wash};border:1px solid {Line};" +
-                              $"border-radius:14px;padding:2px 9px;margin:0 4px 4px 0;font-size:12px;color:{Ink}\">" +
+                              $"border-radius:14px;padding:3px 11px;margin:0 5px 5px 0;font-size:13.5px;color:{Ink}\">" +
                               $"<span style=\"color:{Muted}\">{H(r.Name)}</span> <b>{H(r.DisplayValue)}" +
                               (string.IsNullOrWhiteSpace(r.Unit) ? "" : " " + H(r.Unit)) + "</b></span>");
                 sb.Append("</div>");
@@ -346,7 +449,7 @@ public class QoFinishNotifier : IQoFinishNotifier
 
             if (sections.Count == 0)
             {
-                sb.Append($"<div style=\"color:{Good};font-size:13px;font-weight:600\">No defects recorded.</div>");
+                sb.Append($"<div style=\"color:{Good};font-size:14.5px;font-weight:600\">No defects recorded.</div>");
             }
             else
             {
@@ -363,9 +466,9 @@ public class QoFinishNotifier : IQoFinishNotifier
                     sb.Append($"<tr><td style=\"border-left:3px solid {col};padding:0 0 0 8px\">");
 
                     sb.Append("<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse\"><tr>" +
-                              $"<td style=\"font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;" +
+                              $"<td style=\"font-size:12px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;" +
                               $"color:{col}\">{H(sec.CategoryName)}</td>" +
-                              $"<td align=\"right\" style=\"font-size:12px;color:{Ink}\"><b>{total:N2}</b> " +
+                              $"<td align=\"right\" style=\"font-size:13.5px;color:{Ink}\"><b>{total:N2}</b> " +
                               $"<span style=\"color:{Muted}\">({pct:N2}%)</span></td></tr></table>");
 
                     // A proportion bar, drawn with table cells because a div with a
@@ -376,7 +479,7 @@ public class QoFinishNotifier : IQoFinishNotifier
                               $"<td style=\"height:4px;background:{Line};width:{100 - w}%;font-size:0;line-height:0\">&nbsp;</td>" +
                               "</tr></table>");
 
-                    sb.Append($"<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;font-size:12.5px\">");
+                    sb.Append($"<table role=\"presentation\" width=\"100%\" style=\"border-collapse:collapse;font-size:13.5px\">");
                     foreach (var r in sec.Rows.Where(r => r.SumValue > 0).OrderByDescending(r => r.SumValue))
                         sb.Append("<tr>"
                             + $"<td style=\"padding:2px 8px 2px 0;color:{Ink}\">{H(r.Name)}</td>"
@@ -402,7 +505,7 @@ public class QoFinishNotifier : IQoFinishNotifier
 
         sb.Append("</td></tr>");
         sb.Append($"<tr><td style=\"background:{Wash};border-top:1px solid {Line};padding:10px 20px;" +
-                  $"color:{Muted};font-size:11px;line-height:1.5\">" +
+                  $"color:{Muted};font-size:12px;line-height:1.5\">" +
                    "Sent automatically by Sharbatly QMS when a quality order is finished. " +
                    "The full report, with photos, is in the system.</td></tr>");
         sb.Append("</table></div>");
@@ -411,8 +514,8 @@ public class QoFinishNotifier : IQoFinishNotifier
     }
 
     private static string FactCell((string Label, string? Value) f) =>
-        $"<td style=\"padding:3px 14px 3px 0;color:{Muted};white-space:nowrap;width:1%\">{H(f.Label)}</td>" +
-        $"<td style=\"padding:3px 18px 3px 0;font-weight:600;color:{Ink}\">{H(f.Value)}</td>";
+        $"<td style=\"padding:5px 16px 5px 0;color:{Muted};white-space:nowrap;width:1%\">{H(f.Label)}</td>" +
+        $"<td style=\"padding:5px 26px 5px 0;font-weight:600;color:{Ink};width:49%\">{H(f.Value)}</td>";
 
     /// <summary>
     /// Absolute link to the order. Built from Site Configuration's site URL,

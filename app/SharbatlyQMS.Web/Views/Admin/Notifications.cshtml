@@ -2,6 +2,7 @@
 @{
     ViewData["Title"] = "Notifications";
     var people   = ViewBag.Candidates as IReadOnlyList<NotifyCandidate> ?? new List<NotifyCandidate>();
+    var scope    = ViewBag.ScopeOptions as NotifyScopeOptions ?? new NotifyScopeOptions();
     var canEdit  = Perms.Can(Perm.Parameters.NotificationsEdit);
     var selected = people.Count(p => p.Selected);
     var mailable = people.Where(p => p.IsActive && p.CanBeMailed).ToList();
@@ -24,6 +25,11 @@
         defect breakdown per material group.
         <strong>Nobody ticked means nobody is mailed</strong>, which is how the notification
         is switched off.
+        <div class="mt-1">
+            Each person can be narrowed to certain plants and procurement types.
+            <strong>Leaving a box empty means everything</strong>, so a recipient you never
+            narrow keeps receiving every order.
+        </div>
         <div class="text-muted mt-1">
             Addresses come from each person's profile, so a changed address follows them
             automatically and a deactivated account stops receiving mail on its own.
@@ -64,9 +70,10 @@
                     <thead class="table-light">
                         <tr>
                             <th style="width:3rem"></th>
-                            <th>Name</th>
-                            <th>Email</th>
-                            <th style="width:11rem">Role</th>
+                            <th style="width:14rem">Name</th>
+                            <th style="width:15rem">Email</th>
+                            <th>Plants <span class="text-muted fw-normal">(empty = all)</span></th>
+                            <th>Procurement types <span class="text-muted fw-normal">(empty = all)</span></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -78,9 +85,31 @@
                                            value="@p.UserId" id="nu-@p.UserId"
                                            checked="@p.Selected" disabled="@(!canEdit)" />
                                 </td>
-                                <td><label class="mb-0" for="nu-@p.UserId">@p.FullName</label></td>
+                                <td>
+                                    <label class="mb-0 d-block" for="nu-@p.UserId">@p.FullName</label>
+                                    <span class="text-muted" style="font-size:.72rem">@p.RoleName</span>
+                                </td>
                                 <td class="text-muted">@p.Email</td>
-                                <td><span class="badge bg-light text-dark border">@p.RoleName</span></td>
+                                @* Multi-select rather than checkbox lists: a dozen
+                                   plants times every user would bury the page. *@
+                                <td>
+                                    <select class="form-select form-select-sm" multiple size="3"
+                                            name="plants_@p.UserId" disabled="@(!canEdit)">
+                                        @foreach (var (code, label) in scope.Plants)
+                                        {
+                                            <option value="@code" selected="@p.Plants.Contains(code, StringComparer.OrdinalIgnoreCase)">@label</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td>
+                                    <select class="form-select form-select-sm" multiple size="3"
+                                            name="poTypes_@p.UserId" disabled="@(!canEdit)">
+                                        @foreach (var (code, label) in scope.PoTypes)
+                                        {
+                                            <option value="@code" selected="@p.PoTypes.Contains(code, StringComparer.OrdinalIgnoreCase)">@label</option>
+                                        }
+                                    </select>
+                                </td>
                             </tr>
                         }
                     </tbody>
