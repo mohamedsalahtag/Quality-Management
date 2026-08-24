@@ -10,6 +10,22 @@
     var inactive = people.Where(p => !p.IsActive && p.Selected).ToList();
 }
 
+<style>
+    /* Toggle chips for the per-recipient scope. Sized down from the default
+       button so seven plants sit on one or two lines inside a table cell. */
+    .scope-chips        { display: flex; flex-wrap: wrap; gap: .2rem; }
+    .scope-chips .btn   { --bs-btn-padding-y: .1rem; --bs-btn-padding-x: .4rem;
+                          --bs-btn-font-size: .72rem; }
+    .scope-foot         { display: flex; justify-content: space-between; align-items: baseline;
+                          gap: .5rem; margin-top: .2rem; font-size: .7rem; }
+    .scope-hint         { color: var(--bs-secondary-color); }
+    /* "All" on an untouched cell is the current behaviour, not a warning -- but
+       it is worth reading, so it stays legible rather than fading out. */
+    .scope-hint.is-all  { font-style: italic; }
+    .scope-links a      { text-decoration: none; }
+    .scope-links        { white-space: nowrap; }
+</style>
+
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0">
         <i class="bi bi-bell me-1 text-primary"></i>Notifications
@@ -72,8 +88,26 @@
                             <th style="width:3rem"></th>
                             <th style="width:14rem">Name</th>
                             <th style="width:15rem">Email</th>
-                            <th>Plants <span class="text-muted fw-normal">(empty = all)</span></th>
-                            <th>Procurement types <span class="text-muted fw-normal">(empty = all)</span></th>
+                            <th>
+                                Plants <span class="text-muted fw-normal">(none ticked = all)</span>
+                                @if (canEdit)
+                                {
+                                    <span class="scope-links fw-normal ms-1">
+                                        &mdash; every row:
+                                        <a href="#" data-col-all="plant">All</a><span class="mx-1">/</span><a href="#" data-col-none="plant">None</a>
+                                    </span>
+                                }
+                            </th>
+                            <th>
+                                Procurement types <span class="text-muted fw-normal">(none ticked = all)</span>
+                                @if (canEdit)
+                                {
+                                    <span class="scope-links fw-normal ms-1">
+                                        &mdash; every row:
+                                        <a href="#" data-col-all="procurement type">All</a><span class="mx-1">/</span><a href="#" data-col-none="procurement type">None</a>
+                                    </span>
+                                }
+                            </th>
                         </tr>
                     </thead>
                     <tbody>
@@ -90,25 +124,57 @@
                                     <span class="text-muted" style="font-size:.72rem">@p.RoleName</span>
                                 </td>
                                 <td class="text-muted">@p.Email</td>
-                                @* Multi-select rather than checkbox lists: a dozen
-                                   plants times every user would bury the page. *@
+                                @* Toggle chips rather than a multi-select: a
+                                   multi-select needs ctrl-click to add and loses
+                                   the lot on a stray click, which is a poor way to
+                                   set something that decides who gets told. *@
                                 <td>
-                                    <select class="form-select form-select-sm" multiple size="3"
-                                            name="plants_@p.UserId" disabled="@(!canEdit)">
-                                        @foreach (var (code, label) in scope.Plants)
-                                        {
-                                            <option value="@code" selected="@p.Plants.Contains(code, StringComparer.OrdinalIgnoreCase)">@label</option>
-                                        }
-                                    </select>
+                                    <div class="scope-cell" data-scope data-scope-kind="plant">
+                                        <div class="scope-chips">
+                                            @foreach (var (code, label) in scope.Plants)
+                                            {
+                                                var cid = $"pl-{p.UserId}-{code}";
+                                                <input type="checkbox" class="btn-check" name="plants_@p.UserId"
+                                                       value="@code" id="@cid" autocomplete="off"
+                                                       checked="@p.Plants.Contains(code, StringComparer.OrdinalIgnoreCase)"
+                                                       disabled="@(!canEdit)" />
+                                                <label class="btn btn-sm btn-outline-primary" for="@cid" title="@code">@label</label>
+                                            }
+                                        </div>
+                                        <div class="scope-foot">
+                                            <span class="scope-hint" data-scope-hint></span>
+                                            @if (canEdit)
+                                            {
+                                                <span class="scope-links">
+                                                    <a href="#" data-scope-all>All</a><span class="mx-1">/</span><a href="#" data-scope-none>None</a>
+                                                </span>
+                                            }
+                                        </div>
+                                    </div>
                                 </td>
                                 <td>
-                                    <select class="form-select form-select-sm" multiple size="3"
-                                            name="poTypes_@p.UserId" disabled="@(!canEdit)">
-                                        @foreach (var (code, label) in scope.PoTypes)
-                                        {
-                                            <option value="@code" selected="@p.PoTypes.Contains(code, StringComparer.OrdinalIgnoreCase)">@label</option>
-                                        }
-                                    </select>
+                                    <div class="scope-cell" data-scope data-scope-kind="procurement type">
+                                        <div class="scope-chips">
+                                            @foreach (var (code, label) in scope.PoTypes)
+                                            {
+                                                var cid = $"pt-{p.UserId}-{code}";
+                                                <input type="checkbox" class="btn-check" name="poTypes_@p.UserId"
+                                                       value="@code" id="@cid" autocomplete="off"
+                                                       checked="@p.PoTypes.Contains(code, StringComparer.OrdinalIgnoreCase)"
+                                                       disabled="@(!canEdit)" />
+                                                <label class="btn btn-sm btn-outline-secondary" for="@cid" title="@code">@label</label>
+                                            }
+                                        </div>
+                                        <div class="scope-foot">
+                                            <span class="scope-hint" data-scope-hint></span>
+                                            @if (canEdit)
+                                            {
+                                                <span class="scope-links">
+                                                    <a href="#" data-scope-all>All</a><span class="mx-1">/</span><a href="#" data-scope-none>None</a>
+                                                </span>
+                                            }
+                                        </div>
+                                    </div>
                                 </td>
                             </tr>
                         }
@@ -151,6 +217,60 @@
 @section Scripts {
     <script>
         (function () {
+            // ---- per-recipient scope chips ----
+            function boxes(cell) {
+                return Array.prototype.slice.call(cell.querySelectorAll('input.btn-check'));
+            }
+            function refresh(cell) {
+                var all  = boxes(cell);
+                var on   = all.filter(function (b) { return b.checked; });
+                var hint = cell.querySelector('[data-scope-hint]');
+                var kind = cell.getAttribute('data-scope-kind') || 'item';
+                if (!hint) return;
+                // Nothing ticked is not "empty", it is "everything" -- say so, or
+                // an admin reads a blank cell as nobody being notified.
+                if (on.length === 0) {
+                    hint.textContent = 'All ' + kind + 's';
+                    hint.classList.add('is-all');
+                } else {
+                    hint.textContent = on.length + ' of ' + all.length;
+                    hint.classList.remove('is-all');
+                }
+            }
+            function setCell(cell, on) {
+                boxes(cell).forEach(function (b) { if (!b.disabled) b.checked = on; });
+                refresh(cell);
+            }
+
+            document.querySelectorAll('[data-scope]').forEach(function (cell) {
+                refresh(cell);
+                cell.addEventListener('change', function () { refresh(cell); });
+                cell.querySelector('[data-scope-all]')?.addEventListener('click', function (e) {
+                    e.preventDefault(); setCell(cell, true);
+                });
+                cell.querySelector('[data-scope-none]')?.addEventListener('click', function (e) {
+                    e.preventDefault(); setCell(cell, false);
+                });
+            });
+
+            // Column-wide helpers: with fifty users, setting one plant on each by
+            // hand is the sort of chore people give up on halfway.
+            function eachCell(kind, fn) {
+                document.querySelectorAll('[data-scope][data-scope-kind="' + kind + '"]').forEach(fn);
+            }
+            document.querySelectorAll('[data-col-all]').forEach(function (a) {
+                a.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    eachCell(a.getAttribute('data-col-all'), function (c) { setCell(c, true); });
+                });
+            });
+            document.querySelectorAll('[data-col-none]').forEach(function (a) {
+                a.addEventListener('click', function (e) {
+                    e.preventDefault();
+                    eachCell(a.getAttribute('data-col-none'), function (c) { setCell(c, false); });
+                });
+            });
+
             function setAll(on) {
                 document.querySelectorAll('input[name="userIds"]:not([disabled])')
                         .forEach(function (c) { c.checked = on; });

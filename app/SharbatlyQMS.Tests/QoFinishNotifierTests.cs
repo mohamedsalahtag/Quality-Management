@@ -74,6 +74,55 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
     }
 
     [Fact]
+    public async Task Scope_survives_a_save_and_empty_still_means_everything()
+    {
+        using var scope = Scope();
+        var notifier = scope.ServiceProvider.GetRequiredService<IQoFinishNotifier>();
+
+        var before = (await notifier.ListCandidatesAsync()).Where(p => p.Selected).Select(p => p.UserId).ToArray();
+        try
+        {
+            var options = await notifier.GetScopeOptionsAsync();
+            var people  = (await notifier.ListCandidatesAsync()).Where(p => p.CanBeMailed).Take(2).ToArray();
+            if (people.Length < 2 || options.Plants.Count == 0 || options.PoTypes.Count == 0) return;
+
+            var plant  = options.Plants[0].Code;
+            var poType = options.PoTypes[0].Code;
+
+            await notifier.SaveRecipientsAsync(new[]
+            {
+                new NotifyRecipientInput(people[0].UserId, new[] { plant }, new[] { poType }),
+                // Deliberately unscoped: this is the default, and it must stay
+                // empty rather than being back-filled with "everything", or the
+                // screen would show a narrowed recipient who is not narrowed.
+                new NotifyRecipientInput(people[1].UserId, Array.Empty<string>(), Array.Empty<string>()),
+            }, "test");
+
+            var after = await notifier.ListCandidatesAsync();
+            var scoped   = after.First(p => p.UserId == people[0].UserId);
+            var unscoped = after.First(p => p.UserId == people[1].UserId);
+
+            Assert.Equal(new[] { plant },  scoped.Plants);
+            Assert.Equal(new[] { poType }, scoped.PoTypes);
+            Assert.Empty(unscoped.Plants);
+            Assert.Empty(unscoped.PoTypes);
+
+            // Blank values from an empty form field must not become rows.
+            await notifier.SaveRecipientsAsync(new[]
+            {
+                new NotifyRecipientInput(people[0].UserId, new[] { "", "  " }, new[] { "" }),
+            }, "test");
+            var cleaned = (await notifier.ListCandidatesAsync()).First(p => p.UserId == people[0].UserId);
+            Assert.Empty(cleaned.Plants);
+            Assert.Empty(cleaned.PoTypes);
+        }
+        finally
+        {
+            await notifier.SaveRecipientsAsync(before.Select(NoScope), "test-restore");
+        }
+    }
+
+    [Fact]
     public async Task Mail_body_carries_the_basics_and_the_qc_summary()
     {
         using var scope = Scope();
