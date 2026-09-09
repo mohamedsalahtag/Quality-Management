@@ -196,6 +196,16 @@ public class PlantCommitmentRow
     /// </summary>
     public int    QosCreated { get; set; }
 
+    /// <summary>
+    /// How many of <see cref="QosCreated"/> were raised against containers that
+    /// arrived BEFORE this period. Without it a plant that raised 13 orders on a
+    /// day it took 3 containers in looks impossible rather than busy.
+    /// </summary>
+    public int    QosCatchUp { get; set; }
+
+    /// <summary>The rest of the period's orders: this period's own arrivals.</summary>
+    public int    QosOnNewArrivals => Math.Max(0, QosCreated - QosCatchUp);
+
     /// <summary>Containers received in the period still waiting for a quality
     /// order. Cannot go negative now that both halves are the same cohort.</summary>
     public int    Outstanding => Math.Max(0, Received - Committed);

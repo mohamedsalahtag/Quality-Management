@@ -134,6 +134,7 @@ public static class SettingKeys
     public const string TimeBarWarnDays       = "timebar_warn_days";
     public const string TimeBarArrivalBasis   = "timebar_arrival_basis";
     public const string TimeBarStartDate      = "timebar_start_date";
+    public const string PendingArchiveBefore  = "pending_archive_before";
 
     public const string AlertStaleArrivalDays = "alert_stale_arrival_days";
     public const string AlertOpenQoDays       = "alert_open_qo_days";
@@ -538,8 +539,26 @@ public class StorageConfig
 
 public class ContainerPollConfig
 {
-    /// <summary>Earliest SAP Doc_Date to consider. Null = polling disabled.</summary>
+    /// <summary>Earliest SAP Receive_Date to consider. Null = polling disabled.</summary>
     public DateOnly? StartDate     { get; set; }
+
+    /// <summary>
+    /// Containers that arrived before this date are archived automatically at
+    /// the end of every sync.
+    ///
+    /// Archiving by hand does not stay done. The sweep re-reads SAP from
+    /// <see cref="StartDate"/> every run, and a purchase order whose container
+    /// was only confirmed later arrives in the cache as a brand-new row long
+    /// after the operator archived that period -- 963 containers that arrived
+    /// before 18 August 2026 landed in the pending list on 9 September, none of
+    /// which existed when that period was archived two days earlier. A date
+    /// holds; a one-off sweep does not.
+    ///
+    /// Nothing is deleted: archived containers stay on the Archived tab and can
+    /// be restored one by one or by range. Null disables it, which is the
+    /// shipped default.
+    /// </summary>
+    public DateOnly? ArchiveArrivalsBefore { get; set; }
     /// <summary>How often the polling service should hit SAP, in minutes. Default 60.</summary>
     public int       PollingMinutes{ get; set; } = 60;
     /// <summary>Read-only metadata for the Settings UI status line (last

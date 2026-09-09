@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Services.Sap;
@@ -124,7 +124,8 @@ public class ContainerPollingService : BackgroundService
         }
         try
         {
-            await cache.RefreshFromSapAsync(cfg.StartDate.Value, "auto-scheduler", "Auto", ct);
+            await cache.RefreshFromSapAsync(cfg.StartDate.Value, "auto-scheduler", "Auto",
+                                            cfg.ArchiveArrivalsBefore, ct);
         }
         catch (Exception ex)
         {

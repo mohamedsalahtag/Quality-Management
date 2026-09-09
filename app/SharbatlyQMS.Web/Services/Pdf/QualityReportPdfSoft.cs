@@ -105,10 +105,12 @@ public static class QualityReportPdfSoft
             //    heading with nothing under it.
             if (d.GroupSummaries.Count > 0)
             {
-                PartBand(col.Item(), "Summary",
+                PartBand(col.Item(), 1, 2, "Summary",
                     "Results rolled up per material group — the overall picture.");
                 foreach (var g in d.GroupSummaries)
                     col.Item().Element(Card).Element(c => RenderGroupSummary(c, g));
+                if (d.Samples.Count > 0)
+                    col.Item().Element(c => PartEnd(c, "End of summary — sample details follow"));
             }
 
             // 6. Sample Details (per material, then its samples).
@@ -127,7 +129,8 @@ public static class QualityReportPdfSoft
                 if (d.GroupSummaries.Count > 0)
                     col.Item().PageBreak();
 
-                PartBand(col.Item(), "Sample Details",
+                PartBand(col.Item(), d.GroupSummaries.Count > 0 ? 2 : 1,
+                                     d.GroupSummaries.Count > 0 ? 2 : 1, "Sample Details",
                     "Every sample and every reading, material by material.");
                 foreach (var grp in d.Samples.GroupBy(s => s.Sample.QoMaterialId))
                 {
@@ -621,14 +624,35 @@ public static class QualityReportPdfSoft
     /// and the eye slid straight past the boundary. A solid reversed bar with a
     /// line saying what the part contains stops it.
     /// </summary>
-    private static void PartBand(IContainer c, string title, string caption) =>
+    private static void PartBand(IContainer c, int part, int ofParts, string title, string caption) =>
         c.PaddingTop(14).Column(col =>
         {
-            col.Item().Background(Accent).PaddingVertical(5).PaddingHorizontal(8)
-               .Text(title.ToUpperInvariant()).Bold().FontSize(11).FontColor("#ffffff");
+            col.Item().Background(Accent).PaddingVertical(6).PaddingHorizontal(8).Row(r =>
+            {
+                r.RelativeItem().Text(title.ToUpperInvariant())
+                    .Bold().FontSize(12).FontColor("#ffffff");
+                // The numbering is what makes the boundary unmissable at a
+                // glance: a reader who sees "PART 2 OF 2" knows without reading
+                // a word that the previous section has ended.
+                r.ConstantItem(70).AlignRight().Text($"PART {part} OF {ofParts}")
+                    .SemiBold().FontSize(7.5f).FontColor("#dbe6f2");
+            });
             col.Item().Background(BandBg).BorderBottom(1.4f).BorderColor(Accent)
                .PaddingVertical(2.5f).PaddingHorizontal(8)
                .Text(caption).Italic().FontSize(7).FontColor(Muted);
+        });
+
+    /// <summary>
+    /// Closes a part off. A heading tells you something has STARTED; on a long
+    /// summary that runs over a page the reader also needs to be told it has
+    /// FINISHED, or the first sample card reads as more summary.
+    /// </summary>
+    private static void PartEnd(IContainer c, string text) =>
+        c.PaddingTop(6).Column(col =>
+        {
+            col.Item().Height(0.8f).Background(Border);
+            col.Item().PaddingTop(2).AlignRight()
+               .Text(text).Italic().FontSize(6.5f).FontColor(Muted);
         });
 
     /// <summary>

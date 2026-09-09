@@ -284,9 +284,16 @@
                 @Html.AntiForgeryToken()
                 <div class="row g-3 align-items-end">
                     <div class="col-md-4">
-                        <label class="form-label" asp-for="ContainerPoll.StartDate">@Loc["Start date (Doc_Date ≥)"]</label>
+                        <label class="form-label" asp-for="ContainerPoll.StartDate">@Loc["Start date (arrival date ≥)"]</label>
                         <input asp-for="ContainerPoll.StartDate" type="date" class="form-control form-control-sm" />
-                        <small class="text-muted">@Loc["Containers before this date are ignored. Set to your QMS go-live date."]</small>
+                        <small class="text-muted">@Loc["SAP is read from this date onwards, by arrival date. Set to your QMS go-live date."]</small>
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label" asp-for="ContainerPoll.ArchiveArrivalsBefore">@Loc["Auto-archive arrivals before"]</label>
+                        <input asp-for="ContainerPoll.ArchiveArrivalsBefore" type="date" class="form-control form-control-sm" />
+                        <small class="text-muted">
+                            @Loc["Containers that arrived before this date are archived automatically after every sync, so old ones stop reappearing in Pending. Nothing is deleted — they stay on the Archived tab and can be restored. Leave empty to switch it off."]
+                        </small>
                     </div>
                     <div class="col-md-4">
                         <label class="form-label" asp-for="ContainerPoll.PollingMinutes">@Loc["Pull every (minutes)"]</label>

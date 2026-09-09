@@ -639,7 +639,8 @@ public class AdminController : Controller
         if (cfg.PollingMinutes > 1440) cfg.PollingMinutes = 1440;
         await _settings.SaveContainerPollConfigAsync(cfg, GetCurrentUserId());
         await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null,
-            new { section = "Container polling", cfg.PollingMinutes });
+            new { section = "Container polling", cfg.PollingMinutes,
+                  archiveArrivalsBefore = cfg.ArchiveArrivalsBefore?.ToString("yyyy-MM-dd") });
         TempData["Success"] = "Pending Containers pulling saved.";
         return RedirectToAction(nameof(Settings), new { activeTab = "sap" });
     }
@@ -683,6 +684,7 @@ public class AdminController : Controller
 
         var user      = User.FindFirstValue(ClaimTypes.Name) ?? "system";
         var startDate = cfg.StartDate.Value;
+        var archiveBefore = cfg.ArchiveArrivalsBefore;
 
         // Fire-and-forget. The HTTP request returns immediately so the
         // browser doesn't sit on a multi-minute load -- a bulk pull can fetch
@@ -696,7 +698,7 @@ public class AdminController : Controller
             {
                 await using var scope = _scopeFactory.CreateAsyncScope();
                 var cache = scope.ServiceProvider.GetRequiredService<IContainerCacheService>();
-                await cache.RefreshFromSapAsync(startDate, user, "Manual", CancellationToken.None);
+                await cache.RefreshFromSapAsync(startDate, user, "Manual", archiveBefore, CancellationToken.None);
             }
             catch (Exception ex)
             {

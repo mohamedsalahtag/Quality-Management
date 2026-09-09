@@ -221,13 +221,14 @@ public class ArrivalsController : Controller
 
         var user      = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var startDate = cfg.StartDate.Value;
+        var archiveBefore = cfg.ArchiveArrivalsBefore;
         _ = Task.Run(async () =>
         {
             try
             {
                 await using var scope = scopeFactory.CreateAsyncScope();
                 var cache = scope.ServiceProvider.GetRequiredService<IContainerCacheService>();
-                await cache.RefreshFromSapAsync(startDate, user, "Manual", CancellationToken.None);
+                await cache.RefreshFromSapAsync(startDate, user, "Manual", archiveBefore, CancellationToken.None);
             }
             catch (Exception ex)
             {

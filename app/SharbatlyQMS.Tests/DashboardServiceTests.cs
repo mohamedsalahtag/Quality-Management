@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services;
 using SharbatlyQMS.Web.ViewModels;
@@ -146,5 +146,27 @@ public class DashboardServiceTests : IClassFixture<QmsAppFactory>
                 $"{g.MaterialGroup}: {g.DefectiveUnits} defective of {g.InspectedUnits} inspected — " +
                 "the sample rows are being counted once per defect again.");
         });
+    }
+
+    /// <summary>
+    /// The portlet's whole confusion was a plant showing 3 arrivals beside 13
+    /// orders. The split has to add up exactly, or the explanation is worse
+    /// than the silence it replaced.
+    /// </summary>
+    [Fact]
+    public async Task Catch_up_orders_are_a_subset_of_the_orders_opened()
+    {
+        var vm = await LoadAsync(new DashboardFilter { Period = DashboardFilter.Periods.Month });
+        foreach (var row in vm.Commitment)
+        {
+            Assert.True(row.QosCatchUp >= 0);
+            Assert.True(row.QosCatchUp <= row.QosCreated,
+                $"{row.Plant} reports more catch-up orders than orders.");
+            Assert.Equal(row.QosCreated, row.QosOnNewArrivals + row.QosCatchUp);
+            // Committed is a property of the arrivals cohort, so it can never
+            // exceed it -- the bug that started all this.
+            Assert.True(row.Committed <= row.Received,
+                $"{row.Plant} has more committed than arrived.");
+        }
     }
 }

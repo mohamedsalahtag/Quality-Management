@@ -388,7 +388,9 @@ public class DashboardService : IDashboardService
             --     Received  = arrivals created in the period (containers taken in).
             --     Committed = HOW MANY OF THOSE now have a quality order.
             --     QosCreated= quality orders raised in the period from ANY
-            --                 arrival date -- the team's throughput.
+            --                 arrival date -- the team's throughput, split into
+            --                 the part worked on this period's own arrivals and
+            --                 the part catching up on earlier ones.
             --
             --     Committed used to be QosCreated, which compared two different
             --     sets of containers: on 2026-09-03 Dammam took in 3 and raised
@@ -404,7 +406,8 @@ public class DashboardService : IDashboardService
             SELECT COALESCE(r.plant, q.plant) AS Plant,
                    ISNULL(r.Received, 0)      AS Received,
                    ISNULL(r.Committed, 0)     AS Committed,
-                   ISNULL(q.Cnt, 0)           AS QosCreated
+                   ISNULL(q.Cnt, 0)           AS QosCreated,
+                   ISNULL(q.CatchUp, 0)       AS QosCatchUp
             FROM (
                 SELECT x.plant,
                        COUNT(*)      AS Received,
@@ -421,7 +424,14 @@ public class DashboardService : IDashboardService
                 GROUP BY x.plant
             ) r
             FULL OUTER JOIN (
-                SELECT a.plant, COUNT(*) AS Cnt
+                -- Split by WHEN THE CONTAINER CAME IN, not when the order was
+                -- raised. Most of a day's orders are usually against earlier
+                -- arrivals, and a single total hid that: the portlet showed 13
+                -- orders beside 3 arrivals with nothing to say the other 10 were
+                -- the team catching up on a backlog.
+                SELECT a.plant,
+                       COUNT(*) AS Cnt,
+                       SUM(CASE WHEN a.created_at < @fromUtc THEN 1 ELSE 0 END) AS CatchUp
                 FROM   qms_quality_order qo
                 JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
                 WHERE  qo.created_at >= @fromUtc AND qo.created_at < @toUtcEx AND {plantWhere}

@@ -153,7 +153,23 @@ public interface IContainerCacheService
     /// and the admin "Pull now" button so both go through the same code path.
     /// Returns the number of SAP rows fetched.
     /// </summary>
-    Task<int> RefreshFromSapAsync(DateOnly sinceDocDate, string triggeredBy, string triggerSource, CancellationToken ct = default);
+    /// <summary>
+    /// Archives every pending container that arrived before <paramref name="before"/>,
+    /// and repairs any container whose cache lines disagree about being
+    /// archived. Idempotent; a null date runs the repair only. Returns how many
+    /// containers the floor archived.
+    /// </summary>
+    Task<int> ArchiveArrivalsBeforeAsync(DateOnly? before, CancellationToken ct = default);
+
+    /// <param name="archiveArrivalsBefore">
+    /// When set, containers that arrived before this date are archived at the
+    /// end of the sweep. The sweep re-reads SAP in full every run, so a PO
+    /// confirmed late arrives as a new cache row weeks after its period was
+    /// archived by hand -- without this the pending list refills with old
+    /// containers and the manual archive has to be repeated forever.
+    /// </param>
+    Task<int> RefreshFromSapAsync(DateOnly sinceReceiveDate, string triggeredBy, string triggerSource,
+                                  DateOnly? archiveArrivalsBefore = null, CancellationToken ct = default);
 
     /// <summary>
     /// Snapshot of the latest completed pull + whether one is currently

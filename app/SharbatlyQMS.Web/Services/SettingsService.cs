@@ -274,7 +274,8 @@ public class SettingsService : ISettingsService
     public async Task<ContainerPollConfig> GetContainerPollConfigAsync()
     {
         var c = await _db.GetConfigManyAsync(new[] {
-            SettingKeys.ContainerStartDate, SettingKeys.ContainerPollMinutes
+            SettingKeys.ContainerStartDate, SettingKeys.ContainerPollMinutes,
+            SettingKeys.PendingArchiveBefore
         });
         DateOnly? startDate = null;
         var raw = c.GetValueOrDefault(SettingKeys.ContainerStartDate);
@@ -284,7 +285,13 @@ public class SettingsService : ISettingsService
         return new ContainerPollConfig
         {
             StartDate      = startDate,
-            PollingMinutes = ParseInt(c.GetValueOrDefault(SettingKeys.ContainerPollMinutes), 60)
+            PollingMinutes = ParseInt(c.GetValueOrDefault(SettingKeys.ContainerPollMinutes), 60),
+            // An unreadable stored value means no auto-archive rather than a
+            // date nobody chose: this setting hides rows, so it fails open.
+            ArchiveArrivalsBefore =
+                DateOnly.TryParse(c.GetValueOrDefault(SettingKeys.PendingArchiveBefore),
+                                  CultureInfo.InvariantCulture, DateTimeStyles.None, out var ab)
+                    ? ab : null
         };
     }
 
@@ -294,6 +301,8 @@ public class SettingsService : ISettingsService
             cfg.StartDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "", updatedBy);
         await _db.SetConfigAsync(SettingKeys.ContainerPollMinutes,
             cfg.PollingMinutes.ToString(CultureInfo.InvariantCulture), updatedBy);
+        await _db.SetConfigAsync(SettingKeys.PendingArchiveBefore,
+            cfg.ArchiveArrivalsBefore?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "", updatedBy);
     }
 
     // ---- Auto sync ----

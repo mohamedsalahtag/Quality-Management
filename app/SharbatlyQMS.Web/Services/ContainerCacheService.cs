@@ -492,6 +492,73 @@ public class ContainerCacheService : IContainerCacheService
             });
     }
 
+    /// <summary>
+    /// Archives every pending container that arrived before <paramref name="before"/>,
+    /// and repairs any container whose lines disagree about being archived.
+    ///
+    /// Runs at the end of each sweep. Both statements are idempotent -- they
+    /// only ever touch rows that are not already in the state they want -- so
+    /// repeating them costs nothing.
+    ///
+    /// The second statement matters even with no floor set: archiving marks a
+    /// whole container (container_no, bol_no, ebeln), but the cache key also
+    /// includes the PO line, the material, the storage location and the batch.
+    /// A new line on an already-archived container therefore inserts unarchived
+    /// and, because the pending list filters rows before grouping them, brings
+    /// the whole container back. Inheriting the state closes that.
+    /// </summary>
+    public async Task<int> ArchiveArrivalsBeforeAsync(DateOnly? before, CancellationToken ct = default)
+    {
+        using var c = Open();
+        await c.OpenAsync(ct);
+
+        // Repair first, so a container that only came back through a new line is
+        // re-hidden even when no floor is configured.
+        await c.ExecuteAsync(@"
+            UPDATE cc
+            SET    archived_at = t.archived_at,
+                   archived_by = t.archived_by
+            FROM   qms_sap_container_cache cc
+            JOIN  (SELECT container_no, bol_no, ebeln,
+                          MAX(archived_at) AS archived_at,
+                          MAX(archived_by) AS archived_by
+                   FROM   qms_sap_container_cache
+                   WHERE  archived_at IS NOT NULL
+                   GROUP  BY container_no, bol_no, ebeln) t
+              ON   t.container_no = cc.container_no
+             AND   t.bol_no       = cc.bol_no
+             AND   t.ebeln        = cc.ebeln
+            WHERE  cc.archived_at IS NULL AND cc.has_arrival = 0;");
+
+        if (before is null) return 0;
+
+        // Then the floor. Matched on MAX(arrival_date) per container, the same
+        // date the pending grid prints, so what disappears is what the operator
+        // would have selected by hand.
+        return await c.ExecuteScalarAsync<int>(@"
+            SELECT container_no, bol_no, ebeln
+            INTO   #old
+            FROM   qms_sap_container_cache
+            WHERE  has_arrival = 0 AND archived_at IS NULL
+            GROUP  BY container_no, bol_no, ebeln
+            HAVING MAX(arrival_date) IS NOT NULL AND MAX(arrival_date) < @before;
+
+            UPDATE cc
+            SET    archived_at = SYSUTCDATETIME(),
+                   archived_by = 'auto (arrived before ' + CONVERT(VARCHAR(10), @before, 23) + ')'
+            FROM   qms_sap_container_cache cc
+            JOIN   #old o
+              ON   o.container_no = cc.container_no
+             AND   o.bol_no       = cc.bol_no
+             AND   o.ebeln        = cc.ebeln
+            WHERE  cc.has_arrival = 0;
+
+            SELECT COUNT(*) FROM #old;
+
+            DROP TABLE #old;",
+            new { before = before.Value.ToDateTime(TimeOnly.MinValue) });
+    }
+
     public async Task<int> SetArchivedAsync(string containerNo, string bolNo, string ebeln,
         bool archived, string user, CancellationToken ct = default)
     {
@@ -578,7 +645,8 @@ public class ContainerCacheService : IContainerCacheService
         return status;
     }
 
-    public async Task<int> RefreshFromSapAsync(DateOnly hardFloorStartDate, string triggeredBy, string triggerSource, CancellationToken ct = default)
+    public async Task<int> RefreshFromSapAsync(DateOnly hardFloorStartDate, string triggeredBy, string triggerSource,
+                                               DateOnly? archiveArrivalsBefore = null, CancellationToken ct = default)
     {
         // Always pull every row from the admin-configured start date.
         //
@@ -623,7 +691,9 @@ public class ContainerCacheService : IContainerCacheService
                 await UpsertAsync(page, c2);
             }, ct);
             var reconciled = await ReconcileWithArrivalsAsync(ct);
-            message = $"Fetched {totalRows} SAP row(s) since {effectiveSince:yyyy-MM-dd}; reconciled {reconciled} pre-existing arrival(s).";
+            var autoArchived = await ArchiveArrivalsBeforeAsync(archiveArrivalsBefore, ct);
+            message = $"Fetched {totalRows} SAP row(s) since {effectiveSince:yyyy-MM-dd}; reconciled {reconciled} pre-existing arrival(s)."
+                    + (autoArchived > 0 ? $" Auto-archived {autoArchived} container(s) that arrived before {archiveArrivalsBefore:yyyy-MM-dd}." : "");
             success = true;
             _log.LogInformation("Container pull OK ({Trigger}) -- {Msg}", triggerSource, message);
         }

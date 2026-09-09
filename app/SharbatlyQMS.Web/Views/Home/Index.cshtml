@@ -79,6 +79,7 @@
     var totalCommitted = Model.Commitment.Sum(x => x.Committed);
     var totalQosMade   = Model.Commitment.Sum(x => x.QosCreated);
     var totalOutstanding = Model.Commitment.Sum(x => x.Outstanding);
+    var totalCatchUp   = Model.Commitment.Sum(x => x.QosCatchUp);
     decimal? totalCoverage = totalReceived == 0
         ? null : Math.Round(totalCommitted * 100m / totalReceived, 1);
     var rate = Model.DefectRate;
@@ -217,7 +218,13 @@
                     @totalCoverage.Value.ToString("0.#")% @Loc["covered"]
                 </span>
             }
-            <span class="ms-2">&middot; @totalQosMade @Loc["QC orders opened"]</span>
+            <span class="ms-2">
+                &middot; @totalQosMade @Loc["QC orders opened"]
+                @if (totalCatchUp > 0)
+                {
+                    <text>(@totalCatchUp @Loc["catching up on earlier arrivals"])</text>
+                }
+            </span>
         </span>
     </div>
     <div class="card-body pt-0">
@@ -231,9 +238,9 @@
            which is the thing that looks wrong until it is explained. *@
         <div class="alert alert-light border small py-2 mb-3">
             <i class="bi bi-info-circle me-1"></i>
-            @Loc["The first four columns are all about the containers that ARRIVED in this period. The last one counts QC orders opened in the period, whenever their container arrived — so it can be larger."]
+            @Loc["The first four columns are all about the containers that ARRIVED in this period. The last two count QC orders OPENED in the period, whichever day their container arrived — which is why the total can be larger."]
             <div class="text-muted mt-1">
-                @Loc["Example: 8 arrived, 1 of them has been taken into QC, 7 are still waiting (13% covered) — and the team opened 8 orders today, most of them for containers that arrived yesterday."]
+                @Loc["Example: 3 arrived and 1 of them is in QC (2 still waiting, 33% covered) — while the team opened 13 orders, 10 of them catching up on containers that arrived earlier. Nothing is wrong: coverage tracks this period's arrivals, output tracks the work done in it."]
             </div>
         </div>
         <div class="row g-3">
@@ -255,8 +262,11 @@
                                 <th class="text-end" title='@Loc["Taken into QC as a share of Arrived."]'>
                                     @Loc["Covered"]
                                 </th>
-                                <th class="text-end border-start" title='@Loc["Every QC order opened in this period, whatever date its container arrived. A separate measure of the team\u2019s output."]'>
+                                <th class="text-end border-start" title='@Loc["Every QC order opened in this period, whatever date its container arrived. A measure of the work done, not of coverage."]'>
                                     @Loc["QC orders opened"]
+                                </th>
+                                <th class="text-end" title='@Loc["Of those orders, how many were on containers that arrived BEFORE this period - the backlog the team worked through."]'>
+                                    @Loc["...catching up"]
                                 </th>
                             </tr>
                         </thead>
@@ -302,11 +312,24 @@
                                            asp-all-route-data="Drill(row.Plant, null, true)"
                                            class="text-decoration-none">@row.QosCreated</a>
                                     </td>
+                                    <td class="text-end">
+                                        @if (row.QosCatchUp > 0)
+                                        {
+                                            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle"
+                                                  title="@row.QosOnNewArrivals on this period's arrivals, @row.QosCatchUp on earlier ones">
+                                                @row.QosCatchUp
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">&mdash;</span>
+                                        }
+                                    </td>
                                 </tr>
                             }
                             @if (Model.Commitment.Count == 0)
                             {
-                                <tr><td colspan="6" class="text-center text-muted small py-3">
+                                <tr><td colspan="7" class="text-center text-muted small py-3">
                                     @Loc["Nothing arrived and no QC orders were opened in this period."]
                                 </td></tr>
                             }
@@ -336,6 +359,7 @@
                                         }
                                     </td>
                                     <td class="text-end border-start">@totalQosMade</td>
+                                    <td class="text-end">@(totalCatchUp > 0 ? totalCatchUp.ToString() : "—")</td>
                                 </tr>
                             </tfoot>
                         }
