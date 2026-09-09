@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Extensions;
 using SharbatlyQMS.Web.Models.Security;
@@ -58,5 +58,32 @@ public class TimeBarController : Controller
         // was rather than letting a page left open all afternoon look current.
         ViewBag.AsOf             = DateTime.Now;
         return View(result.Rows);
+    }
+
+    /// <summary>
+    /// Sets the page's own start date without a trip to Site Configuration.
+    ///
+    /// It lives here because this is where the question is asked. The date was
+    /// only editable on the Alerts tab of the settings screen, three clicks and
+    /// one tab away from the page it governs, and it was not found.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
+    public async Task<IActionResult> SetStartDate(DateOnly? startDate, CancellationToken ct = default)
+    {
+        var cfg = await _settings.GetTimeBarConfigAsync();
+        cfg.StartDate = startDate;
+        await _settings.SaveTimeBarConfigAsync(cfg, GetCurrentUserId());
+        TempData["Success"] = startDate.HasValue
+            ? $"Showing containers that arrived on or after {startDate:yyyy-MM-dd}."
+            : "Showing every container, whenever it arrived.";
+        return RedirectToAction(nameof(Index));
+    }
+
+    // Same claim the rest of the application reads for the acting user.
+    private int GetCurrentUserId()
+    {
+        var claim = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier);
+        return int.TryParse(claim?.Value, out var id) ? id : 0;
     }
 }

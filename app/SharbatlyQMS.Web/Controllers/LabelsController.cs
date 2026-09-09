@@ -88,6 +88,12 @@ public class LabelsController : Controller
     /// does not stamp every label with an update.
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
+    // The page can list over a thousand labels and each row posts a key and a
+    // value, so a full save exceeds the framework's default 1,024-value limit
+    // and the request is rejected before any action code runs. The view now
+    // submits only edited rows; this is the floor under that, for a browser
+    // with scripting off or a genuine bulk rename.
+    [RequestFormLimits(ValueCountLimit = 16384)]
     [RequirePermission(Perm.Admin.LabelsEdit, Seed.AdminOnly, "Rename a label")]
     public async Task<IActionResult> Save(string[]? key, string[]? value,
         string? screen, string? kind, string? q, bool changedOnly = false,

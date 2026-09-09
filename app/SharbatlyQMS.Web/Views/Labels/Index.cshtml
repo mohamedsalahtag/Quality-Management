@@ -147,7 +147,7 @@
                             <td class="small text-muted">@(string.IsNullOrWhiteSpace(l.ScreenKey) ? "—" : l.ScreenKey)</td>
                             <td>
                                 <span class="fw-semibold">@l.Key</span>
-                                <input type="hidden" name="key" value="@l.Key" />
+                                <input type="hidden" name="key" value="@l.Key" data-label-key />
                             </td>
                             <td>
                                 @* The box shows the OVERRIDE, not the effective text:
@@ -157,6 +157,7 @@
                                 <input type="text" name="value" value="@l.CustomText"
                                        class="form-control form-control-sm"
                                        placeholder="@l.Key" maxlength="400"
+                                       data-label-value data-original="@l.CustomText"
                                        disabled="@(!canEdit)" />
                             </td>
                             <td class="small text-muted">
@@ -189,3 +190,48 @@
         }
     </div>
 </form>
+
+@section Scripts {
+<script>
+// Post only the rows that were actually edited.
+//
+// The screen lists every label the application knows about -- over a thousand
+// of them -- and each row submits a key AND a value, so an unfiltered save sent
+// more than 2,000 form values and ASP.NET Core rejected the whole request at
+// its 1,024-value limit. The user saw a server error and lost the edit.
+//
+// Disabled inputs are not submitted, so switching the untouched pairs off just
+// before the post leaves a request carrying the handful of rows that changed.
+// They are switched straight back on afterwards, because a failed navigation
+// would otherwise leave the form visibly greyed out.
+(function () {
+    var form = document.querySelector('form[action$="/Save"], form[asp-action="Save"]')
+            || document.querySelector('#labels-form');
+    if (!form) {
+        var forms = document.querySelectorAll('form[method="post"]');
+        for (var i = 0; i < forms.length; i++) {
+            if (forms[i].querySelector('[data-label-value]')) { form = forms[i]; break; }
+        }
+    }
+    if (!form) return;
+
+    form.addEventListener('submit', function () {
+        var boxes = form.querySelectorAll('[data-label-value]');
+        var parked = [];
+        for (var i = 0; i < boxes.length; i++) {
+            var box = boxes[i];
+            if (box.value === (box.getAttribute('data-original') || '')) {
+                var key = box.closest('tr').querySelector('[data-label-key]');
+                box.disabled = true;
+                parked.push(box);
+                if (key) { key.disabled = true; parked.push(key); }
+            }
+        }
+        // Re-enable after the browser has serialised the form.
+        setTimeout(function () {
+            for (var j = 0; j < parked.length; j++) parked[j].disabled = false;
+        }, 0);
+    });
+})();
+</script>
+}

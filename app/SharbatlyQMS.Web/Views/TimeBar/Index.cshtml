@@ -2,7 +2,7 @@
 @using SharbatlyQMS.Web.Services
 @model IReadOnlyList<TimeBarRow>
 @{
-    ViewData["Title"] = Loc["Time Bar"];
+    ViewData["Title"] = Loc["Inspection Time Bar"];
     var f          = ViewBag.Filter        as TimeBarFilter  ?? new TimeBarFilter();
     var cfg        = ViewBag.Config        as TimeBarConfig  ?? new TimeBarConfig();
     var summary    = ViewBag.Summary       as TimeBarSummary ?? new TimeBarSummary();
@@ -11,7 +11,9 @@
     var statuses   = ViewBag.StatusOptions as IReadOnlyList<string> ?? Array.Empty<string>();
     var lockedPlant= ViewBag.PlantScopeLocked as string;
     var asOf       = ViewBag.AsOf as DateTime? ?? DateTime.Now;
-    var canConfigure = Perms.CanView(SharbatlyQMS.Web.Models.Security.Screens.AdminSettings);
+    // Edit, not view: the form posts to an action guarded by SettingsEdit, so
+    // offering it to a read-only administrator would only produce a refusal.
+    var canConfigure = Perms.CanEdit(SharbatlyQMS.Web.Models.Security.Screens.AdminSettings);
 
     var total      = ViewBag.Total    as int? ?? Model.Count;
     var pageNo     = ViewBag.Page     as int? ?? 1;
@@ -48,7 +50,7 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="h3 mb-0">
-        <i class="bi bi-hourglass-split me-1"></i>@Loc["Time Bar"]
+        <i class="bi bi-hourglass-split me-1"></i>@Loc["Inspection Time Bar"]
         <span class="badge bg-secondary ms-2">@total</span>
         <small class="text-muted fs-6 fw-normal ms-2">
             @Loc["Days from a container's arrival to the moment QC finished. Optimum is"] @cfg.GoodDays @Loc["day(s)."]
@@ -59,9 +61,36 @@
     </span>
 </div>
 
-@* A page that silently hides most of the fleet would be read as a bug. Say the
-   floor is on, say what it is, and say who can change it. *@
-@if (cfg.StartDate.HasValue)
+@* The start date is stated AND set here. It governs every number on this page,
+   so sending the reader to a tab of the settings screen to change it was the
+   wrong place -- it was looked for here twice and not found. *@
+@if (canConfigure)
+{
+    <form asp-action="SetStartDate" method="post"
+          class="alert @(cfg.StartDate.HasValue ? "alert-info" : "alert-light border") py-2 small
+                 d-flex flex-wrap align-items-center gap-2">
+        @Html.AntiForgeryToken()
+        <i class="bi bi-funnel@(cfg.StartDate.HasValue ? "-fill" : "")"></i>
+        <label class="mb-0" for="tb-start">@Loc["Show containers that arrived on or after"]</label>
+        <input type="date" id="tb-start" name="startDate" style="max-width:11rem"
+               value="@(cfg.StartDate?.ToString("yyyy-MM-dd"))"
+               class="form-control form-control-sm" />
+        <button type="submit" class="btn btn-sm btn-primary">@Loc["Apply"]</button>
+        @if (cfg.StartDate.HasValue)
+        {
+            <button type="submit" name="startDate" value=""
+                    class="btn btn-sm btn-outline-secondary">@Loc["Show all"]</button>
+            <span class="text-muted">
+                @Loc["Earlier arrivals are left out of every number on this page."]
+            </span>
+        }
+        else
+        {
+            <span class="text-muted">@Loc["Empty means every container, whenever it arrived."]</span>
+        }
+    </form>
+}
+else if (cfg.StartDate.HasValue)
 {
     <div class="alert alert-info d-flex align-items-center py-2 small">
         <i class="bi bi-funnel-fill me-2"></i>
@@ -69,11 +98,6 @@
             @Loc["Counting only containers that arrived on or after"]
             <strong>@cfg.StartDate.Value.ToString("yyyy-MM-dd")</strong>.
             @Loc["Earlier arrivals are left out of every number on this page."]
-            @if (canConfigure)
-            {
-                <a asp-controller="Admin" asp-action="Settings" asp-route-activeTab="alerts"
-                   class="alert-link ms-1">@Loc["Change it in Site Configuration → Alerts → Time Bar thresholds"]</a>
-            }
         </div>
     </div>
 }
@@ -269,8 +293,7 @@
                             @Loc["yet. Containers appear here as they arrive."]
                             @if (canConfigure)
                             {
-                                <a asp-controller="Admin" asp-action="Settings" asp-route-activeTab="alerts"
-                                   class="ms-1">@Loc["Move the start date back"]</a>
+                                <span class="ms-1">@Loc["Change the date at the top of the page to widen it."]</span>
                             }
                         </span>
                     }

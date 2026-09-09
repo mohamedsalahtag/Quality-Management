@@ -146,7 +146,7 @@
                                     @if (Perms.CanView(Screens.ReportsBuilder))
                                     { <li><a class="dropdown-item @(ActOn("ReportBuilder") ? "active" : "")" asp-controller="Reports" asp-action="ReportBuilder"><i class="bi bi-table me-1"></i>@Loc["Report builder"]</a></li> }
                                     @if (Perms.CanView(Screens.TimeBar))
-                                    { <li><a class="dropdown-item @(NavOn("TimeBar") ? "active" : "")" asp-controller="TimeBar" asp-action="Index"><i class="bi bi-hourglass-split me-1"></i>@Loc["Time Bar"]</a></li> }
+                                    { <li><a class="dropdown-item @(NavOn("TimeBar") ? "active" : "")" asp-controller="TimeBar" asp-action="Index"><i class="bi bi-hourglass-split me-1"></i>@Loc["Inspection Time Bar"]</a></li> }
                                 </ul>
                             </li>
                         }
