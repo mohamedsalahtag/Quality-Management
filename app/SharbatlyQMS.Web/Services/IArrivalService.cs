@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Models;
+﻿using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services.Sap;
 using SharbatlyQMS.Web.ViewModels;
 
@@ -43,6 +43,43 @@ public interface IArrivalService
     Task<IReadOnlyList<Arrival>> FindByContainersAsync(IReadOnlyCollection<string> containers);
     Task<ArrivalChecklist?> GetChecklistAsync(long arrivalId);
     Task<ShipmentSnapshot?> GetShipmentAsync(long arrivalId);
+
+    /// <summary>
+    /// Days in transit as the SAP cache currently holds them for this arrival's
+    /// (container, BOL, PO) triplet — the same figure the container list shows.
+    /// Null when the container is not in the cache at all, which is the case for
+    /// arrivals created through /Arrivals/Search.
+    ///
+    /// The shipment snapshot carries its own copy, written once at arrival
+    /// creation and deliberately excluded from every later UPDATE, so a SAP
+    /// correction never reaches it: six arrivals were printing 0 transit days
+    /// while the cache held 31. Anything that displays transit days to a user
+    /// should read it from here.
+    /// </summary>
+    Task<short?> GetCachedTransitDaysAsync(long arrivalId);
+
+    /// <summary>
+    /// Refuses a container that arrived in bad condition: the arrival goes to
+    /// Rejected and a quality order is raised already Closed, carrying a
+    /// potential claim, so the damage still reaches the supplier without an
+    /// inspection there is nothing to inspect for.
+    ///
+    /// Draft only. A Completed arrival can already have an active quality order,
+    /// and rejecting around one would either strand it or destroy inspection
+    /// data; the caller is told to reopen for edit first.
+    ///
+    /// <paramref name="reason"/> is mandatory and validated here, not only in
+    /// the dialog -- a crafted POST bypasses a required attribute trivially, and
+    /// this text is printed on the report the supplier receives.
+    /// </summary>
+    Task<(bool ok, string? error, long? qoId)> RejectAsync(long arrivalId, string reason, string user);
+
+    /// <summary>
+    /// Undoes a rejection: cancels the rejection order and returns the arrival
+    /// to Draft. The only route back -- a Closed quality order cannot be
+    /// cancelled or deleted by any other path in the application.
+    /// </summary>
+    Task<(bool ok, string? error)> CancelRejectionAsync(long arrivalId, string reason, string user);
 
     /// <summary>V36: the active custom fields applicable to this arrival
     /// (definition's material group is present among the arrival's line

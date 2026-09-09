@@ -1,9 +1,10 @@
-@using System.Text.Json
+﻿@using System.Text.Json
 @using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.ViewModels
+@using SharbatlyQMS.Web.Extensions
 @model DashboardVm
 @{
-    ViewData["Title"] = "Dashboard";
+    ViewData["Title"] = Loc["Dashboard"];
     var role     = User?.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     var fullName = User?.FindFirst(System.Security.Claims.ClaimTypes.GivenName)?.Value;
 
@@ -14,6 +15,7 @@
     {
         ArrivalStatus.Draft     => "bg-warning text-dark",
         ArrivalStatus.Completed => "bg-success text-white",
+        ArrivalStatus.Rejected  => "bg-danger text-white",
         ArrivalStatus.Cancelled => "bg-secondary text-white",
         _ => "bg-light text-dark"
     };
@@ -34,18 +36,73 @@
         : (avgDefect > Model.Thresholds.DefectPctYellow ? "text-warning"
         :  "text-success"));
 
+    // ---- The current slice, and the links that carry it onward ----
+    var f            = Model.Filter;
+    var (perFrom, perTo) = f.Resolve();
+    var plantLocked  = User?.SinglePlantOrNull();     // single-plant operator
+    var periodLabel  = f.Label;
+
+    // Drill-through: open the matching list already filtered to what the
+    // portlet was showing, so the number on the dashboard and the rows on the
+    // list can never disagree. EVENT-based portlets carry the period; BACKLOG
+    // tiles ("as of now") deliberately do not, or the list would contradict
+    // the tile the moment the backlog predates the range.
+    Func<string?, string?, bool, Dictionary<string, string>> Drill =
+        (plant, status, withPeriod) =>
+    {
+        var d = new Dictionary<string, string>();
+        var pl = plant ?? f.Plant;
+        if (!string.IsNullOrWhiteSpace(pl))     d["plant"]  = pl!;
+        if (!string.IsNullOrWhiteSpace(status)) d["status"] = status!;
+        if (withPeriod)
+        {
+            d["from"] = perFrom.ToString("yyyy-MM-dd");
+            d["to"]   = perTo.ToString("yyyy-MM-dd");
+        }
+        return d;
+    };
+
+    // Links that change the dashboard's own slice (period chips, plant chips).
+    Func<string, string?, Dictionary<string, string>> Slice = (period, plant) =>
+    {
+        var d = new Dictionary<string, string> { ["period"] = period };
+        if (!string.IsNullOrWhiteSpace(plant)) d["plant"] = plant!;
+        if (period == DashboardFilter.Periods.Custom)
+        {
+            d["from"] = perFrom.ToString("yyyy-MM-dd");
+            d["to"]   = perTo.ToString("yyyy-MM-dd");
+        }
+        return d;
+    };
+
+    var totalReceived  = Model.Commitment.Sum(x => x.Received);
+    var totalCommitted = Model.Commitment.Sum(x => x.Committed);
+    var totalQosMade   = Model.Commitment.Sum(x => x.QosCreated);
+    var totalOutstanding = Model.Commitment.Sum(x => x.Outstanding);
+    decimal? totalCoverage = totalReceived == 0
+        ? null : Math.Round(totalCommitted * 100m / totalReceived, 1);
+    var rate = Model.DefectRate;
+
     // JSON payload consumed by dashboard.js. Camel-cased so the JS reads
     // `trend`, `qoByStatus`, `avgDefectPct`, `thresholds`,
-    // `throughput`, `openQoAge`, `defectByGroup`.
+    // `throughput`, `openQoAge`, `defectByGroup`, `commitment`.
     var payload = new
     {
-        trend         = Model.ArrivalsTrend,
-        qoByStatus    = Model.QoByStatus,
-        avgDefectPct  = Model.AvgDefectPctLast30,
-        thresholds    = Model.Thresholds,
-        throughput    = Model.ThroughputTrend,
-        openQoAge     = Model.OpenQoAgeBuckets,
-        defectByGroup = Model.DefectByGroup
+        trend           = Model.ArrivalsTrend,
+        qoByStatus      = Model.QoByStatus,
+        avgDefectPct    = Model.AvgDefectPctLast30,
+        thresholds      = Model.Thresholds,
+        throughput      = Model.ThroughputTrend,
+        openQoAge       = Model.OpenQoAgeBuckets,
+        defectByGroup   = Model.DefectByGroup,
+        commitmentTrend = Model.CommitmentTrend,
+        commitment      = Model.Commitment.Select(x => new {
+                              plant      = Codes.PlantDisplay(x.Plant),
+                              received   = x.Received,
+                              committed  = x.Committed,
+                              qosCreated = x.QosCreated }),
+        bucketByDay     = f.BucketByDay,
+        bucketByHour    = f.BucketByHour
     };
     var payloadJson = JsonSerializer.Serialize(payload);
 }
@@ -53,7 +110,7 @@
 <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
     <div>
         <h1 class="h3 mb-1">Welcome, @fullName</h1>
-        <p class="text-muted mb-0">Sharbatly Quality Management System</p>
+        <p class="text-muted mb-0">@Loc["Sharbatly Quality Management System"]</p>
     </div>
     <span class="badge bg-secondary fs-6">@role</span>
 </div>
@@ -64,7 +121,7 @@
     <div class="alert alert-warning d-flex align-items-start" role="alert">
         <i class="bi bi-exclamation-triangle-fill me-2 mt-1"></i>
         <div>
-            <strong>SAP sync needs attention.</strong>
+            <strong>@Loc["SAP sync needs attention."]</strong>
             The most recent sync failed for:
             @foreach (var sf in Model.SyncFailures)
             {
@@ -74,35 +131,299 @@
                     @if (!string.IsNullOrWhiteSpace(sf.Message)) { <text>: @(sf.Message!.Length > 160 ? sf.Message[..160] + "…" : sf.Message)</text> }
                 </div>
             }
-            <div class="small mt-1">Open <a asp-controller="Admin" asp-action="Settings" asp-route-activeTab="sap">Site Configuration → SAP</a> to retry.</div>
+            <div class="small mt-1">Open <a asp-controller="Admin" asp-action="Settings" asp-route-activeTab="sap">@Loc["Site Configuration → SAP"]</a> to retry.</div>
         </div>
     </div>
 }
 
-@* ---- KPI tiles ---- *@
-<div class="row g-3 mb-3">
-    <div class="col-6 col-md-4 col-xl-2">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-body py-3">
-                <div class="text-muted small text-uppercase fw-semibold mb-1">
-                    <i class="bi bi-pencil-square text-primary me-1"></i>Arrivals in Draft
+@* ---- Slice bar: one plant, one period. Everything below obeys it, and
+       every drill-through link carries it into the list it opens. ---- *@
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body py-2 d-flex flex-wrap align-items-center gap-3">
+        <div class="d-flex align-items-center gap-2">
+            <span class="text-muted small text-uppercase fw-semibold">@Loc["Period"]</span>
+            <div class="btn-group btn-group-sm" role="group" aria-label='@Loc["Period"]'>
+                @foreach (var (key, text) in new[] {
+                    (DashboardFilter.Periods.Today,   "Today"),
+                    (DashboardFilter.Periods.Week,    "7 days"),
+                    (DashboardFilter.Periods.Month,   "30 days"),
+                    (DashboardFilter.Periods.Quarter, "90 days") })
+                {
+                    <a asp-action="Index" asp-all-route-data="Slice(key, f.Plant)"
+                       class="btn @(f.Period == key ? "btn-primary" : "btn-outline-secondary")">@text</a>
+                }
+            </div>
+        </div>
+
+        @* Custom range. Submitting sets period=custom, so the chips above
+           unselect and the label reads the real dates. *@
+        <form asp-action="Index" method="get" class="d-flex align-items-center gap-2 m-0">
+            <input type="hidden" name="period" value="@DashboardFilter.Periods.Custom" />
+            @if (!string.IsNullOrWhiteSpace(f.Plant))
+            {
+                <input type="hidden" name="plant" value="@f.Plant" />
+            }
+            <input type="date" name="from" value="@perFrom.ToString("yyyy-MM-dd")"
+                   class="form-control form-control-sm" style="width:9.5rem" aria-label='@Loc["From"]' />
+            <span class="text-muted small">@Loc["to"]</span>
+            <input type="date" name="to" value="@perTo.ToString("yyyy-MM-dd")"
+                   class="form-control form-control-sm" style="width:9.5rem" aria-label='@Loc["To"]' />
+            <button type="submit" class="btn btn-sm btn-outline-primary">@Loc["Apply"]</button>
+        </form>
+
+        <div class="d-flex align-items-center gap-2 ms-auto">
+            <span class="text-muted small text-uppercase fw-semibold">@Loc["Plant"]</span>
+            @if (plantLocked != null)
+            {
+                @* Plant-scoped operator: the scope is forced server-side, so a
+                   picker would only offer choices that come back identical. *@
+                <span class="badge bg-light text-dark border" title="Your account is restricted to this plant.">
+                    <i class="bi bi-lock-fill text-muted me-1"></i>@Codes.PlantLabel(plantLocked)
+                </span>
+            }
+            else
+            {
+                <div class="btn-group btn-group-sm" role="group" aria-label='@Loc["Plant"]'>
+                    <a asp-action="Index" asp-all-route-data="Slice(f.Period, null)"
+                       class="btn @(string.IsNullOrWhiteSpace(f.Plant) ? "btn-secondary" : "btn-outline-secondary")">@Loc["All"]</a>
+                    @foreach (var pl in Model.PlantOptions)
+                    {
+                        <a asp-action="Index" asp-all-route-data="Slice(f.Period, pl)"
+                           class="btn @(string.Equals(pl, f.Plant, StringComparison.OrdinalIgnoreCase) ? "btn-secondary" : "btn-outline-secondary")"
+                           title="@pl">@Codes.PlantDisplay(pl)</a>
+                    }
                 </div>
-                <div class="fs-2 fw-semibold lh-1">@Model.Counts.ArrivalsDraft</div>
-                <div class="text-muted small mt-1">Awaiting checklist completion</div>
+            }
+        </div>
+    </div>
+</div>
+
+@* ---- Received vs committed: did QC keep up with what arrived? ----
+       Received  = containers taken in (arrivals created) in the period.
+       Committed = those taken into QC (quality orders created).
+       The gap is the backlog built during the period. Every number opens the
+       list it was counted from. ---- *@
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2 flex-wrap gap-2">
+        <span class="fw-semibold">
+            <i class="bi bi-truck me-1"></i>Received vs Committed to QC
+            <span class="badge bg-light text-dark border ms-1">@periodLabel</span>
+        </span>
+        <span class="text-muted small">
+            @totalReceived @Loc["arrived"] &middot; @totalCommitted @Loc["taken into QC"]
+            @if (totalCoverage.HasValue)
+            {
+                <span class="ms-1 fw-semibold @(totalCoverage >= 100 ? "text-success" : (totalCoverage >= 80 ? "text-warning" : "text-danger"))">
+                    @totalCoverage.Value.ToString("0.#")% @Loc["covered"]
+                </span>
+            }
+            <span class="ms-2">&middot; @totalQosMade @Loc["QC orders opened"]</span>
+        </span>
+    </div>
+    <div class="card-body pt-0">
+        @* The distinction this portlet lives or dies by. "Received 3, QC orders
+           raised 13" looked impossible until it said which containers each
+           number is about: coverage follows the containers received in the
+           period, while the orders raised include catching up on earlier
+           arrivals. *@
+        @* An abstract definition of each column did not land. A worked example
+           does: it shows in one line why the last column can exceed the first,
+           which is the thing that looks wrong until it is explained. *@
+        <div class="alert alert-light border small py-2 mb-3">
+            <i class="bi bi-info-circle me-1"></i>
+            @Loc["The first four columns are all about the containers that ARRIVED in this period. The last one counts QC orders opened in the period, whenever their container arrived — so it can be larger."]
+            <div class="text-muted mt-1">
+                @Loc["Example: 8 arrived, 1 of them has been taken into QC, 7 are still waiting (13% covered) — and the team opened 8 orders today, most of them for containers that arrived yesterday."]
+            </div>
+        </div>
+        <div class="row g-3">
+            <div class="col-lg-6">
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>@Loc["Plant"]</th>
+                                <th class="text-end" title='@Loc["Containers that arrived in this period."]'>
+                                    @Loc["Arrived"]
+                                </th>
+                                <th class="text-end" title='@Loc["How many of those arrived containers now have a QC order."]'>
+                                    @Loc["Taken into QC"]
+                                </th>
+                                <th class="text-end" title='@Loc["Arrived, but still has no QC order. Arrived minus Taken into QC."]'>
+                                    @Loc["Still waiting"]
+                                </th>
+                                <th class="text-end" title='@Loc["Taken into QC as a share of Arrived."]'>
+                                    @Loc["Covered"]
+                                </th>
+                                <th class="text-end border-start" title='@Loc["Every QC order opened in this period, whatever date its container arrived. A separate measure of the team\u2019s output."]'>
+                                    @Loc["QC orders opened"]
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in Model.Commitment.OrderByDescending(x => x.Received).ThenBy(x => x.Plant))
+                            {
+                                <tr>
+                                    <td>
+                                        <a asp-action="Index" asp-all-route-data="Slice(f.Period, row.Plant)"
+                                           class="text-decoration-none" title="Show the whole dashboard for @row.Plant">
+                                            @Codes.PlantDisplay(row.Plant)
+                                        </a>
+                                    </td>
+                                    <td class="text-end">
+                                        <a asp-controller="Arrivals" asp-action="Index"
+                                           asp-all-route-data="Drill(row.Plant, null, true)"
+                                           class="text-decoration-none">@row.Received</a>
+                                    </td>
+                                    <td class="text-end">
+                                        @* Opens the ARRIVALS received in the period, which is
+                                           the set this number is a property of. *@
+                                        <a asp-controller="Arrivals" asp-action="Index"
+                                           asp-all-route-data="Drill(row.Plant, null, true)"
+                                           class="text-decoration-none">@row.Committed</a>
+                                    </td>
+                                    <td class="text-end @(row.Outstanding > 0 ? "text-danger fw-semibold" : "text-muted")">
+                                        @row.Outstanding
+                                    </td>
+                                    <td class="text-end">
+                                        @if (row.CoveragePct.HasValue)
+                                        {
+                                            <span class="badge @(row.CoveragePct >= 100 ? "bg-success" : (row.CoveragePct >= 80 ? "bg-warning text-dark" : "bg-danger"))">
+                                                @row.CoveragePct.Value.ToString("0.#")%
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">&mdash;</span>
+                                        }
+                                    </td>
+                                    <td class="text-end border-start">
+                                        <a asp-controller="QualityOrders" asp-action="Index"
+                                           asp-all-route-data="Drill(row.Plant, null, true)"
+                                           class="text-decoration-none">@row.QosCreated</a>
+                                    </td>
+                                </tr>
+                            }
+                            @if (Model.Commitment.Count == 0)
+                            {
+                                <tr><td colspan="6" class="text-center text-muted small py-3">
+                                    @Loc["Nothing arrived and no QC orders were opened in this period."]
+                                </td></tr>
+                            }
+                        </tbody>
+                        @if (Model.Commitment.Count > 0)
+                        {
+                            @* Totals across every plant in view. Coverage is
+                               recomputed from the totals, not averaged from the
+                               rows: averaging percentages would weight a plant
+                               with two containers the same as one with forty. *@
+                            <tfoot class="table-light fw-semibold">
+                                <tr>
+                                    <td>@Loc["All plants"]</td>
+                                    <td class="text-end">@totalReceived</td>
+                                    <td class="text-end">@totalCommitted</td>
+                                    <td class="text-end @(totalOutstanding > 0 ? "text-danger" : "text-muted")">@totalOutstanding</td>
+                                    <td class="text-end">
+                                        @if (totalCoverage.HasValue)
+                                        {
+                                            <span class="badge @(totalCoverage >= 100 ? "bg-success" : (totalCoverage >= 80 ? "bg-warning text-dark" : "bg-danger"))">
+                                                @totalCoverage.Value.ToString("0.#")%
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">&mdash;</span>
+                                        }
+                                    </td>
+                                    <td class="text-end border-start">@totalQosMade</td>
+                                </tr>
+                            </tfoot>
+                        }
+                    </table>
+                </div>
+            </div>
+            <div class="col-lg-6">
+                <div style="position: relative; height: 240px;">
+                    <canvas id="chartCommitment"></canvas>
+                </div>
             </div>
         </div>
     </div>
+</div>
+
+@* ---- KPI tiles ---- *@
+<div class="row g-3 mb-3">
+    @* Backlog tiles drill through WITHOUT the period: a draft arrival that has
+       been sitting since last month is exactly the one you want to open, and a
+       date-filtered list would hide it and contradict the number above it. *@
     <div class="col-6 col-md-4 col-xl-2">
-        <a asp-controller="Arrivals" asp-action="Pending" class="text-decoration-none">
+        <a asp-controller="Arrivals" asp-action="Index"
+           asp-all-route-data="Drill(null, ArrivalStatus.Draft, false)" class="text-decoration-none text-reset">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body py-3">
+                <div class="text-muted small text-uppercase fw-semibold mb-1">
+                    <i class="bi bi-pencil-square text-primary me-1"></i>@Loc["Arrivals in Draft"]
+                </div>
+                <div class="fs-2 fw-semibold lh-1">@Model.Counts.ArrivalsDraft</div>
+                <div class="text-muted small mt-1">@Loc["Awaiting checklist completion"]</div>
+            </div>
+        </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+        <a asp-controller="Arrivals" asp-action="Pending"
+           asp-all-route-data="Drill(null, null, false)" class="text-decoration-none">
         <div class="card border-0 shadow-sm h-100 @(Model.Counts.PendingContainers > 0 ? "border-start border-4 border-danger" : "")">
             <div class="card-body py-3">
                 <div class="text-muted small text-uppercase fw-semibold mb-1">
-                    <i class="bi bi-inbox text-danger me-1"></i>Containers without Arrival
+                    <i class="bi bi-inbox text-danger me-1"></i>@Loc["Containers without Arrival"]
                 </div>
                 <div class="fs-2 fw-semibold lh-1 @(Model.Counts.PendingContainers > 0 ? "text-danger" : "")">
                     @Model.Counts.PendingContainers
                 </div>
-                <div class="text-muted small mt-1">Click to review pending</div>
+                <div class="text-muted small mt-1">@Loc["Click to review pending"]</div>
+            </div>
+        </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+        <a asp-controller="QualityOrders" asp-action="Index"
+           asp-all-route-data="Drill(null, null, false)" class="text-decoration-none text-reset">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body py-3">
+                <div class="text-muted small text-uppercase fw-semibold mb-1">
+                    <i class="bi bi-clipboard-data text-primary me-1"></i>@Loc["Quality Orders Open"]
+                </div>
+                <div class="fs-2 fw-semibold lh-1">@Model.Counts.QoOpen</div>
+                <div class="text-muted small mt-1">Initial, Open & Reopened</div>
+            </div>
+        </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+        <a asp-controller="Arrivals" asp-action="Index"
+           asp-all-route-data="Drill(null, ArrivalStatus.Draft, false)" class="text-decoration-none text-reset">
+        <div class="card border-0 shadow-sm h-100 @(Model.Counts.StaleArrivals > 0 ? "border-start border-4 border-danger" : "")">
+            <div class="card-body py-3">
+                <div class="text-muted small text-uppercase fw-semibold mb-1">
+                    <i class="bi bi-hourglass-split text-danger me-1"></i>@Loc["Stale Arrivals"]
+                </div>
+                <div class="fs-2 fw-semibold lh-1 @(Model.Counts.StaleArrivals > 0 ? "text-danger" : "")">@Model.Counts.StaleArrivals</div>
+                <div class="text-muted small mt-1">Draft &gt; @Model.Thresholds.StaleArrivalDays day(s)</div>
+            </div>
+        </div>
+        </a>
+    </div>
+    <div class="col-6 col-md-4 col-xl-2">
+        <a asp-controller="QualityOrders" asp-action="Index"
+           asp-all-route-data="Drill(null, null, false)" class="text-decoration-none text-reset">
+        <div class="card border-0 shadow-sm h-100 @(Model.Counts.AgedOpenQos > 0 ? "border-start border-4 border-warning" : "")">
+            <div class="card-body py-3">
+                <div class="text-muted small text-uppercase fw-semibold mb-1">
+                    <i class="bi bi-stopwatch text-warning me-1"></i>@Loc["Aged Open QOs"]
+                </div>
+                <div class="fs-2 fw-semibold lh-1 @(Model.Counts.AgedOpenQos > 0 ? "text-warning" : "")">@Model.Counts.AgedOpenQos</div>
+                <div class="text-muted small mt-1">Open &gt; @Model.Thresholds.OpenQoDays day(s)</div>
             </div>
         </div>
         </a>
@@ -111,45 +432,12 @@
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body py-3">
                 <div class="text-muted small text-uppercase fw-semibold mb-1">
-                    <i class="bi bi-clipboard-data text-primary me-1"></i>Quality Orders Open
-                </div>
-                <div class="fs-2 fw-semibold lh-1">@Model.Counts.QoOpen</div>
-                <div class="text-muted small mt-1">Initial, Open & Reopened</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-xl-2">
-        <div class="card border-0 shadow-sm h-100 @(Model.Counts.StaleArrivals > 0 ? "border-start border-4 border-danger" : "")">
-            <div class="card-body py-3">
-                <div class="text-muted small text-uppercase fw-semibold mb-1">
-                    <i class="bi bi-hourglass-split text-danger me-1"></i>Stale Arrivals
-                </div>
-                <div class="fs-2 fw-semibold lh-1 @(Model.Counts.StaleArrivals > 0 ? "text-danger" : "")">@Model.Counts.StaleArrivals</div>
-                <div class="text-muted small mt-1">Draft &gt; @Model.Thresholds.StaleArrivalDays day(s)</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-xl-2">
-        <div class="card border-0 shadow-sm h-100 @(Model.Counts.AgedOpenQos > 0 ? "border-start border-4 border-warning" : "")">
-            <div class="card-body py-3">
-                <div class="text-muted small text-uppercase fw-semibold mb-1">
-                    <i class="bi bi-stopwatch text-warning me-1"></i>Aged Open QOs
-                </div>
-                <div class="fs-2 fw-semibold lh-1 @(Model.Counts.AgedOpenQos > 0 ? "text-warning" : "")">@Model.Counts.AgedOpenQos</div>
-                <div class="text-muted small mt-1">Open &gt; @Model.Thresholds.OpenQoDays day(s)</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-4 col-xl-2">
-        <div class="card border-0 shadow-sm h-100">
-            <div class="card-body py-3">
-                <div class="text-muted small text-uppercase fw-semibold mb-1">
-                    <i class="bi bi-graph-down-arrow text-info me-1"></i>Avg Defect % (30 d)
+                    <i class="bi bi-graph-down-arrow text-info me-1"></i>@Loc["Avg Defect %"]
                 </div>
                 <div class="fs-2 fw-semibold lh-1 @DefectTone()">
                     @(avgDefect == null ? "—" : $"{avgDefect.Value:0.0}%")
                 </div>
-                <div class="text-muted small mt-1">Across closed QOs</div>
+                <div class="text-muted small mt-1">Closed QOs &middot; @periodLabel</div>
             </div>
         </div>
     </div>
@@ -160,8 +448,8 @@
     <div class="col-lg-5">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
-                <span class="fw-semibold"><i class="bi bi-activity me-1"></i>Arrivals Trend</span>
-                <span class="text-muted small">Last 12 weeks</span>
+                <span class="fw-semibold"><i class="bi bi-activity me-1"></i>@Loc["Arrivals Trend"]</span>
+                <span class="text-muted small">@periodLabel</span>
             </div>
             <div class="card-body pt-0">
                 <div style="position: relative; height: 240px;">
@@ -173,7 +461,7 @@
     <div class="col-lg-4">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
-                <span class="fw-semibold"><i class="bi bi-pie-chart-fill me-1"></i>Quality Orders by Status</span>
+                <span class="fw-semibold"><i class="bi bi-pie-chart-fill me-1"></i>@Loc["Quality Orders by Status"]</span>
             </div>
             <div class="card-body pt-0">
                 <div style="position: relative; height: 240px;">
@@ -185,15 +473,60 @@
     <div class="col-lg-3">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
-                <span class="fw-semibold"><i class="bi bi-speedometer me-1"></i>Defect Rate</span>
+                <span class="fw-semibold"><i class="bi bi-speedometer me-1"></i>@Loc["Defect Rate"]</span>
                 <span class="text-muted small" title="Red above @(Model.Thresholds.DefectPctRed)%, Amber above @(Model.Thresholds.DefectPctYellow)%">
                     <i class="bi bi-info-circle"></i>
                 </span>
             </div>
             <div class="card-body pt-0">
-                <div style="position: relative; height: 240px;">
+                @* The gauge alone was a number with no provenance -- "which
+                   defect, which order, which material?" had no answer on the
+                   page. The rate is unchanged; what follows it is the evidence:
+                   how much was inspected, across how many orders, and the
+                   defects actually driving it. A rate over four samples and one
+                   over four hundred are different claims and now look it. *@
+                <div style="position: relative; height: 150px;">
                     <canvas id="chartDefectGauge"></canvas>
                 </div>
+                @if (rate.Samples > 0)
+                {
+                    <div class="text-center small text-muted border-top pt-2">
+                        @Loc["from"] <strong>@rate.Samples</strong> @Loc["samples"]
+                        @Loc["across"] <strong>@rate.Orders</strong> @Loc["closed orders"]
+                        <div>
+                            <strong>@Fmt.Dec2(rate.DefectiveUnits)</strong> @Loc["defective of"]
+                            <strong>@Fmt.Dec2(rate.InspectedUnits)</strong> @Loc["inspected"]
+                        </div>
+                    </div>
+                    @if (rate.TopDefects.Count > 0)
+                    {
+                        <div class="mt-2">
+                            <div class="text-muted small text-uppercase fw-semibold mb-1">@Loc["Biggest contributors"]</div>
+                            <ul class="list-unstyled mb-0 small">
+                                @foreach (var td in rate.TopDefects.Take(4))
+                                {
+                                    <li class="d-flex justify-content-between gap-2 border-bottom py-1">
+                                        <span class="text-truncate" title="@td.DefectCategory@(string.IsNullOrWhiteSpace(td.MaterialGroup) ? "" : " · " + td.MaterialGroup)">
+                                            @td.DefectName
+                                        </span>
+                                        <span class="fw-semibold text-nowrap">@td.PctOfInspected.ToString("0.##")%</span>
+                                    </li>
+                                }
+                            </ul>
+                            <a asp-controller="Reports" asp-action="FlatDefects"
+                               asp-all-route-data="Drill(null, null, false)"
+                               class="small text-decoration-none d-inline-block mt-1">
+                                @Loc["Break it down in the Data hub"] <i class="bi bi-arrow-right-short"></i>
+                            </a>
+                        </div>
+                    }
+                }
+                else
+                {
+                    <div class="text-center small text-muted border-top pt-2">
+                        @Loc["No closed orders with samples in this period."]
+                    </div>
+                }
             </div>
         </div>
     </div>
@@ -204,8 +537,8 @@
     <div class="col-lg-5">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
-                <span class="fw-semibold"><i class="bi bi-bar-chart-steps me-1"></i>Throughput vs QC pace</span>
-                <span class="text-muted small">Arrivals received vs QOs closed (12 wk)</span>
+                <span class="fw-semibold"><i class="bi bi-bar-chart-steps me-1"></i>@Loc["Throughput vs QC pace"]</span>
+                <span class="text-muted small">Received vs QOs closed &middot; @periodLabel</span>
             </div>
             <div class="card-body pt-0">
                 <div style="position: relative; height: 240px;">
@@ -217,8 +550,8 @@
     <div class="col-lg-3">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
-                <span class="fw-semibold"><i class="bi bi-bar-chart me-1"></i>Open QO Age</span>
-                <span class="text-muted small">Days since opened</span>
+                <span class="fw-semibold"><i class="bi bi-bar-chart me-1"></i>@Loc["Open QO Age"]</span>
+                <span class="text-muted small">@Loc["Days since opened"]</span>
             </div>
             <div class="card-body pt-0">
                 <div style="position: relative; height: 240px;">
@@ -230,8 +563,8 @@
     <div class="col-lg-4">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
-                <span class="fw-semibold"><i class="bi bi-bar-chart-line me-1"></i>Defect % by Material Group</span>
-                <span class="text-muted small">Top 8 (30 d)</span>
+                <span class="fw-semibold"><i class="bi bi-bar-chart-line me-1"></i>@Loc["Defect % by Material Group"]</span>
+                <span class="text-muted small">Top 8 &middot; @periodLabel</span>
             </div>
             <div class="card-body pt-0">
                 <div style="position: relative; height: 240px;">
@@ -247,8 +580,9 @@
     <div class="col-lg-6">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
-                <span class="fw-semibold"><i class="bi bi-box-arrow-in-down me-1"></i>Open Arrivals</span>
-                <a asp-controller="Arrivals" asp-action="Index" asp-route-status="Draft" class="small text-decoration-none">
+                <span class="fw-semibold"><i class="bi bi-box-arrow-in-down me-1"></i>@Loc["Open Arrivals"]</span>
+                <a asp-controller="Arrivals" asp-action="Index"
+                   asp-all-route-data="Drill(null, ArrivalStatus.Draft, false)" class="small text-decoration-none">
                     View all <i class="bi bi-arrow-right-short"></i>
                 </a>
             </div>
@@ -256,11 +590,11 @@
                 <table class="table table-sm table-hover align-middle mb-0">
                     <thead class="table-light">
                         <tr>
-                            <th>Arrival</th>
-                            <th>Container</th>
-                            <th>Vendor</th>
-                            <th>Status</th>
-                            <th class="text-end">Created</th>
+                            <th>@Loc["Arrival"]</th>
+                            <th>@Loc["Container"]</th>
+                            <th>@Loc["Vendor"]</th>
+                            <th>@Loc["Status"]</th>
+                            <th class="text-end">@Loc["Created"]</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -279,7 +613,7 @@
                         }
                         @if (Model.OpenArrivals.Count == 0)
                         {
-                            <tr><td colspan="5" class="text-center text-muted small py-3">No open arrivals.</td></tr>
+                            <tr><td colspan="5" class="text-center text-muted small py-3">@Loc["No open arrivals."]</td></tr>
                         }
                     </tbody>
                 </table>
@@ -289,8 +623,9 @@
     <div class="col-lg-6">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-header bg-transparent border-0 d-flex justify-content-between align-items-center py-2">
-                <span class="fw-semibold"><i class="bi bi-clipboard-data me-1"></i>Open Quality Orders</span>
-                <a asp-controller="QualityOrders" asp-action="Index" class="small text-decoration-none">
+                <span class="fw-semibold"><i class="bi bi-clipboard-data me-1"></i>@Loc["Open Quality Orders"]</span>
+                <a asp-controller="QualityOrders" asp-action="Index"
+                   asp-all-route-data="Drill(null, null, false)" class="small text-decoration-none">
                     View all <i class="bi bi-arrow-right-short"></i>
                 </a>
             </div>
@@ -298,11 +633,11 @@
                 <table class="table table-sm table-hover align-middle mb-0">
                     <thead class="table-light">
                         <tr>
-                            <th>QO</th>
-                            <th>Container</th>
-                            <th>Vendor</th>
-                            <th>Status</th>
-                            <th class="text-end">Opened</th>
+                            <th>@Loc["QO"]</th>
+                            <th>@Loc["Container"]</th>
+                            <th>@Loc["Vendor"]</th>
+                            <th>@Loc["Status"]</th>
+                            <th class="text-end">@Loc["Opened"]</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -322,7 +657,7 @@
                         }
                         @if (Model.OpenQos.Count == 0)
                         {
-                            <tr><td colspan="5" class="text-center text-muted small py-3">No open quality orders.</td></tr>
+                            <tr><td colspan="5" class="text-center text-muted small py-3">@Loc["No open quality orders."]</td></tr>
                         }
                     </tbody>
                 </table>

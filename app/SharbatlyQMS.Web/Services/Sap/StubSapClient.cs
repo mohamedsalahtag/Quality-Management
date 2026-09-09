@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.Services.Sap;
+﻿namespace SharbatlyQMS.Web.Services.Sap;
 
 /// <summary>
 /// Hard-coded SAP rows used during early development before CDS Views are
@@ -42,14 +42,14 @@ public class StubSapClient : ISapClient
     }
 
     public async Task<int> FetchSinceAsync(
-        DateOnly sinceDocDate,
+        DateOnly sinceArrivalDate,
         Func<IReadOnlyList<SapShipmentRow>, CancellationToken, Task> onPage,
         CancellationToken ct = default)
     {
         // The stub data has no TOC_DATE; use ArrivalDate as a proxy for
         // "document date" so dev mode still produces realistic rows.
         var matched = Rows
-            .Where(r => r.ArrivalDate.HasValue && r.ArrivalDate.Value >= sinceDocDate)
+            .Where(r => r.ArrivalDate.HasValue && r.ArrivalDate.Value >= sinceArrivalDate)
             .ToList();
         if (matched.Count > 0)
             await onPage(matched, ct);
@@ -57,7 +57,7 @@ public class StubSapClient : ISapClient
         // should produce equivalent diagnostic output so a regression that
         // only surfaces in dev (or vice versa) is not hidden by the log
         // gap. Counts can legitimately be 0 in either implementation.
-        _log?.LogInformation("Stub fetch-since(>= {Date}) returned {Count} row(s)", sinceDocDate, matched.Count);
+        _log?.LogInformation("Stub fetch-since(>= {Date}) returned {Count} row(s)", sinceArrivalDate, matched.Count);
         return matched.Count;
     }
 

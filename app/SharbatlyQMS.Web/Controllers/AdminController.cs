@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -549,6 +549,21 @@ public class AdminController : Controller
         await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null, new { section = "Thumbnails" });
         TempData["Success"] = "Thumbnail settings saved.";
         return RedirectToAction(nameof(Settings), new { activeTab = "thumbnails" });
+    }
+
+    /// <summary>
+    /// Time Bar thresholds. The parameter MUST be named <c>timeBar</c>: the view
+    /// renders the inputs as TimeBar.GoodDays and the default binder matches the
+    /// PARAMETER name as the prefix, so a different name silently binds every
+    /// field to its default.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Admin.SettingsEdit, Seed.AdminOnly, "Change site configuration")]
+    public async Task<IActionResult> SaveTimeBarSettings(TimeBarConfig timeBar)
+    {
+        await _settings.SaveTimeBarConfigAsync(timeBar ?? new TimeBarConfig(), GetCurrentUserId());
+        TempData["Success"] = "Time Bar thresholds saved.";
+        return RedirectToAction(nameof(Settings), new { activeTab = "alerts" });
     }
 
     [HttpPost, ValidateAntiForgeryToken]
@@ -1926,6 +1941,7 @@ public class AdminController : Controller
             Sap          = await _settings.GetSapConfigAsync(),
             Smtp         = await _settings.GetSmtpConfigAsync(),
             Thumbnails   = await _settings.GetThumbnailConfigAsync(),
+            TimeBar      = await _settings.GetTimeBarConfigAsync(),
             Alerts       = await _settings.GetAlertConfigAsync(),
             Report       = await _settings.GetReportConfigAsync(),
             Branding     = await _settings.GetBrandingConfigAsync(),
@@ -2199,6 +2215,7 @@ public class SettingsVm
     public SmtpConfig        Smtp         { get; set; } = new();
     public ThumbnailConfig   Thumbnails   { get; set; } = new();
     public AlertConfig       Alerts       { get; set; } = new();
+    public TimeBarConfig     TimeBar      { get; set; } = new();
     public ReportConfig      Report       { get; set; } = new();
     public BrandingConfig    Branding     { get; set; } = new();
     public StorageConfig     Storage      { get; set; } = new();

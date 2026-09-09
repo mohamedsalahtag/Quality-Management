@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.ViewModels;
+﻿namespace SharbatlyQMS.Web.ViewModels;
 
 /// <summary>
 /// Every filter the Claims list accepts, bound straight from the query string.
@@ -25,6 +25,11 @@ public class ClaimListFilter
     // ---- Quick bar (always visible) ----
     /// <summary>"" = all, "Pending" = no claim row yet, otherwise a claim status code.</summary>
     public string? Status     { get; set; }
+    /// <summary>M24 QC assessment picked at finish: "" = any, "Yes" = Potential
+    /// Claim, "No" = No Potential Claim, "Unset" = finished before the question
+    /// existed. ANDs with <see cref="Status"/> — the two answer different
+    /// questions (what QC saw vs. what the claim team decided).</summary>
+    public string? Potential  { get; set; }
     public string? Search     { get; set; }
 
     // ---- Collapsible panel ----
@@ -71,7 +76,8 @@ public class ClaimListFilter
 
     public bool Any => AnyPanelFilter
                        || !string.IsNullOrWhiteSpace(Search)
-                       || !string.IsNullOrWhiteSpace(Status);
+                       || !string.IsNullOrWhiteSpace(Status)
+                       || !string.IsNullOrWhiteSpace(Potential);
 }
 
 /// <summary>Dropdown sources for the Claims filter panel. Drawn from Closed

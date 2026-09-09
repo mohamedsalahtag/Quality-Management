@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Services
+﻿@using SharbatlyQMS.Web.Services
 @using SharbatlyQMS.Web.ViewModels
 @model DocumentListVm
 @{
@@ -14,7 +14,7 @@
 @if (Model.Editable)
 {
     <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-cloud-upload me-1"></i>Upload documents</div>
+        <div class="card-header"><i class="bi bi-cloud-upload me-1"></i>@Loc["Upload documents"]</div>
         <div class="card-body">
             <form asp-controller="Documents" asp-action="Upload" method="post"
                   enctype="multipart/form-data" class="dl-upload-form">
@@ -26,7 +26,7 @@
                     @if (Model.Categories.Length > 0)
                     {
                         <div class="col-md-4">
-                            <label class="form-label mb-1" for="dl-category-@Model.OwnerId">Category</label>
+                            <label class="form-label mb-1" for="dl-category-@Model.OwnerId">@Loc["Category"]</label>
                             <select name="category" id="dl-category-@Model.OwnerId" class="form-select" required>
                                 @foreach (var cat in Model.Categories)
                                 {
@@ -35,13 +35,13 @@
                             </select>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label mb-1" for="dl-files-@Model.OwnerId">Files</label>
+                            <label class="form-label mb-1" for="dl-files-@Model.OwnerId">@Loc["Files"]</label>
                             <input type="file" name="files" id="dl-files-@Model.OwnerId"
                                    class="form-control" multiple accept="@accept" required />
                         </div>
                         <div class="col-md-2">
                             <button type="submit" class="btn btn-primary w-100">
-                                <i class="bi bi-cloud-upload me-1"></i>Upload
+                                <i class="bi bi-cloud-upload me-1"></i>@Loc["Upload"]
                             </button>
                         </div>
                     }
@@ -51,13 +51,13 @@
                            server coalesces it to "" (the column is NOT NULL). *@
                         <input type="hidden" name="category" value="" />
                         <div class="col-md-10">
-                            <label class="form-label mb-1" for="dl-files-@Model.OwnerId">Files</label>
+                            <label class="form-label mb-1" for="dl-files-@Model.OwnerId">@Loc["Files"]</label>
                             <input type="file" name="files" id="dl-files-@Model.OwnerId"
                                    class="form-control" multiple accept="@accept" required />
                         </div>
                         <div class="col-md-2">
                             <button type="submit" class="btn btn-primary w-100">
-                                <i class="bi bi-cloud-upload me-1"></i>Upload
+                                <i class="bi bi-cloud-upload me-1"></i>@Loc["Upload"]
                             </button>
                         </div>
                     }

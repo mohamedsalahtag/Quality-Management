@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Services
+﻿@using SharbatlyQMS.Web.Services
 @using SharbatlyQMS.Web.ViewModels
 @model DocumentListVm
 @inject IDocumentService DocSvc
@@ -23,10 +23,16 @@
     </div>
 }
 
+@* The grid is re-rendered on its own after every upload and delete, so it is
+   the only place that always knows the true count. Anything outside it that
+   wants to display one (the Documents tab badge) reads it from here rather
+   than counting rows, which would be wrong while the alert above is showing. *@
+<span data-doc-count="@docs.Count" hidden></span>
+
 @if (docs.Count == 0)
 {
     <div class="alert alert-light text-center text-muted">
-        <i class="bi bi-paperclip me-1"></i>No documents uploaded yet.
+        <i class="bi bi-paperclip me-1"></i>@Loc["No documents uploaded yet."]
     </div>
 }
 else
@@ -36,11 +42,11 @@ else
             <thead>
                 <tr>
                     <th style="width:2.5rem"></th>
-                    <th>File</th>
-                    <th>Category</th>
-                    <th class="text-end">Size</th>
-                    <th>Uploaded by</th>
-                    <th>Uploaded</th>
+                    <th>@Loc["File"]</th>
+                    <th>@Loc["Category"]</th>
+                    <th class="text-end">@Loc["Size"]</th>
+                    <th>@Loc["Uploaded by"]</th>
+                    <th>@Loc["Uploaded"]</th>
                     <th style="width:6rem"></th>
                 </tr>
             </thead>
@@ -51,13 +57,30 @@ else
                         <td class="text-center">
                             <i class="bi @DocumentDisplay.IconClass(d.OriginalName) fs-5 text-secondary"></i>
                         </td>
-                        <td class="text-truncate" style="max-width:22rem" title="@d.OriginalName">@d.OriginalName</td>
+                        @* The file name is the thing people scan for, so it gets the
+                           room. It used to be capped at 22rem and truncated well
+                           before the column ran out. *@
+                        <td class="text-truncate" style="max-width:34rem" title="@d.OriginalName">@d.OriginalName</td>
                         <td>@(string.IsNullOrEmpty(d.Category) ? "—" : d.Category)</td>
                         <td class="text-end text-nowrap">@DocumentDisplay.FormatBytes(d.FileSizeBytes)</td>
                         <td>@d.UploadedBy</td>
                         <td class="text-nowrap">@d.UploadedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
                         <td>
                             <div class="d-flex gap-1 justify-content-end">
+                                @* Preview, for the types that are safe to render in our
+                                   own origin -- PDF and plain text. Everything else has
+                                   no button rather than a button that silently downloads,
+                                   so the affordance never lies about what it will do. *@
+                                @if (DocSvc.CanPreviewInline(d.OriginalName))
+                                {
+                                    <button type="button"
+                                            class="btn btn-sm btn-outline-secondary"
+                                            data-preview-url="@Url.Action("Preview", "Documents", new { id = d.DocumentId })"
+                                            data-preview-label="@d.OriginalName"
+                                            title="Preview @d.OriginalName">
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                }
                                 @* Download is authenticated + plant-scoped, so it stays available
                                    to every reader even when the arrival is no longer editable. *@
                                 <a asp-controller="Documents" asp-action="Download" asp-route-id="@d.DocumentId"

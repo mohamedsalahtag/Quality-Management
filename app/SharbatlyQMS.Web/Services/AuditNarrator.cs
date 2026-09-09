@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.Json;
 using SharbatlyQMS.Web.Models;
 
@@ -82,10 +82,10 @@ public static class AuditNarrator
         ActionCodes.Closed          => "finished",
         ActionCodes.Reopened        => "reopened",
         ActionCodes.Cancelled       => "cancelled",
-        ActionCodes.ClaimRequest    => "raised a claim on",
+        ActionCodes.ClaimRequest    => "raised a claim notification on",
         ActionCodes.PassedQC        => "cleared",
-        ActionCodes.Approved        => "approved the claim on",
-        ActionCodes.Hold            => "put the claim on hold for",
+        ActionCodes.Approved        => "marked the claim notification reviewed on",
+        ActionCodes.Hold            => "put the claim notification on hold for",
         ActionCodes.Override        => "overrode the sample size on",
         ActionCodes.OverrideCleared => "cleared the sample-size override on",
         ActionCodes.PasswordReset   => "reset the password for",
@@ -99,7 +99,7 @@ public static class AuditNarrator
         ActionCodes.CancelSubmit    => "Submission withdrawn",
         ActionCodes.Closed          => "Finished",
         ActionCodes.PassedQC        => "Passed QC",
-        ActionCodes.ClaimRequest    => "Claim raised",
+        ActionCodes.ClaimRequest    => "Claim notification raised",
         ActionCodes.Override        => "Size override",
         ActionCodes.OverrideCleared => "Override cleared",
         ActionCodes.PasswordReset   => "Password reset",

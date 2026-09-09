@@ -1,8 +1,8 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.Services
 @model IReadOnlyList<ReadingTypeEntry>
 @{
-    ViewData["Title"] = "Reading Types";
+    ViewData["Title"] = Loc["Reading Types"];
     var groups      = ViewBag.Groups      as IReadOnlyList<MaraGroup> ?? new List<MaraGroup>();
     var filterGroup = ViewBag.FilterGroup as string;
     var maraEmpty   = (bool?)ViewBag.MaraEmpty ?? false;
@@ -26,12 +26,12 @@
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="h3 mb-0">
         <i class="bi bi-rulers me-1"></i>Reading Types
-        <small class="text-muted fs-6 fw-normal ms-2">Measurements captured per sample (Brix, Firmness, Net Weight, …).</small>
+        <small class="text-muted fs-6 fw-normal ms-2">@Loc["Measurements captured per sample (Brix, Firmness, Net Weight, …)."]</small>
     </h1>
     <div class="d-flex gap-2">
         <form method="get" asp-action="ReadingTypes" class="d-flex gap-2">
             <select name="materialGroup" class="form-select form-select-sm" onchange="this.form.submit()">
-                <option value="">All material groups</option>
+                <option value="">@Loc["All material groups"]</option>
                 @foreach (var g in groups)
                 {
                     <option value="@g.Code" selected="@(g.Code == filterGroup)">@GroupLabel(g)</option>
@@ -39,7 +39,7 @@
             </select>
             @if (!string.IsNullOrEmpty(filterGroup))
             {
-                <a asp-action="ReadingTypes" class="btn btn-sm btn-outline-secondary">Clear</a>
+                <a asp-action="ReadingTypes" class="btn btn-sm btn-outline-secondary">@Loc["Clear"]</a>
             }
         </form>
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#rtModal"
@@ -58,15 +58,15 @@
             <thead class="table-light">
                 <tr>
                     <th style="width:1%"></th>
-                    <th>Group</th>
-                    <th>Code</th>
-                    <th>Name</th>
-                    <th>Kind</th>
-                    <th>Unit</th>
-                    <th title="How this reading is aggregated in the Quality Order PDF grouped summary">PDF summary</th>
-                    <th>Mandatory</th>
-                    <th>Active</th>
-                    <th class="text-end" style="width: 120px">Actions</th>
+                    <th>@Loc["Group"]</th>
+                    <th>@Loc["Code"]</th>
+                    <th>@Loc["Name"]</th>
+                    <th>@Loc["Kind"]</th>
+                    <th>@Loc["Unit"]</th>
+                    <th title="How this reading is aggregated in the Quality Order PDF grouped summary">@Loc["PDF summary"]</th>
+                    <th>@Loc["Mandatory"]</th>
+                    <th>@Loc["Active"]</th>
+                    <th class="text-end" style="width: 120px">@Loc["Actions"]</th>
                 </tr>
             </thead>
             <tbody>
@@ -77,7 +77,7 @@
                         <td>
                             @if (string.IsNullOrEmpty(r.MaterialGroup))
                             {
-                                <span class="badge bg-info text-dark" title="Applies to every material group">Global</span>
+                                <span class="badge bg-info text-dark" title="Applies to every material group">@Loc["Global"]</span>
                             }
                             else
                             {
@@ -92,11 +92,11 @@
                         <td>
                             @if (r.IsMandatory)
                             {
-                                <span class="badge bg-danger"><i class="bi bi-exclamation-circle me-1"></i>Required</span>
+                                <span class="badge bg-danger"><i class="bi bi-exclamation-circle me-1"></i>@Loc["Required"]</span>
                             }
                             else
                             {
-                                <span class="text-muted small">Optional</span>
+                                <span class="text-muted small">@Loc["Optional"]</span>
                             }
                         </td>
                         <td>@(r.IsActive ? "Yes" : "No")</td>
@@ -151,17 +151,17 @@
         <form asp-action="SaveReadingType" method="post" class="modal-content">
             @Html.AntiForgeryToken()
             <input type="hidden" name="readingTypeId" id="r-id" value="0" />
-            <div class="modal-header"><h5 class="modal-title" id="r-title">Add reading type</h5>
+            <div class="modal-header"><h5 class="modal-title" id="r-title">@Loc["Add reading type"]</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
                 <div class="row g-2">
-                    <div class="col-md-6"><label class="form-label">Material group *</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["Material group *"]</label>
                         @* "Global" maps to NULL material_group at the DB layer.
                            Sourced from the SAP MARA cache otherwise. If the page
                            filter is active, the matching option is server-side
                            selected so a new reading type lands in the same group. *@
                         <select name="materialGroup" id="r-group" class="form-select">
-                            <option value="" selected="@(string.IsNullOrEmpty(filterGroup))">🌐 Global — applies to every material group</option>
+                            <option value="" selected="@(string.IsNullOrEmpty(filterGroup))">@Loc["🌐 Global — applies to every material group"]</option>
                             @foreach (var g in groups)
                             {
                                 <option value="@g.Code" selected="@(g.Code == filterGroup)">@GroupLabel(g)</option>
@@ -169,48 +169,48 @@
                         </select>
                         @if (maraEmpty)
                         {
-                            <small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>SAP MARA cache is empty — run a Material Master Sync from <a asp-action="Settings">Site Configuration</a> to populate this list.</small>
+                            <small class="text-warning"><i class="bi bi-exclamation-triangle me-1"></i>SAP MARA cache is empty — run a Material Master Sync from <a asp-action="Settings">@Loc["Site Configuration"]</a> to populate this list.</small>
                         }
                     </div>
-                    <div class="col-md-6"><label class="form-label">Sort order</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["Sort order"]</label>
                         <input name="sortOrder" id="r-sort" type="number" class="form-control" value="500" /></div>
-                    <div class="col-md-6"><label class="form-label">Code *</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["Code *"]</label>
                         <input name="readingTypeCode" id="r-code" class="form-control" required /></div>
-                    <div class="col-md-6"><label class="form-label">Name *</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["Name *"]</label>
                         <input name="readingName" id="r-name" class="form-control" required /></div>
-                    <div class="col-md-6"><label class="form-label">Value kind *</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["Value kind *"]</label>
                         <select name="valueKind" id="r-kind" class="form-select" required>
-                            <option value="Numeric">Numeric</option>
-                            <option value="Text">Text</option>
+                            <option value="Numeric">@Loc["Numeric"]</option>
+                            <option value="Text">@Loc["Text"]</option>
                         </select></div>
-                    <div class="col-md-6"><label class="form-label">Default unit</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["Default unit"]</label>
                         <input name="defaultUnit" id="r-unit" class="form-control" /></div>
-                    <div class="col-md-6"><label class="form-label">PDF summary mode</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["PDF summary mode"]</label>
                         <select name="displayMode" id="r-display" class="form-select">
-                            <option value="text">Text join — distinct values, comma-separated</option>
-                            <option value="count">Count — number of samples with a value</option>
-                            <option value="sum">Sum — total of numeric values</option>
-                            <option value="avg">Average — Σ value ÷ sample count (e.g. Gross / Net weight)</option>
-                            <option value="sum_over_size">% of Σ size — (Σ value ÷ Σ sample size) × 100</option>
-                            <option value="formula">Formula — placeholder, renders as “—” for now</option>
+                            <option value="text">@Loc["Text join — distinct values, comma-separated"]</option>
+                            <option value="count">@Loc["Count — number of samples with a value"]</option>
+                            <option value="sum">@Loc["Sum — total of numeric values"]</option>
+                            <option value="avg">@Loc["Average — Σ value ÷ sample count (e.g. Gross / Net weight)"]</option>
+                            <option value="sum_over_size">@Loc["% of Σ size — (Σ value ÷ Σ sample size) × 100"]</option>
+                            <option value="formula">@Loc["Formula — placeholder, renders as “—” for now"]</option>
                         </select>
-                        <small class="text-muted">Controls how the Quality Order PDF grouped summary renders this reading.</small>
+                        <small class="text-muted">@Loc["Controls how the Quality Order PDF grouped summary renders this reading."]</small>
                     </div>
                     <div class="col-12"><div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" name="isActive" id="r-active" value="true" checked />
-                        <label class="form-check-label" for="r-active">Active</label>
+                        <label class="form-check-label" for="r-active">@Loc["Active"]</label>
                     </div></div>
                     <div class="col-12"><div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" name="isMandatory" id="r-mandatory" value="true" />
                         <label class="form-check-label" for="r-mandatory">
-                            Mandatory <span class="text-muted small">— sample cannot be saved unless this reading has a value</span>
+                            @Loc["Mandatory"] <span class="text-muted small">@Loc["— sample cannot be saved unless this reading has a value"]</span>
                         </label>
                     </div></div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="submit" class="btn btn-primary">Save</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="submit" class="btn btn-primary">@Loc["Save"]</button>
             </div>
         </form>
     </div>

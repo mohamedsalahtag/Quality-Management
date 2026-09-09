@@ -1,8 +1,8 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.ViewModels
 @model IReadOnlyList<ClaimListRow>
 @{
-    ViewData["Title"] = "Claims";
+    ViewData["Title"] = Loc["Claims"];
     var f      = ViewBag.Filter as ClaimListFilter ?? new ClaimListFilter();
     var opts   = ViewBag.FilterOptions as ClaimFilterOptions ?? new ClaimFilterOptions();
     var status = f.Status;
@@ -21,13 +21,77 @@
     {
         ("",                                "All",                    "btn-outline-secondary"),
         (ClaimStatus.Pending,               "Pending",                "btn-outline-secondary"),
-        (ClaimStatus.ClaimRequest,          "Claim Request",          "btn-outline-danger"),
-        (ClaimStatus.ClaimRequestApproved,  "Claim Request Approved", "btn-outline-dark"),
-        (ClaimStatus.HoldClaim,             "Hold Claim",             "btn-outline-warning"),
-        (ClaimStatus.PassedQC,              "Passed QC",              "btn-outline-success"),
+        @* Labels come from ClaimStatus.Label so the chips, the badges and the
+           chat panel can never drift apart. *@
+        (ClaimStatus.ClaimRequest,          ClaimStatus.Label(ClaimStatus.ClaimRequest),         "btn-outline-danger"),
+        (ClaimStatus.ClaimRequestApproved,  ClaimStatus.Label(ClaimStatus.ClaimRequestApproved), "btn-outline-dark"),
+        (ClaimStatus.HoldClaim,             ClaimStatus.Label(ClaimStatus.HoldClaim),            "btn-outline-warning"),
+        (ClaimStatus.PassedQC,              ClaimStatus.Label(ClaimStatus.PassedQC),            "btn-outline-success"),
     };
     string ActiveClass(string v, string baseCss) =>
         (status ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
+
+    // M24: QC's assessment at finish time. A second, independent chip row --
+    // "what QC saw" ANDed with "what the claim team decided" is exactly the
+    // question the claim desk asks ("show me Pending orders QC flagged").
+    var potential = f.Potential;
+
+    @* Chips are LINKS, not submit buttons. As buttons they shared a field name
+       with a hidden "carry the other chip row" input, so the browser submitted
+       e.g. potential="" AND potential="Yes"; the model binder joined those to
+       ",Yes", which matched no bucket and silently disabled the filter. A link
+       carries the whole current filter with exactly one value per key, needs no
+       JavaScript, and makes "All" reset reliably. Trade-off: text typed into the
+       search box but not yet submitted is not carried by a chip click. *@
+    Dictionary<string, string> ChipRoute(string key, string? value)
+    {
+        var d = new Dictionary<string, string>();
+        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) d[k] = v!; }
+        Add("status", status);
+        Add("potential", potential);
+        Add("search", search);
+        Add("container", f.Container);
+        Add("bol", f.Bol);
+        Add("po", f.Po);
+        Add("arrivalNo", f.ArrivalNo);
+        Add("plant", f.Plant);
+        Add("storageLoc", f.StorageLoc);
+        Add("material", f.Material);
+        Add("supplier", f.Supplier);
+        Add("closedBy", f.ClosedBy);
+        Add("claimOwner", f.ClaimOwner);
+        if (f.From.HasValue) d["from"] = D(f.From);
+        if (f.To.HasValue)   d["to"]   = D(f.To);
+        // "All" is the absence of the key, so the URL stays clean and the
+        // filter-memory script doesn't remember an empty value.
+        if (string.IsNullOrEmpty(value)) d.Remove(key); else d[key] = value;
+        return d;
+    }
+    var chipAction = f.Archived ? "Archived" : "Index";
+
+    var pChips = new (string Value, string Label, string Icon, string OutlineCss)[]
+    {
+        (ClaimAssessment.Any,       "All",               "",                            "btn-outline-secondary"),
+        (ClaimAssessment.Potential, "Potential Claim",   "bi-exclamation-octagon-fill", "btn-outline-danger"),
+        (ClaimAssessment.NoClaim,   "No Potential Claim","bi-check-circle-fill",        "btn-outline-success"),
+        (ClaimAssessment.Unset,     "Not classified",    "bi-dash-circle",              "btn-outline-secondary"),
+    };
+    string PActiveClass(string v, string baseCss) =>
+        (potential ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
+
+    string Dt(DateTime? d)  => d?.ToLocalTime().ToString("yyyy-MM-dd") ?? "—";
+    // Shipment dates are date-only with no zone, so Dt() leaves them alone.
+    // Anything written with SYSUTCDATETIME() — closed_at, last_changed_at,
+    // opened_at, potential_claim_at — is real UTC, and Dapper hands it back with
+    // Kind=Unspecified, which makes a bare .ToLocalTime() a no-op that silently
+    // displays UTC (three hours early here). These two convert explicitly.
+    string DtUtc(DateTime? d) => d.HasValue
+        ? DateTime.SpecifyKind(d.Value, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-dd")
+        : "—";
+    string TsUtc(DateTime? d) => d.HasValue
+        ? DateTime.SpecifyKind(d.Value, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+        : "—";
+    string Txt(string? v)   => string.IsNullOrWhiteSpace(v) ? "—" : v;
 }
 
 <style>
@@ -40,6 +104,19 @@
         border-radius: 1rem; padding: .05rem .45rem;
         font-size: .72rem; font-weight: 700; margin-left: .25rem;
     }
+    /* Product tooltip: one line per product, same look as the Pending
+       Containers peek. */
+    .tooltip-inner  { max-width: 460px; text-align: left; }
+    .claim-tip      { margin: 0; padding: 0; list-style: none; font-size: .8rem; }
+    .claim-tip li   { padding: 2px 0; border-bottom: 1px dashed rgba(255,255,255,.18); }
+    .claim-tip li:last-child { border-bottom: 0; }
+    /* Expandable shipment/inspection panel under each row. */
+    .claim-detail > td { background: var(--bs-tertiary-bg); }
+    .claim-detail dl { margin-bottom: 0; }
+    .claim-detail dt { font-weight: 600; color: var(--bs-secondary-color); font-size: .78rem; }
+    .claim-detail dd { margin-bottom: .35rem; font-size: .82rem; }
+    .claim-toggle[aria-expanded="true"] .bi { transform: rotate(90deg); }
+    .claim-toggle .bi { transition: transform .15s ease-in-out; }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -59,12 +136,12 @@
 <ul class="nav nav-tabs mb-3">
     <li class="nav-item">
         <a class="nav-link @(f.Archived ? "" : "active")" asp-action="Index">
-            <i class="bi bi-list-check me-1"></i>Claims
+            <i class="bi bi-list-check me-1"></i>@Loc["Claims"]
         </a>
     </li>
     <li class="nav-item">
         <a class="nav-link @(f.Archived ? "active" : "")" asp-action="Archived">
-            <i class="bi bi-archive me-1"></i>Archived
+            <i class="bi bi-archive me-1"></i>@Loc["Archived"]
         </a>
     </li>
 </ul>
@@ -91,18 +168,47 @@
             @if (f.Any)
             {
                 <a asp-action="@(f.Archived ? "Archived" : "Index")" class="btn btn-outline-secondary"
-                   title="Clear every filter" data-filter-clear>Clear</a>
+                   title="Clear every filter" data-filter-clear>@Loc["Clear"]</a>
             }
         </div>
         <div class="col-md-4">
             <input type="text" name="search" value="@search" class="form-control"
-                   placeholder="Search by QO #, container, BOL, PO, supplier, or closed by..." />
+                   placeholder='@Loc["Search by QO #, container, BOL, PO, supplier, or closed by..."]' />
         </div>
         <div class="col-auto">
-            <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label="Filter by claim status">
+            <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label='@Loc["Filter by claim status"]'>
                 @foreach (var c in chips)
                 {
-                    <button type="submit" name="status" value="@c.Value" class="btn @ActiveClass(c.Value, c.OutlineCss)">@c.Label</button>
+                    var statusRoute = ChipRoute("status", c.Value);
+                    <a asp-action="@chipAction" asp-all-route-data="statusRoute"
+                       class="btn @ActiveClass(c.Value, c.OutlineCss)">@c.Label</a>
+                }
+            </div>
+        </div>
+    </div>
+    @* The search box and the panel fields still submit the form, so both chip
+       selections ride along as hidden fields on THAT path. The chips themselves
+       are links (see ChipRoute) and never submit this form, so these can't be
+       sent twice. *@
+    <input type="hidden" name="status"    value="@status" />
+    <input type="hidden" name="potential" value="@potential" />
+    <div class="row g-2 align-items-center mt-1">
+        <div class="col-auto">
+            <span class="text-muted small"><i class="bi bi-clipboard-check me-1"></i>@Loc["QC assessment"]</span>
+        </div>
+        <div class="col-auto">
+            <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label='@Loc["Filter by QC claim assessment"]'>
+                @foreach (var c in pChips)
+                {
+                    var potentialRoute = ChipRoute("potential", c.Value);
+                    <a asp-action="@chipAction" asp-all-route-data="potentialRoute"
+                       class="btn @PActiveClass(c.Value, c.OutlineCss)">
+                        @if (!string.IsNullOrEmpty(c.Icon))
+                        {
+                            <i class="bi @c.Icon me-1"></i>
+                        }
+                        @c.Label
+                    </a>
                 }
             </div>
         </div>
@@ -112,35 +218,35 @@
         <div class="card card-body mt-2 bg-body-tertiary">
             <div class="row g-2">
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Container</label>
+                    <label class="form-label small mb-1">@Loc["Container"]</label>
                     <input type="text" name="container" value="@f.Container" class="form-control form-control-sm"
-                           placeholder="any part" autocomplete="off" />
+                           placeholder='@Loc["any part"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">BOL</label>
+                    <label class="form-label small mb-1">@Loc["BOL"]</label>
                     <input type="text" name="bol" value="@f.Bol" class="form-control form-control-sm"
-                           placeholder="any part" autocomplete="off" />
+                           placeholder='@Loc["any part"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">PO</label>
+                    <label class="form-label small mb-1">@Loc["PO"]</label>
                     <input type="text" name="po" value="@f.Po" class="form-control form-control-sm"
-                           placeholder="EBELN" autocomplete="off" />
+                           placeholder='@Loc["EBELN"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Arrival no.</label>
+                    <label class="form-label small mb-1">@Loc["Arrival no."]</label>
                     <input type="text" name="arrivalNo" value="@f.ArrivalNo" class="form-control form-control-sm"
-                           placeholder="ARR-…" autocomplete="off" />
+                           placeholder='@Loc["ARR-…"]' autocomplete="off" />
                 </div>
                 <div class="col-12 col-md-4">
-                    <label class="form-label small mb-1">Material</label>
+                    <label class="form-label small mb-1">@Loc["Material"]</label>
                     <input type="text" name="material" value="@f.Material" class="form-control form-control-sm"
-                           placeholder="code or description" autocomplete="off" />
+                           placeholder='@Loc["code or description"]' autocomplete="off" />
                 </div>
 
                 <div class="col-12 col-md-4">
-                    <label class="form-label small mb-1">Supplier</label>
+                    <label class="form-label small mb-1">@Loc["Supplier"]</label>
                     <select name="supplier" class="form-select form-select-sm">
-                        <option value="">All suppliers</option>
+                        <option value="">@Loc["All suppliers"]</option>
                         @foreach (var sup in opts.Suppliers)
                         {
                             <option value="@sup" selected="@(string.Equals(sup, f.Supplier, StringComparison.OrdinalIgnoreCase))">@sup</option>
@@ -149,7 +255,7 @@
                 </div>
 
                 <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">Plant</label>
+                    <label class="form-label small mb-1">@Loc["Plant"]</label>
                     @if (plantScopeLocked != null)
                     {
                         @* Scoped operator: the server forces this plant anyway, so
@@ -164,7 +270,7 @@
                     else
                     {
                         <select name="plant" id="claim-plant-filter" data-plant-filter="claim" class="form-select form-select-sm">
-                            <option value="">All plants</option>
+                            <option value="">@Loc["All plants"]</option>
                             @foreach (var pl in opts.Plants)
                             {
                                 <option value="@pl" selected="@(string.Equals(pl, f.Plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
@@ -173,9 +279,9 @@
                     }
                 </div>
                 <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">Storage location</label>
+                    <label class="form-label small mb-1">@Loc["Storage location"]</label>
                     <select name="storageLoc" id="claim-storage-filter" data-storage-filter="claim" class="form-select form-select-sm">
-                        <option value="">All storage locations</option>
+                        <option value="">@Loc["All storage locations"]</option>
                         @foreach (var sl in opts.StorageLocations)
                         {
                             <option value="@sl.Code" data-plant="@sl.Plant"
@@ -187,9 +293,9 @@
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Closed by</label>
+                    <label class="form-label small mb-1">@Loc["Closed by"]</label>
                     <select name="closedBy" class="form-select form-select-sm">
-                        <option value="">Anyone</option>
+                        <option value="">@Loc["Anyone"]</option>
                         @foreach (var cb in opts.ClosedBy)
                         {
                             <option value="@cb" selected="@(string.Equals(cb, f.ClosedBy, StringComparison.OrdinalIgnoreCase))">@cb</option>
@@ -197,9 +303,9 @@
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Claim owner</label>
+                    <label class="form-label small mb-1">@Loc["Claim owner"]</label>
                     <select name="claimOwner" class="form-select form-select-sm">
-                        <option value="">Anyone</option>
+                        <option value="">@Loc["Anyone"]</option>
                         @foreach (var co in opts.ClaimOwners)
                         {
                             <option value="@co" selected="@(string.Equals(co, f.ClaimOwner, StringComparison.OrdinalIgnoreCase))">@co</option>
@@ -209,20 +315,20 @@
                 @* Dates filter on the QO's closed_at -- when you are looking at a
                    claim, the date that matters is when the inspection finished. *@
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Closed from</label>
+                    <label class="form-label small mb-1">@Loc["Closed from"]</label>
                     <input type="date" name="from" value="@D(f.From)" class="form-control form-control-sm" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Closed to</label>
+                    <label class="form-label small mb-1">@Loc["Closed to"]</label>
                     <input type="date" name="to" value="@D(f.To)" class="form-control form-control-sm" />
                 </div>
             </div>
             <div class="mt-2 d-flex gap-2">
-                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Apply filters</button>
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>@Loc["Apply filters"]</button>
                 @if (f.AnyPanelFilter)
                 {
                     <a asp-action="@(f.Archived ? "Archived" : "Index")" asp-route-status="@status" asp-route-search="@search"
-                       class="btn btn-outline-secondary btn-sm">Reset these filters</a>
+                       class="btn btn-outline-secondary btn-sm">@Loc["Reset these filters"]</a>
                 }
             </div>
         </div>
@@ -234,29 +340,33 @@
         <table class="table table-hover align-middle mb-0 qms-index-table">
             <thead class="table-light">
                 <tr>
-                    <th>QO Number</th>
-                    <th>Container</th>
-                    <th>BOL</th>
-                    <th>PO</th>
-                    <th>Supplier</th>
+                    <th style="width:2rem" aria-label='@Loc["Shipment details"]'></th>
+                    <th>@Loc["QO Number"]</th>
+                    <th>@Loc["Arrival No"]</th>
+                    <th>@Loc["Container"]</th>
+                    <th>@Loc["BOL"]</th>
+                    <th>@Loc["PO"]</th>
+                    <th>@Loc["Supplier"]</th>
+                    <th class="text-center" title="Number of distinct products on the order — hover the count to list them">@Loc["Products"]</th>
                     @if (f.Archived)
                     {
                         @* The archive also holds orders that were never finished,
                            so their state is worth a column of its own. *@
-                        <th>Order Status</th>
+                        <th>@Loc["Order Status"]</th>
                     }
-                    <th>Closed</th>
-                    <th>Closed By</th>
-                    <th>Claim Status</th>
-                    <th>Notes</th>
-                    <th>Last activity</th>
-                    <th class="text-end">Open</th>
+                    <th>@Loc["Closed"]</th>
+                    <th>@Loc["Closed By"]</th>
+                    <th>@Loc["QC Assessment"]</th>
+                    <th>@Loc["Claim Status"]</th>
+                    <th>@Loc["Notes"]</th>
+                    <th>@Loc["Last activity"]</th>
+                    <th class="text-end">@Loc["Open"]</th>
                 </tr>
             </thead>
             <tbody>
                 @if (!Model.Any())
                 {
-                    <tr><td colspan="@(f.Archived ? 12 : 11)" class="text-center text-muted py-4">
+                    <tr><td colspan="@(f.Archived ? 16 : 15)" class="text-center text-muted py-4">
                         @(f.Archived
                             ? "No archived Quality Orders match the current filters."
                             : "No closed Quality Orders match the current filters.")
@@ -270,19 +380,70 @@
                         var label = ClaimStatus.Label(r.ClaimStatus);
                         var lastActivity = r.LastActivityAt ?? r.ClosedAt;
                         var rowCss = r.UnreadCount > 0 ? "has-unread" : "";
+                        var detailId = $"claimDetail{r.QualityOrderId}";
+                        // Products arrive newline-separated (descriptions contain
+                        // commas, so a comma split would break one product in two).
+                        var products = string.IsNullOrWhiteSpace(r.Products)
+                            ? Array.Empty<string>()
+                            : r.Products.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        // A handful of orders carry 100+ distinct products; an
+                        // unbounded tooltip is unreadable, so show the first 15
+                        // and say how many are left. The badge still counts all.
+                        const int tipMax = 15;
+                        var productTip = products.Length == 0
+                            ? ""
+                            : "<ul class='claim-tip'>" +
+                              string.Concat(products.Take(tipMax)
+                                  .Select(pn => "<li>" + System.Net.WebUtility.HtmlEncode(pn) + "</li>")) +
+                              (products.Length > tipMax
+                                  ? "<li><em>+" + (products.Length - tipMax) + " more — open the order to see them all</em></li>"
+                                  : "") +
+                              "</ul>";
                         <tr class="@rowCss">
+                            <td class="pe-0">
+                                <button class="btn btn-sm btn-link p-0 text-muted claim-toggle" type="button"
+                                        data-bs-toggle="collapse" data-bs-target="#@detailId"
+                                        aria-expanded="false" aria-controls="@detailId"
+                                        title="Show shipment &amp; inspection details">
+                                    <i class="bi bi-chevron-right" aria-hidden="true"></i>
+                                </button>
+                            </td>
                             <td><code>@r.QualityOrderNo</code></td>
+                            <td>@Txt(r.ArrivalNo)</td>
                             <td><code>@r.ContainerNo</code></td>
                             <td>@r.BolNo</td>
                             <td>@r.Ebeln</td>
                             <td>@r.VendorName</td>
+                            @* Product COUNT, not the list: the full names were the
+                               widest column on the page and forced a horizontal
+                               scroll. Hovering shows every product, same peek
+                               pattern as Pending Containers. *@
+                            <td class="text-center">
+                                @if (products.Length == 0)
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-primary-subtle text-primary-emphasis"
+                                          data-bs-toggle="tooltip" data-bs-html="true"
+                                          data-bs-placement="bottom" data-bs-title="@productTip"
+                                          title="@productTip">@products.Length</span>
+                                }
+                            </td>
                             @if (f.Archived)
                             {
                                 <td><span class="badge bg-secondary">@QualityOrderStatus.DisplayName(r.StatusCode)</span></td>
                             }
-                            <td>@(r.ClosedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                            <td>@TsUtc(r.ClosedAt)</td>
                             <td>@r.ClosedBy</td>
-                            <td><span class="badge @badge">@label</span></td>
+                            <td>
+                                <span class="badge @ClaimAssessment.BadgeCss(r.PotentialClaim)"
+                                      title="@ClaimAssessment.Label(r.PotentialClaim)@(r.PotentialClaimBy is { Length: > 0 } pcBy ? $" — set by {pcBy}" : " — chosen by QC when the order was finished")">
+                                    <i class="bi @ClaimAssessment.Icon(r.PotentialClaim) me-1"></i>@ClaimAssessment.ShortLabel(r.PotentialClaim)
+                                </span>
+                            </td>
+                            <td><span class="badge @badge" title="@label">@ClaimStatus.ShortLabel(r.ClaimStatus)</span></td>
                             <td>
                                 @if (r.NoteCount > 0)
                                 {
@@ -299,13 +460,65 @@
                                     <span class="text-muted small">—</span>
                                 }
                             </td>
-                            <td>@(lastActivity?.ToLocalTime().ToString("yyyy-MM-dd HH:mm") ?? "—")</td>
+                            <td>@TsUtc(lastActivity)</td>
                             <td class="text-end">
                                 <a asp-action="Details" asp-route-id="@r.QualityOrderId"
                                    class="btn btn-sm btn-outline-primary"
-                                   aria-label="View claim details" title="View claim details">
+                                   aria-label='@Loc["View claim details"]' title="View claim details">
                                     <i class="bi bi-eye" aria-hidden="true"></i>
                                 </a>
+                            </td>
+                        </tr>
+                        @* Shipment + inspection detail, so a claim can be assessed
+                           without leaving the list. Rendered with the row (no
+                           extra request on expand) but deliberately LEAN: every
+                           field already visible in the row above — arrival no,
+                           container, BOL, PO, supplier, product, closed by/at,
+                           both status badges — is left out. With ~500 claims on
+                           the page, repeating them would roughly double the HTML
+                           for no added information. *@
+                        <tr class="claim-detail">
+                            <td colspan="@(f.Archived ? 16 : 15)" class="p-0 border-0">
+                                <div class="collapse" id="@detailId">
+                                    <div class="p-3">
+                                        <div class="row g-3">
+                                            <div class="col-lg-4">
+                                                <div class="fw-semibold small mb-1"><i class="bi bi-box-seam me-1"></i>@Loc["Shipment"]</div>
+                                                <dl class="row mb-0">
+                                                    <dt class="col-5">@Loc["Procurement type"]</dt><dd class="col-7">@Txt(Codes.PoTypeDisplay(r.PoType))</dd>
+                                                    <dt class="col-5">@Loc["Plant"]</dt><dd class="col-7">@Txt(Codes.PlantDisplay(r.Plant))</dd>
+                                                    <dt class="col-5">@Loc["Storage location"]</dt><dd class="col-7">@Txt(Codes.StorageLocationDisplay(r.Plant, r.StorageLocation))</dd>
+                                                    <dt class="col-5">@Loc["Vessel / Voyage"]</dt><dd class="col-7">@Txt(r.VesselName) @(string.IsNullOrWhiteSpace(r.VoyageNumber) ? "" : "/ " + r.VoyageNumber)</dd>
+                                                    <dt class="col-5">@Loc["Loading port"]</dt><dd class="col-7">@Txt(r.LoadingPort)@(string.IsNullOrWhiteSpace(r.LoadingCountry) ? "" : ", " + Countries.Display(r.LoadingCountry))</dd>
+                                                    <dt class="col-5">@Loc["Port of arrival"]</dt><dd class="col-7">@Txt(r.ArrivalPlace)</dd>
+                                                </dl>
+                                            </div>
+                                            <div class="col-lg-4">
+                                                @* Timeline in event order — same sequence as the QC report. *@
+                                                <div class="fw-semibold small mb-1"><i class="bi bi-calendar3 me-1"></i>@Loc["Timeline"]</div>
+                                                <dl class="row mb-0">
+                                                    <dt class="col-5">@Loc["Loading date"]</dt><dd class="col-7">@Dt(r.SailingDate)</dd>
+                                                    <dt class="col-5">@Loc["Arrival date"]</dt><dd class="col-7">@Dt(r.ArrivalDate)</dd>
+                                                    <dt class="col-5">@Loc["Discharge date"]</dt><dd class="col-7">@Dt(r.DischargeDate)</dd>
+                                                    <dt class="col-5">@Loc["Inspection date"]</dt><dd class="col-7">@DtUtc(r.InspectionDate)</dd>
+                                                </dl>
+                                            </div>
+                                            <div class="col-lg-4">
+                                                <div class="fw-semibold small mb-1"><i class="bi bi-clipboard-check me-1"></i>@Loc["Inspection"]</div>
+                                                <dl class="row mb-0">
+                                                    <dt class="col-5">@Loc["Materials"]</dt><dd class="col-7">@r.MaterialCount</dd>
+                                                    <dt class="col-5">@Loc["Samples"]</dt><dd class="col-7">@r.SampleCount</dd>
+                                                    @if (r.PotentialClaimAt.HasValue)
+                                                    {
+                                                        <dt class="col-5">@Loc["Assessed by"]</dt>
+                                                        <dd class="col-7">@r.PotentialClaimBy · @DtUtc(r.PotentialClaimAt)</dd>
+                                                    }
+                                                    <dt class="col-5">@Loc["Finish note"]</dt><dd class="col-7">@Txt(r.CloseReason)</dd>
+                                                </dl>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
                             </td>
                         </tr>
                     }

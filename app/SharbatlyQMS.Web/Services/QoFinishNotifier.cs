@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services.Pdf;
@@ -316,8 +316,16 @@ public class QoFinishNotifier : IQoFinishNotifier
         var smtp = await _settings.GetSmtpConfigAsync();
         var link = QoLink(smtp.SiteUrl, qualityOrderId);
 
-        var subject = $"QC finished — {qo.QualityOrderNo}"
-                    + (string.IsNullOrWhiteSpace(arrival?.ContainerNo) ? "" : $" — {arrival!.ContainerNo}");
+        // Standard subject line (QcSubjectLine): short QC number, inspection
+        // status, container, vendor, BOL -- enough for a recipient to triage
+        // from the inbox list. The status carries the M24 claim assessment when
+        // the order has one, which is the whole point of asking for it at
+        // finish time.
+        var status = qo.PotentialClaim.HasValue
+            ? $"Finished — {ClaimAssessment.Label(qo.PotentialClaim)}"
+            : "Finished";
+        var subject = QcSubjectLine.Build(
+            qo.QualityOrderNo, status, arrival?.ContainerNo, arrival?.VendorName, arrival?.BolNo);
 
         var sb = new System.Text.StringBuilder();
         sb.Append($"<div style=\"background:{Wash};padding:16px 0;font-family:Segoe UI,Roboto,Arial,sans-serif\">");

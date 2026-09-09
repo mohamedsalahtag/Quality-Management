@@ -1,4 +1,4 @@
-using Microsoft.AspNetCore.Authentication;
+﻿using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.Cookies;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.FileProviders;
@@ -76,7 +76,14 @@ builder.Services.AddScoped<ICatalogCache, CatalogCache>();
 // Singleton, not scoped: views resolve it per table cell, so it holds immutable
 // dictionaries and is refreshed wholesale after an admin save.
 builder.Services.AddSingleton<ICodeDescriptionDirectory, CodeDescriptionDirectory>();
+// Editable UI labels. Singleton for the same reason as the permission
+// resolver: every rendered page reads it dozens of times, so it must be a
+// lock-free dictionary lookup and never a database call. The background
+// service writes newly-seen labels off the request path.
+builder.Services.AddSingleton<ILabelService, LabelService>();
+builder.Services.AddHostedService<LabelDiscoveryService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
+builder.Services.AddScoped<ITimeBarService, TimeBarService>();
 // V34 (2026-06-20): Perspective Analyzer (server-side pivot + saved configs).
 builder.Services.AddScoped<SharbatlyQMS.Web.Services.Reports.IPivotService,
                            SharbatlyQMS.Web.Services.Reports.PivotService>();

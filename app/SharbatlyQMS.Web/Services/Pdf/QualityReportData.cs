@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Models;
+﻿using SharbatlyQMS.Web.Models;
 
 namespace SharbatlyQMS.Web.Services.Pdf;
 
@@ -8,20 +8,34 @@ namespace SharbatlyQMS.Web.Services.Pdf;
 /// </summary>
 public class QualityReportData
 {
+    /// <summary>
+    /// True only for the copy emailed to the SUPPLIER. Internal fields that the
+    /// supplier has no business seeing are omitted from that copy; everything
+    /// else is identical, so the download and the preview still show the
+    /// complete report.
+    ///
+    /// Consequence worth knowing: the emailed PDF and the downloadable PDF are
+    /// no longer byte-identical, so "what exactly did we send them?" is answered
+    /// by this flag, not by re-downloading.
+    /// </summary>
+    public bool                 SupplierCopy    { get; set; }
+
+    /// <summary>
+    /// The container was refused on arrival, so this report carries the
+    /// rejection banner and the arrival's damage photos instead of inspection
+    /// results. Read from the order's own stored flag, not from the arrival's
+    /// current status: a reprint must look the same as the original.
+    /// </summary>
+    public bool                 IsContainerRejection { get; set; }
+    /// <summary>Banner wording, from Site Configuration -> Report.</summary>
+    public string               RejectionHeader      { get; set; } = "";
+    /// <summary>The refusal reason, printed verbatim -- it is the claim.</summary>
+    public string?              RejectionComment     { get; set; }
+
     public QualityOrder         QualityOrder    { get; set; } = new();
     public Arrival              Arrival         { get; set; } = new();
     public ShipmentSnapshot?    Shipment        { get; set; }
     public ArrivalChecklist?    Checklist       { get; set; }
-
-    /// <summary>
-    /// The real port-arrival date from SAP (ZQC_Data.Arrival_Date), resolved
-    /// through the container cache. Deliberately NOT <c>Shipment.ArrivalDate</c>
-    /// — that one carries SAP's Receive_Date and therefore printed the same
-    /// value as the report's own "Receive Date" field on every report.
-    /// Null when SAP has no port-arrival date; the report then prints blank
-    /// rather than substituting a goods-receipt date under an arrival label.
-    /// </summary>
-    public DateTime? PortArrivalDate { get; set; }
 
     /// <summary>
     /// When the Quality Order was opened — what "Inspection Date" means to the
@@ -120,10 +134,9 @@ public class QualityReportData
     /// The header renderer clamps it to 50–400. Default 100.</summary>
     public int LogoScalePercent { get; set; } = 100;
 
-    /// <summary>Which visual layout to render — one of <see cref="ReportLayouts"/>
-    /// (Classic / Soft). Layout only; the data is identical across versions.
-    /// Set from Site Configuration → Report. See <see cref="QualityReportRenderer"/>.</summary>
-    public string LayoutVersion { get; set; } = ReportLayouts.Classic;
+    /// <summary>Which visual layout to render. Fixed at
+    /// <see cref="ReportLayouts.Soft"/> — see <see cref="QualityReportRenderer"/>.</summary>
+    public string LayoutVersion { get; set; } = ReportLayouts.Soft;
 
     public string GeneratedBy  { get; set; } = "system";
     public DateTime GeneratedAt{ get; set; } = DateTime.UtcNow;

@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 
 namespace SharbatlyQMS.Web.Services;
 
@@ -156,6 +156,44 @@ public class SettingsService : ISettingsService
     }
 
     // ---- Alerts ----
+    public async Task<TimeBarConfig> GetTimeBarConfigAsync()
+    {
+        var c = await _db.GetConfigManyAsync(new[] {
+            SettingKeys.TimeBarGoodDays, SettingKeys.TimeBarWarnDays, SettingKeys.TimeBarArrivalBasis,
+            SettingKeys.TimeBarStartDate
+        });
+        var basis = c.GetValueOrDefault(SettingKeys.TimeBarArrivalBasis);
+        return new TimeBarConfig
+        {
+            GoodDays     = ParseInt(c.GetValueOrDefault(SettingKeys.TimeBarGoodDays), 1),
+            WarnDays     = ParseInt(c.GetValueOrDefault(SettingKeys.TimeBarWarnDays), 3),
+            ArrivalBasis = TimeBarArrivalBases.IsValid(basis) ? basis! : TimeBarArrivalBases.GoodsReceipt,
+            // An unparseable stored value means NO floor rather than an
+            // arbitrary one: silently filtering to a date nobody chose would be
+            // worse than showing everything.
+            StartDate    = DateOnly.TryParse(c.GetValueOrDefault(SettingKeys.TimeBarStartDate),
+                                             CultureInfo.InvariantCulture,
+                                             DateTimeStyles.None, out var cut) ? cut : null
+        };
+    }
+
+    public async Task SaveTimeBarConfigAsync(TimeBarConfig cfg, int? updatedBy)
+    {
+        cfg ??= new TimeBarConfig();
+        var good = Math.Clamp(cfg.GoodDays, 0, 30);
+        // Warn can never be below Good: inverted thresholds would paint every
+        // row red and give the reader no way to see why.
+        var warn = Math.Clamp(Math.Max(cfg.WarnDays, good), 1, 90);
+        var basis = TimeBarArrivalBases.IsValid(cfg.ArrivalBasis)
+                        ? cfg.ArrivalBasis : TimeBarArrivalBases.GoodsReceipt;
+
+        await _db.SetConfigAsync(SettingKeys.TimeBarGoodDays,     good.ToString(CultureInfo.InvariantCulture), updatedBy);
+        await _db.SetConfigAsync(SettingKeys.TimeBarWarnDays,     warn.ToString(CultureInfo.InvariantCulture), updatedBy);
+        await _db.SetConfigAsync(SettingKeys.TimeBarArrivalBasis, basis, updatedBy);
+        await _db.SetConfigAsync(SettingKeys.TimeBarStartDate,
+            cfg.StartDate?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? "", updatedBy);
+    }
+
     public async Task<AlertConfig> GetAlertConfigAsync()
     {
         var c = await _db.GetConfigManyAsync(new[] {
@@ -188,23 +226,36 @@ public class SettingsService : ISettingsService
     public async Task<ReportConfig> GetReportConfigAsync()
     {
         var c = await _db.GetConfigManyAsync(new[] {
-            SettingKeys.TimeBarBasis, SettingKeys.ReportLayoutVersion
+            SettingKeys.TimeBarBasis, SettingKeys.RejectedContainerHeader
         });
-        var basis  = c.GetValueOrDefault(SettingKeys.TimeBarBasis);
-        var layout = c.GetValueOrDefault(SettingKeys.ReportLayoutVersion);
+        var rejectHeader = c.GetValueOrDefault(SettingKeys.RejectedContainerHeader);
+        var basis = c.GetValueOrDefault(SettingKeys.TimeBarBasis);
         return new ReportConfig
         {
-            TimeBarBasis  = TimeBarBases.IsValid(basis)   ? basis!  : TimeBarBases.Discharge,
-            LayoutVersion = ReportLayouts.IsValid(layout) ? layout! : ReportLayouts.Classic
+            TimeBarBasis  = TimeBarBases.IsValid(basis) ? basis! : TimeBarBases.Discharge,
+            // Blank falls back to the shipped wording rather than printing an
+            // empty banner, which would read as a rendering fault.
+            RejectedContainerHeader = string.IsNullOrWhiteSpace(rejectHeader)
+                                        ? RejectedContainerDefaults.Header
+                                        : rejectHeader!.Trim(),
+            // Layout is fixed at Soft — any stored value is ignored.
+            LayoutVersion = ReportLayouts.Soft
         };
     }
 
     public async Task SaveReportConfigAsync(ReportConfig cfg, int? updatedBy)
     {
-        var basis  = TimeBarBases.IsValid(cfg.TimeBarBasis)    ? cfg.TimeBarBasis    : TimeBarBases.Discharge;
-        var layout = ReportLayouts.IsValid(cfg.LayoutVersion)  ? cfg.LayoutVersion   : ReportLayouts.Classic;
-        await _db.SetConfigAsync(SettingKeys.TimeBarBasis,        basis,  updatedBy);
-        await _db.SetConfigAsync(SettingKeys.ReportLayoutVersion, layout, updatedBy);
+        var basis = TimeBarBases.IsValid(cfg.TimeBarBasis) ? cfg.TimeBarBasis : TimeBarBases.Discharge;
+        await _db.SetConfigAsync(SettingKeys.TimeBarBasis, basis, updatedBy);
+
+        var header = string.IsNullOrWhiteSpace(cfg.RejectedContainerHeader)
+                        ? RejectedContainerDefaults.Header
+                        : cfg.RejectedContainerHeader.Trim();
+        if (header.Length > 200) header = header[..200];
+        await _db.SetConfigAsync(SettingKeys.RejectedContainerHeader, header, updatedBy);
+        // The layout is no longer selectable; pin the stored key to Soft so an
+        // old "Classic" row can never resurface.
+        await _db.SetConfigAsync(SettingKeys.ReportLayoutVersion, ReportLayouts.Soft, updatedBy);
     }
 
     // ---- Storage (configurable uploads folder) ----

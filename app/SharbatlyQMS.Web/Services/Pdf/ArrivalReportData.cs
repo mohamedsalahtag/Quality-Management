@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Models;
+﻿using SharbatlyQMS.Web.Models;
 
 namespace SharbatlyQMS.Web.Services.Pdf;
 
@@ -14,6 +14,11 @@ public class ArrivalReportData
     public BrandingConfig    Branding  { get; set; } = new();
     /// <summary>Absolute file path of the company logo (or null when not uploaded).</summary>
     public string?           LogoAbsolutePath { get; set; }
+
+    /// <summary>Procurement type of the shipment, resolved from the arrival's
+    /// SAP PO type (EKKO.BSART) through ICodeDescriptionDirectory. Display
+    /// string only -- the source of truth is qms_arrival.po_type.</summary>
+    public string?           ProcurementType { get; set; }
 
     /// <summary>Images attached to the arrival (any category). Rendered as
     /// an appendix at the end of the PDF when non-empty.</summary>

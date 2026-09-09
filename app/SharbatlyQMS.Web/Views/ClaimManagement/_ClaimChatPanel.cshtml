@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @model QualityOrder
 @{
     var claim = ViewBag.Claim as QualityClaim;
@@ -71,7 +71,7 @@
     <div class="card-header bg-danger-subtle d-flex justify-content-between align-items-center">
         <div>
             <i class="bi bi-shield-exclamation me-1 text-danger"></i>
-            <strong>Claim review</strong>
+            <strong>@Loc["Claim review"]</strong>
             <span class="badge @currentBadge ms-2 fs-6">@currentLabel</span>
             @if (claim?.DecidedAt != null)
             {
@@ -82,7 +82,7 @@
             else if (claim != null)
             {
                 <span class="text-muted small ms-2">
-                    Awaiting Claim Manager decision
+                    @Loc["Awaiting Claim Manager decision"]
                 </span>
             }
         </div>
@@ -92,7 +92,7 @@
                     data-bs-toggle="modal" data-bs-target="#claimNoteModal-Comment"
                     @(claim == null ? "disabled" : "")
                     title="@(claim == null ? "Available after the Quality Manager starts the claim review" : "Add a note without changing status")">
-                <i class="bi bi-chat-left-dots me-1"></i>Add note
+                <i class="bi bi-chat-left-dots me-1"></i>@Loc["Add note"]
             </button>
         }
     </div>
@@ -104,28 +104,28 @@
             {
                 <button type="button" class="btn btn-danger"
                         data-bs-toggle="modal" data-bs-target="#claimNoteModal-MarkClaimRequest">
-                    <i class="bi bi-exclamation-octagon me-1"></i>Mark as Claim Request
+                    <i class="bi bi-exclamation-octagon me-1"></i>@Loc["Mark as Claim Notification Request"]
                 </button>
             }
             @if (canMarkPassedQc)
             {
                 <button type="button" class="btn btn-success"
                         data-bs-toggle="modal" data-bs-target="#claimNoteModal-MarkPassedQc">
-                    <i class="bi bi-check2-circle me-1"></i>Mark as Passed QC
+                    <i class="bi bi-check2-circle me-1"></i>@Loc["Mark as Passed QC"]
                 </button>
             }
             @if (canApprove)
             {
                 <button type="button" class="btn btn-dark"
                         data-bs-toggle="modal" data-bs-target="#claimNoteModal-Approve">
-                    <i class="bi bi-shield-check me-1"></i>Approve Claim
+                    <i class="bi bi-shield-check me-1"></i>@Loc["Mark as Reviewed"]
                 </button>
             }
             @if (canHold)
             {
                 <button type="button" class="btn btn-warning"
                         data-bs-toggle="modal" data-bs-target="#claimNoteModal-Hold">
-                    <i class="bi bi-pause-circle me-1"></i>Hold Claim
+                    <i class="bi bi-pause-circle me-1"></i>@Loc["Hold Notification"]
                 </button>
             }
             @* "Send report to supplier" is available on every closed order in
@@ -140,7 +140,7 @@
             {
                 <button type="button" class="btn btn-info"
                         data-bs-toggle="modal" data-bs-target="#sendReportModal">
-                    <i class="bi bi-envelope-paper me-1"></i>Send report to supplier
+                    <i class="bi bi-envelope-paper me-1"></i>@Loc["Send report to supplier"]
                 </button>
             }
             @if (isArchived)
@@ -167,7 +167,7 @@
             @if (!canComment)
             {
                 <span class="text-muted small align-self-center">
-                    <i class="bi bi-info-circle me-1"></i>Read-only — your role cannot change claim status.
+                    <i class="bi bi-info-circle me-1"></i>@Loc["Read-only — your role cannot change claim status."]
                 </span>
             }
         </div>
@@ -176,7 +176,7 @@
         @if (notes.Count == 0)
         {
             <div class="text-center text-muted py-4 chat-stream">
-                <em>No claim activity yet. Mark this QO as Claim Request or Passed QC to start the conversation.</em>
+                <em>No claim activity yet. Mark this QO as Claim Notification Request or Passed QC to start the conversation.</em>
             </div>
         }
         else
@@ -184,18 +184,29 @@
             <div class="chat-stream">
                 @foreach (var n in notes)
                 {
-                    var bubbleClass = n.AuthorRole switch
+                    @* author_role stores the role CODE the note was written
+                       under ("QcManager"), but this matched against the
+                       pre-overhaul display names ("Manager"), so every bubble
+                       fell through to the admin colour and printed the raw code
+                       as its label. Comparing on the bare name handles both the
+                       codes written today and the legacy values on older
+                       notes. *@
+                    var bare = RoleCodes.BareRoleName(n.AuthorRole);
+                    var bubbleClass = bare switch
                     {
-                        UserRoles.Manager      => "role-mgr",
-                        UserRoles.ClaimManager => "role-cm",
-                        _                      => "role-admin"
+                        "Manager"      => "role-mgr",
+                        "ClaimManager" => "role-cm",
+                        _              => "role-admin"
                     };
-                    var roleLabel = n.AuthorRole switch
+                    var roleLabel = bare switch
                     {
-                        UserRoles.Manager      => "Quality Manager",
-                        UserRoles.ClaimManager => "Claim Manager",
-                        UserRoles.SiteAdmin    => "Site Admin",
-                        _                      => n.AuthorRole
+                        "Manager"      => "Quality Manager",
+                        "ClaimManager" => "Claim Manager",
+                        "Admin"        => "Site Admin",
+                        "SiteAdmin"    => "Site Admin",
+                        "Supervisor"   => "Supervisor",
+                        "Operator"     => "Operator",
+                        _              => n.AuthorRole
                     };
                     var statusPillCss = ClaimStatus.BadgeCss(n.StatusAtPost);
                     <div class="claim-bubble @bubbleClass">
@@ -232,18 +243,18 @@
                 @Html.AntiForgeryToken()
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-exclamation-octagon me-1"></i>Mark as Claim Request</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        <h5 class="modal-title"><i class="bi bi-exclamation-octagon me-1"></i>@Loc["Mark as Claim Notification Request"]</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label='@Loc["Close"]'></button>
                     </div>
                     <div class="modal-body">
-                        <label class="form-label">Justification note <span class="text-danger">*</span></label>
+                        <label class="form-label">@Loc["Justification note"] <span class="text-danger">*</span></label>
                         <textarea name="note" class="form-control" rows="4" required minlength="3"
-                                  placeholder="Why is this QO a claim against the supplier?"></textarea>
-                        <div class="form-text">Visible to both Quality Manager and Claim Manager.</div>
+                                  placeholder='@Loc["Why does this QO need a claim notification to the supplier?"]'></textarea>
+                        <div class="form-text">@Loc["Visible to both Quality Manager and Claim Manager."]</div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-danger"><i class="bi bi-exclamation-octagon me-1"></i>Mark as Claim Request</button>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                        <button type="submit" class="btn btn-danger"><i class="bi bi-exclamation-octagon me-1"></i>@Loc["Mark as Claim Notification Request"]</button>
                     </div>
                 </div>
             </form>
@@ -259,17 +270,17 @@
                 @Html.AntiForgeryToken()
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-check2-circle me-1"></i>Mark as Passed QC</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        <h5 class="modal-title"><i class="bi bi-check2-circle me-1"></i>@Loc["Mark as Passed QC"]</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label='@Loc["Close"]'></button>
                     </div>
                     <div class="modal-body">
-                        <label class="form-label">Note <span class="text-danger">*</span></label>
+                        <label class="form-label">@Loc["Note"] <span class="text-danger">*</span></label>
                         <textarea name="note" class="form-control" rows="4" required minlength="3"
-                                  placeholder="Why does this QO not require a claim?"></textarea>
+                                  placeholder='@Loc["Why does this QO not require a claim?"]'></textarea>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-success"><i class="bi bi-check2-circle me-1"></i>Mark as Passed QC</button>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                        <button type="submit" class="btn btn-success"><i class="bi bi-check2-circle me-1"></i>@Loc["Mark as Passed QC"]</button>
                     </div>
                 </div>
             </form>
@@ -285,18 +296,18 @@
                 @Html.AntiForgeryToken()
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-shield-check me-1"></i>Approve Claim</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        <h5 class="modal-title"><i class="bi bi-shield-check me-1"></i>@Loc["Mark as Reviewed"]</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label='@Loc["Close"]'></button>
                     </div>
                     <div class="modal-body">
-                        <label class="form-label">Approval note <span class="text-danger">*</span></label>
+                        <label class="form-label">@Loc["Approval note"] <span class="text-danger">*</span></label>
                         <textarea name="note" class="form-control" rows="4" required minlength="3"
-                                  placeholder="Confirm the commercial reasoning for approving this claim."></textarea>
-                        <div class="form-text">Approval is final unless flipped back to Hold.</div>
+                                  placeholder='@Loc["Confirm the commercial reasoning for approving this claim."]'></textarea>
+                        <div class="form-text">Marking the notification reviewed is final unless flipped back to Hold Notification.</div>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-dark"><i class="bi bi-shield-check me-1"></i>Approve Claim</button>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                        <button type="submit" class="btn btn-dark"><i class="bi bi-shield-check me-1"></i>@Loc["Mark as Reviewed"]</button>
                     </div>
                 </div>
             </form>
@@ -312,17 +323,17 @@
                 @Html.AntiForgeryToken()
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-pause-circle me-1"></i>Hold Claim</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        <h5 class="modal-title"><i class="bi bi-pause-circle me-1"></i>@Loc["Hold Notification"]</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label='@Loc["Close"]'></button>
                     </div>
                     <div class="modal-body">
-                        <label class="form-label">Reason to hold <span class="text-danger">*</span></label>
+                        <label class="form-label">@Loc["Reason to hold"] <span class="text-danger">*</span></label>
                         <textarea name="note" class="form-control" rows="4" required minlength="3"
-                                  placeholder="Why is the claim being held?"></textarea>
+                                  placeholder='@Loc["Why is the claim being held?"]'></textarea>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-warning"><i class="bi bi-pause-circle me-1"></i>Hold Claim</button>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                        <button type="submit" class="btn btn-warning"><i class="bi bi-pause-circle me-1"></i>@Loc["Hold Notification"]</button>
                     </div>
                 </div>
             </form>
@@ -338,17 +349,17 @@
                 @Html.AntiForgeryToken()
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-chat-left-dots me-1"></i>Add Note</h5>
-                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        <h5 class="modal-title"><i class="bi bi-chat-left-dots me-1"></i>@Loc["Add Note"]</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label='@Loc["Close"]'></button>
                     </div>
                     <div class="modal-body">
-                        <label class="form-label">Note <span class="text-danger">*</span></label>
+                        <label class="form-label">@Loc["Note"] <span class="text-danger">*</span></label>
                         <textarea name="note" class="form-control" rows="4" required minlength="3"
-                                  placeholder="Add a note without changing claim status..."></textarea>
+                                  placeholder='@Loc["Add a note without changing claim status..."]'></textarea>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                        <button type="submit" class="btn btn-primary"><i class="bi bi-chat-left-dots me-1"></i>Add Note</button>
+                        <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                        <button type="submit" class="btn btn-primary"><i class="bi bi-chat-left-dots me-1"></i>@Loc["Add Note"]</button>
                     </div>
                 </div>
             </form>

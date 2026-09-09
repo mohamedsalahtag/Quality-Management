@@ -1,8 +1,8 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.Models.Reports
 @model IReadOnlyList<FlatDefectRow>
 @{
-    ViewData["Title"] = "Flat defects — data hub";
+    ViewData["Title"] = Loc["Flat defects — data hub"];
     var f             = (ViewBag.Filter   as FlatDefectFilter) ?? new FlatDefectFilter();
     int previewLimit  = (int?) ViewBag.PreviewLimit ?? 200;
     bool truncated    = (bool?)ViewBag.Truncated    ?? false;
@@ -29,7 +29,7 @@
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
-    <h1 class="h4 mb-0"><i class="bi bi-grid-3x3-gap me-1"></i>Flat defects (data hub)</h1>
+    <h1 class="h4 mb-0"><i class="bi bi-grid-3x3-gap me-1"></i>@Loc["Flat defects (data hub)"]</h1>
     <a class="btn btn-success" target="_blank"
        href="@Url.Action("FlatDefectsExcel", "Reports", new {
             qualityOrderId  = f.QualityOrderId, arrivalId = f.ArrivalId,
@@ -42,136 +42,136 @@
             containerNo     = f.ContainerNo,   bolNo     = f.BolNo, ebeln = f.Ebeln,
             sampleScope     = f.SampleScope,
             poFrom          = FmtDate(f.PoFrom), poTo = FmtDate(f.PoTo) })">
-        <i class="bi bi-file-earmark-excel me-1"></i>Download Excel
+        <i class="bi bi-file-earmark-excel me-1"></i>@Loc["Download Excel"]
     </a>
 </div>
 
 <p class="text-muted small mb-3">
     One row per (sample × every catalog defect for the material group). Defaults to the last 30 days of PO Date —
-    widen via the filter card. The Excel export includes <strong>all</strong> rows (zero-value defects + raw SAP
+    widen via the filter card. The Excel export includes <strong>@Loc["all"]</strong> rows (zero-value defects + raw SAP
     columns like Arrival No / STO / Severity that the on-screen preview hides for clarity).
 </p>
 
 <form asp-action="FlatDefects" method="get" class="card mb-3" id="filterCard">
     <div class="card-header filter-card-toggle d-flex justify-content-between align-items-center" role="button"
          data-bs-toggle="collapse" data-bs-target="#filterPanel" aria-expanded="true" aria-controls="filterPanel">
-        <span><i class="bi bi-funnel me-1"></i><strong>Filters</strong>
-              <small class="text-muted ms-2">(click to expand / collapse — last state remembered)</small></span>
+        <span><i class="bi bi-funnel me-1"></i><strong>@Loc["Filters"]</strong>
+              <small class="text-muted ms-2">@Loc["(click to expand / collapse — last state remembered)"]</small></span>
         <i class="bi bi-chevron-down chev"></i>
     </div>
     <div class="collapse show" id="filterPanel">
         <div class="card-body">
             <div class="row g-2">
                 <div class="col-md-2">
-                    <label class="form-label small">PO date from</label>
+                    <label class="form-label small">@Loc["PO date from"]</label>
                     <input type="date" name="PoFrom" class="form-control form-control-sm"
                            value="@FmtDate(f.PoFrom)" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">PO date to</label>
+                    <label class="form-label small">@Loc["PO date to"]</label>
                     <input type="date" name="PoTo" class="form-control form-control-sm"
                            value="@FmtDate(f.PoTo)" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">QO Status</label>
+                    <label class="form-label small">@Loc["QO Status"]</label>
                     <select name="Status" class="form-select form-select-sm">
-                        <option value="">(any)</option>
-                        <option value="Initial"   selected="@(f.Status == "Initial")">Initial</option>
-                        <option value="Open"      selected="@(f.Status == "Open")">Open</option>
-                        <option value="Submitted" selected="@(f.Status == "Submitted")">Submitted</option>
-                        <option value="Closed"    selected="@(f.Status == "Closed")">Finished</option>
-                        <option value="Cancelled" selected="@(f.Status == "Cancelled")">Cancelled</option>
+                        <option value="">@Loc["(any)"]</option>
+                        <option value="Initial"   selected="@(f.Status == "Initial")">@Loc["Initial"]</option>
+                        <option value="Open"      selected="@(f.Status == "Open")">@Loc["Open"]</option>
+                        <option value="Submitted" selected="@(f.Status == "Submitted")">@Loc["Submitted"]</option>
+                        <option value="Closed"    selected="@(f.Status == "Closed")">@Loc["Finished"]</option>
+                        <option value="Cancelled" selected="@(f.Status == "Cancelled")">@Loc["Cancelled"]</option>
                     </select>
                 </div>
                 <div class="col-md-1">
-                    <label class="form-label small">Plant</label>
+                    <label class="form-label small">@Loc["Plant"]</label>
                     <input type="text" name="Plant" class="form-control form-control-sm" maxlength="4"
                            value="@f.Plant" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">Storage Loc.</label>
+                    <label class="form-label small">@Loc["Storage Loc."]</label>
                     <input type="text" name="StorageLocation" class="form-control form-control-sm" maxlength="4"
                            value="@f.StorageLocation" />
                 </div>
                 <div class="col-md-1">
-                    <label class="form-label small">QO id</label>
+                    <label class="form-label small">@Loc["QO id"]</label>
                     <input type="number" name="QualityOrderId" class="form-control form-control-sm"
                            value="@(f.QualityOrderId)" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">Arrival id</label>
+                    <label class="form-label small">@Loc["Arrival id"]</label>
                     <input type="number" name="ArrivalId" class="form-control form-control-sm"
                            value="@(f.ArrivalId)" />
                 </div>
 
                 <div class="col-md-2">
-                    <label class="form-label small">Material Group</label>
+                    <label class="form-label small">@Loc["Material Group"]</label>
                     <input type="text" name="MaterialGroup" class="form-control form-control-sm"
                            value="@f.MaterialGroup" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">Major Category</label>
+                    <label class="form-label small">@Loc["Major Category"]</label>
                     <input type="text" name="MajorCategory" class="form-control form-control-sm"
                            value="@f.MajorCategory" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">Variety</label>
+                    <label class="form-label small">@Loc["Variety"]</label>
                     <input type="text" name="Variety" class="form-control form-control-sm"
                            value="@f.Variety" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">Class</label>
+                    <label class="form-label small">@Loc["Class"]</label>
                     <input type="text" name="MaterialClass" class="form-control form-control-sm"
                            value="@f.MaterialClass" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">Origin</label>
+                    <label class="form-label small">@Loc["Origin"]</label>
                     <input type="text" name="Origin" class="form-control form-control-sm"
                            value="@f.Origin" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">Sample Scope</label>
+                    <label class="form-label small">@Loc["Sample Scope"]</label>
                     <select name="SampleScope" class="form-select form-select-sm">
-                        <option value="">(any)</option>
-                        <option value="OneCarton"   selected="@(f.SampleScope == "OneCarton")">One Carton</option>
-                        <option value="MultiCarton" selected="@(f.SampleScope == "MultiCarton")">Multi Carton</option>
+                        <option value="">@Loc["(any)"]</option>
+                        <option value="OneCarton"   selected="@(f.SampleScope == "OneCarton")">@Loc["One Carton"]</option>
+                        <option value="MultiCarton" selected="@(f.SampleScope == "MultiCarton")">@Loc["Multi Carton"]</option>
                     </select>
                 </div>
 
                 <div class="col-md-3">
-                    <label class="form-label small">Supplier (name contains)</label>
+                    <label class="form-label small">@Loc["Supplier (name contains)"]</label>
                     <input type="text" name="VendorName" class="form-control form-control-sm"
-                           value="@f.VendorName" placeholder="e.g. arabian" />
+                           value="@f.VendorName" placeholder='@Loc["e.g. arabian"]' />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">Vendor No (exact)</label>
+                    <label class="form-label small">@Loc["Vendor No (exact)"]</label>
                     <input type="text" name="VendorNo" class="form-control form-control-sm" maxlength="10"
                            value="@f.VendorNo" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">Container No</label>
+                    <label class="form-label small">@Loc["Container No"]</label>
                     <input type="text" name="ContainerNo" class="form-control form-control-sm"
-                           value="@f.ContainerNo" />
+                           placeholder='@Loc["any part of it"]' value="@f.ContainerNo" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">BOL No</label>
+                    <label class="form-label small">@Loc["BOL No"]</label>
                     <input type="text" name="BolNo" class="form-control form-control-sm"
-                           value="@f.BolNo" />
+                           placeholder='@Loc["any part of it"]' value="@f.BolNo" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">PO (Ebeln)</label>
+                    <label class="form-label small">@Loc["PO (Ebeln)"]</label>
                     <input type="text" name="Ebeln" class="form-control form-control-sm" maxlength="10"
-                           value="@f.Ebeln" />
+                           placeholder='@Loc["any part of it"]' value="@f.Ebeln" />
                 </div>
                 <div class="col-md-1 d-flex align-items-end">
                     <button type="submit" class="btn btn-primary btn-sm w-100">
-                        <i class="bi bi-search me-1"></i>Filter
+                        <i class="bi bi-search me-1"></i>@Loc["Filter"]
                     </button>
                 </div>
             </div>
             <div class="mt-2">
                 <a href="@Url.Action("FlatDefects", "Reports")"
-                   class="btn btn-link btn-sm">Clear all filters</a>
+                   class="btn btn-link btn-sm">@Loc["Clear all filters"]</a>
             </div>
         </div>
     </div>
@@ -181,7 +181,7 @@
 {
     <div class="alert alert-info py-2 small">
         Preview limited to the first @previewLimit rows.
-        Use <strong>Download Excel</strong> for the full result (streamed; no row cap).
+        Use <strong>@Loc["Download Excel"]</strong> for the full result (streamed; no row cap).
     </div>
 }
 
@@ -189,32 +189,32 @@
     <table class="table table-sm table-bordered table-hover align-middle flat-defects-table">
         <thead class="table-light">
             <tr>
-                <th>Plant</th>
-                <th>Storage Loc</th>
-                <th>Container</th>
-                <th>BOL</th>
-                <th>PO</th>
-                <th class="text-end">PO Qty</th>
-                <th>PO Date</th>
-                <th>Shipping Date</th>
-                <th>Arrival Date</th>
-                <th>Receive Date</th>
-                <th class="text-end">Transit Days</th>
-                <th>Supplier</th>
-                <th>QO</th>
-                <th>Status</th>
-                <th>Material</th>
-                <th>Material Group</th>
-                <th>Major Cat</th>
-                <th>Sub Cat</th>
-                <th>Variety</th>
-                <th>Class</th>
-                <th>Origin</th>
-                <th class="text-end">Sample #</th>
-                <th class="text-end">Sample size</th>
-                <th>Defect</th>
-                <th>Defect Category</th>
-                <th class="text-end">Value</th>
+                <th>@Loc["Plant"]</th>
+                <th>@Loc["Storage Loc"]</th>
+                <th>@Loc["Container"]</th>
+                <th>@Loc["BOL"]</th>
+                <th>@Loc["PO"]</th>
+                <th class="text-end">@Loc["PO Qty"]</th>
+                <th>@Loc["PO Date"]</th>
+                <th>@Loc["Shipping Date"]</th>
+                <th>@Loc["Arrival Date"]</th>
+                <th>@Loc["Receive Date"]</th>
+                <th class="text-end">@Loc["Transit Days"]</th>
+                <th>@Loc["Supplier"]</th>
+                <th>@Loc["QO"]</th>
+                <th>@Loc["Status"]</th>
+                <th>@Loc["Material"]</th>
+                <th>@Loc["Material Group"]</th>
+                <th>@Loc["Major Cat"]</th>
+                <th>@Loc["Sub Cat"]</th>
+                <th>@Loc["Variety"]</th>
+                <th>@Loc["Class"]</th>
+                <th>@Loc["Origin"]</th>
+                <th class="text-end">@Loc["Sample #"]</th>
+                <th class="text-end">@Loc["Sample size"]</th>
+                <th>@Loc["Defect"]</th>
+                <th>@Loc["Defect Category"]</th>
+                <th class="text-end">@Loc["Value"]</th>
                 <th class="text-end">%</th>
             </tr>
         </thead>

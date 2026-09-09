@@ -1,9 +1,9 @@
-@using SharbatlyQMS.Web.Services.Sap
+﻿@using SharbatlyQMS.Web.Services.Sap
 @using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.Controllers
 @model IReadOnlyList<SapShipmentRow>
 @{
-    ViewData["Title"] = "Search SAP";
+    ViewData["Title"] = Loc["Search SAP"];
     var container = ViewBag.Container as string;
     var bol       = ViewBag.Bol as string;
     var po        = ViewBag.Po as string;
@@ -31,9 +31,9 @@
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0"><i class="bi bi-search me-1"></i>Search SAP shipment</h1>
+    <h1 class="h3 mb-0"><i class="bi bi-search me-1"></i>@Loc["Search SAP shipment"]</h1>
     <a asp-action="Index" class="btn btn-outline-secondary">
-        <i class="bi bi-arrow-left me-1"></i>Back to arrivals
+        <i class="bi bi-arrow-left me-1"></i>@Loc["Back to arrivals"]
     </a>
 </div>
 
@@ -41,24 +41,24 @@
     <div class="card-body">
         <form method="get" class="row g-2">
             <div class="col-md-3">
-                <label class="form-label">Container number</label>
-                <input name="container" value="@container" class="form-control" placeholder="e.g. CMAU1234567" />
+                <label class="form-label">@Loc["Container number"]</label>
+                <input name="container" value="@container" class="form-control" placeholder='@Loc["e.g. CMAU1234567"]' />
             </div>
             <div class="col-md-3">
-                <label class="form-label">BOL number</label>
-                <input name="bol" value="@bol" class="form-control" placeholder="e.g. MSCUAB1234" />
+                <label class="form-label">@Loc["BOL number"]</label>
+                <input name="bol" value="@bol" class="form-control" placeholder='@Loc["e.g. MSCUAB1234"]' />
             </div>
             <div class="col-md-3">
-                <label class="form-label">PO (EBELN)</label>
+                <label class="form-label">@Loc["PO (EBELN)"]</label>
                 <input name="po" value="@po" class="form-control" />
             </div>
             <div class="col-md-3">
-                <label class="form-label">Material</label>
+                <label class="form-label">@Loc["Material"]</label>
                 <input name="material" value="@material" class="form-control" />
             </div>
             <div class="col-12 d-flex justify-content-end">
                 <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-search me-1"></i>Search SAP
+                    <i class="bi bi-search me-1"></i>@Loc["Search SAP"]
                 </button>
             </div>
         </form>
@@ -83,17 +83,17 @@
         <div class="modal-dialog modal-dialog-centered">
             <div class="modal-content">
                 <div class="modal-header bg-warning">
-                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>Arrival already exists</h5>
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle me-2"></i>@Loc["Arrival already exists"]</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
-                    <p>An arrival has already been created for this container shipment:</p>
+                    <p>@Loc["An arrival has already been created for this container shipment:"]</p>
                     <dl class="row mb-3">
-                        <dt class="col-4">Container</dt><dd class="col-8"><code>@dupContainerNo</code></dd>
-                        <dt class="col-4">BOL</dt>      <dd class="col-8">@dupBolNo</dd>
-                        <dt class="col-4">PO</dt>       <dd class="col-8">@dupPo</dd>
-                        <dt class="col-4">Arrival #</dt><dd class="col-8"><strong>@dupArrivalNo</strong></dd>
-                        <dt class="col-4">Status</dt>   <dd class="col-8">
+                        <dt class="col-4">@Loc["Container"]</dt><dd class="col-8"><code>@dupContainerNo</code></dd>
+                        <dt class="col-4">@Loc["BOL"]</dt>      <dd class="col-8">@dupBolNo</dd>
+                        <dt class="col-4">@Loc["PO"]</dt>       <dd class="col-8">@dupPo</dd>
+                        <dt class="col-4">@Loc["Arrival #"]</dt><dd class="col-8"><strong>@dupArrivalNo</strong></dd>
+                        <dt class="col-4">@Loc["Status"]</dt>   <dd class="col-8">
                             @{ var (sc, sl) = dupStatus switch {
                                 "Draft"     => ("warning", "Draft"),
                                 "Completed" => ("success", "Completed"),
@@ -108,9 +108,9 @@
                     </p>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Close"]</button>
                     <a asp-action="Details" asp-route-id="@dupArrivalId" class="btn btn-primary">
-                        <i class="bi bi-box-arrow-up-right me-1"></i>Open existing arrival
+                        <i class="bi bi-box-arrow-up-right me-1"></i>@Loc["Open existing arrival"]
                     </a>
                 </div>
             </div>
@@ -127,12 +127,12 @@
 {
     <div class="alert alert-danger">
         <i class="bi bi-x-circle me-1"></i>
-        <strong>SAP search failed.</strong>
+        <strong>@Loc["SAP search failed."]</strong>
         <pre class="mb-0 small mt-2" style="white-space:pre-wrap">@sapError</pre>
         <div class="small mt-2 text-muted">
             Verify the Container Search URL, credentials, and entity-set name on the
-            <a asp-controller="Admin" asp-action="Settings" asp-route-activeTab="sap">Site Configuration</a> page.
-            Use the <em>Test</em> and <em>Preview</em> buttons on that page to validate connectivity.
+            <a asp-controller="Admin" asp-action="Settings" asp-route-activeTab="sap">@Loc["Site Configuration"]</a> page.
+            Use the <em>@Loc["Test"]</em> and <em>@Loc["Preview"]</em> buttons on that page to validate connectivity.
         </div>
     </div>
 }
@@ -141,7 +141,7 @@
 {
     <div class="alert alert-warning">
         <i class="bi bi-exclamation-triangle me-1"></i>
-        <strong>Container ambiguous.</strong> This container number appears under multiple BOLs.
+        <strong>@Loc["Container ambiguous."]</strong> This container number appears under multiple BOLs.
         Pick one to narrow the result and avoid inspecting the wrong shipment:
         <div class="mt-2">
             @foreach (var b in bolOptions)
@@ -159,14 +159,14 @@
     {
         <div class="alert alert-info">
             <i class="bi bi-info-circle me-1"></i>
-            No matching SAP shipments. Adjust the filters and try again.
+            @Loc["No matching SAP shipments. Adjust the filters and try again."]
         </div>
     }
     else
     {
         <p class="text-muted small mb-3">
             <i class="bi bi-info-circle me-1"></i>@shipments.Count shipment line(s) found (one per container / BOL / PO).
-            Click <em>Create arrival</em> on any one &mdash; all item lines for that container / BOL / PO are included automatically.
+            Click <em>@Loc["Create arrival"]</em> on any one &mdash; all item lines for that container / BOL / PO are included automatically.
         </p>
 
         @foreach (var s in shipments)
@@ -188,7 +188,7 @@
                     {
                         <div class="d-flex align-items-center gap-2">
                             <button type="button" class="btn btn-success btn-sm" disabled>
-                                <i class="bi bi-plus-circle me-1"></i>Create arrival
+                                <i class="bi bi-plus-circle me-1"></i>@Loc["Create arrival"]
                             </button>
                             <a asp-action="Details" asp-route-id="@dup.ArrivalId" class="btn btn-outline-primary btn-sm">
                                 <i class="bi bi-check-circle me-1"></i>Already created &mdash; open @dup.ArrivalNo
@@ -203,34 +203,34 @@
                             <input type="hidden" name="bolNo"       value="@s.BolNo" />
                             <input type="hidden" name="po"          value="@s.Ebeln" />
                             <button type="submit" class="btn btn-success btn-sm">
-                                <i class="bi bi-plus-circle me-1"></i>Create arrival
+                                <i class="bi bi-plus-circle me-1"></i>@Loc["Create arrival"]
                             </button>
                         </form>
                     }
                 </div>
                 <div class="card-body py-2">
                     <div class="row small">
-                        <div class="col-md-3"><span class="text-muted">Vessel:</span> @s.Header.VesselName</div>
-                        <div class="col-md-2"><span class="text-muted">Voyage:</span> @s.Header.VoyageNumber</div>
-                        <div class="col-md-3"><span class="text-muted">Loading:</span> @s.Header.LoadingPort, @s.Header.LoadingCountry</div>
-                        <div class="col-md-2"><span class="text-muted">Sailing:</span> @s.Header.SailingDate</div>
-                        <div class="col-md-2"><span class="text-muted">Arrival:</span> @s.Header.ArrivalDate</div>
+                        <div class="col-md-3"><span class="text-muted">@Loc["Vessel:"]</span> @s.Header.VesselName</div>
+                        <div class="col-md-2"><span class="text-muted">@Loc["Voyage:"]</span> @s.Header.VoyageNumber</div>
+                        <div class="col-md-3"><span class="text-muted">@Loc["Loading:"]</span> @s.Header.LoadingPort, @Countries.Display(s.Header.LoadingCountry)</div>
+                        <div class="col-md-2"><span class="text-muted">@Loc["Sailing:"]</span> @s.Header.SailingDate</div>
+                        <div class="col-md-2"><span class="text-muted">@Loc["Arrival:"]</span> @s.Header.ArrivalDate</div>
                     </div>
                 </div>
                 <div class="table-responsive">
                     <table class="table table-sm table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th>PO / Item</th>
-                                <th>Material</th>
-                                <th>Description</th>
-                                <th>Origin</th>
-                                <th>Variety</th>
-                                <th>Material group</th>
-                                <th class="text-end">Qty</th>
-                                <th>UoM</th>
-                                <th>Plant / Storage</th>
-                                <th>Batch</th>
+                                <th>@Loc["PO / Item"]</th>
+                                <th>@Loc["Material"]</th>
+                                <th>@Loc["Description"]</th>
+                                <th>@Loc["Origin"]</th>
+                                <th>@Loc["Variety"]</th>
+                                <th>@Loc["Material group"]</th>
+                                <th class="text-end">@Loc["Qty"]</th>
+                                <th>@Loc["UoM"]</th>
+                                <th>@Loc["Plant / Storage"]</th>
+                                <th>@Loc["Batch"]</th>
                             </tr>
                         </thead>
                         <tbody>

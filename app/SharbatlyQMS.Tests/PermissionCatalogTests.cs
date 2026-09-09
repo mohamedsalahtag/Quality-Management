@@ -1,6 +1,7 @@
-using Microsoft.AspNetCore.Authorization;
+﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Models.Security;
 using SharbatlyQMS.Web.Security;
@@ -33,6 +34,35 @@ public class PermissionCatalogTests : IClassFixture<QmsAppFactory>
     {
         using var scope = _factory.Services.CreateScope();
         return scope.ServiceProvider.GetRequiredService<PermissionCatalog>();
+    }
+
+    /// <summary>
+    /// Every screen constant must have a qms_screen row.
+    ///
+    /// qms_permission.screen_key carries a FOREIGN KEY to qms_screen, and
+    /// permission discovery cannot invent the screen. A constant without its
+    /// migration row makes the whole reconciliation transaction roll back at
+    /// startup -- and because the resolver is refreshed at the END of that same
+    /// transaction, the application then authorises against an EMPTY snapshot:
+    /// every screen denies for every user. It looks like a catastrophic
+    /// permission bug and it is a missing row.
+    ///
+    /// Fail here, where the message names the file to write, rather than there.
+    /// </summary>
+    [Fact]
+    public async Task Every_declared_screen_has_a_qms_screen_row()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var cfg = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Default"));
+        var known = (await Dapper.SqlMapper.QueryAsync<string>(c,
+            "SELECT screen_key FROM qms_screen")).ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var missing = Screens.All.Where(k => !known.Contains(k)).ToList();
+        Assert.True(missing.Count == 0,
+            "These screen constants have no qms_screen row. Add the migration pair " +
+            "(app/db/mis/Mnn__*.sql + app/db/Vnn__*.sql, modelled on M28__labels_screen.sql) " +
+            "and apply it BEFORE deploying: " + string.Join(", ", missing));
     }
 
     [Fact]

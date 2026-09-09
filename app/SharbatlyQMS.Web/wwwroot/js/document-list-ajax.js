@@ -27,6 +27,21 @@
         return (l && l.getAttribute('data-ajax') === 'true') ? l : null;
     }
 
+    // A count shown outside the grid (the Documents tab badge) would go stale
+    // the moment a file is added or removed, since only the grid is redrawn.
+    // The grid publishes its own count; this copies it out to whichever badge
+    // belongs to the same owner. No badge on the page is the normal case.
+    function syncCount(list) {
+        var owner  = list.getAttribute('data-owner-type') + '-' + list.getAttribute('data-owner-id');
+        var badge  = document.querySelector('[data-doc-count-badge="' + owner + '"]');
+        var marker = list.querySelector('[data-doc-count]');
+        if (!badge || !marker) return;
+        var n = parseInt(marker.getAttribute('data-doc-count'), 10);
+        if (isNaN(n)) return;
+        badge.textContent = n;
+        badge.hidden = n === 0;
+    }
+
     document.addEventListener('submit', function (e) {
         if (e.defaultPrevented) return;
         var form = e.target;
@@ -50,6 +65,7 @@
         .then(function (r) { if (!r.ok) throw new Error('Request failed'); return r.text(); })
         .then(function (html) {
             if (grid) grid.innerHTML = html;
+            syncCount(list);
             if (isUpload) {
                 var file = form.querySelector('input[type="file"]');
                 if (file) file.value = '';

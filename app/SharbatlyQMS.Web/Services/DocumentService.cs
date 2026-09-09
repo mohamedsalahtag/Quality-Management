@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.ViewModels;
@@ -251,6 +251,18 @@ public class DocumentService : IDocumentService
         }
         return combined;
     }
+
+    /// <summary>
+    /// The types safe to render inline. Kept deliberately narrow -- see
+    /// IDocumentService.CanPreviewInline for why the list is not longer.
+    /// .msg and .eml are excluded even though a browser would show them as
+    /// text: they are the two formats most likely to carry hostile markup.
+    /// </summary>
+    private static readonly HashSet<string> InlineExtensions =
+        new(StringComparer.OrdinalIgnoreCase) { ".pdf", ".txt", ".csv" };
+
+    public bool CanPreviewInline(string fileName) =>
+        InlineExtensions.Contains(Path.GetExtension(fileName ?? ""));
 
     public string ContentTypeFor(string fileName) =>
         Path.GetExtension(fileName ?? "").ToLowerInvariant() switch

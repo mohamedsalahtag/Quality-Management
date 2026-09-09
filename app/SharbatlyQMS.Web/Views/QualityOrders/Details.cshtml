@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.ViewModels
 @using SharbatlyQMS.Web.Services.Pdf
 @model QualityOrder
@@ -91,18 +91,18 @@
         <span class="text-muted small ms-2">created @Model.CreatedAt.ToLocalTime().ToString("g") by @Model.CreatedBy</span>
     </div>
     <div class="d-flex gap-2 flex-wrap">
-        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back</a>
+        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>@Loc["Back"]</a>
         @if (arrival != null)
         {
             <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@arrival.ArrivalId" class="btn btn-outline-secondary">
-                <i class="bi bi-box-arrow-in-down me-1"></i>View arrival
+                <i class="bi bi-box-arrow-in-down me-1"></i>@Loc["View arrival"]
             </a>
         }
         @* Documents live in a modal (opened from here) so they don't reserve
            space on the page. Available in every status; upload/delete inside
            the modal are still role- + plant-gated server-side. *@
         <button type="button" class="btn btn-outline-secondary qo-docs-btn" data-bs-toggle="modal" data-bs-target="#documentsModal">
-            <i class="bi bi-paperclip me-1"></i>Documents
+            <i class="bi bi-paperclip me-1"></i>@Loc["Documents"]
         </button>
         @if (Model.StatusCode == QualityOrderStatus.Initial && canEdit)
         {
@@ -110,7 +110,7 @@
                   data-confirm="Open this Quality Order? Samples can be added once opened."
                   data-confirm-title="Open Quality Order" data-confirm-ok="Open">
                 @Html.AntiForgeryToken()
-                <button type="submit" class="btn btn-primary"><i class="bi bi-unlock me-1"></i>Open</button>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-unlock me-1"></i>@Loc["Open"]</button>
             </form>
         }
         @* V31 (2026-06-20): Submit (operator on Open) -> Submitted. After submit,
@@ -121,37 +121,39 @@
                   data-confirm="Submit this Quality Order for supervisor review? No more changes will be allowed until the supervisor either finishes or cancel-submits."
                   data-confirm-title="Submit for review" data-confirm-ok="Submit">
                 @Html.AntiForgeryToken()
-                <button type="submit" class="btn btn-primary"><i class="bi bi-send-check me-1"></i>Submit</button>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-send-check me-1"></i>@Loc["Submit"]</button>
             </form>
         }
         @if (Model.StatusCode == QualityOrderStatus.Submitted && canSupervise)
         {
             <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#closeModal">
-                <i class="bi bi-check-circle me-1"></i>Finish order
+                <i class="bi bi-check-circle me-1"></i>@Loc["Finish order"]
             </button>
             <form asp-action="CancelSubmit" asp-route-id="@Model.QualityOrderId" method="post" class="d-inline"
                   data-confirm="Cancel the submit and return this QO to Open so the operator can fix it?"
                   data-confirm-title="Cancel submit" data-confirm-ok="Return to Open">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="reason" value="" />
-                <button type="submit" class="btn btn-outline-warning"><i class="bi bi-arrow-counterclockwise me-1"></i>Cancel submit</button>
+                <button type="submit" class="btn btn-outline-warning"><i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Cancel submit"]</button>
             </form>
         }
-        @if (Model.StatusCode == QualityOrderStatus.Closed && canManage)
+        @* Not offered on a rejection order: there is no inspection to reopen,
+           and the service refuses it anyway. *@
+        @if (Model.StatusCode == QualityOrderStatus.Closed && canManage && !Model.ContainerRejected)
         {
             <button type="button" class="btn btn-warning" data-bs-toggle="modal" data-bs-target="#reopenModal">
-                <i class="bi bi-arrow-clockwise me-1"></i>Reopen
+                <i class="bi bi-arrow-clockwise me-1"></i>@Loc["Reopen"]
             </button>
         }
         @if (!isClaimContext)
         {
-            <button type="button" class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#summaryModal">
-                <i class="bi bi-clipboard-check me-1"></i>Generate Summary
+            <button type="button" class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#reportPreviewModal">
+                <i class="bi bi-file-earmark-text me-1"></i>@Loc["Preview QC report"]
             </button>
         }
         <a asp-controller="Reports" asp-action="QualityOrderPdf" asp-route-id="@Model.QualityOrderId"
            class="btn btn-outline-danger" target="_blank">
-            <i class="bi bi-file-earmark-pdf me-1"></i>Download PDF report
+            <i class="bi bi-file-earmark-pdf me-1"></i>@Loc["Download PDF report"]
         </a>
         @* Permanent delete. SiteAdmin only, and only while the QO is still
            Initial or Open -- past that it is a signed-off record. The server
@@ -161,7 +163,7 @@
              && (Model.StatusCode == QualityOrderStatus.Initial || Model.StatusCode == QualityOrderStatus.Open))
         {
             <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteQoModal">
-                <i class="bi bi-trash me-1"></i>Delete
+                <i class="bi bi-trash me-1"></i>@Loc["Delete"]
             </button>
         }
         @* "Send report to supplier" moved to the Claim Management chat-panel
@@ -172,6 +174,32 @@
     </div>
 </div>
 
+@* ---- Container rejected: say so before anything else on the page, because
+       every empty section below follows from it. ---- *@
+@if (Model.ContainerRejected)
+{
+    <div class="alert alert-danger d-flex align-items-start" role="alert">
+        <i class="bi bi-x-octagon-fill me-2 mt-1"></i>
+        <div>
+            <strong>@Loc["Container rejected on arrival"]</strong>
+            <div class="small mt-1">
+                @Loc["No inspection was carried out — the container was refused because of its condition. This order exists to carry the shipment details and the arrival photos to the supplier, and is finished with a potential claim."]
+            </div>
+            @if (arrival != null && !string.IsNullOrWhiteSpace(arrival.RejectReason))
+            {
+                <div class="mt-2">@arrival.RejectReason</div>
+            }
+            @if (arrival != null)
+            {
+                <div class="small mt-2">
+                    <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@arrival.ArrivalId"
+                       class="alert-link">@Loc["Open the arrival"] @arrival.ArrivalNo</a>
+                </div>
+            }
+        </div>
+    </div>
+}
+
 @* ---- Summary (claim context) — the exact page-1 grouped summary the QC report
        prints, from the shared _QcSummary partial. On the QO page the same partial
        is loaded on demand by the "Generate Summary" popup. ---- *@
@@ -179,7 +207,7 @@
 {
     <div class="card mb-3 qc-summary">
         <div class="card-header py-2 fw-semibold text-uppercase">
-            <i class="bi bi-clipboard-check me-1"></i>Summary
+            <i class="bi bi-clipboard-check me-1"></i>@Loc["Summary"]
         </div>
         <div class="card-body">
             @await Html.PartialAsync("_QcSummary", groupSummaries)
@@ -187,25 +215,55 @@
     </div>
 }
 
-@* ---- Generate Summary popup (QO page). Loads the same summary fresh each time
-       it opens, so it always reflects the latest samples — usable before the
-       order is finished. ---- *@
+@* ---- QC report preview popup (QO page). Renders the real report PDF — the
+       same bytes the Download button produces, page-1 grouped summary included
+       — so the report can be read before anyone commits to a download. It is
+       built fresh on every open, so it always reflects the latest saved
+       samples and is usable before the order is finished. ---- *@
 @if (!isClaimContext)
 {
-    <div class="modal fade" id="summaryModal" tabindex="-1">
-        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+    <div class="modal fade" id="reportPreviewModal" tabindex="-1">
+        <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-clipboard-check me-1"></i>Summary — @Model.QualityOrderNo</h5>
+                    <h5 class="modal-title"><i class="bi bi-file-earmark-text me-1"></i>QC Report — @Model.QualityOrderNo</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body qc-summary" id="summaryModalBody">
-                    <div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-1"></span>Loading…</div>
+                @* Fixed-height body so the PDF viewer has somewhere to live; the
+                   iframe scrolls the document, the modal itself does not. *@
+                <div class="modal-body p-0 position-relative" style="height: 78vh;">
+                    @* Progress panel. Building the report re-reads the order, its
+                       samples and every photo, so on a big order it takes a few
+                       seconds — long enough that a blank frame reads as broken.
+                       The bar is deliberately indeterminate: the server renders in
+                       one shot and has no percentage to report. *@
+                    <div id="reportPreviewStatus"
+                         class="position-absolute top-0 start-0 w-100 h-100 d-flex flex-column
+                                justify-content-center align-items-center text-center px-4 gap-2">
+                        <div class="spinner-border text-info" role="status" aria-hidden="true"></div>
+                        <div id="reportPreviewMsg" class="fw-semibold">@Loc["Generating the QC report…"]</div>
+                        <div class="progress w-50" style="height:.4rem;" role="progressbar" aria-label='@Loc["Report progress"]'>
+                            <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" style="width:100%"></div>
+                        </div>
+                        <div class="text-muted small"><span id="reportPreviewElapsed">@Loc["0s"]</span></div>
+                    </div>
+                    <iframe id="reportPreviewFrame" title="QC report preview"
+                            class="w-100 h-100 border-0 d-none"></iframe>
                 </div>
                 <div class="modal-footer">
-                    <span class="text-muted small me-auto">Reflects the latest saved data.</span>
-                    <button type="button" class="btn btn-outline-secondary" id="summaryRefreshBtn"><i class="bi bi-arrow-repeat me-1"></i>Refresh</button>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <span class="text-muted small me-auto">@Loc["Built fresh from the latest saved data."]</span>
+                    <a asp-controller="Reports" asp-action="QualityOrderPdfPreview" asp-route-id="@Model.QualityOrderId"
+                       class="btn btn-outline-secondary" target="_blank" rel="noopener">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>@Loc["Open in new tab"]
+                    </a>
+                    <a asp-controller="Reports" asp-action="QualityOrderPdf" asp-route-id="@Model.QualityOrderId"
+                       class="btn btn-outline-danger" target="_blank" rel="noopener">
+                        <i class="bi bi-download me-1"></i>@Loc["Download"]
+                    </a>
+                    <button type="button" class="btn btn-outline-secondary" id="reportPreviewRefreshBtn">
+                        <i class="bi bi-arrow-repeat me-1"></i>@Loc["Refresh"]
+                    </button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Close"]</button>
                 </div>
             </div>
         </div>
@@ -215,24 +273,55 @@
 @if (arrival != null && shipment != null)
 {
     <div class="card mb-3">
-        <div class="card-header py-2"><i class="bi bi-truck me-1"></i>Shipment</div>
+        <div class="card-header py-2"><i class="bi bi-truck me-1"></i>@Loc["Shipment"]</div>
         <div class="card-body small">
             <div class="row g-2">
-                <div class="col-md-3"><strong>Container:</strong> <code>@arrival.ContainerNo</code></div>
-                <div class="col-md-3"><strong>BOL:</strong> @arrival.BolNo</div>
-                <div class="col-md-3"><strong>Vendor:</strong> @arrival.VendorName</div>
-                <div class="col-md-3"><strong>PO:</strong> @arrival.Ebeln</div>
+                <div class="col-md-3"><strong>@Loc["Container:"]</strong> <code>@arrival.ContainerNo</code></div>
+                <div class="col-md-3"><strong>@Loc["BOL:"]</strong> @arrival.BolNo</div>
+                <div class="col-md-3"><strong>@Loc["Vendor:"]</strong> @arrival.VendorName</div>
+                <div class="col-md-3"><strong>@Loc["PO:"]</strong> @arrival.Ebeln</div>
                 @* SAP's purchase-order document type, the same "Procurement Type"
                    the QC report prints. Shown here so the claim page carries it
                    too -- this view serves both. *@
                 <div class="col-md-3">
-                    <strong>Procurement Type:</strong>
+                    <strong>@Loc["Procurement Type:"]</strong>
                     <span title="@arrival.PoType">@Codes.PoTypeDisplay(arrival.PoType)</span>
                 </div>
-                <div class="col-md-3"><strong>Vessel:</strong> @shipment.VesselName / @shipment.VoyageNumber</div>
-                <div class="col-md-3"><strong>Loading:</strong> @shipment.LoadingPort, @shipment.LoadingCountry</div>
-                <div class="col-md-3"><strong>Sailing:</strong> @shipment.SailingDate?.ToString("yyyy-MM-dd")</div>
-                <div class="col-md-3"><strong>Arrival:</strong> @shipment.ArrivalDate?.ToString("yyyy-MM-dd")</div>
+                <div class="col-md-3"><strong>@Loc["Vessel:"]</strong> @shipment.VesselName / @shipment.VoyageNumber</div>
+                <div class="col-md-3"><strong>@Loc["Loading port:"]</strong> @shipment.LoadingPort, <span title="@shipment.LoadingCountry">@Countries.Display(shipment.LoadingCountry)</span></div>
+                <div class="col-md-3"><strong>@Loc["Port of arrival:"]</strong> @shipment.ArrivalPlace</div>
+            </div>
+            @* Shipment timeline, in the order the events actually happen, so a
+               gap or an out-of-order date is obvious. Same sequence as the QC
+               report and the Claims list. A missing date shows as a dash rather
+               than a blank, or the sequence would silently close up. *@
+            @{
+                string SD(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "—";
+                var timeline = new (string Label, DateTime? Value)[]
+                {
+                    ("Loading",    shipment.SailingDate),
+                    ("Arrival",    shipment.ArrivalDate),
+                    ("Discharge",  shipment.DischargeDate),
+                    ("Pullout",    shipment.PullOutDate),
+                    ("Receive",    shipment.ReceiveDate),
+                    ("Unloading",  shipment.UnloadingDate),
+                    ("Inspection", shipment.InspectionDate),
+                };
+            }
+            <hr class="my-2" />
+            <div class="row g-2">
+                @foreach (var ev in timeline)
+                {
+                    <div class="col-6 col-md-3 col-xl-2">
+                        <strong>@ev.Label:</strong> @SD(ev.Value)
+                    </div>
+                }
+                @if (shipment.TransitDays.HasValue)
+                {
+                    <div class="col-6 col-md-3 col-xl-2">
+                        <strong>@Loc["Transit days:"]</strong> @shipment.TransitDays
+                    </div>
+                }
             </div>
         </div>
     </div>
@@ -275,7 +364,7 @@
                 @if (!matHeaderOk)
                 {
                     <span class="badge bg-warning text-dark ms-1" title="Material details not filled in yet — you can fill them from any sample.">
-                        <i class="bi bi-exclamation-triangle me-1"></i>Details incomplete
+                        <i class="bi bi-exclamation-triangle me-1"></i>@Loc["Details incomplete"]
                     </span>
                 }
             </div>
@@ -288,13 +377,13 @@
                     <button type="button" class="btn btn-sm btn-success sample-add"
                             data-qo-id="@Model.QualityOrderId"
                             data-qo-material-id="@m.QoMaterialId">
-                        <i class="bi bi-plus-circle me-1"></i>Add sample
+                        <i class="bi bi-plus-circle me-1"></i>@Loc["Add sample"]
                     </button>
                 }
                 <button type="button" class="btn btn-sm btn-outline-info material-details-btn"
                         data-bs-toggle="modal" data-bs-target="#materialDetailsModal"
                         data-qo-material-id="@m.QoMaterialId">
-                    <i class="bi bi-card-list me-1"></i>Material details
+                    <i class="bi bi-card-list me-1"></i>@Loc["Material details"]
                 </button>
                 @if (canAct)
                 {
@@ -303,7 +392,7 @@
                             data-qo-material-id="@m.QoMaterialId"
                             data-quality-order-id="@Model.QualityOrderId"
                             data-current-size="@(m.MaterialSize ?? "")">
-                        <i class="bi bi-pencil-square me-1"></i>Override size
+                        <i class="bi bi-pencil-square me-1"></i>@Loc["Override size"]
                     </button>
                 }
             </div>
@@ -312,17 +401,17 @@
         <div id="@bodyId" class="collapse">
             <div class="card-body small">
                 <div class="row g-2 mb-0">
-                    <div class="col-md-4 col-lg-3"><strong>Material Group:</strong> @m.MaterialGroup @(string.IsNullOrWhiteSpace(m.MaterialGroupDesc) ? "" : "— " + m.MaterialGroupDesc)</div>
-                    <div class="col-md-4 col-lg-3"><strong>Major Category:</strong> @m.MajorCategory</div>
-                    <div class="col-md-4 col-lg-3"><strong>Sub-Major Category:</strong> @m.SubMajorCategory</div>
-                    <div class="col-md-4 col-lg-3"><strong>Variety:</strong> @m.Variety</div>
-                    <div class="col-md-4 col-lg-3"><strong>Class:</strong> @m.MaterialClass</div>
-                    <div class="col-md-4 col-lg-3"><strong>Origin:</strong> @m.Origin</div>
+                    <div class="col-md-4 col-lg-3"><strong>@Loc["Material Group:"]</strong> @m.MaterialGroup @(string.IsNullOrWhiteSpace(m.MaterialGroupDesc) ? "" : "— " + m.MaterialGroupDesc)</div>
+                    <div class="col-md-4 col-lg-3"><strong>@Loc["Major Category:"]</strong> @m.MajorCategory</div>
+                    <div class="col-md-4 col-lg-3"><strong>@Loc["Sub-Major Category:"]</strong> @m.SubMajorCategory</div>
+                    <div class="col-md-4 col-lg-3"><strong>@Loc["Variety:"]</strong> @m.Variety</div>
+                    <div class="col-md-4 col-lg-3"><strong>@Loc["Class:"]</strong> @m.MaterialClass</div>
+                    <div class="col-md-4 col-lg-3"><strong>@Loc["Origin:"]</strong> @m.Origin</div>
                     <div class="col-md-4 col-lg-3 size-cell" data-qo-material-id="@m.QoMaterialId">
-                        <strong>Size:</strong>
+                        <strong>@Loc["Size:"]</strong>
                         <span class="size-value">@(m.MaterialSize ?? "—")</span>
                         <span class="override-badge @(m.SizeOverridden ? "" : "d-none")">
-                            <span class="badge bg-warning text-dark ms-1" title="@m.OverrideReason">Override</span>
+                            <span class="badge bg-warning text-dark ms-1" title="@m.OverrideReason">@Loc["Override"]</span>
                             @if (canAct)
                             {
                                 <button type="button" class="btn btn-link clear-override-btn text-danger override-clear"
@@ -334,7 +423,7 @@
                             }
                         </span>
                     </div>
-                    <div class="col-md-4 col-lg-3"><strong>Weight:</strong> @m.NetWeight</div>
+                    <div class="col-md-4 col-lg-3"><strong>@Loc["Weight:"]</strong> @m.NetWeight</div>
                 </div>
             </div>
 
@@ -343,16 +432,16 @@
                     <table class="table table-sm table-hover align-middle">
                         <thead class="table-light">
                             <tr>
-                                <th>Sample #</th>
-                                <th>Grower</th>
-                                <th>Pallet</th>
-                                <th>Lot</th>
-                                <th>Date code</th>
-                                <th class="text-end">Firmness</th>
-                                <th class="text-end">Brix</th>
-                                <th class="text-end">Size</th>
-                                <th class="text-end">Created</th>
-                                <th class="text-end" style="min-width:110px;">Actions</th>
+                                <th>@Loc["Sample #"]</th>
+                                <th>@Loc["Grower"]</th>
+                                <th>@Loc["Pallet"]</th>
+                                <th>@Loc["Lot"]</th>
+                                <th>@Loc["Date code"]</th>
+                                <th class="text-end">@Loc["Firmness"]</th>
+                                <th class="text-end">@Loc["Brix"]</th>
+                                <th class="text-end">@Loc["Size"]</th>
+                                <th class="text-end">@Loc["Created"]</th>
+                                <th class="text-end" style="min-width:110px;">@Loc["Actions"]</th>
                             </tr>
                         </thead>
                         <tbody class="samples-tbody" data-qo-material-id="@m.QoMaterialId">
@@ -368,7 +457,7 @@
                             }
                             @if (matSamples.Count == 0)
                             {
-                                <tr class="empty-samples-row"><td colspan="10" class="text-center text-muted small py-2">No samples recorded yet for this material.</td></tr>
+                                <tr class="empty-samples-row"><td colspan="10" class="text-center text-muted small py-2">@Loc["No samples recorded yet for this material."]</td></tr>
                             }
                         </tbody>
                     </table>
@@ -387,14 +476,14 @@
     <div class="offcanvas-header border-bottom bg-success-subtle" id="sampleDrawerHeader">
         <h5 class="offcanvas-title" id="sampleDrawerLabel">
             <i class="bi bi-clipboard-data me-1 text-success"></i>
-            <span id="sampleDrawerTitle">Sample</span>
+            <span id="sampleDrawerTitle">@Loc["Sample"]</span>
         </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label='@Loc["Close"]'></button>
     </div>
     <div class="offcanvas-body" id="sampleDrawerBody">
         <div class="text-center py-5 text-muted">
             <div class="spinner-border" role="status"></div>
-            <div class="small mt-2">Loading sample…</div>
+            <div class="small mt-2">@Loc["Loading sample…"]</div>
         </div>
     </div>
 </div>
@@ -405,14 +494,14 @@
     <div class="offcanvas-header border-bottom bg-info-subtle">
         <h5 class="offcanvas-title">
             <i class="bi bi-camera me-1 text-info"></i>
-            <span id="samplePhotosDrawerTitle">Sample photos</span>
+            <span id="samplePhotosDrawerTitle">@Loc["Sample photos"]</span>
         </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label='@Loc["Close"]'></button>
     </div>
     <div class="offcanvas-body" id="samplePhotosDrawerBody">
         <div class="text-center py-5 text-muted">
             <div class="spinner-border" role="status"></div>
-            <div class="small mt-2">Loading photos…</div>
+            <div class="small mt-2">@Loc["Loading photos…"]</div>
         </div>
     </div>
 </div>
@@ -433,32 +522,32 @@
                     <h5 class="modal-title" id="deleteQoModalLabel">
                         <i class="bi bi-exclamation-octagon me-1"></i>Delete @Model.QualityOrderNo permanently?
                     </h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label='@Loc["Close"]'></button>
                 </div>
                 <div class="modal-body">
                     <p class="mb-2">
-                        This removes the quality order and <strong>everything under it</strong> — every sample,
+                        This removes the quality order and <strong>@Loc["everything under it"]</strong> — every sample,
                         reading, defect, photo and document.
                     </p>
                     <ul class="small mb-3">
-                        <li><strong>It cannot be undone.</strong></li>
-                        <li>The quality order also disappears from Data Hub and the Perspective Analyzer.</li>
-                        <li>Arrival <strong>@Model.ArrivalNo</strong> is <em>not</em> affected — you can create a fresh quality order for it afterwards.</li>
+                        <li><strong>@Loc["It cannot be undone."]</strong></li>
+                        <li>@Loc["The quality order also disappears from Data Hub and the Perspective Analyzer."]</li>
+                        <li>Arrival <strong>@Model.ArrivalNo</strong> is <em>@Loc["not"]</em> affected — you can create a fresh quality order for it afterwards.</li>
                     </ul>
                     <div class="alert alert-light border small py-2">
                         Only want to stop work on this inspection but keep the record? Close this and use
-                        <strong>Cancel</strong> instead.
+                        <strong>@Loc["Cancel"]</strong> instead.
                     </div>
                     <label class="form-label small mb-1" for="qo-delete-confirm">
-                        Type <code>@Model.QualityOrderNo</code> to confirm
+                        @Loc["Type"] <code>@Model.QualityOrderNo</code> to confirm
                     </label>
                     <input type="text" name="confirm" id="qo-delete-confirm" class="form-control"
                            placeholder="@Model.QualityOrderNo" autocomplete="off" required />
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
                     <button type="submit" class="btn btn-danger" id="qo-delete-submit" disabled>
-                        <i class="bi bi-trash me-1"></i>Delete permanently
+                        <i class="bi bi-trash me-1"></i>@Loc["Delete permanently"]
                     </button>
                 </div>
             </form>
@@ -473,15 +562,20 @@
        grid, AJAX). Available in every status; upload/delete are role- +
        plant-gated server-side in DocumentsController for "QualityOrder". ---- *@
 <div class="modal fade" id="documentsModal" tabindex="-1" aria-labelledby="documentsModalLabel" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
-        <div class="modal-content">
+    @* modal-xl, and full-screen on anything below a large display: the dialog
+       now holds a file list AND a viewer side by side, which modal-lg could not
+       fit. Reading an attachment used to mean downloading it first. *@
+    <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
+        <div class="modal-content" data-preview-host>
             <div class="modal-header">
                 <h5 class="modal-title" id="documentsModalLabel">
                     <i class="bi bi-paperclip me-1"></i>Documents — @Model.QualityOrderNo
                 </h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label='@Loc["Close"]'></button>
             </div>
-            <div class="modal-body">
+            <div class="modal-body p-0">
+              <div class="row g-0" style="min-height:70vh">
+                <div class="col-lg-6 border-end overflow-auto p-3" style="max-height:78vh">
                 @{
                     var qoDocsVm = new SharbatlyQMS.Web.ViewModels.DocumentListVm
                     {
@@ -525,6 +619,27 @@
                     };
                     <partial name="_DocumentList" model="arrivalDocsVm" />
                 }
+                </div>
+
+                @* The viewer. Empty until a preview button is pressed, so the
+                   list is what the dialog opens on. file-preview.js fills the
+                   frame from a blob and reports its own progress and errors. *@
+                <div class="col-lg-6 d-flex flex-column bg-body-tertiary" style="max-height:78vh">
+                    <div class="px-3 py-2 border-bottom d-flex align-items-center gap-2 small">
+                        <i class="bi bi-eye text-muted"></i>
+                        <span class="fw-semibold text-truncate" data-preview-title>@Loc["Preview"]</span>
+                    </div>
+                    <div class="flex-grow-1 position-relative">
+                        <div class="position-absolute top-0 start-0 w-100 h-100 d-flex
+                                    align-items-center justify-content-center text-muted small px-4 text-center"
+                             data-preview-status>
+                            @Loc["Select a file to preview it here. PDF and text files open in place; anything else downloads."]
+                        </div>
+                        <iframe class="w-100 h-100 border-0 d-none"
+                                title="@Loc["Document preview"]" data-preview-frame></iframe>
+                    </div>
+                </div>
+              </div>
             </div>
         </div>
     </div>
@@ -536,33 +651,61 @@
         <form asp-action="Close" asp-route-id="@Model.QualityOrderId" method="post" class="modal-content"
               data-confirm-finish="true">
             @Html.AntiForgeryToken()
-            <div class="modal-header"><h5 class="modal-title">Finish Quality Order</h5>
+            <div class="modal-header"><h5 class="modal-title">@Loc["Finish Quality Order"]</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
                 <div class="alert alert-warning d-flex mb-2">
                     <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
                     <div>
-                        Once finished, this Quality Order <strong>cannot be modified</strong>.
+                        Once finished, this Quality Order <strong>@Loc["cannot be modified"]</strong>.
                         No further samples can be added. Re-opening requires a Site Admin.
                     </div>
                 </div>
                 <div class="mb-2">
-                    <label class="form-label" for="finishComment">Comment <span class="text-muted">(optional)</span></label>
+                    <label class="form-label" for="finishComment">@Loc["Comment"] <span class="text-muted">@Loc["(optional)"]</span></label>
                     <textarea class="form-control" id="finishComment" name="reason" rows="2" maxlength="1000"
-                              placeholder="Add a note about this order…"></textarea>
-                    <div class="form-text">If you add a comment, it appears as a message under your name on the claim page.</div>
+                              placeholder='@Loc["Add a note about this order…"]'></textarea>
+                    <div class="form-text">@Loc["If you add a comment, it appears as a message under your name on the claim page."]</div>
+                </div>
+                @* M24: QC's claim assessment. Required -- the Finish button
+                   stays disabled until one is picked, and the server refuses a
+                   post without it. It feeds the Claims window's QC assessment
+                   column and filter; it does NOT decide the claim itself. *@
+                <div class="mb-2">
+                    <label class="form-label d-block mb-1">
+                        @Loc["Claim assessment"] <span class="text-danger fw-bold">*</span>
+                    </label>
+                    <div class="d-flex flex-column gap-1">
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="potentialClaim"
+                                   id="pcYes" value="Yes" required data-finish-claim />
+                            <label class="form-check-label" for="pcYes">
+                                <span class="badge bg-danger me-1">@Loc["Potential Claim"]</span>
+                                this shipment may need claim processing.
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="potentialClaim"
+                                   id="pcNo" value="No" required data-finish-claim />
+                            <label class="form-check-label" for="pcNo">
+                                <span class="badge bg-success me-1">@Loc["No Potential Claim"]</span>
+                                nothing to claim on this shipment.
+                            </label>
+                        </div>
+                    </div>
+                    <div class="form-text">@Loc["Shown in the Claims window so claims can be picked up faster."]</div>
                 </div>
                 <div class="form-check mt-3">
                     <input class="form-check-input" type="checkbox" id="finishAckCheck">
                     <label class="form-check-label" for="finishAckCheck">
-                        I understand and want to finish this Quality Order.
+                        @Loc["I understand and want to finish this Quality Order."]
                     </label>
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
                 <button type="submit" class="btn btn-success" id="finishBtn" disabled>
-                    <i class="bi bi-check-circle me-1"></i>Finish order
+                    <i class="bi bi-check-circle me-1"></i>@Loc["Finish order"]
                 </button>
             </div>
         </form>
@@ -573,12 +716,20 @@
         var chk = document.getElementById('finishAckCheck');
         var btn = document.getElementById('finishBtn');
         if (!chk || !btn) return;
-        chk.addEventListener('change', function () { btn.disabled = !chk.checked; });
+        // M24: finishing needs BOTH the acknowledgement and a claim assessment.
+        // The server refuses a post without the assessment anyway; this just
+        // stops the user hitting that error.
+        var claims = Array.prototype.slice.call(document.querySelectorAll('[data-finish-claim]'));
+        function claimPicked() { return claims.some(function (r) { return r.checked; }); }
+        function sync() { btn.disabled = !(chk.checked && claimPicked()); }
+        chk.addEventListener('change', sync);
+        claims.forEach(function (r) { r.addEventListener('change', sync); });
         // Reset ack each time the modal opens so a previously-acknowledged
         // state doesn't carry across cancellations.
         var modal = document.getElementById('closeModal');
         modal.addEventListener('show.bs.modal', function () {
             chk.checked = false;
+            claims.forEach(function (r) { r.checked = false; });
             btn.disabled = true;
         });
     })();
@@ -591,6 +742,7 @@
 {
     var bypassAction = TempData["BypassAction"] as string == "Close" ? "Close" : "Submit";
     var bypassReason = TempData["BypassReason"] as string;
+    var bypassClaim  = TempData["BypassClaim"] as string;
     var bypassVerb   = bypassAction == "Close" ? "Finish" : "Submit";
     <div class="modal fade" id="bypassWarnModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
@@ -598,7 +750,7 @@
                 <div class="modal-header py-2">
                     <h5 class="modal-title d-flex align-items-center gap-2 fs-6">
                         <i class="bi bi-exclamation-triangle-fill text-warning fs-4"></i>
-                        Materials without samples
+                        @Loc["Materials without samples"]
                     </h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
@@ -617,16 +769,45 @@
                             material(s) will remain without samples on this Quality Order.
                         </p>
                         <label for="bypassReasonInput" class="form-label mb-1 fw-semibold">
-                            Reason <span class="text-danger">*</span>
+                            @Loc["Reason"] <span class="text-danger">*</span>
                         </label>
                         <textarea id="bypassReasonInput" name="reason" class="form-control" rows="3"
                                   required maxlength="500"
-                                  placeholder="e.g. Supplier sample not available; proceeding with QM approval">@bypassReason</textarea>
-                        <div class="form-text">Required. Recorded in this Quality Order's audit trail.</div>
+                                  placeholder='@Loc["e.g. Supplier sample not available; proceeding with QM approval"]'>@bypassReason</textarea>
+                        <div class="form-text">@Loc["Required. Recorded in this Quality Order's audit trail."]</div>
+                        @if (bypassAction == "Close")
+                        {
+                            @* M24: this form is the other way into Close, so it has
+                               to carry the claim assessment too -- the server
+                               refuses a finish without one. Pre-selected from the
+                               first attempt so the pick isn't made twice. *@
+                            <hr class="my-3" />
+                            <label class="form-label mb-1 fw-semibold">
+                                @Loc["Claim assessment"] <span class="text-danger">*</span>
+                            </label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="potentialClaim"
+                                       id="pcBypassYes" value="Yes" required
+                                       checked="@(bypassClaim == "Yes")" />
+                                <label class="form-check-label" for="pcBypassYes">
+                                    <span class="badge bg-danger me-1">@Loc["Potential Claim"]</span>
+                                    this shipment may need claim processing.
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="potentialClaim"
+                                       id="pcBypassNo" value="No" required
+                                       checked="@(bypassClaim == "No")" />
+                                <label class="form-check-label" for="pcBypassNo">
+                                    <span class="badge bg-success me-1">@Loc["No Potential Claim"]</span>
+                                    nothing to claim on this shipment.
+                                </label>
+                            </div>
+                        }
                     </div>
                     <div class="modal-footer py-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">
-                            Cancel — add samples first
+                            @Loc["Cancel — add samples first"]
                         </button>
                         <button type="submit" class="btn btn-warning btn-sm">
                             <i class="bi bi-exclamation-triangle me-1"></i>@bypassVerb anyway
@@ -647,16 +828,16 @@
     <div class="modal-dialog">
         <form asp-action="Reopen" asp-route-id="@Model.QualityOrderId" method="post" class="modal-content">
             @Html.AntiForgeryToken()
-            <div class="modal-header"><h5 class="modal-title">Reopen Quality Order</h5>
+            <div class="modal-header"><h5 class="modal-title">@Loc["Reopen Quality Order"]</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
-                <p class="small text-muted">Reopening creates an audit trail. Use only with proper justification.</p>
-                <label class="form-label">Reason (required)</label>
+                <p class="small text-muted">@Loc["Reopening creates an audit trail. Use only with proper justification."]</p>
+                <label class="form-label">@Loc["Reason (required)"]</label>
                 <textarea name="reason" class="form-control" rows="3" required></textarea>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="submit" class="btn btn-warning"><i class="bi bi-arrow-clockwise me-1"></i>Reopen</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="submit" class="btn btn-warning"><i class="bi bi-arrow-clockwise me-1"></i>@Loc["Reopen"]</button>
             </div>
         </form>
     </div>
@@ -674,82 +855,82 @@
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title"><i class="bi bi-envelope-paper me-1"></i>Send report to supplier</h5>
+                    <h5 class="modal-title"><i class="bi bi-envelope-paper me-1"></i>@Loc["Send report to supplier"]</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <div id="srm-load" class="text-center py-4 text-muted">
                         <div class="spinner-border"></div>
-                        <div class="small mt-2">Preparing email…</div>
+                        <div class="small mt-2">@Loc["Preparing email…"]</div>
                     </div>
                     <form id="srm-form" class="d-none">
                         @* Three states, one banner slot: no address on file (warn),
                            address remembered in QMS (info), address from SAP (info). *@
                         <div id="srm-no-email" class="alert alert-warning small d-none">
                             <i class="bi bi-exclamation-triangle me-1"></i>
-                            No e-mail address is on file for <strong id="srm-supplier-a">this supplier</strong>.
+                            No e-mail address is on file for <strong id="srm-supplier-a">@Loc["this supplier"]</strong>.
                             SAP's vendor master does not carry supplier e-mail addresses, so QMS keeps its own.
-                            Type the address below and tick <em>Remember</em> to save it for next time.
+                            Type the address below and tick <em>@Loc["Remember"]</em> to save it for next time.
                         </div>
                         <div id="srm-email-qms" class="alert alert-info small d-none">
                             <i class="bi bi-bookmark-check me-1"></i>
-                            Using the address saved in QMS for <strong id="srm-supplier-b">this supplier</strong>.
-                            Editing it below and leaving <em>Remember</em> ticked updates it.
+                            Using the address saved in QMS for <strong id="srm-supplier-b">@Loc["this supplier"]</strong>.
+                            Editing it below and leaving <em>@Loc["Remember"]</em> ticked updates it.
                         </div>
                         <div id="srm-email-sap" class="alert alert-info small d-none">
                             <i class="bi bi-database-check me-1"></i>
-                            Address taken from the SAP vendor master.
+                            @Loc["Address taken from the SAP vendor master."]
                         </div>
                         <div class="mb-2">
-                            <label class="form-label">To *</label>
+                            <label class="form-label">@Loc["To *"]</label>
                             <input id="srm-to" name="to" class="form-control" placeholder="supplier@example.com" required />
-                            <div class="form-text">Comma- or semicolon-separated for multiple recipients.</div>
+                            <div class="form-text">@Loc["Comma- or semicolon-separated for multiple recipients."]</div>
                             <div class="form-check mt-1">
                                 <input class="form-check-input" type="checkbox" id="srm-remember" checked />
                                 <label class="form-check-label small" for="srm-remember">
-                                    Remember the first address for this supplier
-                                    <span class="text-muted">(reused next time; CC is never saved)</span>
+                                    @Loc["Remember the first address for this supplier"]
+                                    <span class="text-muted">@Loc["(reused next time; CC is never saved)"]</span>
                                 </label>
                             </div>
                         </div>
                         @* Read-only: the send path applies these whatever the box
                            below says, so showing them as editable would lie. *@
                         <div class="mb-2 d-none" id="srm-alwayscc-wrap">
-                            <label class="form-label">Always CC</label>
+                            <label class="form-label">@Loc["Always CC"]</label>
                             <div class="form-control bg-body-secondary" id="srm-alwayscc"></div>
                             <div class="form-text">Set in Parameters &rarr; Mail Template. Copied on every supplier report.</div>
                         </div>
                         <div class="mb-2">
-                            <label class="form-label">CC</label>
-                            <input id="srm-cc" name="cc" class="form-control" placeholder="optional, comma-separated" />
+                            <label class="form-label">@Loc["CC"]</label>
+                            <input id="srm-cc" name="cc" class="form-control" placeholder='@Loc["optional, comma-separated"]' />
                         </div>
                         <div class="mb-2">
-                            <label class="form-label">Subject *</label>
+                            <label class="form-label">@Loc["Subject *"]</label>
                             <input id="srm-subject" name="subject" class="form-control" required />
                         </div>
                         <div class="mb-2">
-                            <label class="form-label">Body *</label>
+                            <label class="form-label">@Loc["Body *"]</label>
                             <textarea id="srm-body" name="body" class="form-control" rows="8" required></textarea>
-                            <div class="form-text">Plain text. The PDF report is attached automatically.</div>
+                            <div class="form-text">@Loc["Plain text. The PDF report is attached automatically."]</div>
                         </div>
-                        <div class="small text-muted mb-2"><i class="bi bi-paperclip me-1"></i><span id="srm-filename">report.pdf</span> (generated when you press Send)</div>
+                        <div class="small text-muted mb-2"><i class="bi bi-paperclip me-1"></i><span id="srm-filename">@Loc["report.pdf"]</span> (generated when you press Send)</div>
 
                         @* Documents already on the order or its arrival. Offered
                            here so a packing list or certificate can go with the
                            report without leaving the dialog to find it. *@
                         <div id="srm-docs-wrap" class="d-none">
-                            <label class="form-label mb-1">Also attach</label>
+                            <label class="form-label mb-1">@Loc["Also attach"]</label>
                             <div id="srm-docs" class="border rounded p-2" style="max-height:12rem;overflow:auto"></div>
                             <div class="form-text d-flex justify-content-between">
-                                <span>From this quality order and its arrival.</span>
+                                <span>@Loc["From this quality order and its arrival."]</span>
                                 <span id="srm-docs-total" class="text-muted"></span>
                             </div>
                         </div>
                     </form>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-info" id="srm-send"><i class="bi bi-send me-1"></i>Send</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="button" class="btn btn-info" id="srm-send"><i class="bi bi-send me-1"></i>@Loc["Send"]</button>
                 </div>
             </div>
         </div>
@@ -761,18 +942,18 @@
         <form id="overrideForm" class="modal-content">
             <input type="hidden" name="qoMaterialId" id="ov-qo-material-id" />
             <input type="hidden" name="qualityOrderId" id="ov-quality-order-id" />
-            <div class="modal-header"><h5 class="modal-title">Override sample size (inspected qty)</h5>
+            <div class="modal-header"><h5 class="modal-title">@Loc["Override sample size (inspected qty)"]</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
                 <p class="small text-muted">Current sample size: <code id="ov-current"></code>. The new value is applied to every sample on this material. The override is fully audited.</p>
-                <label class="form-label">New sample size *</label>
+                <label class="form-label">@Loc["New sample size *"]</label>
                 <input name="newSize" type="number" min="1" step="1" inputmode="numeric" class="form-control" required />
-                <label class="form-label mt-2">Reason <span class="text-muted small">(optional)</span></label>
+                <label class="form-label mt-2">@Loc["Reason"] <span class="text-muted small">@Loc["(optional)"]</span></label>
                 <textarea name="reason" class="form-control" rows="3"></textarea>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="submit" class="btn btn-warning">Save override</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="submit" class="btn btn-warning">@Loc["Save override"]</button>
             </div>
         </form>
     </div>
@@ -783,14 +964,14 @@
 <div class="modal fade" id="materialDetailsModal" tabindex="-1">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <div class="modal-header"><h5 class="modal-title"><i class="bi bi-card-list me-1"></i>Material details</h5>
+            <div class="modal-header"><h5 class="modal-title"><i class="bi bi-card-list me-1"></i>@Loc["Material details"]</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body" id="materialDetailsBody">
                 <div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-2"></span>Loading…</div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" class="btn btn-primary" id="mdm-save"><i class="bi bi-save me-1"></i>Save material details</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="button" class="btn btn-primary" id="mdm-save"><i class="bi bi-save me-1"></i>@Loc["Save material details"]</button>
             </div>
         </div>
     </div>
@@ -810,27 +991,90 @@
 
 @section Scripts {
 <script>
-    // ---- Generate Summary popup: fetch the grouped summary fresh every time the
+    // ---- QC report preview popup: build the report PDF fresh every time the
     //      modal opens (and on Refresh), so it always reflects the latest saved
     //      data — even before the order is finished.
+    //
+    //      The PDF is fetched into a blob rather than pointed at with an iframe
+    //      src, for two reasons: an iframe gives no way to tell "still
+    //      generating" from "generated but blank", and a non-200 (403, or a
+    //      render that threw) would paint the raw error page inside the frame.
+    //      With fetch we own the whole progress and error story, and the blob
+    //      URL is revoked when the modal closes.
     (function () {
-        var modal = document.getElementById('summaryModal');
+        var modal = document.getElementById('reportPreviewModal');
         if (!modal) return;
-        var body  = document.getElementById('summaryModalBody');
-        var url   = '@Url.Action("SummaryPanel", "QualityOrders", new { id = Model.QualityOrderId })';
-        var loading = '<div class="text-center text-muted py-4"><span class="spinner-border spinner-border-sm me-1"></span>Loading…</div>';
+        var frame   = document.getElementById('reportPreviewFrame');
+        var status  = document.getElementById('reportPreviewStatus');
+        var msg     = document.getElementById('reportPreviewMsg');
+        var elapsed = document.getElementById('reportPreviewElapsed');
+        var url     = '@Url.Action("QualityOrderPdfPreview", "Reports", new { id = Model.QualityOrderId })';
+        // Captured before the first failure can overwrite it, so Refresh and
+        // every reopen restore the same progress panel the page rendered.
+        var spinnerHtml = status.innerHTML;
+        var blobUrl = null, timer = null, inFlight = null;
+
+        function release() {
+            if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
+            frame.removeAttribute('src');
+            frame.classList.add('d-none');
+        }
+        function stopTimer() { if (timer) { clearInterval(timer); timer = null; } }
+        function fail(text) {
+            status.classList.remove('d-none');
+            status.innerHTML = '<div class="alert alert-danger mb-0">' + text + '</div>';
+        }
+
         async function load() {
-            body.innerHTML = loading;
+            // A second open while the first is still rendering would leave two
+            // responses racing for the same frame — abort the older one.
+            if (inFlight) inFlight.abort();
+            inFlight = new AbortController();
+            release();
+            stopTimer();
+            status.classList.remove('d-none');
+            status.innerHTML = spinnerHtml;
+            msg     = document.getElementById('reportPreviewMsg');
+            elapsed = document.getElementById('reportPreviewElapsed');
+
+            var started = Date.now();
+            timer = setInterval(function () {
+                var s = Math.round((Date.now() - started) / 1000);
+                elapsed.textContent = s + 's';
+                // Only once it is genuinely slow — saying it up front would make
+                // every fast report look like a problem.
+                if (s === 8) msg.textContent = 'Still working — orders with many samples and photos take longer…';
+            }, 1000);
+
             try {
-                var res = await fetch(url, { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
-                if (!res.ok) { body.innerHTML = '<div class="alert alert-danger mb-0">Could not load the summary (' + res.status + ').</div>'; return; }
-                body.innerHTML = await res.text();
+                var res = await fetch(url, { credentials: 'same-origin', signal: inFlight.signal });
+                if (!res.ok) {
+                    fail(res.status === 403
+                        ? 'You do not have permission to view this report.'
+                        : 'Could not generate the report (' + res.status + '). Try Refresh.');
+                    return;
+                }
+                blobUrl = URL.createObjectURL(await res.blob());
+                frame.src = blobUrl;
+                frame.classList.remove('d-none');
+                status.classList.add('d-none');
             } catch (e) {
-                body.innerHTML = '<div class="alert alert-danger mb-0">Request failed: ' + (e && e.message ? e.message : e) + '</div>';
+                if (e && e.name === 'AbortError') return;   // superseded, not failed
+                fail('Request failed: ' + (e && e.message ? e.message : e));
+            } finally {
+                stopTimer();
             }
         }
+
         modal.addEventListener('show.bs.modal', load);
-        var rb = document.getElementById('summaryRefreshBtn');
+        // Free the blob (a report runs to several MB) and drop the frame, so a
+        // reopen always regenerates rather than showing a stale render.
+        modal.addEventListener('hidden.bs.modal', function () {
+            if (inFlight) { inFlight.abort(); inFlight = null; }
+            stopTimer();
+            release();
+        });
+        var rb = document.getElementById('reportPreviewRefreshBtn');
         if (rb) rb.addEventListener('click', load);
     })();
 

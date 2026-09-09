@@ -107,6 +107,23 @@ public sealed class PermissionCatalog
             }
         }
 
+        // Code-only permissions (Perm.CodeOnly): the handful that qualify how an
+        // action behaves rather than whether it runs, so no attribute can carry
+        // them. Registered through the same path, which means the same duplicate
+        // and unknown-screen checks apply to them.
+        foreach (var p in Models.Security.Perm.CodeOnly)
+        {
+            var owner = Models.Security.Screens.OwnerOf(p.Code);
+            if (!Array.Exists(Models.Security.Screens.All,
+                    k => string.Equals(k, owner, StringComparison.OrdinalIgnoreCase)))
+            {
+                problems.Add($"Perm.CodeOnly: '{p.Code}' resolves to unknown screen '{owner}'.");
+                continue;
+            }
+            Register(byCode, owners, problems, "Perm.CodeOnly", new DiscoveredPermission(
+                p.Code, owner, "Action", p.DisplayName, p.SortOrder, p.SeedFor));
+        }
+
         if (problems.Count > 0)
             throw new InvalidOperationException(
                 "The permission catalogue is incomplete, so the application refuses to start. " +

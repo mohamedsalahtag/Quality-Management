@@ -1,9 +1,9 @@
-@using SharbatlyQMS.Web.Controllers
+﻿@using SharbatlyQMS.Web.Controllers
 @using SharbatlyQMS.Web.Services
 @using SharbatlyQMS.Web.Services.Sap
 @model SettingsVm
 @{
-    ViewData["Title"] = "Site Configuration";
+    ViewData["Title"] = Loc["Site Configuration"];
     var activeTab = (ViewBag.ActiveTab as string) ?? "sap";
     string TabClass(string id)    => activeTab == id ? "nav-link active" : "nav-link";
     string TabPaneClass(string id) => activeTab == id ? "tab-pane fade show active" : "tab-pane fade";
@@ -13,53 +13,53 @@
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0"><i class="bi bi-gear me-1"></i>Site Configuration</h1>
+    <h1 class="h3 mb-0"><i class="bi bi-gear me-1"></i>@Loc["Site Configuration"]</h1>
 </div>
 
 <ul class="nav nav-tabs mb-3" role="tablist">
     <li class="nav-item">
         <button class="@TabClass("sap")" data-bs-toggle="tab" data-bs-target="#tab-sap" type="button">
-            <i class="bi bi-cloud-arrow-down me-1"></i>SAP OData
+            <i class="bi bi-cloud-arrow-down me-1"></i>@Loc["SAP OData"]
         </button>
     </li>
     <li class="nav-item">
         <button class="@TabClass("branding")" data-bs-toggle="tab" data-bs-target="#tab-branding" type="button">
-            <i class="bi bi-palette2 me-1"></i>Branding
+            <i class="bi bi-palette2 me-1"></i>@Loc["Branding"]
         </button>
     </li>
     <li class="nav-item">
         <button class="@TabClass("smtp")" data-bs-toggle="tab" data-bs-target="#tab-smtp" type="button">
-            <i class="bi bi-envelope-at me-1"></i>Email (SMTP)
+            <i class="bi bi-envelope-at me-1"></i>@Loc["Email (SMTP)"]
         </button>
     </li>
     <li class="nav-item">
         <button class="@TabClass("thumbnails")" data-bs-toggle="tab" data-bs-target="#tab-thumbnails" type="button">
-            <i class="bi bi-image me-1"></i>Images / Thumbnails
+            <i class="bi bi-image me-1"></i>@Loc["Images / Thumbnails"]
         </button>
     </li>
     <li class="nav-item">
         <button class="@TabClass("storage")" data-bs-toggle="tab" data-bs-target="#tab-storage" type="button">
-            <i class="bi bi-hdd me-1"></i>Storage
+            <i class="bi bi-hdd me-1"></i>@Loc["Storage"]
         </button>
     </li>
     <li class="nav-item">
         <button class="@TabClass("alerts")" data-bs-toggle="tab" data-bs-target="#tab-alerts" type="button">
-            <i class="bi bi-bell me-1"></i>Alert Thresholds
+            <i class="bi bi-bell me-1"></i>@Loc["Alert Thresholds"]
         </button>
     </li>
     <li class="nav-item">
         <button class="@TabClass("report")" data-bs-toggle="tab" data-bs-target="#tab-report" type="button">
-            <i class="bi bi-file-earmark-text me-1"></i>Report
+            <i class="bi bi-file-earmark-text me-1"></i>@Loc["Report"]
         </button>
     </li>
     <li class="nav-item">
         <button class="@TabClass("syncstatus")" data-bs-toggle="tab" data-bs-target="#tab-syncstatus" type="button">
-            <i class="bi bi-arrow-repeat me-1"></i>Sync Status
+            <i class="bi bi-arrow-repeat me-1"></i>@Loc["Sync Status"]
         </button>
     </li>
     <li class="nav-item">
         <button class="@TabClass("ad")" data-bs-toggle="tab" data-bs-target="#tab-ad" type="button">
-            <i class="bi bi-person-lines-fill me-1"></i>Active Directory
+            <i class="bi bi-person-lines-fill me-1"></i>@Loc["Active Directory"]
         </button>
     </li>
     @* Danger Zone (Purge all operational data) hidden by request. To restore,
@@ -78,7 +78,7 @@
 @* ===================== SAP OData ===================== *@
 <div class="@TabPaneClass("sap")" id="tab-sap">
     <div class="card">
-        <div class="card-header bg-primary text-white"><i class="bi bi-cloud-arrow-down me-1"></i>SAP S/4HANA OData endpoints</div>
+        <div class="card-header bg-primary text-white"><i class="bi bi-cloud-arrow-down me-1"></i>@Loc["SAP S/4HANA OData endpoints"]</div>
         <div class="card-body">
             <p class="text-muted small mb-3">
                 Fill in the OData URL for each CDS view. The application reads from these
@@ -87,8 +87,8 @@
                 its CDS view is published &mdash; the arrival search will fall back to the
                 in-memory demo data while URLs are blank.
                 <br />
-                Use the <strong>Test</strong> button to verify connectivity (probes the URL with <code>$top=1</code>)
-                and <strong>Preview</strong> to inspect the actual JSON SAP returns. Both work
+                Use the <strong>@Loc["Test"]</strong> button to verify connectivity (probes the URL with <code>$top=1</code>)
+                and <strong>@Loc["Preview"]</strong> to inspect the actual JSON SAP returns. Both work
                 against the value currently in the input box &mdash; you do not need to Save first.
             </p>
             <form asp-action="SaveSapSettings" method="post" id="sap-form">
@@ -97,29 +97,29 @@
                     <div class="col-md-12">
                         <div class="alert alert-light border small mb-0">
                             <i class="bi bi-info-circle me-1"></i>
-                            <strong>How credentials are resolved:</strong> the per-URL <em>User</em> and <em>Password</em>
-                            below each endpoint take priority. If a per-URL <em>User</em> is left blank, the global
+                            <strong>@Loc["How credentials are resolved:"]</strong> the per-URL <em>@Loc["User"]</em> and <em>@Loc["Password"]</em>
+                            below each endpoint take priority. If a per-URL <em>@Loc["User"]</em> is left blank, the global
                             default below is used instead. This lets you point one URL at a dev server and another
                             at production with different accounts.
                         </div>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">SAP username <span class="text-muted small">(global default)</span></label>
+                        <label class="form-label">@Loc["SAP username"] <span class="text-muted small">@Loc["(global default)"]</span></label>
                         <input asp-for="Sap.User" class="form-control" autocomplete="off" />
                     </div>
                     <div class="col-md-6">
                         <label class="form-label d-flex align-items-center gap-2">
-                            <span>SAP password <span class="text-muted small">(global default)</span></span>
+                            <span>SAP password <span class="text-muted small">@Loc["(global default)"]</span></span>
                             @if (!string.IsNullOrEmpty(Model.Sap.Password))
                             {
                                 <span class="badge bg-success" title="A password is stored. Leave this field blank to keep it.">
-                                    <i class="bi bi-shield-check"></i> Saved
+                                    <i class="bi bi-shield-check"></i> @Loc["Saved"]
                                 </span>
                             }
                         </label>
                         <input name="Sap.Password" type="password" class="form-control" autocomplete="new-password"
                                placeholder="@(!string.IsNullOrEmpty(Model.Sap.Password) ? "•••••••• (saved — leave blank to keep)" : "Enter password")" />
-                        <small class="text-muted">Leave blank to keep existing password.</small>
+                        <small class="text-muted">@Loc["Leave blank to keep existing password."]</small>
                     </div>
                 </div>
                 <hr />
@@ -129,8 +129,8 @@
                 </h6>
                 <p class="small text-muted mb-3">
                     Material Master and Vendor Master are pulled into a local cache so lookups are fast.
-                    Use <strong>Sync now</strong> to pull immediately, or schedule auto-sync hours
-                    on the <em>Sync Status</em> tab.
+                    Use <strong>@Loc["Sync now"]</strong> to pull immediately, or schedule auto-sync hours
+                    on the <em>@Loc["Sync Status"]</em> tab.
                 </p>
 
                 @{
@@ -148,23 +148,23 @@
                         <div class="mb-4 border rounded p-2">
                             <label class="form-label fw-semibold mb-1">
                                 @label
-                                @if (searchOnly) { <span class="badge bg-info text-dark ms-1">Search-only</span> }
+                                @if (searchOnly) { <span class="badge bg-info text-dark ms-1">@Loc["Search-only"]</span> }
                             </label>
                             <div class="input-group mb-1">
                                 <input id="@urlId" name="@urlAsp" value="@urlValue" class="form-control font-monospace" placeholder="@placeholder" />
                                 <button type="button" class="btn btn-outline-info"
                                         onclick="sapTest('@urlId','@userId','@pwdId','@endpointKey','@resultId')">
-                                    <i class="bi bi-plug"></i> Test
+                                    <i class="bi bi-plug"></i> @Loc["Test"]
                                 </button>
                                 <button type="button" class="btn btn-outline-secondary"
                                         onclick="sapPreview('@urlId','@userId','@pwdId','@endpointKey','@resultId')">
-                                    <i class="bi bi-eye"></i> Preview
+                                    <i class="bi bi-eye"></i> @Loc["Preview"]
                                 </button>
                                 @if (syncable)
                                 {
                                     <button type="button" class="btn btn-success"
                                             onclick="sapSync('@endpointKey','@resultId')">
-                                        <i class="bi bi-arrow-down-circle"></i> Sync now
+                                        <i class="bi bi-arrow-down-circle"></i> @Loc["Sync now"]
                                     </button>
                                 }
                             </div>
@@ -172,7 +172,7 @@
                                 <div class="col-md-6">
                                     <input id="@userId" name="@userAsp" value="@userValue"
                                            class="form-control form-control-sm" autocomplete="off"
-                                           placeholder="SAP user for this URL (blank = use global default)" />
+                                           placeholder='@Loc["SAP user for this URL (blank = use global default)"]' />
                                 </div>
                                 <div class="col-md-6">
                                     <div class="input-group input-group-sm">
@@ -192,7 +192,7 @@
                             @if (syncable && sync != null)
                             {
                                 <div class="small mt-1">
-                                    <strong>Last sync:</strong>
+                                    <strong>@Loc["Last sync:"]</strong>
                                     <span class="@(sync.LastRunUtc.HasValue ? "" : "text-muted")">
                                         @(sync.LastRunUtc.HasValue ? sync.LastRunUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "never")
                                     </span>
@@ -235,7 +235,7 @@
                 <p class="small text-muted mb-3">
                     PO / Shipment / Container search calls SAP live when inspectors create an arrival checklist.
                     The exact slice they pick is then snapshotted into the arrival, and downstream Quality Order /
-                    Sample / Report flows read the snapshot &mdash; never SAP. These URLs are <strong>not</strong> bulk-synced.
+                    Sample / Report flows read the snapshot &mdash; never SAP. These URLs are <strong>@Loc["not"]</strong> bulk-synced.
                 </p>
 
                 @{ EndpointRow("Container Search URL", syncable:false,
@@ -264,19 +264,19 @@
                     sync:null, searchOnly:true); }
 
                 <button type="submit" class="btn btn-primary mt-2">
-                    <i class="bi bi-save me-1"></i>Save SAP settings
+                    <i class="bi bi-save me-1"></i>@Loc["Save SAP settings"]
                 </button>
             </form>
 
             <hr class="my-4" />
 
             <h6 class="text-uppercase small fw-bold text-primary mb-2">
-                <i class="bi bi-clock-history me-1"></i>Pending Containers retrieval
+                <i class="bi bi-clock-history me-1"></i>@Loc["Pending Containers retrieval"]
             </h6>
             <p class="small text-muted mb-3">
                 The background retrieval hits the Container Search OData URL and caches every SAP row
                 whose <code>Doc_Date</code> is on/after the start date below. The page
-                <a asp-controller="Arrivals" asp-action="Pending">Arrivals → Pending Containers</a>
+                <a asp-controller="Arrivals" asp-action="Pending">@Loc["Arrivals → Pending Containers"]</a>
                 renders cached rows that don't yet have a QMS Arrival — so no container slips
                 through QC silently.
             </p>
@@ -284,24 +284,24 @@
                 @Html.AntiForgeryToken()
                 <div class="row g-3 align-items-end">
                     <div class="col-md-4">
-                        <label class="form-label" asp-for="ContainerPoll.StartDate">Start date (Doc_Date ≥)</label>
+                        <label class="form-label" asp-for="ContainerPoll.StartDate">@Loc["Start date (Doc_Date ≥)"]</label>
                         <input asp-for="ContainerPoll.StartDate" type="date" class="form-control form-control-sm" />
-                        <small class="text-muted">Containers before this date are ignored. Set to your QMS go-live date.</small>
+                        <small class="text-muted">@Loc["Containers before this date are ignored. Set to your QMS go-live date."]</small>
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label" asp-for="ContainerPoll.PollingMinutes">Pull every (minutes)</label>
+                        <label class="form-label" asp-for="ContainerPoll.PollingMinutes">@Loc["Pull every (minutes)"]</label>
                         <input asp-for="ContainerPoll.PollingMinutes" type="number" min="5" max="1440" step="1"
                                class="form-control form-control-sm" />
                         <small class="text-muted">5 minutes – 24 hours (1440). Examples: 60 = hourly, 300 = every 5 h, 1440 = daily.</small>
                     </div>
                     <div class="col-md-4 d-flex gap-2">
                         <button type="submit" class="btn btn-primary btn-sm">
-                            <i class="bi bi-save me-1"></i>Save settings
+                            <i class="bi bi-save me-1"></i>@Loc["Save settings"]
                         </button>
                         <button type="submit" formaction="@Url.Action("PullContainersNow")"
                                 class="btn btn-success btn-sm"
                                 title="Override the schedule and pull from SAP immediately">
-                            <i class="bi bi-cloud-download me-1"></i>Pull now
+                            <i class="bi bi-cloud-download me-1"></i>@Loc["Pull now"]
                         </button>
                     </div>
                 </div>
@@ -312,13 +312,13 @@
                         var runningTrig = string.Equals(Model.ContainerPoll.RunningTriggerSource, "Manual", StringComparison.OrdinalIgnoreCase) ? "Manual" : "Auto";
                         <span class="text-info">
                             <i class="bi bi-arrow-repeat me-1"></i>
-                            <strong>Currently retrieving…</strong>
+                            <strong>@Loc["Currently retrieving…"]</strong>
                             (<em>@runningTrig</em>) started @Model.ContainerPoll.RunningSince.Value.ToLocalTime().ToString("HH:mm:ss")
                             (elapsed @(elapsedSec / 60) min @(elapsedSec % 60) s) — refresh this page to update.
                         </span>
                         <br />
                     }
-                    <strong>Last pull:</strong>
+                    <strong>@Loc["Last pull:"]</strong>
                     <span class="@(Model.ContainerPoll.LastRunUtc.HasValue ? "" : "text-muted")">
                         @(Model.ContainerPoll.LastRunUtc.HasValue ? Model.ContainerPoll.LastRunUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "never")
                     </span>
@@ -543,7 +543,7 @@
 @* ===================== Branding ===================== *@
 <div class="@TabPaneClass("branding")" id="tab-branding">
     <div class="card mb-3">
-        <div class="card-header bg-primary text-white"><i class="bi bi-palette2 me-1"></i>Company branding for reports</div>
+        <div class="card-header bg-primary text-white"><i class="bi bi-palette2 me-1"></i>@Loc["Company branding for reports"]</div>
         <div class="card-body">
             <p class="small text-muted mb-3">
                 Company name, footer text, and logo shown on every printed report (Arrival Checklist, Quality
@@ -553,11 +553,11 @@
             <form asp-action="SaveBrandingSettings" method="post" class="row g-3">
                 @Html.AntiForgeryToken()
                 <div class="col-md-6">
-                    <label class="form-label">Company name <span class="text-muted small">(shown above every report title)</span></label>
+                    <label class="form-label">@Loc["Company name"] <span class="text-muted small">@Loc["(shown above every report title)"]</span></label>
                     <input asp-for="Branding.CompanyName" class="form-control" />
                 </div>
                 <div class="col-12">
-                    <label class="form-label">Logo size <span class="text-muted small">(company logo on the Quality Control Report — 100% = original size)</span></label>
+                    <label class="form-label">@Loc["Logo size"] <span class="text-muted small">@Loc["(company logo on the Quality Control Report — 100% = original size)"]</span></label>
                     <div class="d-flex flex-wrap align-items-center gap-4">
                         <div style="flex:0 0 auto;">
                             <div class="d-flex align-items-center gap-2">
@@ -565,10 +565,10 @@
                                        class="form-range" id="logoSizeRange" style="width:180px;" oninput="updateLogoPeek()" />
                                 <span class="badge bg-primary fs-6 text-nowrap" id="logoSizeVal" style="min-width:4rem;">@Model.Branding.LogoScalePercent%</span>
                             </div>
-                            <small class="text-muted d-block mt-1">Drag to resize. Allowed 50–400%.</small>
+                            <small class="text-muted d-block mt-1">@Loc["Drag to resize. Allowed 50–400%."]</small>
                         </div>
                         <div style="flex:0 0 auto;">
-                            <div class="small text-muted mb-1">Preview — top of the report:</div>
+                            <div class="small text-muted mb-1">@Loc["Preview — top of the report:"]</div>
                             <div class="border rounded bg-white px-3 py-2" style="width:360px; max-width:100%;">
                                 <div class="d-flex align-items-center" style="gap:10px; min-height:24px;">
                                     <div style="flex:0 0 auto; display:flex; align-items:center;">
@@ -580,25 +580,25 @@
                                         else
                                         {
                                             <div id="logoPeekImg" class="d-flex align-items-center justify-content-center fw-bold"
-                                                 style="height:45px; width:45px; background:#0d6efd; color:#fff; font-size:9px;">QMS</div>
+                                                 style="height:45px; width:45px; background:#0d6efd; color:#fff; font-size:9px;">@Loc["QMS"]</div>
                                         }
                                     </div>
                                     <div class="flex-grow-1 text-center" style="line-height:1.25;">
                                         <div class="fw-bold" style="font-size:12px;">@Model.Branding.CompanyName</div>
-                                        <div class="fw-bold" style="font-size:15px; color:#0d6efd;">Quality Control Report</div>
+                                        <div class="fw-bold" style="font-size:15px; color:#0d6efd;">@Loc["Quality Control Report"]</div>
                                     </div>
-                                    <div class="text-muted text-nowrap" style="flex:0 0 auto; font-size:8px;">Page 1 / 5</div>
+                                    <div class="text-muted text-nowrap" style="flex:0 0 auto; font-size:8px;">@Loc["Page 1 / 5"]</div>
                                 </div>
                             </div>
                         </div>
                     </div>
                 </div>
                 <div class="col-md-12">
-                    <label class="form-label">Footer line <span class="text-muted small">(small text at the bottom of every PDF page)</span></label>
+                    <label class="form-label">@Loc["Footer line"] <span class="text-muted small">@Loc["(small text at the bottom of every PDF page)"]</span></label>
                     <input asp-for="Branding.FooterLine" class="form-control" />
                 </div>
                 <div class="col-12">
-                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>Save branding text</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>@Loc["Save branding text"]</button>
                 </div>
             </form>
         </div>
@@ -625,7 +625,7 @@
     </script>
 
     <div class="card">
-        <div class="card-header bg-primary text-white"><i class="bi bi-image me-1"></i>Company logo</div>
+        <div class="card-header bg-primary text-white"><i class="bi bi-image me-1"></i>@Loc["Company logo"]</div>
         <div class="card-body">
             <div class="row g-3 align-items-center">
                 <div class="col-md-4 text-center">
@@ -640,17 +640,17 @@
                     {
                         <div class="border rounded p-4 text-muted">
                             <i class="bi bi-image fs-1"></i>
-                            <div class="small mt-2">No logo uploaded</div>
+                            <div class="small mt-2">@Loc["No logo uploaded"]</div>
                         </div>
                     }
                 </div>
                 <div class="col-md-8">
                     <form asp-action="UploadCompanyLogo" method="post" enctype="multipart/form-data" class="mb-3">
                         @Html.AntiForgeryToken()
-                        <label class="form-label">Upload new logo</label>
+                        <label class="form-label">@Loc["Upload new logo"]</label>
                         <div class="input-group">
                             <input name="logo" type="file" class="form-control" accept="image/*" required />
-                            <button type="submit" class="btn btn-primary"><i class="bi bi-cloud-upload me-1"></i>Upload</button>
+                            <button type="submit" class="btn btn-primary"><i class="bi bi-cloud-upload me-1"></i>@Loc["Upload"]</button>
                         </div>
                         <small class="text-muted">PNG / JPG / GIF / WEBP / SVG. Up to 2 MB. Recommended: a square or wide logo ~300 x 300 px on a transparent background.</small>
                     </form>
@@ -659,7 +659,7 @@
                         <form asp-action="RemoveCompanyLogo" method="post" data-confirm="Remove the current logo? The placeholder will be used until a new one is uploaded." data-confirm-danger data-confirm-ok="Remove">
                             @Html.AntiForgeryToken()
                             <button type="submit" class="btn btn-outline-danger btn-sm">
-                                <i class="bi bi-trash me-1"></i>Remove current logo
+                                <i class="bi bi-trash me-1"></i>@Loc["Remove current logo"]
                             </button>
                         </form>
                     }
@@ -670,7 +670,7 @@
 
     @* ---- Page icon (favicon) ---- *@
     <div class="card mt-3">
-        <div class="card-header bg-primary text-white"><i class="bi bi-globe me-1"></i>Page icon (browser tab favicon)</div>
+        <div class="card-header bg-primary text-white"><i class="bi bi-globe me-1"></i>@Loc["Page icon (browser tab favicon)"]</div>
         <div class="card-body">
             <p class="small text-muted mb-3">
                 Icon shown in the browser tab and bookmark bar. Real photo-style 3D fruit images
@@ -710,7 +710,7 @@
                         <div class="fav-tile @(isDefault ? "selected" : "")" data-fav="">
                             <button type="button" title="Default QMS icon">
                                 <div class="fav-default-icon"><i class="bi bi-clipboard2-check"></i></div>
-                                <div class="fav-label">Default</div>
+                                <div class="fav-label">@Loc["Default"]</div>
                             </button>
                         </div>
                     </div>
@@ -752,7 +752,7 @@
                                     <img class="fav-img"
                                          src="/branding/@Model.Branding.FaviconCustomFilename?v=@DateTime.UtcNow.Ticks"
                                          alt="My uploaded image" />
-                                    <div class="fav-label">My image</div>
+                                    <div class="fav-label">@Loc["My image"]</div>
                                 </button>
                             </div>
                             <div class="text-center mt-1">
@@ -771,7 +771,7 @@
                                file input. No JS needed -- native HTML behavior. *@
                             <label for="custom-favicon-file" class="fav-tile m-0" style="cursor:pointer;">
                                 <div class="fav-default-icon"><i class="bi bi-cloud-arrow-up text-success"></i></div>
-                                <div class="fav-label">Upload yours</div>
+                                <div class="fav-label">@Loc["Upload yours"]</div>
                             </label>
                         </div>
                     }
@@ -802,7 +802,7 @@
                           data-confirm="Remove your uploaded image? If it is currently active, the default icon will be restored." data-confirm-danger data-confirm-ok="Remove">
                         @Html.AntiForgeryToken()
                         <button type="submit" class="btn btn-outline-danger btn-sm">
-                            <i class="bi bi-trash me-1"></i>Remove uploaded image
+                            <i class="bi bi-trash me-1"></i>@Loc["Remove uploaded image"]
                         </button>
                     </form>
                 </div>
@@ -850,53 +850,53 @@
 @* ===================== SMTP ===================== *@
 <div class="@TabPaneClass("smtp")" id="tab-smtp">
     <div class="card">
-        <div class="card-header bg-primary text-white"><i class="bi bi-envelope-at me-1"></i>Email / SMTP</div>
+        <div class="card-header bg-primary text-white"><i class="bi bi-envelope-at me-1"></i>@Loc["Email / SMTP"]</div>
         <div class="card-body">
             <form asp-action="SaveSmtpSettings" method="post">
                 @Html.AntiForgeryToken()
                 <div class="row g-3">
                     <div class="col-md-8">
-                        <label class="form-label">SMTP host</label>
-                        <input asp-for="Smtp.Host" class="form-control" placeholder="smtp.sendgrid.net" />
+                        <label class="form-label">@Loc["SMTP host"]</label>
+                        <input asp-for="Smtp.Host" class="form-control" placeholder='@Loc["smtp.sendgrid.net"]' />
                     </div>
                     <div class="col-md-4">
-                        <label class="form-label">Port</label>
+                        <label class="form-label">@Loc["Port"]</label>
                         <input asp-for="Smtp.Port" type="number" class="form-control" />
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">SMTP username</label>
+                        <label class="form-label">@Loc["SMTP username"]</label>
                         <input asp-for="Smtp.User" class="form-control" autocomplete="off" />
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">SMTP password</label>
+                        <label class="form-label">@Loc["SMTP password"]</label>
                         <input asp-for="Smtp.Password" type="password" class="form-control" autocomplete="new-password" />
-                        <small class="text-muted">Leave blank to keep existing password.</small>
+                        <small class="text-muted">@Loc["Leave blank to keep existing password."]</small>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">From email</label>
+                        <label class="form-label">@Loc["From email"]</label>
                         <input asp-for="Smtp.FromEmail" type="email" class="form-control" />
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">From name</label>
+                        <label class="form-label">@Loc["From name"]</label>
                         <input asp-for="Smtp.FromName" class="form-control" />
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Site name</label>
+                        <label class="form-label">@Loc["Site name"]</label>
                         <input asp-for="Smtp.SiteName" class="form-control" />
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Site URL (used in email links)</label>
-                        <input asp-for="Smtp.SiteUrl" class="form-control" placeholder="http://localhost:5300" />
+                        <label class="form-label">@Loc["Site URL (used in email links)"]</label>
+                        <input asp-for="Smtp.SiteUrl" class="form-control" placeholder='@Loc["http://localhost:5300"]' />
                     </div>
                     <div class="col-12">
                         <div class="form-check form-switch">
                             <input asp-for="Smtp.EnableSsl" class="form-check-input" type="checkbox" role="switch" />
-                            <label asp-for="Smtp.EnableSsl" class="form-check-label">Use TLS / SSL</label>
+                            <label asp-for="Smtp.EnableSsl" class="form-check-label">@Loc["Use TLS / SSL"]</label>
                         </div>
                     </div>
                 </div>
                 <button type="submit" class="btn btn-primary mt-3">
-                    <i class="bi bi-save me-1"></i>Save SMTP settings
+                    <i class="bi bi-save me-1"></i>@Loc["Save SMTP settings"]
                 </button>
             </form>
         </div>
@@ -904,12 +904,12 @@
             <form asp-action="SendTestEmail" method="post" class="row g-2 align-items-end">
                 @Html.AntiForgeryToken()
                 <div class="col-md-6">
-                    <label class="form-label">Send test email to</label>
+                    <label class="form-label">@Loc["Send test email to"]</label>
                     <input name="toEmail" type="email" class="form-control" placeholder="you@sharbatlyfruit.com" />
                 </div>
                 <div class="col-md-3">
                     <button type="submit" class="btn btn-info w-100">
-                        <i class="bi bi-send me-1"></i>Send test
+                        <i class="bi bi-send me-1"></i>@Loc["Send test"]
                     </button>
                 </div>
             </form>
@@ -920,7 +920,7 @@
 @* ===================== Thumbnails ===================== *@
 <div class="@TabPaneClass("thumbnails")" id="tab-thumbnails">
     <div class="card">
-        <div class="card-header bg-primary text-white"><i class="bi bi-image me-1"></i>Image / Thumbnail sizes</div>
+        <div class="card-header bg-primary text-white"><i class="bi bi-image me-1"></i>@Loc["Image / Thumbnail sizes"]</div>
         <div class="card-body">
             <p class="text-muted small mb-3">
                 Controls thumbnail dimensions on screen and inside the PDF report.
@@ -929,31 +929,31 @@
             <form asp-action="SaveThumbnailSettings" method="post" class="row g-3">
                 @Html.AntiForgeryToken()
                 <div class="col-md-6">
-                    <label class="form-label">Screen thumbnail width (px)</label>
+                    <label class="form-label">@Loc["Screen thumbnail width (px)"]</label>
                     <input asp-for="Thumbnails.ScreenWidth" type="number" class="form-control" />
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Screen thumbnail height (px)</label>
+                    <label class="form-label">@Loc["Screen thumbnail height (px)"]</label>
                     <input asp-for="Thumbnails.ScreenHeight" type="number" class="form-control" />
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">PDF thumbnail width (px)</label>
+                    <label class="form-label">@Loc["PDF thumbnail width (px)"]</label>
                     <input asp-for="Thumbnails.PdfWidth" type="number" class="form-control" />
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">PDF thumbnail height (px)</label>
+                    <label class="form-label">@Loc["PDF thumbnail height (px)"]</label>
                     <input asp-for="Thumbnails.PdfHeight" type="number" class="form-control" />
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Fit mode</label>
+                    <label class="form-label">@Loc["Fit mode"]</label>
                     <select asp-for="Thumbnails.FitMode" class="form-select">
-                        <option value="Cover">Cover (crop to fill)</option>
-                        <option value="Contain">Contain (whole image visible)</option>
+                        <option value="Cover">@Loc["Cover (crop to fill)"]</option>
+                        <option value="Contain">@Loc["Contain (whole image visible)"]</option>
                     </select>
                 </div>
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-save me-1"></i>Save thumbnail settings
+                        <i class="bi bi-save me-1"></i>@Loc["Save thumbnail settings"]
                     </button>
                 </div>
             </form>
@@ -965,7 +965,7 @@
 @* ===================== Storage ===================== *@
 <div class="@TabPaneClass("storage")" id="tab-storage">
     <div class="card">
-        <div class="card-header bg-primary text-white"><i class="bi bi-hdd me-1"></i>Uploaded photo storage</div>
+        <div class="card-header bg-primary text-white"><i class="bi bi-hdd me-1"></i>@Loc["Uploaded photo storage"]</div>
         <div class="card-body">
             <p class="text-muted small mb-3">
                 Folder where uploaded inspection photos are stored and served from. Point this at a disk with
@@ -980,7 +980,7 @@
                 <code>/uploads/…</code> web addresses never change.
             </div>
             <div class="mb-3">
-                <label class="form-label mb-1">Current folder in use</label>
+                <label class="form-label mb-1">@Loc["Current folder in use"]</label>
                 <div class="input-group">
                     <span class="input-group-text"><i class="bi bi-folder2-open"></i></span>
                     <input type="text" class="form-control bg-light" value="@Model.Storage.EffectiveRoot" readonly />
@@ -990,7 +990,7 @@
             <form asp-action="SaveStorageSettings" method="post" class="row g-3">
                 @Html.AntiForgeryToken()
                 <div class="col-md-9">
-                    <label class="form-label">Uploads folder (absolute path)</label>
+                    <label class="form-label">@Loc["Uploads folder (absolute path)"]</label>
                     <input asp-for="Storage.UploadsRoot" class="form-control" placeholder="e.g. D:\QMS\uploads  (blank = server default)" />
                     @if (!string.IsNullOrWhiteSpace(Model.Storage.UploadsRoot) &&
                          !string.Equals(Model.Storage.UploadsRoot, Model.Storage.EffectiveRoot, StringComparison.OrdinalIgnoreCase))
@@ -1000,7 +1000,7 @@
                     <small class="text-muted">Validated on save — the folder is created if missing and a write test is run before it's accepted. Blank = server default.</small>
                 </div>
                 <div class="col-12">
-                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>Save storage folder</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>@Loc["Save storage folder"]</button>
                 </div>
             </form>
         </div>
@@ -1009,7 +1009,7 @@
 
 <div class="@TabPaneClass("alerts")" id="tab-alerts">
     <div class="card">
-        <div class="card-header bg-primary text-white"><i class="bi bi-bell me-1"></i>Alert thresholds</div>
+        <div class="card-header bg-primary text-white"><i class="bi bi-bell me-1"></i>@Loc["Alert thresholds"]</div>
         <div class="card-body">
             <p class="text-muted small mb-3">
                 Used by the alert engine to classify QMS records as Yellow (warning) or Red (critical)
@@ -1018,27 +1018,27 @@
             <form asp-action="SaveAlertSettings" method="post" class="row g-3">
                 @Html.AntiForgeryToken()
                 <div class="col-md-6">
-                    <label class="form-label">Stale arrival (Draft) days</label>
+                    <label class="form-label">@Loc["Stale arrival (Draft) days"]</label>
                     <input asp-for="Alerts.StaleArrivalDays" type="number" class="form-control" />
-                    <small class="text-muted">Arrival in Draft for more than N days triggers a warning.</small>
+                    <small class="text-muted">@Loc["Arrival in Draft for more than N days triggers a warning."]</small>
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Open Quality Order days</label>
+                    <label class="form-label">@Loc["Open Quality Order days"]</label>
                     <input asp-for="Alerts.OpenQoDays" type="number" class="form-control" />
-                    <small class="text-muted">Open QO not closed within N days triggers a warning.</small>
+                    <small class="text-muted">@Loc["Open QO not closed within N days triggers a warning."]</small>
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Defect % red threshold</label>
+                    <label class="form-label">@Loc["Defect % red threshold"]</label>
                     <input asp-for="Alerts.DefectPctRed" type="number" class="form-control" />
-                    <small class="text-muted">Sample defect % above this is critical.</small>
+                    <small class="text-muted">@Loc["Sample defect % above this is critical."]</small>
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Defect % yellow threshold</label>
+                    <label class="form-label">@Loc["Defect % yellow threshold"]</label>
                     <input asp-for="Alerts.DefectPctYellow" type="number" class="form-control" />
-                    <small class="text-muted">Sample defect % above this is a warning.</small>
+                    <small class="text-muted">@Loc["Sample defect % above this is a warning."]</small>
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">Uploads disk full alert (%)</label>
+                    <label class="form-label">@Loc["Uploads disk full alert (%)"]</label>
                     <div class="input-group">
                         <input asp-for="Alerts.DiskFullPercent" type="number" min="50" max="99" class="form-control" />
                         <span class="input-group-text">%</span>
@@ -1047,7 +1047,77 @@
                 </div>
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-save me-1"></i>Save alert thresholds
+                        <i class="bi bi-save me-1"></i>@Loc["Save alert thresholds"]
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    @* A separate card, not extra fields on the one above: those thresholds drive
+       the alert engine and its email fan-out, and these colour a bar on one page
+       and send nothing. Folding them together would make that card's own
+       description untrue. *@
+    <div class="card mt-3">
+        <div class="card-header bg-primary text-white">
+            <i class="bi bi-hourglass-split me-1"></i>@Loc["Time Bar thresholds"]
+        </div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">
+                @Loc["How the Time Bar page judges the days between a container arriving and its QC being finished. The claim window is short, so the optimum is one day."]
+            </p>
+            <form asp-action="SaveTimeBarSettings" method="post" class="row g-3">
+                @Html.AntiForgeryToken()
+                <div class="col-md-3">
+                    <label class="form-label">@Loc["Good, up to (days)"]</label>
+                    <input name="TimeBar.GoodDays" type="number" min="0" max="30"
+                           value="@Model.TimeBar.GoodDays" class="form-control" />
+                    <small class="text-muted">@Loc["At or below this the bar is green. Default 1."]</small>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">@Loc["Warning, up to (days)"]</label>
+                    <input name="TimeBar.WarnDays" type="number" min="1" max="90"
+                           value="@Model.TimeBar.WarnDays" class="form-control" />
+                    <small class="text-muted">@Loc["Above this the bar is red; between the two it is amber. Never stored below the good limit."]</small>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@Loc["Only count containers that arrived on or after"]</label>
+                    <div class="input-group">
+                        <input name="TimeBar.StartDate" type="date"
+                               value="@(Model.TimeBar.StartDate?.ToString("yyyy-MM-dd"))"
+                               class="form-control" />
+                        <button class="btn btn-outline-secondary" type="button"
+                                onclick="this.previousElementSibling.value='@DateTime.Now.ToString("yyyy-MM-dd")'">
+                            @Loc["Today"]
+                        </button>
+                        <button class="btn btn-outline-secondary" type="button"
+                                onclick="this.parentElement.querySelector('input').value=''">
+                            @Loc["Clear"]
+                        </button>
+                    </div>
+                    <small class="text-muted">
+                        @Loc["Leave empty to include every container ever received. Set it to the day the process went live and the page stops reporting on years of shipments that were never worked this way. Containers with no arrival date at all are left out once a date is set."]
+                    </small>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label">@Loc["Start the clock from"]</label>
+                    <select name="TimeBar.ArrivalBasis" class="form-select">
+                        <option value="@TimeBarArrivalBases.GoodsReceipt"
+                                selected="@(Model.TimeBar.ArrivalBasis == TimeBarArrivalBases.GoodsReceipt)">
+                            @Loc["Goods receipt (the date shown as \"Arr\" everywhere else)"]
+                        </option>
+                        <option value="@TimeBarArrivalBases.PortArrival"
+                                selected="@(Model.TimeBar.ArrivalBasis == TimeBarArrivalBases.PortArrival)">
+                            @Loc["Port arrival (when the container physically landed)"]
+                        </option>
+                    </select>
+                    <small class="text-muted">
+                        @Loc["This changes what the number MEANS, not just its colour. Goods receipt keeps the Time Bar consistent with the container list; port arrival is the truer basis for a claim window and always gives a larger number."]
+                    </small>
+                </div>
+                <div class="col-12">
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-save me-1"></i>@Loc["Save Time Bar thresholds"]
                     </button>
                 </div>
             </form>
@@ -1058,12 +1128,20 @@
 @* ===================== Report options ===================== *@
 <div class="@TabPaneClass("report")" id="tab-report">
     <div class="card">
-        <div class="card-header bg-primary text-white"><i class="bi bi-file-earmark-text me-1"></i>Quality Order report</div>
+        <div class="card-header bg-primary text-white"><i class="bi bi-file-earmark-text me-1"></i>@Loc["Quality Order report"]</div>
         <div class="card-body">
             <form asp-action="SaveReportSettings" method="post" class="row g-3">
                 @Html.AntiForgeryToken()
                 <div class="col-md-8">
-                    <label class="form-label">Time Bar basis</label>
+                    <label class="form-label">@Loc["Rejected container report header"]</label>
+                    <p class="text-muted small mb-2">
+                        @Loc["Printed as the banner across the quality report of a container that was refused on arrival. The exact wording is a commercial matter, so it is set here rather than in code."]
+                    </p>
+                    <input name="RejectedContainerHeader" class="form-control" maxlength="200"
+                           value="@Model.Report.RejectedContainerHeader" />
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label">@Loc["Time Bar basis"]</label>
                     <p class="text-muted small mb-2">
                         The Time Bar on the report is the number of days from this date to the date the
                         Quality Order was finished.
@@ -1073,7 +1151,7 @@
                                value="@TimeBarBases.Discharge"
                                checked="@(Model.Report.TimeBarBasis == TimeBarBases.Discharge)" />
                         <label class="form-check-label" for="tbb-discharge">
-                            <strong>Discharge date</strong> — count from the discharge date entered on the arrival.
+                            <strong>@Loc["Discharge date"]</strong> — count from the discharge date entered on the arrival.
                         </label>
                     </div>
                     <div class="form-check">
@@ -1081,36 +1159,21 @@
                                value="@TimeBarBases.Arrival"
                                checked="@(Model.Report.TimeBarBasis == TimeBarBases.Arrival)" />
                         <label class="form-check-label" for="tbb-arrival">
-                            <strong>Arrival date</strong> — count from the SAP arrival date.
+                            <strong>@Loc["Arrival date"]</strong> — count from the SAP arrival date.
                         </label>
                     </div>
                 </div>
                 <div class="col-md-8">
-                    <label class="form-label">Report layout version</label>
-                    <p class="text-muted small mb-2">
-                        The visual layout of the Quality Control Report PDF. All versions show the
-                        <strong>same data</strong> — only the styling differs, so you can switch or revert anytime.
+                    <label class="form-label">@Loc["Report layout"]</label>
+                    <p class="text-muted small mb-0">
+                        The Quality Control Report PDF always uses the <strong>@Loc["Soft"]</strong> layout —
+                        soft-blue section bands and ruled tables with a gentle colour palette.
+                        This is the standard report format and is no longer selectable.
                     </p>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="LayoutVersion" id="lv-classic"
-                               value="@ReportLayouts.Classic"
-                               checked="@(Model.Report.LayoutVersion == ReportLayouts.Classic)" />
-                        <label class="form-check-label" for="lv-classic">
-                            <strong>Classic</strong> — the current layout (calm, hairline rules, minimal color).
-                        </label>
-                    </div>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="LayoutVersion" id="lv-soft"
-                               value="@ReportLayouts.Soft"
-                               checked="@(Model.Report.LayoutVersion == ReportLayouts.Soft)" />
-                        <label class="form-check-label" for="lv-soft">
-                            <strong>Soft</strong> — soft-blue section bands and ruled tables with a gentle colour palette.
-                        </label>
-                    </div>
                 </div>
                 <div class="col-12">
                     <button type="submit" class="btn btn-primary">
-                        <i class="bi bi-save me-1"></i>Save report options
+                        <i class="bi bi-save me-1"></i>@Loc["Save report options"]
                     </button>
                 </div>
             </form>
@@ -1121,17 +1184,17 @@
 @* ===================== Sync Status / Auto Sync ===================== *@
 <div class="@TabPaneClass("syncstatus")" id="tab-syncstatus">
     <div class="card mb-3">
-        <div class="card-header bg-primary text-white"><i class="bi bi-bar-chart me-1"></i>Per-endpoint sync status</div>
+        <div class="card-header bg-primary text-white"><i class="bi bi-bar-chart me-1"></i>@Loc["Per-endpoint sync status"]</div>
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>Endpoint</th>
-                        <th>Last sync</th>
-                        <th class="text-end">Rows</th>
-                        <th>Result</th>
-                        <th>Auto-sync</th>
-                        <th>Hours</th>
+                        <th>@Loc["Endpoint"]</th>
+                        <th>@Loc["Last sync"]</th>
+                        <th class="text-end">@Loc["Rows"]</th>
+                        <th>@Loc["Result"]</th>
+                        <th>@Loc["Auto-sync"]</th>
+                        <th>@Loc["Hours"]</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1156,11 +1219,11 @@
                             <td>
                                 @if (s.Enabled)
                                 {
-                                    <span class="badge bg-success">Enabled</span>
+                                    <span class="badge bg-success">@Loc["Enabled"]</span>
                                 }
                                 else
                                 {
-                                    <span class="badge bg-secondary">Disabled</span>
+                                    <span class="badge bg-secondary">@Loc["Disabled"]</span>
                                 }
                             </td>
                             <td>
@@ -1193,15 +1256,15 @@
                                id="enabled-@s.EndpointKey" name="enabled" value="true"
                                @(s.Enabled ? "checked" : "") />
                         <label class="form-check-label fw-bold" for="enabled-@s.EndpointKey">
-                            Enable scheduled auto-sync
+                            @Loc["Enable scheduled auto-sync"]
                         </label>
                         <div class="text-muted small">
-                            Background scheduler polls every minute; same hour will not trigger twice.
+                            @Loc["Background scheduler polls every minute; same hour will not trigger twice."]
                         </div>
                     </div>
-                    <label class="form-label small fw-bold mb-1">Scheduled hours (24-hour clock, comma-separated)</label>
+                    <label class="form-label small fw-bold mb-1">@Loc["Scheduled hours (24-hour clock, comma-separated)"]</label>
                     <input type="text" name="hoursCsv" value="@hoursCsv"
-                           class="form-control font-monospace mb-2" placeholder="e.g. 2, 14" />
+                           class="form-control font-monospace mb-2" placeholder='@Loc["e.g. 2, 14"]' />
                     <small class="text-muted d-block mb-3">
                         Example: <code>2, 14</code> runs at 02:00 and 14:00 server local time.
                         Leave blank to disable scheduled runs.
@@ -1218,38 +1281,38 @@
 @* ===================== Active Directory ===================== *@
 <div class="@TabPaneClass("ad")" id="tab-ad">
     <div class="card">
-        <div class="card-header bg-primary text-white"><i class="bi bi-person-lines-fill me-1"></i>Active Directory (domain sign-in)</div>
+        <div class="card-header bg-primary text-white"><i class="bi bi-person-lines-fill me-1"></i>@Loc["Active Directory (domain sign-in)"]</div>
         <div class="card-body">
             <p class="text-muted small mb-3">
-                When configured, users sign in with their <strong>domain credentials</strong>
+                When configured, users sign in with their <strong>@Loc["domain credentials"]</strong>
                 (LDAP bind). The local seed admin still works as a recovery path.
-                Use the <strong>Test connection</strong> button to verify the values without saving.
+                Use the <strong>@Loc["Test connection"]</strong> button to verify the values without saving.
             </p>
             <form asp-action="SaveAdSettings" method="post" id="ad-form">
                 @Html.AntiForgeryToken()
                 <div class="row g-3">
                     <div class="col-md-6">
-                        <label class="form-label">Domain *</label>
+                        <label class="form-label">@Loc["Domain *"]</label>
                         <input name="Domain" id="ad-domain" value="@Model.Ad.Domain"
-                               class="form-control" placeholder="sharbatly.local" />
+                               class="form-control" placeholder='@Loc["sharbatly.local"]' />
                         <div class="form-text">e.g. <code>sharbatly.local</code> or <code>corp.example.com</code>.</div>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">LDAP path</label>
+                        <label class="form-label">@Loc["LDAP path"]</label>
                         <input name="LdapPath" id="ad-ldap" value="@Model.Ad.LdapPath"
-                               class="form-control" placeholder="dc1.sharbatly.local/DC=sharbatly,DC=local" />
-                        <div class="form-text">Optional. Server + base DN. Leave blank to use the domain.</div>
+                               class="form-control" placeholder='@Loc["dc1.sharbatly.local/DC=sharbatly,DC=local"]' />
+                        <div class="form-text">@Loc["Optional. Server + base DN. Leave blank to use the domain."]</div>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Service account user</label>
+                        <label class="form-label">@Loc["Service account user"]</label>
                         <input name="ServiceUser" id="ad-user" value="@Model.Ad.ServiceUser"
-                               class="form-control" placeholder="svc-qms" />
-                        <div class="form-text">Read-only AD account used for browsing the user list and the Test button.</div>
+                               class="form-control" placeholder='@Loc["svc-qms"]' />
+                        <div class="form-text">@Loc["Read-only AD account used for browsing the user list and the Test button."]</div>
                     </div>
                     <div class="col-md-6">
-                        <label class="form-label">Service account password</label>
+                        <label class="form-label">@Loc["Service account password"]</label>
                         <input name="ServicePassword" id="ad-pass" type="password"
-                               class="form-control" placeholder="Leave blank to keep the saved password"
+                               class="form-control" placeholder='@Loc["Leave blank to keep the saved password"]'
                                autocomplete="new-password" />
                     </div>
                     <div class="col-12">
@@ -1258,16 +1321,16 @@
                                    type="checkbox" role="switch" value="true"
                                    @(Model.Ad.AutoCreateOnLogin ? "checked" : "") />
                             <label class="form-check-label" for="ad-autocreate">
-                                Auto-create local profile on first successful AD login
-                                <span class="text-muted small">— new users land with the <strong>Viewer</strong> role until an admin promotes them. Leave off to require admins to pick AD users explicitly.</span>
+                                @Loc["Auto-create local profile on first successful AD login"]
+                                <span class="text-muted small">— new users land with the <strong>@Loc["Viewer"]</strong> role until an admin promotes them. Leave off to require admins to pick AD users explicitly.</span>
                             </label>
                         </div>
                     </div>
                 </div>
                 <div class="mt-3 d-flex gap-2 flex-wrap align-items-center">
-                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>Save AD settings</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>@Loc["Save AD settings"]</button>
                     <button type="button" id="testAdBtn" class="btn btn-outline-secondary">
-                        <i class="bi bi-plug me-1"></i>Test connection
+                        <i class="bi bi-plug me-1"></i>@Loc["Test connection"]
                     </button>
                     <span id="testAdResult" class="ms-2 small"></span>
                 </div>

@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using Microsoft.Data.SqlClient;
 using Microsoft.Extensions.Caching.Memory;
 
@@ -91,7 +91,21 @@ public class MaraService : IMaraService
         try
         {
             using var c = new SqlConnection(_cs);
-            var rows = await c.QueryAsync<MaraMaterial>(@"
+            // Chunked for the same reason as the sample lookups: Dapper expands
+            // IN @keys to one parameter per key and SQL Server caps a command at
+            // 2100. The Data Hub asks for every distinct material in a date
+            // window, which passes that on a wide range.
+            //
+            // This one mattered more than the others because the catch below
+            // swallows the failure: the page kept rendering, quietly missing
+            // every Variety, Class, Origin and Brand that MARA supplies. A
+            // silently wrong export is worse than a page that refuses to load.
+            var rows = new List<MaraMaterial>(keys.Length);
+            const int chunkSize = 1000;
+            for (var i = 0; i < keys.Length; i += chunkSize)
+            {
+                var slice = keys.Skip(i).Take(chunkSize).ToArray();
+                rows.AddRange(await c.QueryAsync<MaraMaterial>(@"
                 SELECT
                     material_no           AS MaterialNo,
                     material_desc         AS MaterialDesc,
@@ -111,8 +125,13 @@ public class MaraService : IMaraService
                     weight                AS NetWeight
                 FROM   qms_sap_material_cache
                 WHERE  material_no IN @keys",
-                new { keys });
-            return rows.ToDictionary(r => r.MaterialNo, StringComparer.OrdinalIgnoreCase);
+                    new { keys = slice }));
+            }
+            // GroupBy rather than ToDictionary: material_no is the cache's key,
+            // but a duplicate row would now throw across a chunk boundary where
+            // before it threw inside one query -- same defence, kept explicit.
+            return rows.GroupBy(r => r.MaterialNo, StringComparer.OrdinalIgnoreCase)
+                       .ToDictionary(g => g.Key, g => g.First(), StringComparer.OrdinalIgnoreCase);
         }
         catch (Exception ex)
         {

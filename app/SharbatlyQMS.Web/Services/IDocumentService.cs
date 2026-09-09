@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.ViewModels;
+﻿using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Services;
 
@@ -40,4 +40,15 @@ public interface IDocumentService
 
     /// <summary>Server-side extension to MIME map. Never trust the stored content_type — it is client-supplied at upload.</summary>
     string ContentTypeFor(string fileName);
+
+    /// <summary>
+    /// True when a document may be served INLINE for preview in the browser.
+    ///
+    /// Deliberately a short allow-list rather than "anything the browser might
+    /// render". Documents are uploaded by users, and an inline response is
+    /// executed in OUR origin: a crafted .msg, .eml or .html served inline
+    /// could run script against the signed-in session. PDFs and plain text are
+    /// safe to render, everything else is a download.
+    /// </summary>
+    bool CanPreviewInline(string fileName);
 }

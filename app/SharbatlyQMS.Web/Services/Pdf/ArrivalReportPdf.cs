@@ -1,4 +1,4 @@
-using QuestPDF.Fluent;
+﻿using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 
@@ -183,6 +183,7 @@ public static class ArrivalReportPdf
             ("Date",                      dateStr),
             ("Container / Airway Bill # :", d.Arrival.ContainerNo ?? ""),
             ("Carrier Name:",             d.Checklist.CarrierName ?? d.Arrival.VendorName ?? ""),
+            ("Procurement Type",          d.ProcurementType ?? ""),
             ("Seal Number",               JoinLines(d.Checklist.SealNo))
         };
         // V36: admin-defined arrival fields print directly after Seal Number,

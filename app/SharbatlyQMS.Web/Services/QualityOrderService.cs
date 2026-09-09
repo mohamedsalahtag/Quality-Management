@@ -1,4 +1,4 @@
-using System.Runtime.CompilerServices;
+﻿using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Dapper;
 using Microsoft.Data.SqlClient;
@@ -41,6 +41,10 @@ public class QualityOrderService : IQualityOrderService
                qo.reopen_reason     ReopenReason,
                qo.created_at        CreatedAt,   qo.created_by   CreatedBy,
                qo.archived_at       ArchivedAt,  qo.archived_by  ArchivedBy,
+               qo.container_rejected ContainerRejected,
+               qo.potential_claim   PotentialClaim,
+               qo.potential_claim_at PotentialClaimAt,
+               qo.potential_claim_by PotentialClaimBy,
                a.container_no       ContainerNo,
                a.bol_no             BolNo,
                a.ebeln              Ebeln,
@@ -383,6 +387,9 @@ public class QualityOrderService : IQualityOrderService
         var arrival = await c.QuerySingleAsync<(long Id, string Status)>(
             "SELECT arrival_id, status_code FROM qms_arrival WHERE arrival_id=@arrivalId",
             new { arrivalId }, tx);
+        if (arrival.Status == ArrivalStatus.Rejected)
+            throw new InvalidOperationException(
+                "This container was rejected on arrival; it already carries an automatic quality order.");
         if (arrival.Status != ArrivalStatus.Completed)
             throw new InvalidOperationException($"Arrival must be Completed (currently {arrival.Status}).");
 
@@ -445,16 +452,36 @@ public class QualityOrderService : IQualityOrderService
     // Supervisor/Manager review step is mandatory between operator entry and
     // finished state. Existing legacy 'Open' QOs cannot be closed directly any
     // more -- they must transit through Submit first.
-    public Task<(bool ok, string? error)> CloseAsync(long qoId, string user, string? reason, bool bypassNoSamples = false)  => Transition(qoId, user, reason, "Closed",   new[] { "Submitted" }, bypassNoSamples);
+    // potentialClaim (M24) is the QC assessment picked in the Finish dialog:
+    // true = Potential Claim, false = No Potential Claim. It is written in the
+    // same statement as the status so a finished order can never be missing it.
+    public Task<(bool ok, string? error)> CloseAsync(long qoId, string user, string? reason, bool bypassNoSamples = false, bool? potentialClaim = null)  => Transition(qoId, user, reason, "Closed",   new[] { "Submitted" }, bypassNoSamples, potentialClaim);
     // Reopen folds back into Open -- the user explicitly didn't want a
     // separate "Reopened" status. Audit columns (reopened_at / by /
     // reason) still record that the QO was re-opened.
-    public Task<(bool ok, string? error)> ReopenAsync(long qoId, string user, string? reason) => Transition(qoId, user, reason, "Reopened", new[] { "Closed" });
+    /// <summary>
+    /// Reopening a rejection order is refused. It has no samples to reopen TO,
+    /// and dropping it to Open would take it off the claims worklist while the
+    /// claim window runs. Enforced here rather than only in the view, because
+    /// the view is not the security boundary.
+    /// </summary>
+    public async Task<(bool ok, string? error)> ReopenAsync(long qoId, string user, string? reason)
+    {
+        var qo = await GetAsync(qoId);
+        if (qo is { ContainerRejected: true })
+            return (false, "This order was raised because the container was rejected on arrival. " +
+                           "There is no inspection to reopen — undo the rejection on the arrival instead.");
+        return await Transition(qoId, user, reason, "Reopened", new[] { "Closed" });
+    }
     // Cancel (V31): widened to also accept Submitted -- an aborted submit can
     // be cancelled outright without a Supervisor having to first cancel-submit.
     public Task<(bool ok, string? error)> CancelAsync(long qoId, string user, string? reason) => Transition(qoId, user, reason, "Cancelled",new[] { "Initial", "Open", "Submitted" });
 
-    private async Task<(bool ok, string? error)> Transition(long qoId, string user, string? reason, string toStatus, string[] fromStatuses, bool bypassNoSamples = false)
+    /// <summary>Audit-readable form of the finish-time claim assessment.</summary>
+    private static string PotentialClaimLabel(bool? v) =>
+        v == true ? "Potential Claim" : v == false ? "No Potential Claim" : "Not classified";
+
+    private async Task<(bool ok, string? error)> Transition(long qoId, string user, string? reason, string toStatus, string[] fromStatuses, bool bypassNoSamples = false, bool? potentialClaim = null)
     {
         using var c = Open();
         await c.OpenAsync();
@@ -542,12 +569,15 @@ public class QualityOrderService : IQualityOrderService
             // record who cancelled the submit and when.
             ("Open", "Submitted")     => "UPDATE qms_quality_order SET status_code='Open' WHERE quality_order_id=@qoId AND status_code=@current",
             ("Submitted", _)          => "UPDATE qms_quality_order SET status_code='Submitted' WHERE quality_order_id=@qoId AND status_code=@current",
-            ("Closed", _)             => "UPDATE qms_quality_order SET status_code='Closed',   closed_at=SYSUTCDATETIME(), closed_by=@user, close_reason=@reason WHERE quality_order_id=@qoId AND status_code=@current",
+            // M24: the potential-claim assessment is stamped with the finish,
+            // in the same guarded UPDATE. COALESCE keeps an earlier answer if a
+            // caller somehow omits it (re-finish after a reopen passes it again).
+            ("Closed", _)             => "UPDATE qms_quality_order SET status_code='Closed',   closed_at=SYSUTCDATETIME(), closed_by=@user, close_reason=@reason, potential_claim=COALESCE(@potentialClaim, potential_claim), potential_claim_at=CASE WHEN @potentialClaim IS NULL THEN potential_claim_at ELSE SYSUTCDATETIME() END, potential_claim_by=CASE WHEN @potentialClaim IS NULL THEN potential_claim_by ELSE @user END WHERE quality_order_id=@qoId AND status_code=@current",
             ("Reopened", _)           => "UPDATE qms_quality_order SET status_code='Open',     reopened_at=SYSUTCDATETIME(), reopened_by=@user, reopen_reason=@reason WHERE quality_order_id=@qoId AND status_code=@current",
             ("Cancelled", _)          => "UPDATE qms_quality_order SET status_code='Cancelled' WHERE quality_order_id=@qoId AND status_code=@current",
             _ => throw new InvalidOperationException("Unknown target status.")
         };
-        var affected = await c.ExecuteAsync(sql, new { qoId, user, reason, current }, tx);
+        var affected = await c.ExecuteAsync(sql, new { qoId, user, reason, current, potentialClaim }, tx);
         if (affected != 1)
         {
             tx.Rollback();
@@ -580,7 +610,9 @@ public class QualityOrderService : IQualityOrderService
         await _audit.WriteAsync(c, tx,
             EntityTypes.QualityOrder, qoId, auditAction,
             oldValues: new { status_code = current },
-            newValues: new { status_code = toStatus == "Reopened" ? "Open" : toStatus, reason },
+            newValues: toStatus == "Closed"
+                ? new { status_code = "Closed", reason, potential_claim = PotentialClaimLabel(potentialClaim) }
+                : (object)new { status_code = toStatus == "Reopened" ? "Open" : toStatus, reason },
             actor: user);
 
         tx.Commit();
@@ -877,12 +909,40 @@ public class QualityOrderService : IQualityOrderService
         return rows.ToList();
     }
 
+    /// <summary>
+    /// Runs one of the id-batched sample lookups in CHUNKS.
+    ///
+    /// Dapper expands <c>IN @ids</c> into one PARAMETER per id, and SQL Server
+    /// refuses any command carrying more than 2100 of them. The Data Hub streams
+    /// every sample in a month-wide window and hands the whole id list to these
+    /// lookups, so as the database grew the list crossed 2100 and the page began
+    /// failing with "The incoming request has too many parameters" -- a 500 with
+    /// nothing in it to suggest the cause was simply volume.
+    ///
+    /// Chunking keeps every command far inside the limit whatever the window
+    /// holds. Ordering still holds where it matters: the ids are distinct, so a
+    /// given sample's rows all land in one chunk, and each caller groups by
+    /// sample id afterwards.
+    /// </summary>
+    private async Task<List<T>> QueryByIdChunksAsync<T>(string sql, IReadOnlyList<long> ids,
+        int chunkSize = 1000)
+    {
+        var all = new List<T>(ids.Count);
+        using var c = Open();
+        for (var i = 0; i < ids.Count; i += chunkSize)
+        {
+            var slice = new long[Math.Min(chunkSize, ids.Count - i)];
+            for (var k = 0; k < slice.Length; k++) slice[k] = ids[i + k];
+            all.AddRange(await c.QueryAsync<T>(sql, new { ids = slice }));
+        }
+        return all;
+    }
+
     public async Task<ILookup<long, SampleReading>> GetReadingsBatchAsync(IEnumerable<long> sampleIds)
     {
         var ids = sampleIds.Distinct().ToArray();
         if (ids.Length == 0) return Array.Empty<SampleReading>().ToLookup(r => r.SampleId);
-        using var c = Open();
-        var rows = await c.QueryAsync<SampleReading>(@"
+        var rows = await QueryByIdChunksAsync<SampleReading>(@"
             SELECT r.reading_id     ReadingId,
                    r.sample_id      SampleId,
                    r.reading_type_code ReadingTypeCode,
@@ -904,7 +964,7 @@ public class QualityOrderService : IQualityOrderService
                     GROUP  BY reading_type_code) rt
                    ON rt.reading_type_code = r.reading_type_code
             WHERE  r.sample_id IN @ids
-            ORDER  BY r.sample_id, rt.sort_order", new { ids });
+            ORDER  BY r.sample_id, rt.sort_order", ids);
         return rows.ToLookup(r => r.SampleId);
     }
 
@@ -986,8 +1046,7 @@ public class QualityOrderService : IQualityOrderService
     {
         var ids = sampleIds.Distinct().ToArray();
         if (ids.Length == 0) return Array.Empty<SampleDefect>().ToLookup(d => d.SampleId);
-        using var c = Open();
-        var rows = await c.QueryAsync<SampleDefect>(@"
+        var rows = await QueryByIdChunksAsync<SampleDefect>(@"
             SELECT d.sample_defect_id   SampleDefectId,
                    d.sample_id          SampleId,
                    d.defect_id          DefectId,
@@ -1002,7 +1061,7 @@ public class QualityOrderService : IQualityOrderService
             FROM   qms_sample_defect d
             JOIN   qms_defect_catalog dc ON dc.defect_id = d.defect_id
             WHERE  d.sample_id IN @ids
-            ORDER  BY d.sample_id, dc.sort_order", new { ids });
+            ORDER  BY d.sample_id, dc.sort_order", ids);
         return rows.ToLookup(d => d.SampleId);
     }
 
@@ -1227,8 +1286,7 @@ public class QualityOrderService : IQualityOrderService
     {
         var ids = sampleIds.Distinct().ToArray();
         if (ids.Length == 0) return Array.Empty<SampleHeaderValue>().ToLookup(v => v.SampleId);
-        using var c = Open();
-        var rows = await c.QueryAsync<SampleHeaderValue>(@"
+        var rows = await QueryByIdChunksAsync<SampleHeaderValue>(@"
             SELECT v.sample_id     AS SampleId,
                    v.field_id      AS FieldId,
                    v.text_value    AS TextValue,
@@ -1242,7 +1300,7 @@ public class QualityOrderService : IQualityOrderService
             FROM   qms_sample_header_value v
             JOIN   qms_sample_header_field f ON f.field_id = v.field_id
             WHERE  v.sample_id IN @ids
-            ORDER  BY v.sample_id, f.sort_order, f.field_name", new { ids });
+            ORDER  BY v.sample_id, f.sort_order, f.field_name", ids);
         return rows.ToLookup(r => r.SampleId);
     }
 
@@ -1325,8 +1383,7 @@ public class QualityOrderService : IQualityOrderService
     {
         var ids = qoMaterialIds.Distinct().ToArray();
         if (ids.Length == 0) return Array.Empty<MaterialHeaderValue>().ToLookup(v => v.QoMaterialId);
-        using var c = Open();
-        var rows = await c.QueryAsync<MaterialHeaderValue>(@"
+        var rows = await QueryByIdChunksAsync<MaterialHeaderValue>(@"
             SELECT v.qo_material_id AS QoMaterialId,
                    v.field_id       AS FieldId,
                    v.text_value     AS TextValue,
@@ -1340,7 +1397,7 @@ public class QualityOrderService : IQualityOrderService
             FROM   qms_qo_material_header_value v
             JOIN   qms_sample_header_field f ON f.field_id = v.field_id
             WHERE  v.qo_material_id IN @ids
-            ORDER  BY v.qo_material_id, f.sort_order, f.field_name", new { ids });
+            ORDER  BY v.qo_material_id, f.sort_order, f.field_name", ids);
         return rows.ToLookup(r => r.QoMaterialId);
     }
 
@@ -1505,6 +1562,29 @@ public class QualityOrderService : IQualityOrderService
                 WHERE  sr.sample_id IN @ids",
                 new { ids = sampleIds })).ToList();
 
+        // 4b) Material-scoped header values (Brix, Firmness, ...). These are NOT
+        //     sample readings -- they live on qms_qo_material_header_value, so the
+        //     group summary never saw them even though the material cards printed
+        //     them. Rolled up per group below.
+        var groupHeaderValues = qoMaterialIds.Length == 0
+            ? new List<MaterialHeaderAggSource>()
+            : (await c.QueryAsync<MaterialHeaderAggSource>(@"
+                SELECT hv.qo_material_id  AS QoMaterialId,
+                       f.field_code       AS FieldCode,
+                       f.field_name       AS FieldName,
+                       f.value_kind       AS ValueKind,
+                       f.default_unit     AS DefaultUnit,
+                       f.sort_order       AS SortOrder,
+                       hv.text_value      AS TextValue,
+                       hv.numeric_value   AS NumericValue,
+                       hv.date_value      AS DateValue
+                FROM   qms_qo_material_header_value hv
+                JOIN   qms_sample_header_field f ON f.field_id = hv.field_id
+                WHERE  hv.qo_material_id IN @ids
+                  AND  f.is_active = 1
+                  AND  f.scope     = 'Material'",
+                new { ids = qoMaterialIds })).ToList();
+
         // 5) Active defect catalog for every distinct material_group in the QO.
         //    Pre-loaded so each group can render its FULL catalog (zeros
         //    included) without an N+1 pattern. Codes can repeat across
@@ -1588,13 +1668,30 @@ public class QualityOrderService : IQualityOrderService
 
         foreach (var g in groups)
         {
-            var mats         = g.ToList();
+            // ---- Only SAMPLED materials form the basis of the summary.
+            //
+            // A material nobody took a sample from was never inspected, so
+            // every figure derived from it is an assertion the QC process never
+            // made. Counting it still dragged the group's basis around: three
+            // materials with samples on two put the third one's whole PO
+            // quantity into "PO Quantity", inflated "Count of Materials", and
+            // let its material-level readings (Brix, Firmness, ...) into a
+            // roll-up drawn from cartons nobody opened.
+            //
+            // So the group is computed as if the unsampled materials were not
+            // on the order at all, and a group where NOTHING was sampled drops
+            // out of the summary entirely rather than printing a row of zeros.
+            // Sample-based figures (sample size, defect %, reading averages)
+            // were already immune -- they only ever counted real samples.
+            var mats         = g.Where(m => bySample[m.QoMaterialId].Any()).ToList();
+            if (mats.Count == 0) continue;
+
             var matIds       = mats.Select(m => m.QoMaterialId).ToHashSet();
             var groupSamples = samples.Where(s => matIds.Contains(s.QoMaterialId)).ToList();
             var groupSampleIds = groupSamples.Select(s => s.SampleId).ToHashSet();
             var sumSize      = groupSamples.Sum(s => s.SampleSize ?? 0);
 
-            // PO Quantity = Σ arrival_item.quantity across the group's
+            // PO Quantity = Σ arrival_item.quantity across the group's SAMPLED
             // materials. Shown on the summary only when the group rolls up
             // more than one material.
             decimal sumPoQty = 0m;
@@ -1619,6 +1716,7 @@ public class QualityOrderService : IQualityOrderService
                 MajorCategory     = mats.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.MajorCategory))?.MajorCategory,
                 SumSampleSize     = sumSize,
                 SumPoQuantity     = sumPoQty,
+                TaraWeightText    = JoinDistinct(mats.Select(m => Fmt.Dec2(m.TaraWeight)).Where(v => v.Length > 0)),
                 MaterialCount     = mats.Count,
                 SampleCount       = groupSamples.Count,
                 SampleUnit        = groupUnit
@@ -1731,10 +1829,64 @@ public class QualityOrderService : IQualityOrderService
                 });
             }
 
+            // ---- Material-scoped header values (Brix, Firmness, ...) rolled up
+            // for this group. They are recorded once per material, so a group
+            // spanning several materials shows every distinct value rather than
+            // an invented average -- "15.20 / 14.80" is honest, a mean is not.
+            // A field with no value anywhere in the group is skipped entirely.
+            var groupMaterialIds = mats.Select(m => m.QoMaterialId).ToHashSet();
+            foreach (var field in groupHeaderValues
+                        .Where(h => groupMaterialIds.Contains(h.QoMaterialId))
+                        .GroupBy(h => (h.FieldCode, h.FieldName, h.ValueKind, h.DefaultUnit, h.SortOrder))
+                        .OrderBy(gr => gr.Key.SortOrder).ThenBy(gr => gr.Key.FieldName))
+            {
+                var display = JoinDistinct(field
+                    .Select(h => h.ValueKind switch
+                    {
+                        "Numeric" => Fmt.Dec2(h.NumericValue),
+                        "Date"    => h.DateValue?.ToString("yyyy-MM-dd") ?? "",
+                        _         => (h.TextValue ?? "").Trim()
+                    })
+                    .Where(v => v.Length > 0));
+                if (display.Length == 0) continue;
+
+                summary.Readings.Add(new ReadingAggRow
+                {
+                    Code        = field.Key.FieldCode,
+                    Name        = field.Key.FieldName,
+                    // 'text' so the pre-rendered string prints verbatim; the
+                    // aggregation has already happened here.
+                    DisplayMode = "text",
+                    Unit        = field.Key.DefaultUnit,
+                    DisplayValue= display
+                });
+            }
+
             result.Add(summary);
         }
 
         return result;
+    }
+
+    /// <summary>Distinct, order-preserving join used by the group roll-ups: one
+    /// value when every material agrees, otherwise all of them. Never averages —
+    /// a mean of two materials' Brix would be a number nobody measured.</summary>
+    private static string JoinDistinct(IEnumerable<string> values) =>
+        string.Join(" / ", values.Distinct(StringComparer.OrdinalIgnoreCase));
+
+    /// <summary>Row shape for the Material-scoped header values feeding the
+    /// group summary roll-up.</summary>
+    private sealed class MaterialHeaderAggSource
+    {
+        public long      QoMaterialId { get; set; }
+        public string    FieldCode    { get; set; } = "";
+        public string    FieldName    { get; set; } = "";
+        public string    ValueKind    { get; set; } = "";
+        public string?   DefaultUnit  { get; set; }
+        public int       SortOrder    { get; set; }
+        public string?   TextValue    { get; set; }
+        public decimal?  NumericValue { get; set; }
+        public DateTime? DateValue    { get; set; }
     }
 
     // ===================================================================
@@ -1839,9 +1991,14 @@ public class QualityOrderService : IQualityOrderService
               AND (@vendorName    IS NULL OR a.vendor_name LIKE '%' + @vendorName + '%')
               AND (@vendorNo      IS NULL OR a.vendor_no         = @vendorNo)
               AND (@storageLoc    IS NULL OR ai.storage_location = @storageLoc)
-              AND (@containerNo   IS NULL OR a.container_no      = @containerNo)
-              AND (@bolNo         IS NULL OR a.bol_no            = @bolNo)
-              AND (@ebeln         IS NULL OR a.ebeln             = @ebeln)
+              -- Contains-match, like Supplier just above and like the same
+              -- three boxes on Pending Containers, Arrivals and Quality Orders.
+              -- They were EXACT here alone, so typing part of a container --
+              -- which is what people do, and what every other screen rewards --
+              -- returned an empty hub that read as the page being broken.
+              AND (@containerNo   IS NULL OR a.container_no LIKE '%' + @containerNo + '%')
+              AND (@bolNo         IS NULL OR a.bol_no       LIKE '%' + @bolNo       + '%')
+              AND (@ebeln         IS NULL OR a.ebeln        LIKE '%' + @ebeln       + '%')
               AND (@sampleScope   IS NULL OR s.sample_scope      = @sampleScope)
               -- PO-date range. NULL cc.doc_date rows are included so arrivals
               -- whose SAP cache row was deleted / never linked still surface.

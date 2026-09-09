@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.ViewModels
 @model Sample
 @{
@@ -46,14 +46,14 @@
     </div>
     <div class="d-flex gap-2">
         <a asp-action="Details" asp-route-id="@Model.QualityOrderId" class="btn btn-outline-secondary">
-            <i class="bi bi-arrow-left me-1"></i>Back to QO
+            <i class="bi bi-arrow-left me-1"></i>@Loc["Back to QO"]
         </a>
         @if (editable)
         {
             <form asp-action="DeleteSample" method="post" data-confirm="Delete this sample?" data-confirm-danger data-confirm-ok="Delete">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="sampleId" value="@Model.SampleId" />
-                <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash me-1"></i>Delete sample</button>
+                <button type="submit" class="btn btn-outline-danger"><i class="bi bi-trash me-1"></i>@Loc["Delete sample"]</button>
             </form>
         }
     </div>

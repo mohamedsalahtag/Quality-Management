@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Models;
+﻿using SharbatlyQMS.Web.Models;
 
 namespace SharbatlyQMS.Web.Services.Pdf;
 
@@ -21,6 +21,11 @@ public static class SummaryReadingFilter
     public static readonly HashSet<string> HiddenSummaryOnlyFields = new(StringComparer.Ordinal)
     {
         "PUC", "GROWER", "LOTNO", "LOTNUMBER", "DATECODE",
+        // Pallet identifiers belong to the individual carton that was sampled.
+        // Rolled up over a whole material group they say nothing -- a summary
+        // line reading "Pallet No: 12 / 47 / 103" is noise, not information.
+        // Still printed on each sample card.
+        "PALLETNO", "PALLETNUMBER", "PALLET", "GROWERPALLET",
     };
 
     /// <summary>Uppercase, strip everything that isn't A-Z/0-9, so "Pallet No.",
@@ -64,6 +69,29 @@ public static class SummaryReadingFilter
         }
         return $"#{r:X2}{g:X2}{b:X2}";
     }
+
+    /// <summary>
+    /// Text colour to print ON a filled swatch of <paramref name="hex"/> -- white
+    /// on a dark fill, near-black ink on a light one.
+    ///
+    /// The report used to hardcode white, which is fine for the dark seeded
+    /// colours (Major #b02a37, Critical #7a1620) and unreadable on the light one
+    /// (Minor #ffc107). An administrator picking any pale colour on
+    /// Admin -> Defect Categories would have produced an invisible heading.
+    /// </summary>
+    public static string OnFill(string? hex, string dark = "#1c2733", string light = "#ffffff")
+    {
+        if (string.IsNullOrWhiteSpace(hex) || !IsHex(hex)) return light;
+        int r = Convert.ToInt32(hex.Substring(1, 2), 16);
+        int g = Convert.ToInt32(hex.Substring(3, 2), 16);
+        int b = Convert.ToInt32(hex.Substring(5, 2), 16);
+        // Perceived luminance, same weighting as ReadableOnWhite above.
+        var lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255.0;
+        return lum > 0.6 ? dark : light;
+    }
+
+    /// <summary>True when the string is a usable #RRGGBB colour.</summary>
+    public static bool IsColour(string? s) => !string.IsNullOrWhiteSpace(s) && IsHex(s!);
 
     private static bool IsHex(string s) =>
         s.Length == 7 && s[0] == '#' &&

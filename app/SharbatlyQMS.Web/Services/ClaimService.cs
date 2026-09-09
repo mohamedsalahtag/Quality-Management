@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.ViewModels;
@@ -30,6 +30,16 @@ public class ClaimService : IClaimService
         var pendingFilter = f.Status == ClaimStatus.Pending;
         var statusFilter  = !string.IsNullOrEmpty(f.Status) && !pendingFilter ? f.Status : null;
 
+        // M24 QC assessment. Three buckets, and "Unset" has to be its own flag
+        // because a NULL parameter already means "don't filter".
+        var claimAssessment = f.Potential switch
+        {
+            ClaimAssessment.Potential => (bool?)true,
+            ClaimAssessment.NoClaim   => false,
+            _                         => null
+        };
+        var assessmentUnset = f.Potential == ClaimAssessment.Unset;
+
         static string? Trim(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
 
         // qo.closed_at is UTC; the list renders it local. Convert the picked
@@ -55,10 +65,32 @@ public class ClaimService : IClaimService
                    a.bol_no              AS BolNo,
                    a.ebeln               AS Ebeln,
                    a.vendor_name         AS VendorName,
+                   a.plant               AS Plant,
+                   a.storage_location    AS StorageLocation,
+                   a.po_type             AS PoType,
+                   sh.vessel_name        AS VesselName,
+                   sh.voyage_number      AS VoyageNumber,
+                   sh.loading_port       AS LoadingPort,
+                   sh.loading_country    AS LoadingCountry,
+                   sh.arrival_place      AS ArrivalPlace,
+                   sh.sailing_date       AS SailingDate,
+                   sh.arrival_date       AS ArrivalDate,
+                   sh.discharge_date     AS DischargeDate,
+                   -- Inspection date is when the QO was OPENED, not the
+                   -- arrival checklist's own date (they differ when the order is
+                   -- raised days later). Same rule as the QC report PDF.
+                   COALESCE(qo.opened_at, qo.created_at) AS InspectionDate,
                    qo.closed_at          AS ClosedAt,
                    qo.closed_by          AS ClosedBy,
+                   qo.close_reason       AS CloseReason,
                    qo.status_code        AS StatusCode,
                    qo.archived_at        AS ArchivedAt,
+                   qo.potential_claim    AS PotentialClaim,
+                   qo.potential_claim_at AS PotentialClaimAt,
+                   qo.potential_claim_by AS PotentialClaimBy,
+                   mt.products           AS Products,
+                   ISNULL(mt.material_count, 0) AS MaterialCount,
+                   ISNULL(sc.sample_count,   0) AS SampleCount,
                    cl.claim_status       AS ClaimStatus,
                    cl.last_changed_at    AS LastActivityAt,
                    cl.decided_at         AS DecidedAt,
@@ -66,6 +98,7 @@ public class ClaimService : IClaimService
                    ISNULL(uc.unread_count, 0) AS UnreadCount
             FROM   qms_quality_order qo
             LEFT   JOIN qms_arrival  a  ON a.arrival_id = qo.arrival_id
+            LEFT   JOIN qms_shipment_snapshot sh ON sh.arrival_id = qo.arrival_id
             LEFT   JOIN qms_claim    cl ON cl.quality_order_id = qo.quality_order_id
             LEFT   JOIN qms_claim_read_marker rm
                    ON rm.claim_id = cl.claim_id AND rm.user_name = @currentUser
@@ -81,6 +114,33 @@ public class ClaimService : IClaimService
                   AND  cn.created_by <> @currentUser
                   AND  (rm.last_seen_at IS NULL OR cn.created_at > rm.last_seen_at)
             ) uc
+            -- Products on the order, as one comma-separated cell. This box runs
+            -- SQL Server 2016, so it is FOR XML PATH + STUFF, not STRING_AGG.
+            -- The .value() call keeps &, < and > from being entity-escaped.
+            OUTER  APPLY (
+                SELECT material_count = COUNT(*),
+                       -- Separated by a NEWLINE, not a comma: material
+                       -- descriptions contain commas, and the grid splits this
+                       -- back into one tooltip line per product. (CHAR(31) would
+                       -- be the natural unit separator but FOR XML rejects it --
+                       -- 0x1F is not a legal XML character.)
+                       products = STUFF((
+                            SELECT CHAR(10) + d.material_desc
+                            FROM  (SELECT DISTINCT m2.material_desc
+                                   FROM   qms_quality_order_material m2
+                                   WHERE  m2.quality_order_id = qo.quality_order_id
+                                     AND  m2.material_desc IS NOT NULL) d
+                            ORDER BY d.material_desc
+                            FOR XML PATH(''), TYPE).value('.', 'nvarchar(max)'), 1, 1, '')
+                FROM   qms_quality_order_material m3
+                WHERE  m3.quality_order_id = qo.quality_order_id
+            ) mt
+            OUTER  APPLY (
+                SELECT COUNT(*) AS sample_count
+                FROM   qms_sample sp
+                WHERE  sp.quality_order_id = qo.quality_order_id
+                  AND  sp.is_deleted = 0
+            ) sc
             -- Two mutually exclusive buckets. The active worklist is Closed
             -- orders only (a claim decision presupposes a finished inspection);
             -- the archive holds every archived order whatever its status, which
@@ -91,6 +151,9 @@ public class ClaimService : IClaimService
                    )
               AND  (@pendingFilter = 0 OR cl.claim_id IS NULL)
               AND  (@statusFilter IS NULL OR cl.claim_status = @statusFilter)
+              -- M24 QC assessment, independent of the claim status above.
+              AND  (@assessmentUnset = 0 OR qo.potential_claim IS NULL)
+              AND  (@claimAssessment IS NULL OR qo.potential_claim = @claimAssessment)
               -- Per-user plant scope. The Details action already enforces this;
               -- without it here a plant-scoped user saw other plants' claims in
               -- the list, and the new Plant dropdown would have widened that.
@@ -127,6 +190,8 @@ public class ClaimService : IClaimService
         {
             pendingFilter,
             statusFilter,
+            claimAssessment,
+            assessmentUnset,
             archived      = f.Archived,
             sUnrestricted = scope.Unrestricted,
             sPlants       = scope.QueryPlants,

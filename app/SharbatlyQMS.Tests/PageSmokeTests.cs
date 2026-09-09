@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.ViewModels;
@@ -36,8 +36,22 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
     {
         "/",
         "/Home/Index",
+        // The dashboard is one page in many slices: each period shape drives a
+        // different bucket width and date window through every portlet query,
+        // and the plant filter threads a second predicate through all of them.
+        "/?period=today",
+        "/?period=7d",
+        "/?period=30d",
+        "/?period=90d",
+        "/?period=custom&from=2026-08-01&to=2026-08-31",
+        "/?period=30d&plant=1010",
         "/Arrivals",
         "/Arrivals/Pending",          // container picker, reads the SAP cache
+        // The archive is the same page in its other mode: a different WHERE on
+        // the archived flag, a different action column. Worth its own load —
+        // the pending list passing proves nothing about it.
+        "/Arrivals/Pending?archived=true",
+        "/Arrivals/Pending?archived=true&from=2020-01-01&to=2030-01-01",
         "/Arrivals/Search",
         "/QualityOrders",
         "/ClaimManagement",
@@ -72,6 +86,25 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         "/Admin/Users",
         "/Admin/Settings",
         "/Security",
+        // Time Bar: each URL drives a different branch of the one shared WHERE
+        // clause, so a typo fails here rather than in front of a manager.
+        "/TimeBar",
+        "/TimeBar?stage=Pending",
+        "/TimeBar?stage=QC&status=Closed",
+        "/TimeBar?stage=Arrival",
+        "/TimeBar?overOnly=true",
+        "/TimeBar?noCacheOnly=true",
+        "/TimeBar?includeArchived=true",
+        "/TimeBar?minDays=5&supplier=a",
+        "/TimeBar?from=2026-01-01&to=2026-12-31",
+        "/TimeBar?search=MSC&plant=JD01&poType=",
+        "/TimeBar?page=2&pageSize=50",
+        // Admin -> Labels, unfiltered and through each filter path.
+        "/Labels",
+        "/Labels?changedOnly=true",
+        "/Labels?screen=Arrivals&q=container",
+        "/Labels?kind=Field%20label",
+        "/Labels?kind=Column%20header&screen=Arrivals",
         "/Admin/DefectCatalog",
         "/Admin/DefectCategories",
         "/Admin/ReadingTypes",
@@ -232,9 +265,43 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
     }
 
     /// <summary>
-    /// The QO page's "Generate Summary" popup loads its content from
-    /// /QualityOrders/SummaryPanel — the same grouped summary as the claim page
-    /// and the report, rebuilt on demand. Verifies the endpoint + partial render.
+    /// The QO page's "Preview QC report" popup renders the report inline
+    /// instead of downloading it. Same bytes as QualityOrderPdf, but the
+    /// disposition has to stay "inline" — an "attachment" here would make the
+    /// preview download a file, which is exactly what the popup exists to avoid.
+    /// </summary>
+    [Fact]
+    public async Task Quality_report_pdf_preview_is_served_inline()
+    {
+        TestAuthHandler.Role = RoleCodes.Admin;
+
+        long qoId;
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
+            var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+            qoId = rows.Select(r => r.QualityOrderId).FirstOrDefault();
+        }
+        if (qoId == 0) return;   // no quality orders to render
+
+        var client = _factory.CreateClient();
+        var res = await client.GetAsync($"/Reports/QualityOrderPdfPreview/{qoId}");
+
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        Assert.Equal("application/pdf", res.Content.Headers.ContentType?.MediaType);
+        Assert.Equal("inline", res.Content.Headers.ContentDisposition?.DispositionType);
+
+        var bytes = await res.Content.ReadAsByteArrayAsync();
+        Assert.True(bytes.Length >= 4 && bytes[0] == (byte)'%' && bytes[1] == (byte)'P'
+                    && bytes[2] == (byte)'D' && bytes[3] == (byte)'F', "Response is not a PDF.");
+    }
+
+    /// <summary>
+    /// /QualityOrders/SummaryPanel — the grouped summary the claim page and the
+    /// report both print, rebuilt on demand. The QO page's popup now previews
+    /// the whole report instead, so nothing in the UI calls this any more; the
+    /// endpoint and its partials are kept for the claim-side rollup, and this
+    /// test keeps them honest.
     /// </summary>
     [Fact]
     public async Task Quality_order_summary_panel_returns_grouped_summary()

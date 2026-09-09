@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @model IReadOnlyList<AuditEntryListRow>
 @*
     Audit history rows. Rendered as the body of /Audit/HistoryPanel
@@ -8,7 +8,7 @@
 
 @if (Model.Count == 0)
 {
-    <div class="text-muted small p-2 fst-italic">No audit history for this record or its children yet.</div>
+    <div class="text-muted small p-2 fst-italic">@Loc["No audit history for this record or its children yet."]</div>
 }
 else
 {
@@ -104,7 +104,7 @@ else
                             <td class="audit-diff-old">
                                 @if (string.IsNullOrEmpty(d.OldValue))
                                 {
-                                    <span class="audit-diff-empty">(empty)</span>
+                                    <span class="audit-diff-empty">@Loc["(empty)"]</span>
                                 }
                                 else
                                 {
@@ -118,7 +118,7 @@ else
                             <td class="audit-diff-new">
                                 @if (string.IsNullOrEmpty(d.NewValue))
                                 {
-                                    <span class="audit-diff-empty">(empty)</span>
+                                    <span class="audit-diff-empty">@Loc["(empty)"]</span>
                                 }
                                 else
                                 {
@@ -134,7 +134,7 @@ else
                                 <td>
                                     <a href="#" class="audit-show-more"
                                        onclick="this.closest('tr').classList.toggle('expanded'); event.preventDefault();">
-                                        show more / less
+                                        @Loc["show more / less"]
                                     </a>
                                 </td>
                             }

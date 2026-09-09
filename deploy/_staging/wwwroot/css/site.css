@@ -1,0 +1,241 @@
+html {
+  font-size: 14px;
+}
+
+@media (min-width: 768px) {
+  html {
+    font-size: 16px;
+  }
+}
+
+.btn:focus, .btn:active:focus, .btn-link.nav-link:focus, .form-control:focus, .form-check-input:focus {
+  box-shadow: 0 0 0 0.1rem white, 0 0 0 0.25rem #258cfb;
+}
+
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+body {
+  margin-bottom: 60px;
+}
+
+.form-floating > .form-control-plaintext::placeholder, .form-floating > .form-control::placeholder {
+  color: var(--bs-secondary-color);
+  text-align: end;
+}
+
+.form-floating > .form-control-plaintext:focus::placeholder, .form-floating > .form-control:focus::placeholder {
+  text-align: start;
+}
+
+/* Navbar active-link highlight: a translucent pill that reads clearly on any
+   coloured (themed) navbar background. */
+.navbar-nav .nav-link.active {
+  font-weight: 600;
+  background-color: rgba(255, 255, 255, 0.18);
+  border-radius: 0.375rem;
+}
+
+/* Menu (top navbar) text: one step smaller than the body font. Covers the nav
+   links and their dropdown items so the whole menu reads at one size. */
+.navbar-nav .nav-link,
+.navbar .dropdown-item {
+  font-size: 0.9rem;
+}
+
+/* tablekit: sortable headers + pager */
+.tk-sortable {
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.tk-caret {
+  font-size: 0.75em;
+  opacity: 0.55;
+}
+.tk-sortable:hover .tk-caret {
+  opacity: 0.9;
+}
+
+/* Hide the native browser spinners on number inputs. The app uses
+   explicit touch-friendly +/- buttons where stepping is wanted
+   (.defect-stepper); plain numeric fields should look like ordinary
+   text inputs while still validating numeric content. */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+/* V31 (2026-06-20): pulsing yellow halo on the "Fill material header to add
+   samples" button. Draws the operator's eye to the action they must take
+   first; CSS-only so it works inside the Razor partial without extra JS. */
+@keyframes header-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(255, 193, 7, .55); }
+  50%      { box-shadow: 0 0 0 8px rgba(255, 193, 7, 0); }
+}
+.btn-needs-headers {
+  animation: header-pulse 1.5s ease-in-out infinite;
+}
+/* V31: per-sample photo drop-zone. */
+.photo-dropzone {
+  border: 2px dashed #ced4da;
+  border-radius: .5rem;
+  padding: 1rem;
+  text-align: center;
+  background: #f8f9fa;
+  cursor: pointer;
+  transition: background-color .15s, border-color .15s;
+}
+.photo-dropzone:hover,
+.photo-dropzone.dragover {
+  background: #e7f1ff;
+  border-color: #0d6efd;
+}
+.photo-dropzone input[type="file"] { display: none; }
+
+/* ---- Tablet / touch ergonomics (2026-07-26) ----------------------------
+   Everything here is scoped to touch devices via (pointer: coarse), so a
+   mouse-driven laptop is completely unaffected — only tablets/phones get the
+   larger, easier tap targets. This keeps the 10" tablet comfortable without
+   changing the laptop layout. */
+@media (pointer: coarse) {
+  .btn                                     { min-height: 40px; }
+  .btn-sm                                  { min-height: 34px; }
+  .form-control, .form-select              { min-height: 40px; }
+  .form-control-sm, .form-select-sm        { min-height: 34px; }
+  .nav-link                                { padding-top: .55rem; padding-bottom: .55rem; }
+  .dropdown-item                           { padding-top: .5rem;  padding-bottom: .5rem; }
+  .form-check-input                        { width: 1.2em; height: 1.2em; }
+  /* Space out inline action-button clusters (table rows, card headers) so
+     neighbouring icons aren't a mis-tap away. */
+  .table td .btn + .btn,
+  .d-flex.gap-2 > .btn                     { margin-left: .15rem; }
+  /* Larger touch scrollbar hint for horizontally-scrolling tables. */
+  .table-responsive                        { -webkit-overflow-scrolling: touch; }
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+       appearance: textfield;
+}
+/* ---------------------------------------------------------------------------
+   Before/after value changes (audit log, Users & security).
+
+   Rendered by Views/Shared/_ValueChange.cshtml. The two values are the point of
+   the row, so they get the weight; the field name is context and stays quiet.
+   Colour is a second signal only -- the icon and the strike-through carry the
+   same meaning without it.
+   ------------------------------------------------------------------------- */
+.vchange {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: .35rem;
+  font-size: .8rem;
+  line-height: 1.5;
+  padding: .1rem 0;
+}
+
+.vchange .v-field {
+  color: var(--bs-secondary-color);
+  min-width: 8rem;
+  flex: 0 0 auto;
+}
+
+.vchange .v-old,
+.vchange .v-new {
+  border-radius: .25rem;
+  padding: 0 .35rem;
+  max-width: 26rem;
+  overflow-wrap: anywhere;
+}
+
+.vchange .v-old {
+  background: var(--bs-danger-bg-subtle);
+  color: var(--bs-danger-text-emphasis);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--bs-danger-text-emphasis) 45%, transparent);
+}
+
+.vchange .v-new {
+  background: var(--bs-success-bg-subtle);
+  color: var(--bs-success-text-emphasis);
+  font-weight: 500;
+}
+
+.vchange .v-arrow {
+  color: var(--bs-secondary-color);
+  font-size: .7rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Dense index tables (Quality Orders, Arrivals).
+
+   A list page carries a lot of columns; at the default table size the last few
+   fall off a laptop screen. These rules were written for the Quality Orders
+   list and lived in that view, which meant the Arrivals list beside it rendered
+   noticeably larger. Shared here so the two stay the same size rather than
+   drifting apart again.
+
+   Page-specific bits (the QO materials "quick peek", say) stay in their view.
+   ------------------------------------------------------------------------- */
+.qms-index-table { font-size: .8rem; }
+.qms-index-table > :not(caption) > * > * {
+  padding-top: .35rem; padding-bottom: .35rem;
+  /* Horizontal too: Bootstrap's .5rem a side costs ~190px across a 12-column
+     list, which is most of what pushes the row past a laptop screen. */
+  padding-left: .4rem; padding-right: .4rem;
+}
+.qms-index-table .badge { font-size: .68rem; }
+
+/* Buttons set the row height, and .btn-sm's 14px font and 21px line-height are
+   absolute -- they do not shrink with the table, so a row of 12.8px text was
+   still 43px tall to fit a 31px button. Letting the button inherit the table's
+   size puts the row back in proportion to its own text. */
+.qms-index-table .btn {
+  font-size: inherit;
+  padding: .15rem .45rem;
+  line-height: 1.4;
+}
+.qms-index-table .btn i { font-size: .95em; }
+
+/* One row = one line. A single long supplier name used to wrap and take the
+   whole row down with it -- 37px became 62px at 1440 and 91px at 1152, so the
+   list read as double-spaced on any laptop screen. Long free text is clipped
+   with an ellipsis instead; .table-responsive still scrolls sideways when the
+   columns genuinely need more room. Cells that clip carry the full value in a
+   title attribute, so nothing becomes unreadable. */
+.qms-index-table th,
+.qms-index-table td { white-space: nowrap; }
+
+.qms-index-table td.cell-clip {
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 991.98px) { .qms-index-table { font-size: .74rem; } }
+@media (max-width: 575.98px) { .qms-index-table { font-size: .7rem; } }
+
+/* ---------------------------------------------------------------------------
+   Pre-pagination guard for client-paged tables (tablekit).
+
+   tablekit only runs at DOMContentLoaded, after the whole document is built.
+   Until then the browser has painted every row -- and because an auto-layout
+   table takes its column widths from every rendered row, the table paints wider
+   than it will end up, then snaps narrower once the script hides the overflow.
+   On a 364-row list that flash lasted well over a second.
+
+   Hiding the overflow rows up front means the first paint is already the right
+   width. The rule stops applying the moment tablekit sets data-tk-ready, so it
+   never fights the script's own show/hide.
+
+   50 matches tablekit's default page size. A reader who has chosen 25 or 100
+   sees a small adjustment instead of the full-width flash.
+   Server-paged tables (data-no-pager) render one page already -- excluded.
+   ------------------------------------------------------------------------- */
+table[data-tablekit]:not([data-tk-ready]):not([data-no-pager]) tbody tr:nth-child(n + 51) {
+  display: none;
+}

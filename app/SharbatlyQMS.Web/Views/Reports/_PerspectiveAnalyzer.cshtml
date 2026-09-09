@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models.Reports
+﻿@using SharbatlyQMS.Web.Models.Reports
 @model PerspectiveAnalyzerVm
 
 @*
@@ -20,25 +20,25 @@
     <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span>
             <i class="bi bi-bar-chart-line me-1"></i>
-            <strong>Perspective analyzer</strong>
-            <span class="badge text-bg-secondary ms-2">beta</span>
-            <small class="text-muted ms-2">Pivot the filtered data hub above into any cross-tab or chart.</small>
+            <strong>@Loc["Perspective analyzer"]</strong>
+            <span class="badge text-bg-secondary ms-2">@Loc["beta"]</span>
+            <small class="text-muted ms-2">@Loc["Pivot the filtered data hub above into any cross-tab or chart."]</small>
         </span>
         <div class="d-flex align-items-center gap-2">
             <select id="perspectiveSelect" class="form-select form-select-sm" style="min-width: 240px;">
-                <option value="">(no perspective loaded)</option>
+                <option value="">@Loc["(no perspective loaded)"]</option>
             </select>
             <button type="button" class="btn btn-outline-primary btn-sm" id="btnSaveAs">
-                <i class="bi bi-bookmark-plus me-1"></i>Save as…
+                <i class="bi bi-bookmark-plus me-1"></i>@Loc["Save as…"]
             </button>
             <button type="button" class="btn btn-outline-secondary btn-sm" id="btnSave" disabled>
-                <i class="bi bi-save me-1"></i>Save
+                <i class="bi bi-save me-1"></i>@Loc["Save"]
             </button>
             <button type="button" class="btn btn-outline-secondary btn-sm" id="btnSetDefault" disabled>
-                <i class="bi bi-star me-1"></i>Set as default
+                <i class="bi bi-star me-1"></i>@Loc["Set as default"]
             </button>
             <button type="button" class="btn btn-outline-danger btn-sm" id="btnDelete" disabled>
-                <i class="bi bi-trash me-1"></i>Delete
+                <i class="bi bi-trash me-1"></i>@Loc["Delete"]
             </button>
         </div>
     </div>
@@ -82,7 +82,7 @@
 
         <!-- Scope toggle + breadcrumb -->
         <div class="scope-bar d-flex flex-wrap align-items-center gap-2 mb-3">
-            <div class="btn-group btn-group-sm" role="group" aria-label="Analyzer scope">
+            <div class="btn-group btn-group-sm" role="group" aria-label='@Loc["Analyzer scope"]'>
                 <input type="radio" class="btn-check" name="pivotScope" id="scopePage" value="page" autocomplete="off" checked />
                 <label class="btn btn-outline-primary" for="scopePage">
                     <i class="bi bi-funnel-fill me-1"></i>Match page filters
@@ -103,10 +103,10 @@
                     <div class="card-body p-2">
                         <div class="pivot-zone-label">
                             <i class="bi bi-grid-3x3 me-1"></i>Available fields
-                            <small class="text-muted">(click + to add, or drag a chip)</small>
+                            <small class="text-muted">@Loc["(click + to add, or drag a chip)"]</small>
                         </div>
                         <input type="text" id="dimSearch" class="form-control form-control-sm mb-2"
-                               placeholder="Search…" />
+                               placeholder='@Loc["Search…"]' />
                         <div id="availableList" class="available-list"></div>
                     </div>
                 </div>
@@ -115,8 +115,8 @@
                 <div class="card h-100">
                     <div class="card-body p-2">
                         <div class="pivot-zone-label">
-                            <i class="bi bi-list-ul me-1"></i><strong>Rows</strong>
-                            <small class="text-muted">drag chips up/down to reorder · × to remove</small>
+                            <i class="bi bi-list-ul me-1"></i><strong>@Loc["Rows"]</strong>
+                            <small class="text-muted">@Loc["drag chips up/down to reorder · × to remove"]</small>
                         </div>
                         <div id="rowsZone" class="pivot-zone pivot-chip-zone-row" data-zone="rows"></div>
                     </div>
@@ -126,8 +126,8 @@
                 <div class="card h-100">
                     <div class="card-body p-2">
                         <div class="pivot-zone-label">
-                            <i class="bi bi-layout-three-columns me-1"></i><strong>Columns</strong>
-                            <small class="text-muted">drag chips up/down to reorder · × to remove</small>
+                            <i class="bi bi-layout-three-columns me-1"></i><strong>@Loc["Columns"]</strong>
+                            <small class="text-muted">@Loc["drag chips up/down to reorder · × to remove"]</small>
                         </div>
                         <div id="colsZone" class="pivot-zone pivot-chip-zone-col" data-zone="cols"></div>
                     </div>
@@ -140,7 +140,7 @@
             <div class="card-body p-2">
                 <div class="d-flex justify-content-between align-items-center mb-1">
                     <span class="pivot-zone-label mb-0">
-                        <i class="bi bi-filter-circle me-1"></i><strong>Drill / Filter</strong>
+                        <i class="bi bi-filter-circle me-1"></i><strong>@Loc["Drill / Filter"]</strong>
                         <small class="text-muted">
                             include-only: chips below LIMIT the pivot to the values you pick.
                             Hover a chip to see all picked values · click to edit · × to remove.
@@ -148,7 +148,7 @@
                         </small>
                     </span>
                     <button type="button" class="btn btn-sm btn-outline-primary" id="btnAddDrill">
-                        <i class="bi bi-plus-circle me-1"></i>Add filter
+                        <i class="bi bi-plus-circle me-1"></i>@Loc["Add filter"]
                     </button>
                 </div>
                 <div id="drillZone" class="pivot-zone pivot-chip-zone-drill" style="min-height: 56px;"></div>
@@ -162,7 +162,7 @@
             <div class="card-body p-2">
                 <div class="d-flex justify-content-between align-items-center mb-1">
                     <span class="pivot-zone-label mb-0">
-                        <i class="bi bi-calculator me-1"></i><strong>Values</strong>
+                        <i class="bi bi-calculator me-1"></i><strong>@Loc["Values"]</strong>
                         <small class="text-muted">
                             measures + aggregations. Drag chips to reorder · click to edit · × to remove.
                             The first chip is the default for charts. You can also drag any field
@@ -170,7 +170,7 @@
                         </small>
                     </span>
                     <button type="button" class="btn btn-sm btn-outline-success" id="btnAddMeasure">
-                        <i class="bi bi-plus-circle me-1"></i>Add measure
+                        <i class="bi bi-plus-circle me-1"></i>@Loc["Add measure"]
                     </button>
                 </div>
                 <div id="valuesZone" class="pivot-zone pivot-chip-zone-value" style="min-height: 56px;"></div>
@@ -179,50 +179,50 @@
 
         <div class="row g-2 mb-2">
             <div class="col-md-3">
-                <label class="form-label small">Number format (fallback)</label>
+                <label class="form-label small">@Loc["Number format (fallback)"]</label>
                 <select id="pivotFormat" class="form-select form-select-sm">
-                    <option value="auto">Auto</option>
-                    <option value="int">0   (integer)</option>
-                    <option value="dec1">0.0  (1 decimal)</option>
-                    <option value="dec2">0.00 (2 decimals)</option>
-                    <option value="percent">0%   (percent)</option>
+                    <option value="auto">@Loc["Auto"]</option>
+                    <option value="int">@Loc["0   (integer)"]</option>
+                    <option value="dec1">@Loc["0.0  (1 decimal)"]</option>
+                    <option value="dec2">@Loc["0.00 (2 decimals)"]</option>
+                    <option value="percent">@Loc["0%   (percent)"]</option>
                 </select>
-                <small class="text-muted">Applied to any measure chip that has no format override.</small>
+                <small class="text-muted">@Loc["Applied to any measure chip that has no format override."]</small>
             </div>
             <div class="col-md-3">
-                <label class="form-label small">Renderer</label>
+                <label class="form-label small">@Loc["Renderer"]</label>
                 <select id="pivotRenderer" class="form-select form-select-sm"></select>
-                <label class="form-label small mt-1 d-none" id="chartMeasureLabel" for="chartMeasure">Measure to chart</label>
+                <label class="form-label small mt-1 d-none" id="chartMeasureLabel" for="chartMeasure">@Loc["Measure to chart"]</label>
                 <select id="chartMeasure" class="form-select form-select-sm d-none"></select>
             </div>
             <div class="col-md-3">
-                <label class="form-label small">Top N rows</label>
+                <label class="form-label small">@Loc["Top N rows"]</label>
                 <input type="number" id="pivotTopN" class="form-control form-control-sm"
-                       min="1" max="500" placeholder="optional" />
-                <small class="text-muted">Capped by the first measure's row total.</small>
+                       min="1" max="500" placeholder='@Loc["optional"]' />
+                <small class="text-muted">@Loc["Capped by the first measure's row total."]</small>
             </div>
             <div class="col-md-3 d-flex align-items-end flex-column">
                 <div class="form-check small mb-1" id="heatmapWrap">
                     <input type="checkbox" class="form-check-input" id="pivotHeatmap" checked />
-                    <label class="form-check-label" for="pivotHeatmap">Heat (per measure)</label>
+                    <label class="form-check-label" for="pivotHeatmap">@Loc["Heat (per measure)"]</label>
                 </div>
                 <div class="form-check small mb-1" id="hideZeroWrap"
                      title="Skip rows where every measure's row total is 0.">
                     <input type="checkbox" class="form-check-input" id="pivotHideZero" checked />
-                    <label class="form-check-label" for="pivotHideZero">Hide 0s</label>
+                    <label class="form-check-label" for="pivotHideZero">@Loc["Hide 0s"]</label>
                 </div>
             </div>
         </div>
 
         <div class="d-flex gap-2 mb-2">
             <button type="button" class="btn btn-primary btn-sm" id="btnRunPivot">
-                <i class="bi bi-play me-1"></i>Run
+                <i class="bi bi-play me-1"></i>@Loc["Run"]
             </button>
             <button type="button" class="btn btn-outline-secondary btn-sm" id="btnResetPivot">
-                <i class="bi bi-arrow-counterclockwise me-1"></i>Reset
+                <i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Reset"]
             </button>
             <button type="button" class="btn btn-outline-success btn-sm ms-auto" id="btnExportXlsx" disabled>
-                <i class="bi bi-file-earmark-excel me-1"></i>Export pivot to Excel
+                <i class="bi bi-file-earmark-excel me-1"></i>@Loc["Export pivot to Excel"]
             </button>
         </div>
 
@@ -241,37 +241,37 @@
       <div class="modal-header">
         <h5 class="modal-title">
           <i class="bi bi-filter-circle me-1"></i>
-          <span id="drillModalTitle">Drill filter</span>
+          <span id="drillModalTitle">@Loc["Drill filter"]</span>
         </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label='@Loc["Close"]'></button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="drillEditingKey" />
         <div class="mb-2">
-          <label class="form-label small">Dimension</label>
+          <label class="form-label small">@Loc["Dimension"]</label>
           <select id="drillDimSelect" class="form-select form-select-sm"></select>
         </div>
         <div class="mb-2">
-          <label class="form-label small">Search values</label>
+          <label class="form-label small">@Loc["Search values"]</label>
           <input type="text" id="drillValueSearch" class="form-control form-control-sm"
-                 placeholder="type to filter…" />
+                 placeholder='@Loc["type to filter…"]' />
         </div>
         <div id="drillValuesLoading" class="text-muted small mb-1 d-none">
             <span class="spinner-border spinner-border-sm me-1"></span>Loading…
         </div>
         <div id="drillValuesTruncated" class="text-warning small mb-1 d-none">
-            Showing the first 200 values — refine your search to narrow the list.
+            @Loc["Showing the first 200 values — refine your search to narrow the list."]
         </div>
         <div id="drillValuesList" class="values-list"></div>
         <div class="d-flex justify-content-between mt-2">
-            <button type="button" class="btn btn-link btn-sm p-0" id="drillSelectAll">Select all visible</button>
-            <button type="button" class="btn btn-link btn-sm p-0 text-danger" id="drillClearAll">Clear selection</button>
+            <button type="button" class="btn btn-link btn-sm p-0" id="drillSelectAll">@Loc["Select all visible"]</button>
+            <button type="button" class="btn btn-link btn-sm p-0 text-danger" id="drillClearAll">@Loc["Clear selection"]</button>
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
         <button type="button" class="btn btn-primary" id="btnApplyDrill">
-            <i class="bi bi-check2 me-1"></i>Apply
+            <i class="bi bi-check2 me-1"></i>@Loc["Apply"]
         </button>
       </div>
     </div>
@@ -285,41 +285,41 @@
       <div class="modal-header">
         <h5 class="modal-title">
           <i class="bi bi-calculator me-1"></i>
-          <span id="measureModalTitle">Add measure</span>
+          <span id="measureModalTitle">@Loc["Add measure"]</span>
         </h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label='@Loc["Close"]'></button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="measureEditingIndex" />
         <div class="mb-2">
-          <label class="form-label small">Measure</label>
+          <label class="form-label small">@Loc["Measure"]</label>
           <select id="measureSelect" class="form-select form-select-sm"></select>
         </div>
         <div class="mb-2">
-          <label class="form-label small">Aggregation</label>
+          <label class="form-label small">@Loc["Aggregation"]</label>
           <select id="measureAgg" class="form-select form-select-sm"></select>
         </div>
         <div class="mb-2">
-          <label class="form-label small">Number format (optional override)</label>
+          <label class="form-label small">@Loc["Number format (optional override)"]</label>
           <select id="measureFormat" class="form-select form-select-sm">
-            <option value="">(use global default)</option>
-            <option value="auto">Auto</option>
-            <option value="int">0   (integer)</option>
-            <option value="dec1">0.0  (1 decimal)</option>
-            <option value="dec2">0.00 (2 decimals)</option>
-            <option value="percent">0%   (percent)</option>
+            <option value="">@Loc["(use global default)"]</option>
+            <option value="auto">@Loc["Auto"]</option>
+            <option value="int">@Loc["0   (integer)"]</option>
+            <option value="dec1">@Loc["0.0  (1 decimal)"]</option>
+            <option value="dec2">@Loc["0.00 (2 decimals)"]</option>
+            <option value="percent">@Loc["0%   (percent)"]</option>
           </select>
         </div>
         <div class="mb-2">
-          <label class="form-label small">Custom column label (optional)</label>
+          <label class="form-label small">@Loc["Custom column label (optional)"]</label>
           <input type="text" id="measureLabel" class="form-control form-control-sm"
-                 maxlength="60" placeholder="e.g. Total defects" />
+                 maxlength="60" placeholder='@Loc["e.g. Total defects"]' />
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
         <button type="button" class="btn btn-success" id="btnApplyMeasure">
-            <i class="bi bi-check2 me-1"></i>Apply
+            <i class="bi bi-check2 me-1"></i>@Loc["Apply"]
         </button>
       </div>
     </div>
@@ -331,31 +331,31 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <div class="modal-header">
-        <h5 class="modal-title"><i class="bi bi-bookmark me-1"></i>Save perspective</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        <h5 class="modal-title"><i class="bi bi-bookmark me-1"></i>@Loc["Save perspective"]</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label='@Loc["Close"]'></button>
       </div>
       <div class="modal-body">
         <input type="hidden" id="saveId" />
         <div class="mb-3">
-          <label class="form-label">Name</label>
+          <label class="form-label">@Loc["Name"]</label>
           <input type="text" id="saveName" class="form-control" maxlength="150" />
         </div>
         <div class="mb-3">
-          <label class="form-label">Visibility</label>
+          <label class="form-label">@Loc["Visibility"]</label>
           <div class="form-check">
             <input class="form-check-input" type="radio" name="saveScope" id="scopePrivate" value="private" checked />
             <label class="form-check-label" for="scopePrivate">
-              <strong>Private</strong> &mdash; only you can see it
+              <strong>@Loc["Private"]</strong> &mdash; only you can see it
             </label>
           </div>
           <div class="form-check">
             <input class="form-check-input" type="radio" name="saveScope" id="scopeShared" value="shared"
                    @(Model.CanShare ? "" : "disabled") />
             <label class="form-check-label" for="scopeShared">
-              <strong>Shared</strong> &mdash; visible to every QMS user
+              <strong>@Loc["Shared"]</strong> &mdash; visible to every QMS user
               @if (!Model.CanShare)
               {
-                  <small class="text-muted">(managers and site admins only)</small>
+                  <small class="text-muted">@Loc["(managers and site admins only)"]</small>
               }
             </label>
           </div>
@@ -363,13 +363,13 @@
         <div class="form-check">
           <input type="checkbox" class="form-check-input" id="saveIsDefault" />
           <label class="form-check-label" for="saveIsDefault">
-            Open with this perspective by default
+            @Loc["Open with this perspective by default"]
           </label>
         </div>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button type="button" class="btn btn-primary" id="btnConfirmSave">Save</button>
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+        <button type="button" class="btn btn-primary" id="btnConfirmSave">@Loc["Save"]</button>
       </div>
     </div>
   </div>

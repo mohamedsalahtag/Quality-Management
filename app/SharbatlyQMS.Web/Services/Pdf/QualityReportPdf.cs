@@ -1,4 +1,4 @@
-using QuestPDF.Fluent;
+﻿using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 using SharbatlyQMS.Web.Models;
@@ -281,22 +281,23 @@ public static class QualityReportPdf
                     Field(c, "Container",        d.Arrival.ContainerNo);
                     Field(c, "Purch.Doc.",       d.Arrival.Ebeln);
                     Field(c, "Procurement Type", d.ProcurementType);
-                    Field(c, "Country Of Origin",s?.LoadingCountry);
+                    Field(c, "Country Of Origin",Countries.Display(s?.LoadingCountry));
                     Field(c, "Loading Port",     s?.LoadingPort);
                     Field(c, "Port Of Arrival",  s?.ArrivalPlace);
-                    Field(c, "Loading Date",     s?.SailingDate?.ToString("MMM dd, yyyy"));
-                });
-                row.RelativeItem().Column(c => {
                     Field(c, "Vessel Name",      s?.VesselName);
-                    // Real port arrival from SAP; blank when SAP has none. Reading
-                    // s?.ArrivalDate here would reprint the Receive Date below it.
-                    Field(c, "Arrival Date",     d.PortArrivalDate?.ToString("MMM dd, yyyy"));
+                });
+                // Shipment TIMELINE in event order (loading -> discharge ->
+                // pullout -> receive -> unloading -> inspection), matching the
+                // Soft layout and the on-screen shipment blocks. Arrival Date is
+                // not printed -- only the Time Bar basis below still reads one.
+                row.RelativeItem().Column(c => {
+                    Field(c, "Loading Date",     s?.SailingDate?.ToString("MMM dd, yyyy"));
+                    Field(c, "Discharge Date",   s?.DischargeDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Pullout Date",     s?.PullOutDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Receive Date",     s?.ReceiveDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Unloading Date",   s?.UnloadingDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Inspection Date",  d.InspectionDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Transit Days",     s?.TransitDays?.ToString());
-                    Field(c, "Discharge Date",   s?.DischargeDate?.ToString("MMM dd, yyyy"));
                     // Time Bar = whole days between the chosen basis date and the
                     // date the quality order was finished (Closed / ClosedAt);
                     // falls back to the report date when the QO is not yet
@@ -307,7 +308,6 @@ public static class QualityReportPdf
                     var basisLabel = d.TimeBarBasis == TimeBarBases.Arrival ? "Arrival" : "Discharge";
                     Field(c, $"Time Bar ({basisLabel})", TimeBarDays(basisDate, d.QualityOrder.ClosedAt ?? d.GeneratedAt));
                     Field(c, "Date",             d.GeneratedAt.ToLocalTime().ToString("MMM dd, yyyy"));
-                    Field(c, "Logger Serial",    cl?.DataLoggerSerial);
                 });
                 row.RelativeItem().Column(c => {
                     // Col-3 labels are long ("External damage to container",
@@ -318,6 +318,7 @@ public static class QualityReportPdf
                     // Seal No lists all recorded seals (stored newline-
                     // delimited, up to 4). Temperature reads the data-logger
                     // temperature from the arrival checklist, not the set point.
+                    Field(c, "Logger Serial",                  cl?.DataLoggerSerial,                labelWidth: w);
                     Field(c, "Seal No",                        JoinLines(cl?.SealNo),               labelWidth: w);
                     Field(c, "Temperature",                    cl?.LoggerTemperature?.ToString(),   labelWidth: w);
                     Field(c, "Pulp Temperature",               JoinTemps(cl),                       labelWidth: w);
@@ -334,18 +335,9 @@ public static class QualityReportPdf
             // don't deform the columns. Only rendered when populated --
             // a blank notes field would otherwise eat 1-2 lines of
             // valuable real estate at the top of the report.
-            if (!string.IsNullOrWhiteSpace(cl?.Notes))
-            {
-                col.Item().PaddingTop(4).Column(nc =>
-                {
-                    nc.Item().Text("inspector notes").FontSize(8).FontColor(Colors.Grey.Darken1);
-                    nc.Item().PaddingTop(1).Text(cl!.Notes!).FontSize(8);
-                });
-            }
-
             // Arrival custom fields for the material groups in this report.
-            // A numeric field also prints its share of that group's total sample
-            // size (e.g. "Soft Green: 12 (8.00%)").
+            // A numeric field also prints its share of that group's TOTAL
+            // QUANTITY (e.g. "Soft Green: 26 of Qty 1540 -> (1.69%)").
             if (d.CustomFields.Count > 0)
             {
                 string CustomVal(SharbatlyQMS.Web.Models.ArrivalCustomField cf)
@@ -355,7 +347,7 @@ public static class QualityReportPdf
                     {
                         var denom = d.GroupSummaries
                             .Where(g => string.Equals(g.MaterialGroup, cf.MaterialGroup, StringComparison.OrdinalIgnoreCase))
-                            .Sum(g => g.SumSampleSize);
+                            .Sum(g => g.SumPoQuantity);
                         if (denom > 0)
                             val += $" ({Fmt.Dec2(cf.NumericValue.Value / denom * 100m)}%)";
                     }
@@ -501,6 +493,7 @@ public static class QualityReportPdf
                     Field(c, "Sample Size", g.SumSampleSize + " " + g.SampleUnit);
                     // PO Quantity shown on every summary (single or multi-material).
                     Field(c, "PO Quantity", Fmt.Dec2(g.SumPoQuantity));
+                    Field(c, "Tara Weight", string.IsNullOrEmpty(g.TaraWeightText) ? null : g.TaraWeightText + " kg");
                 });
             });
 
@@ -697,17 +690,17 @@ public static class QualityReportPdf
             CalmHeading(col, heading, 11);
 
             // ---- Header cells: Sample Size (V21+ material-level source of
-            //      truth), Size, Pack Type, then every Material-scoped header
+            //      truth, only when uniform), Size, then every Material-scoped header
             //      value in sort order. Defensive: also include any value
             //      whose field is unknown to the scope map (e.g. a brand new
             //      field added between fetch and render) so nothing silently
             //      disappears.
-            var headerCells = new List<(string Label, string Value)>
-            {
-                ("Sample Size", SampleSizeText(m, sampleSizes, unit)),
-                ("Size",        Dash(m?.MaterialSize)),
-                ("Pack Type",   Dash(m?.PackType)),
-            };
+            var headerCells = new List<(string Label, string Value)>();
+            // Sample Size at material level -- see MaterialSampleSizeRule.
+            if (MaterialSampleSizeRule.ShowAtMaterialLevel(m?.MaterialGroup, sampleSizes))
+                headerCells.Add(("Sample Size", SampleSizeText(m, sampleSizes, unit)));
+            headerCells.Add(("Size", Dash(m?.MaterialSize)));
+            headerCells.Add(("Tara Weight", m?.TaraWeight is > 0 ? $"{Fmt.Dec2(m.TaraWeight)} kg" : "—"));
 
             // Helper: format one MaterialHeaderValue's value by its kind.
             static string FormatValue(MaterialHeaderValue hv) => hv.ValueKind switch

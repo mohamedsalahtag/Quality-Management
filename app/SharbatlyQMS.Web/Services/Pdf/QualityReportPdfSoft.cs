@@ -1,4 +1,4 @@
-using QuestPDF.Fluent;
+﻿using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
 using SharbatlyQMS.Web.Models;
@@ -23,7 +23,11 @@ public static class QualityReportPdfSoft
     private const string Accent   = "#5b7fa6";  // muted slate-blue accent
     private const string BandBg    = "#eaf1f8"; // soft-blue section band fill
     private const string HeadFill  = "#dfe8f2"; // soft table-header fill
-    private const string Stripe    = "#f6f8fb"; // very light alternating row tint
+    private const string Stripe    = "#f6f8fb";
+    // One step lighter than Stripe so a card tint never fights the zebra rows
+    // inside it. This is the whole separator scheme: tint + a left rule +
+    // whitespace, no new hues.
+    private const string CardBg    = "#fbfcfe"; // very light alternating row tint
     private const string Border    = "#c9d4e0"; // soft hairline borders
     private const string MajorHead = "#b76e79"; // soft muted rose — Major header
     private const string MinorHead = "#b08d3e"; // soft muted amber — Minor header
@@ -79,32 +83,69 @@ public static class QualityReportPdfSoft
                     });
             });
 
+            // 2b. Rejection banner. First thing under the reference strip so
+            //     nobody reads the shipment details without knowing the
+            //     container was refused.
+            if (d.IsContainerRejection)
+                col.Item().Element(c => RenderRejectionBanner(c, d));
+
             // 3. Shipment Details
             Band(col.Item(), "Shipment Details");
             RenderShipmentDetails(col, d);
 
             // 4. Materials
-            Band(col.Item(), "Materials");
-            RenderMaterialsTable(col.Item(), d);
+            if (d.Materials.Count > 0)
+            {
+                Band(col.Item(), "Materials");
+                RenderMaterialsTable(col.Item(), d);
+            }
 
-            // 5. Summary
-            Band(col.Item(), "Summary");
-            foreach (var g in d.GroupSummaries)
-                col.Item().Element(c => RenderGroupSummary(c, g));
+            // 5. Summary. Guarded: an order finished through the no-samples
+            //    bypass has no groups, and an unconditional band printed a
+            //    heading with nothing under it.
+            if (d.GroupSummaries.Count > 0)
+            {
+                PartBand(col.Item(), "Summary",
+                    "Results rolled up per material group — the overall picture.");
+                foreach (var g in d.GroupSummaries)
+                    col.Item().Element(Card).Element(c => RenderGroupSummary(c, g));
+            }
 
-            // 6. Sample Details (per material, then its samples)
+            // 6. Sample Details (per material, then its samples).
+            //    Each material and ITS samples live in one card, so the boundary
+            //    between one material's samples and the next is a visible edge
+            //    rather than an extra few points of blank space.
             if (d.Samples.Count > 0)
             {
-                Band(col.Item(), "Sample Details");
+                // A rule, a tint and a heading were not enough: two readers in a
+                // row could not tell where the summary stopped and the per-sample
+                // detail began. Nothing separates two parts of a printed document
+                // as unambiguously as a page edge, so the detail starts on a fresh
+                // page whenever there is a summary to separate it from. When there
+                // is no summary there is nothing to confuse it with, and the break
+                // would only cost a sheet of paper.
+                if (d.GroupSummaries.Count > 0)
+                    col.Item().PageBreak();
+
+                PartBand(col.Item(), "Sample Details",
+                    "Every sample and every reading, material by material.");
                 foreach (var grp in d.Samples.GroupBy(s => s.Sample.QoMaterialId))
                 {
-                    var first = grp.First();
-                    var unit  = d.UnitFor(first.Material?.MaterialGroup);
-                    col.Item().Element(c => RenderMaterialCard(c, first.Material,
-                        first.MaterialHeaderValues, d.HeaderFieldScopeById,
-                        grp.Select(x => x.Sample.SampleSize).ToList(), unit));
-                    foreach (var s in grp)
-                        col.Item().Element(c => RenderSampleDetail(c, d, s));
+                    var first   = grp.First();
+                    var unit    = d.UnitFor(first.Material?.MaterialGroup);
+                    var samples = grp.ToList();
+                    col.Item().Element(Card).Column(mc =>
+                    {
+                        mc.Spacing(5);
+                        // ShowEntire on the header alone: it must not orphan at a
+                        // page foot, but the samples below it may legitimately
+                        // flow onto the next page.
+                        mc.Item().ShowEntire().Element(c => RenderMaterialCard(c, first.Material,
+                            first.MaterialHeaderValues, d.HeaderFieldScopeById,
+                            samples.Select(x => x.Sample.SampleSize).ToList(), unit));
+                        foreach (var s in samples)
+                            mc.Item().Element(c => RenderSampleDetail(c, d, s));
+                    });
                 }
             }
         });
@@ -164,26 +205,38 @@ public static class QualityReportPdfSoft
             ("Container",         V(d.Arrival.ContainerNo)),
             ("Purch.Doc.",        V(d.Arrival.Ebeln)),
             ("Procurement Type",  V(d.ProcurementType)),
-            ("Country Of Origin", V(s?.LoadingCountry)),
+            ("Country Of Origin", V(Countries.Display(s?.LoadingCountry))),
             ("Loading Port",      V(s?.LoadingPort)),
             ("Port Of Arrival",   V(s?.ArrivalPlace)),
-            ("Loading Date",      Dt(s?.SailingDate)),
+            ("Vessel Name",       V(s?.VesselName)),
         };
+        // Middle column is the shipment TIMELINE, in the order the events
+        // actually happen: loading -> discharge -> pullout -> receive ->
+        // unloading -> inspection. Reading it top to bottom shows the movement,
+        // so a gap or an out-of-order date stands out. Arrival Date is not
+        // printed; only the Time Bar basis above still reads one. Derived
+        // figures (transit days, time bar) close the column. The QO page, the
+        // Claims page and the QC summary panel use the same sequence.
         var col2 = new List<(string, string)>
         {
-            ("Vessel Name",       V(s?.VesselName)),
-            ("Arrival Date",      Dt(d.PortArrivalDate)),
+            ("Loading Date",      Dt(s?.SailingDate)),
+            ("Discharge Date",    Dt(s?.DischargeDate)),
             ("Pullout Date",      Dt(s?.PullOutDate)),
+            // Receive Date is an internal goods-receipt date; the supplier's
+            // copy omits it. Removed from the list rather than blanked so the
+            // column closes up instead of printing an orphaned label.
             ("Receive Date",      Dt(s?.ReceiveDate)),
             ("Unloading Date",    Dt(s?.UnloadingDate)),
             ("Inspection Date",   Dt(d.InspectionDate)),
             ("Transit Days",      s?.TransitDays?.ToString() ?? "—"),
-            ("Discharge Date",    Dt(s?.DischargeDate)),
             ($"Time Bar ({basisLabel})", (TimeBarDays(basisDate, d.QualityOrder.ClosedAt ?? d.GeneratedAt) ?? "—") + " days"),
-            ("Logger Serial",     V(cl?.DataLoggerSerial)),
         };
+        if (d.SupplierCopy)
+            col2.RemoveAll(x => x.Item1 == "Receive Date");
+
         var col3 = new List<(string, string)>
         {
+            ("Logger Serial",                      V(cl?.DataLoggerSerial)),
             ("Seal No",                            V(JoinLines(cl?.SealNo))),
             ("Temperature",                        cl?.LoggerTemperature?.ToString() ?? "—"),
             ("Pulp Temperature",                   V(JoinTemps(cl))),
@@ -195,15 +248,8 @@ public static class QualityReportPdfSoft
         };
         ThreeColumns(col.Item(), col1, col2, col3);
 
-        if (!string.IsNullOrWhiteSpace(cl?.Notes))
-        {
-            col.Item().Text("Inspector Notes").Bold().FontSize(8).FontColor(Accent);
-            col.Item().Border(0.5f).BorderColor(Border).Background(Stripe).Padding(5)
-                .Text(cl!.Notes!).FontColor(Ink);
-        }
-
         // Arrival custom fields for this report's material groups (numeric ones
-        // print their share of the group's total sample size) — same as Classic.
+        // print their share of the group's total quantity).
         if (d.CustomFields.Count > 0)
         {
             var list = d.CustomFields.OrderBy(f => f.SortOrder).ThenBy(f => f.FieldName).ToList();
@@ -212,6 +258,10 @@ public static class QualityReportPdfSoft
         }
     }
 
+    /// <summary>A numeric custom field prints its share of the material group's
+    /// TOTAL QUANTITY (Sigma arrival_item.quantity across the group's materials) --
+    /// e.g. Soft Green/Destroyed 26.00 of Qty 1540 => "26.00 (1.69%)". The
+    /// denominator is the quantity, never the sample size.</summary>
     private static string CustomVal(QualityReportData d, ArrivalCustomField cf)
     {
         var val = cf.DisplayValue;
@@ -219,7 +269,7 @@ public static class QualityReportPdfSoft
         {
             var denom = d.GroupSummaries
                 .Where(g => string.Equals(g.MaterialGroup, cf.MaterialGroup, StringComparison.OrdinalIgnoreCase))
-                .Sum(g => g.SumSampleSize);
+                .Sum(g => g.SumPoQuantity);
             if (denom > 0)
                 val += $" ({Fmt.Dec2(cf.NumericValue.Value / denom * 100m)}%)";
         }
@@ -278,7 +328,8 @@ public static class QualityReportPdfSoft
             ThreeColumns(gc.Item(),
                 new() { ("Product", V(g.MajorCategory)), ("Brand", V(g.Brand)), ("Variety", V(g.Variety)), ("Grade", V(g.Grade)) },
                 new() { ("Material Group", V(g.MaterialGroup)), ("Count of Materials", g.MaterialCount.ToString()), ("Samples", $"{g.SampleCount} Cartons") },
-                new() { ("Sample Size", $"{g.SumSampleSize} {V(g.SampleUnit)}"), ("PO Quantity", Fmt.Dec2(g.SumPoQuantity)) });
+                new() { ("Sample Size", $"{g.SumSampleSize} {V(g.SampleUnit)}"), ("PO Quantity", Fmt.Dec2(g.SumPoQuantity)),
+                        ("Tara Weight", string.IsNullOrEmpty(g.TaraWeightText) ? "—" : $"{g.TaraWeightText} kg") });
 
             var readings = SummaryReadingFilter.VisibleSummaryReadings(g.Readings);
             if (readings.Count > 0)
@@ -306,12 +357,16 @@ public static class QualityReportPdfSoft
             mc.Item().Border(0.5f).BorderColor(Border).Background(BandBg)
                 .PaddingVertical(3).PaddingHorizontal(5).Text(heading).Bold().FontColor(Ink);
 
-            var headerCells = new List<(string, string)>
-            {
-                ("Sample Size", SampleSizeText(m, sampleSizes, unit)),
-                ("Size",        Dash(m?.MaterialSize)),
-                ("Pack Type",   Dash(m?.PackType)),
-            };
+            var headerCells = new List<(string, string)>();
+            // Sample Size at material level -- see MaterialSampleSizeRule. Fixed
+            // packs always show it; a banana material whose cartons disagree
+            // does not, because one number would misrepresent the inspection.
+            if (MaterialSampleSizeRule.ShowAtMaterialLevel(m?.MaterialGroup, sampleSizes))
+                headerCells.Add(("Sample Size", SampleSizeText(m, sampleSizes, unit)));
+            headerCells.Add(("Size", Dash(m?.MaterialSize)));
+            // Tara is recorded once per material (Material details card), so it
+            // belongs on the material card rather than on each sample.
+            headerCells.Add(("Tara Weight", m?.TaraWeight is > 0 ? $"{Fmt.Dec2(m.TaraWeight)} kg" : "—"));
             foreach (var hv in materialHeaderValues.OrderBy(h => h.SortOrder).ThenBy(h => h.FieldName))
             {
                 if (SummaryReadingFilter.IsHiddenReportField(hv.FieldName)) continue;
@@ -512,15 +567,79 @@ public static class QualityReportPdfSoft
         });
     }
 
+    /// <summary>
+    /// The banner on a container-rejection report. Reuses the existing muted
+    /// rose (MajorHead) on a pale tint rather than introducing a hard red: the
+    /// report's whole palette is deliberately quiet, and a siren colour here
+    /// would make every other severity signal on the page read as less urgent.
+    /// The refusal comment is printed in full and never truncated -- it is the
+    /// substance of the claim.
+    /// </summary>
+    private static void RenderRejectionBanner(IContainer c, QualityReportData d) =>
+        c.Background("#f7e6e8").Border(0.8f).BorderColor(MajorHead)
+         .BorderLeft(3).PaddingVertical(6).PaddingHorizontal(8)
+         .Column(col =>
+         {
+             col.Spacing(3);
+             col.Item().AlignCenter()
+                .Text(V(d.RejectionHeader).ToUpperInvariant())
+                .ExtraBold().FontSize(13).FontColor(MajorHead);
+
+             var by   = V(d.QualityOrder.ClosedBy);
+             var when = d.QualityOrder.ClosedAt?.ToLocalTime().ToString("dd/MM/yyyy") ?? "";
+             col.Item().AlignCenter()
+                .Text($"Recorded by {by} on {when}").FontSize(7.5f).FontColor(Muted);
+
+             if (!string.IsNullOrWhiteSpace(d.RejectionComment))
+                 col.Item().PaddingTop(2).Text(d.RejectionComment).FontSize(8).FontColor(Ink);
+
+             col.Item().Text("No inspection was carried out: the container was refused on arrival.")
+                .Italic().FontSize(7.5f).FontColor(Muted);
+         });
+
     // ===== Reusable visual pieces ==========================================
+    // A section heading. Closed top and bottom by an Accent rule, with real
+    // space above it, so the eye can see where one section of the report ends
+    // and the next begins -- previously the only boundary was the tinted label
+    // itself and a flat 7pt gap, which read as continuous text when scanning.
     private static void Band(IContainer c, string title) =>
-        c.Column(col =>
+        c.PaddingTop(9).Column(col =>
         {
+            col.Item().Height(1.4f).Background(Accent);
             col.Item().Background(BandBg).Border(0.5f).BorderColor(Border)
                 .PaddingVertical(3).PaddingHorizontal(6)
                 .Text(title.ToUpperInvariant()).Bold().FontSize(9.5f).FontColor(Accent);
             col.Item().Height(1.4f).Background(Accent);
         });
+
+    /// <summary>
+    /// A PART heading, one weight above <see cref="Band"/>.
+    ///
+    /// The report is really two documents bound together: a summary a manager
+    /// reads, and a per-sample record an inspector checks. Giving both the same
+    /// light section band as "Shipment Details" made all four look like peers,
+    /// and the eye slid straight past the boundary. A solid reversed bar with a
+    /// line saying what the part contains stops it.
+    /// </summary>
+    private static void PartBand(IContainer c, string title, string caption) =>
+        c.PaddingTop(14).Column(col =>
+        {
+            col.Item().Background(Accent).PaddingVertical(5).PaddingHorizontal(8)
+               .Text(title.ToUpperInvariant()).Bold().FontSize(11).FontColor("#ffffff");
+            col.Item().Background(BandBg).BorderBottom(1.4f).BorderColor(Accent)
+               .PaddingVertical(2.5f).PaddingHorizontal(8)
+               .Text(caption).Italic().FontSize(7).FontColor(Muted);
+        });
+
+    /// <summary>
+    /// One block of the report as a card: light tint, an Accent rule down the
+    /// left edge, and breathing room around it. Used for each material-group
+    /// summary and each material's run of samples, so "where does this material
+    /// end and the next begin" is answerable at a glance.
+    /// </summary>
+    private static IContainer Card(IContainer c) =>
+        c.PaddingTop(4).Background(CardBg).BorderLeft(2).BorderColor(Accent)
+         .PaddingVertical(5).PaddingLeft(6).PaddingRight(4);
 
     private static void ThreeColumns(IContainer c,
         List<(string, string)> a, List<(string, string)> b, List<(string, string)> d) =>
@@ -573,12 +692,23 @@ public static class QualityReportPdfSoft
         {
             t.ColumnsDefinition(cd => { cd.RelativeColumn(3); cd.ConstantColumn(34); cd.ConstantColumn(42); });
 
+            // The colour an administrator set on Admin -> Defect Categories,
+            // which that screen already promises is "used for the section banner
+            // in the form and PDF". It was loaded into the section and then
+            // ignored here: the fill was chosen by string-matching the category
+            // name for "Major", so every other category -- Critical, Minor,
+            // Other -- printed the same amber whatever was configured.
             var isMajor  = s.CategoryName.Trim().StartsWith("Major", StringComparison.OrdinalIgnoreCase);
-            var headFill = isMajor ? MajorHead : MinorHead;
+            var headFill = SummaryReadingFilter.IsColour(s.ColorHex)
+                            ? s.ColorHex!
+                            : (isMajor ? MajorHead : MinorHead);
+            // Never hardcode white on a configured colour: the seeded Minor is
+            // #ffc107, on which white is unreadable.
+            var headText = SummaryReadingFilter.OnFill(headFill, dark: Ink, light: White);
 
             var head = t.Cell().ColumnSpan(3).Background(headFill).Border(0.5f).BorderColor(Border)
                 .PaddingVertical(2).PaddingHorizontal(4)
-                .Text($"{V(s.CategoryName)} Defects").FontColor(White);
+                .Text($"{V(s.CategoryName)} Defects").FontColor(headText);
             if (isMajor) head.ExtraBold().FontSize(8.5f); else head.Bold().FontSize(8);
 
             Cell(t.Cell(), head: true).Text("Defect").FontSize(7).FontColor(Muted);
@@ -664,13 +794,12 @@ public static class QualityReportPdfSoft
 }
 
 /// <summary>
-/// Picks the QC-report renderer for the configured layout version. Called by
-/// ReportsController in place of a direct QualityReportPdf.Build.
+/// Renders the QC report. Soft is the permanent layout — the Classic renderer
+/// (<see cref="QualityReportPdf"/>) is kept for reference only and is no longer
+/// reachable from the app. Called by ReportsController.
 /// </summary>
 public static class QualityReportRenderer
 {
     public static byte[] Build(QualityReportData d)
-        => string.Equals(d.LayoutVersion, ReportLayouts.Soft, StringComparison.OrdinalIgnoreCase)
-            ? QualityReportPdfSoft.Build(d)
-            : QualityReportPdf.Build(d);
+        => QualityReportPdfSoft.Build(d);
 }

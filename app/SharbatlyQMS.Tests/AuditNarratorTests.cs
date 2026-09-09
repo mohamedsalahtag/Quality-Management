@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Models;
+﻿using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services;
 using Xunit;
 
@@ -177,8 +177,11 @@ public class AuditNarratorTests
     }
 
     [Theory]
-    [InlineData(ActionCodes.Approved,     "approved the claim on QO-2026-000442.")]
-    [InlineData(ActionCodes.ClaimRequest, "raised a claim on QO-2026-000442.")]
+    // The verbs say "claim notification", not "claim": raising one is a
+    // notification that a claim may be needed, and calling it a claim outright
+    // read as a decision nobody had taken yet.
+    [InlineData(ActionCodes.Approved,     "marked the claim notification reviewed on QO-2026-000442.")]
+    [InlineData(ActionCodes.ClaimRequest, "raised a claim notification on QO-2026-000442.")]
     public void Sentence_does_not_say_the_claim_twice(string action, string expectedTail)
     {
         // "approved the claim on" + "the claim on QO-…" produced "approved the

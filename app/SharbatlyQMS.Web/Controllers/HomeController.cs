@@ -1,10 +1,12 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Models.Security;
 using SharbatlyQMS.Web.Security;
 using SharbatlyQMS.Web.Services;
+using SharbatlyQMS.Web.ViewModels;
+using SharbatlyQMS.Web.Extensions;
 
 namespace SharbatlyQMS.Web.Controllers;
 
@@ -23,9 +25,13 @@ public class HomeController : Controller
     }
 
     [RequireScreen(Screens.Dashboard, Seed.Everyone, "Open the dashboard")]
-    public async Task<IActionResult> Index(CancellationToken ct)
+    public async Task<IActionResult> Index([FromQuery] DashboardFilter filter, CancellationToken ct)
     {
-        var vm = await _dashboard.GetSummaryAsync(ct);
+        // The user's plant entitlement bounds everything; the filter can only
+        // narrow it further (the service drops an out-of-scope plant rather
+        // than refusing, so a shared link degrades instead of 403-ing).
+        var vm = await _dashboard.GetSummaryAsync(filter ?? new DashboardFilter(),
+                                                 User.GetPlantScope(), ct);
         // Was User.IsInRole(SiteAdmin). The dashboard's admin panel is really
         // "may this person administer settings", which is now a permission a
         // composed role can hold without being the built-in administrator.

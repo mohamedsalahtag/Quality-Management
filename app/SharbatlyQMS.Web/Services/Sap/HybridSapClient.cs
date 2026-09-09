@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using Dapper;
 using Microsoft.Data.SqlClient;
 
@@ -51,22 +51,27 @@ public class HybridSapClient : ISapClient
     }
 
     public async Task<int> FetchSinceAsync(
-        DateOnly sinceDocDate,
+        DateOnly sinceArrivalDate,
         Func<IReadOnlyList<SapShipmentRow>, CancellationToken, Task> onPage,
         CancellationToken ct = default)
     {
         var sap = await _settings.GetSapConfigAsync();
         if (string.IsNullOrWhiteSpace(sap.ContainerSearchUrl))
-            return await _stub.FetchSinceAsync(sinceDocDate, onPage, ct);
+            return await _stub.FetchSinceAsync(sinceArrivalDate, onPage, ct);
 
         // OData $filter: bulk fetch only PO lines that actually have a
         // container number. The CDS view LEFT JOINs ekes (purchase order
         // confirmations), so a PO header with no EKES record produces a
         // row with Container = '' -- those carry no QC value and would
-        // flood the cache. Doc_Date filters the start cutoff (v4 form for
-        // Edm.Date; v2 `datetime'...'` is rejected by SRVD_A2X with
-        // /IWCOR/CX_OD_EXPR_PARSER_ERROR).
-        var filter = $"Doc_Date ge {sinceDocDate:yyyy-MM-dd} and Container ne ''";
+        // flood the cache. The date cutoff uses the v4 form for Edm.Date;
+        // the v2 `datetime'...'` form is rejected by SRVD_A2X with
+        // /IWCOR/CX_OD_EXPR_PARSER_ERROR.
+        //
+        // Receive_Date, not Doc_Date: the cutoff is about when a container
+        // ARRIVED, not when its purchase order was raised. Filtering on the PO
+        // date meant a container arriving today against an old PO fell outside
+        // the window and never reached the pending list.
+        var filter = $"Receive_Date ge {sinceArrivalDate:yyyy-MM-dd} and Container ne ''";
         var url = sap.ContainerSearchUrl + (sap.ContainerSearchUrl.Contains('?') ? "&" : "?")
                   + "$filter=" + Uri.EscapeDataString(filter);
 
@@ -83,7 +88,7 @@ public class HybridSapClient : ISapClient
         if (!ok)
             throw new InvalidOperationException("SAP container fetch-since failed: " + message);
 
-        _log.LogInformation("SAP container fetch-since(>= {Date}) returned {Count} row(s)", sinceDocDate, total);
+        _log.LogInformation("SAP container fetch-since(>= {Date}) returned {Count} row(s)", sinceArrivalDate, total);
         return total;
     }
 

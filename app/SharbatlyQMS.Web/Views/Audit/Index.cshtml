@@ -1,9 +1,9 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.Services
 @using SharbatlyQMS.Web.ViewModels
 @model AuditListVm
 @{
-    ViewData["Title"] = "Activity log";
+    ViewData["Title"] = Loc["Activity log"];
     var f    = Model.Filter;
     var opts = ViewBag.FilterOptions as AuditFilterOptions ?? new AuditFilterOptions();
     var canExport = Perms.Can(Perm.Admin.AuditExport);
@@ -60,18 +60,18 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0">
         <i class="bi bi-journal-text me-1 text-primary"></i>Activity log
-        <small class="text-muted fs-6 fw-normal ms-2">Who changed what, in plain words</small>
+        <small class="text-muted fs-6 fw-normal ms-2">@Loc["Who changed what, in plain words"]</small>
     </h1>
     @if (canExport)
     {
         <a class="btn btn-outline-success" href="@(Url.Action("Export") + BuildFilterQuery(false))">
-            <i class="bi bi-file-earmark-excel me-1"></i>Export to Excel
+            <i class="bi bi-file-earmark-excel me-1"></i>@Loc["Export to Excel"]
         </a>
     }
 </div>
 
 <ul class="nav nav-tabs mb-3">
-    <li class="nav-item"><a class="nav-link active" asp-action="Index"><i class="bi bi-journal-text me-1"></i>Activity log</a></li>
+    <li class="nav-item"><a class="nav-link active" asp-action="Index"><i class="bi bi-journal-text me-1"></i>@Loc["Activity log"]</a></li>
     <li class="nav-item"><a class="nav-link" asp-action="Security"><i class="bi bi-shield-lock me-1"></i>Users &amp; security</a></li>
 </ul>
 
@@ -90,31 +90,31 @@
         <span class="filter-chips" data-filter-chips></span>
         @if (f.Any)
         {
-            <a asp-action="Index" class="btn btn-sm btn-link text-decoration-none">Clear all</a>
+            <a asp-action="Index" class="btn btn-sm btn-link text-decoration-none">@Loc["Clear all"]</a>
         }
     </div>
 
     <div class="collapse filter-body" id="actFilters" data-filter-body>
         <form method="get" class="p-3" data-filter-form>
             @* --- the record you are asking about ------------------------- *@
-            <div class="small text-muted mb-1">Which records</div>
+            <div class="small text-muted mb-1">@Loc["Which records"]</div>
             <div class="row g-2 align-items-end">
                 <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">QC number</label>
+                    <label class="form-label small mb-1">@Loc["QC number"]</label>
                     <input name="qoNo" value="@f.QoNo" data-chip="QC number"
                            class="form-control form-control-sm"
-                           placeholder="QO-2026-000353 or 000353" autocomplete="off" />
+                           placeholder='@Loc["QO-2026-000353 or 000353"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">Container</label>
+                    <label class="form-label small mb-1">@Loc["Container"]</label>
                     <input name="container" value="@f.Container" data-chip="Container"
                            class="form-control form-control-sm"
-                           placeholder="part of the number is enough" autocomplete="off" />
+                           placeholder='@Loc["part of the number is enough"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-4">
-                    <label class="form-label small mb-1">Supplier</label>
+                    <label class="form-label small mb-1">@Loc["Supplier"]</label>
                     <select name="vendor" class="form-select form-select-sm" data-chip="Supplier">
-                        <option value="">Any supplier</option>
+                        <option value="">@Loc["Any supplier"]</option>
                         @foreach (var v in opts.Vendors)
                         {
                             <option value="@v" selected="@Sel(v, f.Vendor)">@v</option>
@@ -122,9 +122,9 @@
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Plant</label>
+                    <label class="form-label small mb-1">@Loc["Plant"]</label>
                     <select name="plant" class="form-select form-select-sm" data-chip="Plant">
-                        <option value="">Any plant</option>
+                        <option value="">@Loc["Any plant"]</option>
                         @foreach (var pl in opts.Plants)
                         {
                             <option value="@pl" selected="@Sel(pl, f.Plant)">@pl</option>
@@ -138,14 +138,14 @@
             </div>
 
             @* --- who and when -------------------------------------------- *@
-            <div class="small text-muted mb-1">Who and when</div>
+            <div class="small text-muted mb-1">@Loc["Who and when"]</div>
             <div class="row g-2 align-items-end">
                 <div class="col-12 col-md-4">
-                    <label class="form-label small mb-1">Person</label>
+                    <label class="form-label small mb-1">@Loc["Person"]</label>
                     <input name="users" data-chip="Person" class="form-control form-control-sm"
                            value="@(f.Users != null ? string.Join(", ", f.Users) : "")"
                            list="audit-actors"
-                           placeholder="username, or several separated by commas" autocomplete="off" />
+                           placeholder='@Loc["username, or several separated by commas"]' autocomplete="off" />
                     <datalist id="audit-actors">
                         @foreach (var a in opts.Actors) { <option value="@a"></option> }
                     </datalist>
@@ -154,11 +154,11 @@
                    rendered local time, so rows near midnight looked like they fell
                    outside a range that visibly contained them. *@
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">From</label>
+                    <label class="form-label small mb-1">@Loc["From"]</label>
                     <input name="from" type="date" data-chip="From" class="form-control form-control-sm" value="@DateStr(f.From)" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">To</label>
+                    <label class="form-label small mb-1">@Loc["To"]</label>
                     <input name="to" type="date" data-chip="To" class="form-control form-control-sm" value="@DateStr(f.To)" />
                 </div>
                 <div class="col-12 col-md-4">
@@ -167,7 +167,7 @@
                                value="true" checked="@f.ShowTechnical"
                                data-chip="Detail" data-chip-on="per-sample entries shown" />
                         <label class="form-check-label small" for="a-tech">
-                            Include per-sample detail
+                            @Loc["Include per-sample detail"]
                             <span class="text-muted">(readings, defects, sample edits &mdash; about 9 in every 10 entries)</span>
                         </label>
                     </div>
@@ -177,7 +177,7 @@
             @* --- what kind of thing ------------------------------------- *@
             <div class="row g-3 mt-1">
                 <div class="col-12 col-lg-7">
-                    <div class="small text-muted mb-1">What changed</div>
+                    <div class="small text-muted mb-1">@Loc["What changed"]</div>
                     <div class="chip-group">
                         @foreach (var t in workTypes)
                         {
@@ -187,7 +187,7 @@
                             <label class="btn btn-sm btn-outline-secondary" for="et-@t">@AuditNarrator.EntityLabel(t)</label>
                         }
                     </div>
-                    <div class="small text-muted mt-2 mb-1">Administration</div>
+                    <div class="small text-muted mt-2 mb-1">@Loc["Administration"]</div>
                     <div class="chip-group">
                         @foreach (var t in adminTypes)
                         {
@@ -199,7 +199,7 @@
                     </div>
                 </div>
                 <div class="col-12 col-lg-5">
-                    <div class="small text-muted mb-1">Kind of change</div>
+                    <div class="small text-muted mb-1">@Loc["Kind of change"]</div>
                     <div class="chip-group">
                         @foreach (var a in allActions)
                         {
@@ -214,13 +214,13 @@
 
             <div class="d-flex gap-2 mt-3 align-items-center">
                 <button type="submit" class="btn btn-primary btn-sm" data-filter-apply>
-                    <i class="bi bi-funnel me-1"></i>Apply filters
+                    <i class="bi bi-funnel me-1"></i>@Loc["Apply filters"]
                 </button>
-                <a asp-action="Index" class="btn btn-outline-secondary btn-sm">Clear</a>
+                <a asp-action="Index" class="btn btn-outline-secondary btn-sm">@Loc["Clear"]</a>
                 @if (!f.ShowTechnical && (f.EntityTypes == null || f.EntityTypes.Length == 0))
                 {
                     <span class="text-muted small">
-                        <i class="bi bi-funnel-fill me-1"></i>Per-sample entries are hidden.
+                        <i class="bi bi-funnel-fill me-1"></i>@Loc["Per-sample entries are hidden."]
                     </span>
                 }
             </div>
@@ -235,8 +235,8 @@
         <table class="table table-hover align-middle mb-0">
             <thead class="table-light">
                 <tr>
-                    <th style="width:10rem">When</th>
-                    <th>What happened</th>
+                    <th style="width:10rem">@Loc["When"]</th>
+                    <th>@Loc["What happened"]</th>
                     <th style="width:3rem"></th>
                 </tr>
             </thead>
@@ -245,7 +245,7 @@
                 {
                     <tr><td colspan="3" class="text-center text-muted py-4">
                         No entries match these filters.
-                        <a asp-action="Index" class="ms-1">Clear them</a>
+                        <a asp-action="Index" class="ms-1">@Loc["Clear them"]</a>
                     </td></tr>
                 }
                 else
@@ -312,20 +312,20 @@
                                     }
                                     else
                                     {
-                                        <div class="small text-muted mb-2">No field-level differences were recorded.</div>
+                                        <div class="small text-muted mb-2">@Loc["No field-level differences were recorded."]</div>
                                     }
 
                                     @* Full values are no longer trapped in a title tooltip you
                                        cannot copy from. *@
                                     <details>
-                                        <summary class="small text-muted">Technical detail</summary>
+                                        <summary class="small text-muted">@Loc["Technical detail"]</summary>
                                         <div class="row g-2 mt-1">
                                             <div class="col-12 col-md-6">
-                                                <div class="small text-muted">Before</div>
+                                                <div class="small text-muted">@Loc["Before"]</div>
                                                 <pre class="audit-json">@(e.OldValuesJson ?? "(none)")</pre>
                                             </div>
                                             <div class="col-12 col-md-6">
-                                                <div class="small text-muted">After</div>
+                                                <div class="small text-muted">@Loc["After"]</div>
                                                 <pre class="audit-json">@(e.NewValuesJson ?? "(none)")</pre>
                                             </div>
                                         </div>

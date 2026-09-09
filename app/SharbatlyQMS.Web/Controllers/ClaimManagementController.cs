@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using SharbatlyQMS.Web.Extensions;
@@ -47,14 +47,14 @@ public class ClaimManagementController : Controller
     /// cut-over, whatever its status. Same view, same filters; the tab strip
     /// switches between them. Kept as its own action rather than a query-string
     /// flag so the two lists get their own URLs and cannot be mixed.</summary>
-    [RequireScreen(Screens.Claims, Seed.Everyone, "Open Claims")]
+    [RequireScreen(Screens.Claims, Seed.ManagerOrClaimManagerOrAdmin, "Open Claims")]
     public Task<IActionResult> Archived([FromQuery] ClaimListFilter filter)
     {
         filter.Archived = true;
         return ListAsync(filter);
     }
 
-    [RequireScreen(Screens.Claims, Seed.Everyone, "Open Claims")]
+    [RequireScreen(Screens.Claims, Seed.ManagerOrClaimManagerOrAdmin, "Open Claims")]
     public Task<IActionResult> Index([FromQuery] ClaimListFilter filter)
     {
         filter.Archived = false;
@@ -160,9 +160,9 @@ public class ClaimManagementController : Controller
     // ---- QM actions (Manager or SiteAdmin) ------------------------
 
     [HttpPost, ValidateAntiForgeryToken]
-    [RequirePermission(Perm.Claims.MarkClaimRequest, Seed.ManagerOrAdmin, "Mark as claim request")]
+    [RequirePermission(Perm.Claims.MarkClaimRequest, Seed.ManagerOrAdmin, "Mark as claim notification request")]
     public Task<IActionResult> MarkClaimRequest(long id, string note)
-        => ActAsync(id, note, _claims.MarkClaimRequestAsync, "Marked as Claim Request.");
+        => ActAsync(id, note, _claims.MarkClaimRequestAsync, "Marked as Claim Notification Request.");
 
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Claims.MarkPassedQc, Seed.ManagerOrAdmin, "Mark as passed QC")]
@@ -172,14 +172,14 @@ public class ClaimManagementController : Controller
     // ---- CM actions (ClaimManager or SiteAdmin) -------------------
 
     [HttpPost, ValidateAntiForgeryToken]
-    [RequirePermission(Perm.Claims.Approve, Seed.ClaimManagerOrAdmin, "Approve a claim")]
+    [RequirePermission(Perm.Claims.Approve, Seed.ClaimManagerOrAdmin, "Mark a claim notification reviewed")]
     public Task<IActionResult> Approve(long id, string note)
-        => ActAsync(id, note, _claims.ApproveAsync, "Claim approved.");
+        => ActAsync(id, note, _claims.ApproveAsync, "Claim notification marked as reviewed.");
 
     [HttpPost, ValidateAntiForgeryToken]
-    [RequirePermission(Perm.Claims.Hold, Seed.ClaimManagerOrAdmin, "Put a claim on hold")]
+    [RequirePermission(Perm.Claims.Hold, Seed.ClaimManagerOrAdmin, "Put a claim notification on hold")]
     public Task<IActionResult> Hold(long id, string note)
-        => ActAsync(id, note, _claims.HoldAsync, "Claim placed on hold.");
+        => ActAsync(id, note, _claims.HoldAsync, "Claim notification placed on hold.");
 
     // ---- Either Manager/ClaimManager/SiteAdmin --------------------
 

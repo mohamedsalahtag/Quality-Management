@@ -1,8 +1,14 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.Services
 @model IReadOnlyList<PendingPickupRow>
 @{
-    ViewData["Title"] = "Pending Containers";
+    // One view, two modes. archived=true renders the ARCHIVE: same filters,
+    // same pager, same columns -- only containers that were filed away, each
+    // with a Restore action where Create normally sits.
+    var isArchive     = ViewBag.Archived as bool? ?? false;
+    var archivedCount = ViewBag.ArchivedCount as int? ?? 0;
+    var canArchive    = Perms.Can(Perm.Arrivals.Archive);
+    ViewData["Title"] = isArchive ? "Archived Containers" : "Pending Containers";
     var container   = ViewBag.Container  as string;
     var bol         = ViewBag.Bol        as string;
     var po          = ViewBag.Po         as string;
@@ -13,6 +19,8 @@
     var material    = ViewBag.Material   as string;
     var fromDate    = ViewBag.From       as DateOnly?;
     var toDate      = ViewBag.To         as DateOnly?;
+    var arrFromDate = ViewBag.ArrFrom    as DateOnly?;
+    var arrToDate   = ViewBag.ArrTo      as DateOnly?;
     string Dstr(DateOnly? d) => d?.ToString("yyyy-MM-dd") ?? "";
     bool filtered = !string.IsNullOrWhiteSpace(container)
                     || !string.IsNullOrWhiteSpace(bol)
@@ -20,6 +28,7 @@
                     || !string.IsNullOrWhiteSpace(supplier)
                     || !string.IsNullOrWhiteSpace(material)
                     || fromDate.HasValue || toDate.HasValue
+                    || arrFromDate.HasValue || arrToDate.HasValue
                     || !string.IsNullOrWhiteSpace(plant)
                     || !string.IsNullOrWhiteSpace(poType)
                     || !string.IsNullOrWhiteSpace(storageLoc);
@@ -29,7 +38,9 @@
     var storageOptions   = ViewBag.StorageLocOptions as IReadOnlyList<PlantStorageLoc> ?? Array.Empty<PlantStorageLoc>();
     var plantScopeLocked = ViewBag.PlantScopeLocked  as string;
     // QC Manager / Admin: reassign a pending container to another plant.
-    var canOverridePlant = Perms.Can(Perm.Arrivals.OverridePlant);
+    // Not offered in the archive -- moving a container nobody is working on
+    // says nothing; restore it first.
+    var canOverridePlant = Perms.Can(Perm.Arrivals.OverridePlant) && !isArchive;
     var allPlants        = Codes.Plants;
     // Server-side paging state.
     var pageNo    = ViewBag.Page      as int?  ?? 1;
@@ -51,9 +62,12 @@
         Add("material", material);
         Add("from", Dstr(fromDate));
         Add("to", Dstr(toDate));
+        Add("arrFrom", Dstr(arrFromDate));
+        Add("arrTo", Dstr(arrToDate));
         Add("plant", plant);
         Add("storageLoc", storageLoc);
         Add("poType", poType);
+        if (isArchive) d["archived"] = "true";
         d["page"]     = p.ToString();
         d["pageSize"] = size.ToString();
         return d;
@@ -62,16 +76,58 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="h3 mb-0">
-        <i class="bi bi-inbox me-1"></i>Pending Containers
-        <span class="badge bg-secondary ms-2">@totalCount</span>
-        <small class="text-muted fs-6 fw-normal ms-2">SAP containers without a QMS Arrival yet.</small>
+        @if (isArchive)
+        {
+            <i class="bi bi-archive me-1"></i><text>Archived Containers</text>
+            <span class="badge bg-secondary ms-2">@totalCount</span>
+            <small class="text-muted fs-6 fw-normal ms-2">@Loc["Filed away out of the pending list. Restore any of them."]</small>
+        }
+        else
+        {
+            <i class="bi bi-inbox me-1"></i><text>Pending Containers</text>
+            <span class="badge bg-secondary ms-2">@totalCount</span>
+            <small class="text-muted fs-6 fw-normal ms-2">@Loc["SAP containers without a QMS Arrival yet."]</small>
+        }
     </h1>
     <div class="d-flex gap-2 flex-wrap">
+        @* Pending / Archived switch. Always visible (not gated on canArchive) --
+           anyone looking for a container that "disappeared" needs to be able to
+           find it; only archiving and restoring are Manager/Admin. *@
+        <div class="btn-group" role="group" aria-label='@Loc["Pending or archived"]'>
+            <a asp-action="Pending" class="btn @(isArchive ? "btn-outline-secondary" : "btn-secondary")">
+                <i class="bi bi-inbox me-1"></i>@Loc["Pending"]
+            </a>
+            <a asp-action="Pending" asp-route-archived="true"
+               class="btn @(isArchive ? "btn-secondary" : "btn-outline-secondary")">
+                <i class="bi bi-archive me-1"></i>Archived
+                @if (archivedCount > 0)
+                {
+                    <span class="badge bg-light text-dark ms-1">@archivedCount</span>
+                }
+            </a>
+        </div>
+        @if (canArchive)
+        {
+            @if (isArchive)
+            {
+                <button type="button" class="btn btn-outline-success" data-bs-toggle="modal" data-bs-target="#restoreRangeModal"
+                        title="Put a whole arrival-date range back into the pending list.">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Restore by date"]
+                </button>
+            }
+            else
+            {
+                <button type="button" class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#archiveRangeModal"
+                        title="File containers that arrived before a given date out of this list. Nothing is deleted — the archive can restore them.">
+                    <i class="bi bi-archive me-1"></i>@Loc["Archive by date"]
+                </button>
+            }
+        }
         <form asp-action="RetrieveLatestContainers" method="post" class="m-0">
             @Html.AntiForgeryToken()
             <button type="submit" class="btn btn-success"
                     title="Fire an immediate SAP fetch using the admin-configured start date. Runs in the background; refresh after a moment.">
-                <i class="bi bi-cloud-download me-1"></i>Retrieve latest containers
+                <i class="bi bi-cloud-download me-1"></i>@Loc["Retrieve latest containers"]
             </button>
         </form>
         @* Columns menu, rendered here rather than injected by columntoggle.js so
@@ -88,10 +144,10 @@
         </div>
         <div class="btn-group">
             <a asp-action="Index" class="btn btn-outline-secondary">
-                <i class="bi bi-arrow-left me-1"></i>Back to arrivals
+                <i class="bi bi-arrow-left me-1"></i>@Loc["Back to arrivals"]
             </a>
             <a asp-action="Search" class="btn btn-outline-primary">
-                <i class="bi bi-search me-1"></i>Search SAP directly
+                <i class="bi bi-search me-1"></i>@Loc["Search SAP directly"]
             </a>
         </div>
     </div>
@@ -111,13 +167,13 @@
                 var runningTrig = string.Equals(pullStatus.RunningTriggerSource, "Manual", StringComparison.OrdinalIgnoreCase) ? "Manual" : "Auto";
                 <div class="text-info">
                     <i class="bi bi-arrow-repeat me-1"></i>
-                    <strong>Currently retrieving…</strong>
+                    <strong>@Loc["Currently retrieving…"]</strong>
                     <span class="text-muted">(@runningTrig, started @pullStatus.RunningSince.Value.ToLocalTime().ToString("HH:mm:ss"), elapsed @(elapsedSec / 60) m @(elapsedSec % 60) s)</span>
                 </div>
                 <span class="text-muted">|</span>
             }
             <div>
-                <strong>Last successful retrieval:</strong>
+                <strong>@Loc["Last successful retrieval:"]</strong>
                 <span class="@(pullStatus.LastRunUtc.HasValue ? "" : "text-muted")">
                     @(pullStatus.LastRunUtc.HasValue ? pullStatus.LastRunUtc.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") : "never")
                 </span>
@@ -134,7 +190,7 @@
             @if (pullStatus.IsRunning)
             {
                 <a asp-action="Pending" class="btn btn-sm btn-outline-info ms-auto">
-                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                    <i class="bi bi-arrow-clockwise me-1"></i>@Loc["Refresh"]
                 </a>
             }
         </div>
@@ -144,7 +200,7 @@
 @* ---- Filter form (collapsible) ----
    Free-text contains-match on Container / BOL / PO / Supplier / Material;
    exact-match on the SAP-categorical dropdowns (Plant, PO Type, Storage Loc);
-   a PO-date (doc_date) range. All filters live inside a Bootstrap `collapse`
+   an arrival-date range. All filters live inside a Bootstrap `collapse`
    panel to save vertical space; the panel opens automatically when any filter
    is active so a bookmarked/filtered view isn't hidden.
    The Storage Loc dropdown is plant-scoped via `data-plant` on each option
@@ -168,38 +224,43 @@
     <div class="collapse @(filtered ? "show" : "")" id="pendingFilters">
     <div class="card card-body mt-2">
 <form method="get" class="row g-2 mb-0">
+    @* Filtering must not drop you back into the pending list. *@
+    @if (isArchive)
+    {
+        <input type="hidden" name="archived" value="true" />
+    }
     @* Container and BOL gave up a column each so Supplier could have two.
        All three are contains-matches, so a partial value is enough and the
        narrower boxes still show what you typed. *@
     <div class="col-6 col-md-1">
-        <label class="form-label small mb-1">Container</label>
+        <label class="form-label small mb-1">@Loc["Container"]</label>
         <input type="text" name="container" value="@container" class="form-control form-control-sm"
-               placeholder="CMAU12…" title="Container number — any part of it" autocomplete="off" />
+               placeholder='@Loc["CMAU12…"]' title="Container number — any part of it" autocomplete="off" />
     </div>
     <div class="col-6 col-md-1">
-        <label class="form-label small mb-1">BOL</label>
+        <label class="form-label small mb-1">@Loc["BOL"]</label>
         <input type="text" name="bol" value="@bol" class="form-control form-control-sm"
-               placeholder="MSCUA…" title="Bill of lading — any part of it" autocomplete="off" />
+               placeholder='@Loc["MSCUA…"]' title="Bill of lading — any part of it" autocomplete="off" />
     </div>
     <div class="col-6 col-md-1">
-        <label class="form-label small mb-1">PO</label>
+        <label class="form-label small mb-1">@Loc["PO"]</label>
         <input type="text" name="po" value="@po" class="form-control form-control-sm"
-               placeholder="EBELN" title="Purchase order number — any part of it" autocomplete="off" />
+               placeholder='@Loc["EBELN"]' title="Purchase order number — any part of it" autocomplete="off" />
     </div>
     <div class="col-6 col-md-2">
-        <label class="form-label small mb-1">Supplier</label>
+        <label class="form-label small mb-1">@Loc["Supplier"]</label>
         <input type="text" name="supplier" value="@supplier" class="form-control form-control-sm"
-               placeholder="part of the name" title="Supplier name or number — any part of it, no need to type it in full"
+               placeholder='@Loc["part of the name"]' title="Supplier name or number — any part of it, no need to type it in full"
                autocomplete="off" />
     </div>
     <div class="col-6 col-md-2">
-        <label class="form-label small mb-1">Material</label>
+        <label class="form-label small mb-1">@Loc["Material"]</label>
         <input type="text" name="material" value="@material" class="form-control form-control-sm"
-               placeholder="code or description" title="Material number or description — any part of it"
+               placeholder='@Loc["code or description"]' title="Material number or description — any part of it"
                autocomplete="off" />
     </div>
     <div class="col-md-2">
-        <label class="form-label small mb-1">Plant</label>
+        <label class="form-label small mb-1">@Loc["Plant"]</label>
         @if (plantScopeLocked != null)
         {
             @* Operator is plant-scoped: forced server-side; render a locked
@@ -215,7 +276,7 @@
         else
         {
             <select name="plant" id="pending-plant-filter" data-plant-filter="pending" class="form-select form-select-sm">
-                <option value="">All plants</option>
+                <option value="">@Loc["All plants"]</option>
                 @foreach (var pl in plantOptions)
                 {
                     <option value="@pl" selected="@(string.Equals(pl, plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
@@ -224,9 +285,9 @@
         }
     </div>
     <div class="col-md-2">
-        <label class="form-label small mb-1">Storage Loc</label>
+        <label class="form-label small mb-1">@Loc["Storage Loc"]</label>
         <select name="storageLoc" id="pending-storage-filter" data-storage-filter="pending" class="form-select form-select-sm">
-            <option value="">All storage locations</option>
+            <option value="">@Loc["All storage locations"]</option>
             @foreach (var sl in storageOptions)
             {
                 <option value="@sl.Code" data-plant="@sl.Plant"
@@ -238,33 +299,38 @@
         </select>
     </div>
     <div class="col-md-1">
-        <label class="form-label small mb-1">PO type</label>
+        <label class="form-label small mb-1">@Loc["PO type"]</label>
         <select name="poType" class="form-select form-select-sm">
-            <option value="">All</option>
+            <option value="">@Loc["All"]</option>
             @foreach (var pt in poTypeOptions)
             {
                 <option value="@pt" selected="@(string.Equals(pt, poType, StringComparison.OrdinalIgnoreCase))">@Codes.PoTypeDisplay(pt)</option>
             }
         </select>
     </div>
-    @* PO-date (doc_date) range. doc_date is a SQL DATE, so no timezone dance. *@
+    @* The PO-date range is gone: this page is about when a container ARRIVED,
+       and the PO date is no longer shown anywhere on it. The service still
+       accepts from/to against doc_date for anyone with an old bookmark. *@
+    @* Arrival-date range, so the QC team can work through one day's arrivals.
+       Filters the same arrival_date the "Arr" cell displays. *@
     <div class="col-6 col-md-2">
-        <label class="form-label small mb-1">PO date from</label>
-        <input type="date" name="from" value="@Dstr(fromDate)" class="form-control form-control-sm"
-               title="Show containers with a PO date on/after this date" />
+        <label class="form-label small mb-1">@Loc["Arrival date from"]</label>
+        <input type="date" name="arrFrom" value="@Dstr(arrFromDate)" class="form-control form-control-sm"
+               title="Show containers that arrived on/after this date" />
     </div>
     <div class="col-6 col-md-2">
-        <label class="form-label small mb-1">PO date to</label>
-        <input type="date" name="to" value="@Dstr(toDate)" class="form-control form-control-sm"
-               title="Show containers with a PO date on/before this date" />
+        <label class="form-label small mb-1">@Loc["Arrival date to"]</label>
+        <input type="date" name="arrTo" value="@Dstr(arrToDate)" class="form-control form-control-sm"
+               title="Show containers that arrived on/before this date" />
     </div>
     <div class="col-md-3 d-flex align-items-end gap-2">
         <button type="submit" class="btn btn-primary btn-sm">
-            <i class="bi bi-funnel me-1"></i>Filter
+            <i class="bi bi-funnel me-1"></i>@Loc["Filter"]
         </button>
         @if (filtered)
         {
-            <a asp-action="Pending" class="btn btn-outline-secondary btn-sm">Clear</a>
+            <a asp-action="Pending" asp-route-archived="@(isArchive ? "true" : null)"
+               class="btn btn-outline-secondary btn-sm">@Loc["Clear"]</a>
         }
     </div>
 </form>
@@ -314,14 +380,13 @@
     .pending-table th:nth-child(2)  { width:  8%; }   /* BOL        */
     .pending-table th:nth-child(3)  { width:  8%; }   /* PO / STO   */
     .pending-table th:nth-child(4)  { width:  5%; }   /* Type       */
-    .pending-table th:nth-child(5)  { width:13.5%; }  /* Vendor     */
+    .pending-table th:nth-child(5)  { width:16.5%; }  /* Vendor     */
     .pending-table th:nth-child(6)  { width:  7%; }   /* Plant      */
     .pending-table th:nth-child(7)  { width:  9%; }   /* Storage    */
     .pending-table th:nth-child(8)  { width:4.5%; }   /* Lines      */
-    .pending-table th:nth-child(9)  { width:13.5%; }  /* Materials  */
-    .pending-table th:nth-child(10) { width:  9%; }   /* Dates      */
-    .pending-table th:nth-child(11) { width:  6%; }   /* Transit    */
-    .pending-table th:nth-child(12) { width:8.5%; }   /* Action     */
+    .pending-table th:nth-child(9)  { width:16.5%; }  /* Materials  */
+    .pending-table th:nth-child(10) { width:  9%; }   /* Arrival dt */
+    .pending-table th:nth-child(11) { width:8.5%; }   /* Action     */
     .pp-code                    { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     /* The secondary line under a value (STO, vendor code, "was" plant). Tight
        leading and no margin so a two-value cell costs a few pixels, not a
@@ -379,27 +444,33 @@
                data-tablekit data-no-pager data-coltoggle>
             <thead class="table-light">
                 <tr>
-                    <th data-sort data-col-key="container">Container</th>
-                    <th data-sort data-col-key="bol">BOL</th>
-                    <th data-sort data-col-key="po">PO / STO</th>
-                    <th data-sort data-col-key="type">Type</th>
-                    <th data-sort data-col-key="vendor">Vendor</th>
-                    <th data-sort data-col-key="plant">Plant</th>
-                    <th data-sort data-col-key="storage">Storage</th>
-                    <th class="text-end" data-sort="num" data-col-key="lines">Lines</th>
-                    <th data-col-key="materials">Materials</th>
-                    <th data-sort data-col-key="dates">Dates</th>
-                    <th class="text-end" data-sort="num" data-col-key="transit">Transit</th>
-                    <th class="text-end" data-col-key="action" data-col-lock>Action</th>
+                    <th data-sort data-col-key="container">@Loc["Container"]</th>
+                    <th data-sort data-col-key="bol">@Loc["BOL"]</th>
+                    <th data-sort data-col-key="po">@Loc["PO / STO"]</th>
+                    <th data-sort data-col-key="type">@Loc["Type"]</th>
+                    <th data-sort data-col-key="vendor">@Loc["Vendor"]</th>
+                    <th data-sort data-col-key="plant">@Loc["Plant"]</th>
+                    <th data-sort data-col-key="storage">@Loc["Storage"]</th>
+                    <th class="text-end" data-sort="num" data-col-key="lines">@Loc["Lines"]</th>
+                    <th data-col-key="materials">@Loc["Materials"]</th>
+                    <th data-sort data-col-key="dates">@Loc["Arrival date"]</th>
+                    <th class="text-end" data-col-key="action" data-col-lock>@Loc["Action"]</th>
                 </tr>
             </thead>
             <tbody>
             @if (Model.Count == 0)
             {
-                <tr><td colspan="12" class="text-center text-muted py-4">
+                <tr><td colspan="11" class="text-center text-muted py-4">
                     @if (filtered)
                     {
-                        <span>No pending containers match the filter. <a asp-action="Pending">Clear</a> to see all.</span>
+                        <span>
+                            No @(isArchive ? "archived" : "pending") containers match the filter.
+                            <a asp-action="Pending" asp-route-archived="@(isArchive ? "true" : null)">@Loc["Clear"]</a> to see all.
+                        </span>
+                    }
+                    else if (isArchive)
+                    {
+                        <span>@Loc["Nothing is archived. Containers you archive from the pending list land here."]</span>
                     }
                     else
                     {
@@ -432,7 +503,7 @@
                                 <span><strong>@r.Ebeln</strong></span>
                                 @if (!string.IsNullOrEmpty(r.Sto))
                                 {
-                                    <span class="pp-sub"><span class="pp-sub-label">STO</span>@r.Sto</span>
+                                    <span class="pp-sub"><span class="pp-sub-label">@Loc["STO"]</span>@r.Sto</span>
                                 }
                             </div>
                         </td>
@@ -488,7 +559,7 @@
                                         <div class="dropdown">
                                             <button type="button" class="btn btn-link btn-sm p-0 lh-1 text-secondary"
                                                     data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
-                                                    aria-label="Change plant" title="Change plant">
+                                                    aria-label='@Loc["Change plant"]' title="Change plant">
                                                 <i class="bi bi-pencil-square"></i>
                                             </button>
                                             <div class="dropdown-menu p-2" style="min-width: 15rem;">
@@ -497,7 +568,7 @@
                                                     <input type="hidden" name="containerNo" value="@r.ContainerNo" />
                                                     <input type="hidden" name="bolNo"       value="@r.BolNo" />
                                                     <input type="hidden" name="po"          value="@r.Ebeln" />
-                                                    <label class="form-label small mb-1">Move container to plant</label>
+                                                    <label class="form-label small mb-1">@Loc["Move container to plant"]</label>
                                                     <select name="plant" class="form-select form-select-sm mb-2" required>
                                                         @foreach (var pl in allPlants)
                                                         {
@@ -508,7 +579,7 @@
                                                         }
                                                     </select>
                                                     <button type="submit" class="btn btn-sm btn-primary w-100">
-                                                        <i class="bi bi-arrow-left-right me-1"></i>Move container
+                                                        <i class="bi bi-arrow-left-right me-1"></i>@Loc["Move container"]
                                                     </button>
                                                     @if (r.IsPlantOverridden)
                                                     {
@@ -521,7 +592,7 @@
                                 </div>
                                 @if (r.IsPlantOverridden && !string.IsNullOrEmpty(r.OriginalPlant))
                                 {
-                                    <span class="pp-sub"><span class="pp-sub-label">was</span>@Codes.PlantDisplay(r.OriginalPlant)</span>
+                                    <span class="pp-sub"><span class="pp-sub-label">@Loc["was"]</span>@Codes.PlantDisplay(r.OriginalPlant)</span>
                                 }
                             </div>
                         </td>
@@ -551,7 +622,7 @@
                         <td>
                             @if (firstMat == null)
                             {
-                                <span class="text-muted small fst-italic">No material lines</span>
+                                <span class="text-muted small fst-italic">@Loc["No material lines"]</span>
                             }
                             else
                             {
@@ -572,38 +643,60 @@
                         </td>
                         <td>
                             <div class="pp-stack pp-code">
+                                @* Arrival date only. The PO date was the primary
+                                   line here and is the one nobody works from --
+                                   what matters is when the container landed. *@
                                 <span>
-                                    <span class="pp-sub-label">PO</span>
-                                    @(r.DocDate?.ToString("yyyy-MM-dd") ?? "—")
-                                </span>
-                                <span class="pp-sub">
-                                    <span class="pp-sub-label">Arr</span>
+                                    <span class="pp-sub-label">@Loc["Arr"]</span>
                                     @(r.ArrivalDate?.ToString("yyyy-MM-dd") ?? "—")
                                 </span>
+                                @* Who filed it away and when — the archive's only
+                                   provenance, so it belongs next to the dates. *@
+                                @if (isArchive && r.ArchivedAt.HasValue)
+                                {
+                                    <span class="pp-sub" title="Archived by @r.ArchivedBy">
+                                        <span class="pp-sub-label">@Loc["Arch"]</span>
+                                        @r.ArchivedAt.Value.ToLocalTime().ToString("yyyy-MM-dd")
+                                    </span>
+                                }
                             </div>
                         </td>
-                        <td class="text-end pp-code">
-                            @* Days in transit, straight from SAP. tablekit's
-                               numeric sort strips the unit, so "12 d" sorts. *@
-                            @if (r.TransitDays.HasValue)
+                        <td class="text-end">
+                            @* Archived containers cannot be turned into an Arrival
+                               straight from here: restore first, so the container
+                               is back where the rest of the team can see it. *@
+                            @if (isArchive)
                             {
-                                <span>@r.TransitDays d</span>
+                                @if (canArchive)
+                                {
+                                    <form asp-action="RestorePending" method="post" class="d-inline">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="containerNo" value="@r.ContainerNo" />
+                                        <input type="hidden" name="bolNo"       value="@r.BolNo" />
+                                        <input type="hidden" name="po"          value="@r.Ebeln" />
+                                        <button type="submit" class="btn btn-sm btn-outline-success"
+                                                title="Put this container back in the pending list">
+                                            <i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Restore"]
+                                        </button>
+                                    </form>
+                                }
+                                else
+                                {
+                                    <span class="text-muted small">@Loc["Archived"]</span>
+                                }
                             }
                             else
                             {
-                                <span class="text-muted">—</span>
+                                <form asp-action="Create" method="post" class="d-inline">
+                                    @Html.AntiForgeryToken()
+                                    <input type="hidden" name="containerNo" value="@r.ContainerNo" />
+                                    <input type="hidden" name="bolNo"       value="@r.BolNo" />
+                                    <input type="hidden" name="po"          value="@r.Ebeln" />
+                                    <button type="submit" class="btn btn-sm btn-primary">
+                                        <i class="bi bi-plus-circle me-1"></i>@Loc["Create"]
+                                    </button>
+                                </form>
                             }
-                        </td>
-                        <td class="text-end">
-                            <form asp-action="Create" method="post" class="d-inline">
-                                @Html.AntiForgeryToken()
-                                <input type="hidden" name="containerNo" value="@r.ContainerNo" />
-                                <input type="hidden" name="bolNo"       value="@r.BolNo" />
-                                <input type="hidden" name="po"          value="@r.Ebeln" />
-                                <button type="submit" class="btn btn-sm btn-primary">
-                                    <i class="bi bi-plus-circle me-1"></i>Create
-                                </button>
-                            </form>
                         </td>
                     </tr>
                 }
@@ -623,21 +716,21 @@
         <div class="tk-pager d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 border-top"
              data-pending-pager>
             <div class="d-flex align-items-center gap-2 small text-muted">
-                <label class="mb-0">Show</label>
+                <label class="mb-0">@Loc["Show"]</label>
                 <select class="form-select form-select-sm" style="width:auto" data-pagesize-select>
                     @foreach (var n in new[] { 50, 100 })
                     {
                         <option value="@n" selected="@(n == pageSize)">@n</option>
                     }
                 </select>
-                <span>per page</span>
+                <span>@Loc["per page"]</span>
             </div>
 
             <span class="text-muted small">Showing @firstRow–@lastRow of @totalCount</span>
 
             @if (pageCount > 1)
             {
-                <nav aria-label="Pending container pages">
+                <nav aria-label='@Loc["Pending container pages"]'>
                     <ul class="pagination pagination-sm mb-0">
                         @{
                             var from = Math.Max(1, pageNo - 2);
@@ -645,7 +738,7 @@
                         }
                         <li class="page-item @(pageNo == 1 ? "disabled" : "")">
                             <a class="page-link" data-pending-page="@(pageNo - 1)"
-                               asp-action="Pending" asp-all-route-data="pageRoute(pageNo - 1, pageSize)" aria-label="Previous">«</a>
+                               asp-action="Pending" asp-all-route-data="pageRoute(pageNo - 1, pageSize)" aria-label='@Loc["Previous"]'>«</a>
                         </li>
                         @if (from > 1)
                         {
@@ -678,7 +771,7 @@
                         }
                         <li class="page-item @(pageNo == pageCount ? "disabled" : "")">
                             <a class="page-link" data-pending-page="@(pageNo + 1)"
-                               asp-action="Pending" asp-all-route-data="pageRoute(pageNo + 1, pageSize)" aria-label="Next">»</a>
+                               asp-action="Pending" asp-all-route-data="pageRoute(pageNo + 1, pageSize)" aria-label='@Loc["Next"]'>»</a>
                         </li>
                     </ul>
                 </nav>
@@ -686,6 +779,92 @@
         </div>
     }
 </div>
+
+@* ---- Archive / restore by ARRIVAL-date range (Manager / Admin) ----
+   The range is matched on the same "Arr" date the grid prints, so what gets
+   archived is exactly what the operator was looking at. Nothing is deleted:
+   the flag is invisible to the SAP sweep, and the archive view restores. ---- *@
+@if (canArchive)
+{
+    @if (isArchive)
+    {
+        <div class="modal fade" id="restoreRangeModal" tabindex="-1">
+            <div class="modal-dialog">
+                <form asp-action="RestorePendingRange" method="post" class="modal-content">
+                    @Html.AntiForgeryToken()
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Restore by arrival date"]</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="small text-muted">
+                            Puts every <strong>@Loc["archived"]</strong> container whose arrival date falls in this range
+                            back into the pending list. Leave a bound empty for an open-ended range.
+                        </p>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label small mb-1">@Loc["Arrival date from"]</label>
+                                <input type="date" name="from" class="form-control form-control-sm" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small mb-1">@Loc["Arrival date to"]</label>
+                                <input type="date" name="to" class="form-control form-control-sm" />
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                        <button type="submit" class="btn btn-success">
+                            <i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Restore range"]
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="modal fade" id="archiveRangeModal" tabindex="-1">
+            <div class="modal-dialog">
+                <form asp-action="ArchivePending" method="post" class="modal-content">
+                    @Html.AntiForgeryToken()
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-archive me-1"></i>@Loc["Archive by arrival date"]</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="small text-muted mb-2">
+                            Files every <strong>@Loc["pending"]</strong> container whose arrival date falls in this range out of
+                            this list — typically old shipments that will never become an Arrival. Leave a bound
+                            empty for an open-ended range (e.g. only a <em>@Loc["to"]</em> date archives everything older).
+                        </p>
+                        <div class="alert alert-light border small py-2">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Nothing is deleted. Archived containers move to
+                            <strong>@Loc["Archived"]</strong>, where they can be restored one by one or by the same range.
+                        </div>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label small mb-1">@Loc["Arrival date from"]</label>
+                                <input type="date" name="from" class="form-control form-control-sm" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small mb-1">@Loc["Arrival date to"]</label>
+                                <input type="date" name="to" class="form-control form-control-sm" />
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                        <button type="submit" class="btn btn-warning">
+                            <i class="bi bi-archive me-1"></i>@Loc["Archive range"]
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    }
+}
 
 @* Bootstrap tooltips are wired site-wide by site.js, and the plant -> storage
    narrowing now lives in wwwroot/js/plant-storage-filter.js (shared with the

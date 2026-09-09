@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Services.Sap;
+﻿using SharbatlyQMS.Web.Services.Sap;
 
 namespace SharbatlyQMS.Web.Services;
 
@@ -28,14 +28,19 @@ public interface IContainerCacheService
     /// Optional filters narrow the result on the SQL side. Plant and PoType are
     /// exact-match (sourced from the page's dropdowns, which themselves come
     /// from <see cref="GetPendingFilterOptionsAsync"/>).
+    /// <paramref name="archived"/> switches the whole page between the live
+    /// pending list (false — archived containers excluded) and the archive view
+    /// (true — only archived ones). Every other filter applies to both.
     /// </summary>
     Task<PendingPage> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
         string? plant = null, string? poType = null, string? storageLoc = null,
         string? supplier = null, string? material = null,
         DateOnly? from = null, DateOnly? to = null,
+        DateOnly? arrFrom = null, DateOnly? arrTo = null,
         int page = 1, int pageSize = 100,
         Models.PlantScope? scope = null,
+        bool archived = false,
         CancellationToken ct = default);
 
     /// <summary>
@@ -46,7 +51,46 @@ public interface IContainerCacheService
     /// when the operator picks it.
     /// </summary>
     Task<PendingFilterOptions> GetPendingFilterOptionsAsync(
+        Models.PlantScope? scope = null, bool archived = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// Count of ARCHIVED triplets the user is allowed to see. Drives the
+    /// "Archived" toggle's badge on /Arrivals/Pending, so an operator can tell
+    /// at a glance whether anything is filed away without opening the view.
+    /// </summary>
+    Task<int> CountArchivedTripletsAsync(Models.PlantScope? scope = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Archives every pending triplet whose arrival date (the grid's "Arr" date,
+    /// <c>MAX(arrival_date)</c> over the triplet) falls in the given inclusive
+    /// range, so the operator archives exactly the rows the list showed them.
+    /// Either bound may be null for an open-ended range. Only pending rows are
+    /// touched — a triplet that already has an Arrival is not in this list.
+    /// The user's plant scope is applied, so a plant-scoped manager can never
+    /// archive another plant's containers. Returns the number of TRIPLETS
+    /// archived. Manager/Admin-gated at the controller.
+    /// </summary>
+    Task<int> ArchiveByArrivalDateRangeAsync(DateOnly? from, DateOnly? to, string user,
         Models.PlantScope? scope = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// The exact inverse of <see cref="ArchiveByArrivalDateRangeAsync"/>: clears the
+    /// archive flag on every ARCHIVED triplet whose arrival date falls in the range,
+    /// putting the containers back in the pending list. Undoes a bulk archive
+    /// that reached too far without paging through the archive row by row.
+    /// Returns the number of triplets restored.
+    /// </summary>
+    Task<int> RestoreByArrivalDateRangeAsync(DateOnly? from, DateOnly? to, string user,
+        Models.PlantScope? scope = null, CancellationToken ct = default);
+
+    /// <summary>
+    /// Archives (<paramref name="archived"/> true) or restores (false) a single
+    /// (Container, BOL, PO) triplet — every cache row in it, so the grouped list
+    /// never sees a half-archived container. Returns rows affected; 0 when the
+    /// triplet no longer exists or already has an Arrival.
+    /// </summary>
+    Task<int> SetArchivedAsync(string containerNo, string bolNo, string ebeln,
+        bool archived, string user, CancellationToken ct = default);
 
     /// <summary>
     /// Returns every cached SapShipmentRow for the given (Container, BOL, PO)
@@ -187,6 +231,12 @@ public class PendingPickupRow
     /// payload_json to its own cache column in M12 so the list can sort on it.</summary>
     public short?    TransitDays{ get; set; }
     public DateTime  FirstSeenAt{ get; set; }
+    /// <summary>When this triplet was archived out of the pending list (UTC),
+    /// or null while it is still pending. Only ever set on rows the archive
+    /// view returns — the pending list filters archived triplets out.</summary>
+    public DateTime? ArchivedAt { get; set; }
+    /// <summary>Who archived it. Shown beside the Restore button.</summary>
+    public string?   ArchivedBy { get; set; }
     /// <summary>Per-PO-line materials inside this triplet, ordered by Ebelp.</summary>
     public List<PendingMaterialLine> MaterialLines { get; set; } = new();
 }

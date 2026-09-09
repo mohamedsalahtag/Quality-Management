@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.Services.Pdf
 @model IReadOnlyList<MaterialGroupSummary>
 @*
@@ -13,7 +13,7 @@
 }
 @if (groupSummaries.Count == 0)
 {
-    <p class="text-muted mb-0">No samples recorded yet — the summary appears once samples exist.</p>
+    <p class="text-muted mb-0">@Loc["No samples recorded yet — the summary appears once samples exist."]</p>
 }
 else
 {
@@ -38,19 +38,20 @@ else
 
             <div class="row g-3 mt-1 small">
                 <div class="col-md-4">
-                    <div class="qcs-f"><span>Product</span><span>@D(g.MajorCategory)</span></div>
-                    <div class="qcs-f"><span>Brand</span><span>@D(g.Brand)</span></div>
-                    <div class="qcs-f"><span>Variety</span><span>@D(g.Variety)</span></div>
-                    <div class="qcs-f"><span>Grade</span><span>@D(g.Grade)</span></div>
+                    <div class="qcs-f"><span>@Loc["Product"]</span><span>@D(g.MajorCategory)</span></div>
+                    <div class="qcs-f"><span>@Loc["Brand"]</span><span>@D(g.Brand)</span></div>
+                    <div class="qcs-f"><span>@Loc["Variety"]</span><span>@D(g.Variety)</span></div>
+                    <div class="qcs-f"><span>@Loc["Grade"]</span><span>@D(g.Grade)</span></div>
                 </div>
                 <div class="col-md-4">
-                    <div class="qcs-f"><span>Material Group</span><span>@D(g.MaterialGroup)</span></div>
-                    <div class="qcs-f"><span>Count of Materials</span><span>@g.MaterialCount</span></div>
-                    <div class="qcs-f"><span>Samples</span><span>@g.SampleCount Cartons</span></div>
+                    <div class="qcs-f"><span>@Loc["Material Group"]</span><span>@D(g.MaterialGroup)</span></div>
+                    <div class="qcs-f"><span>@Loc["Count of Materials"]</span><span>@g.MaterialCount</span></div>
+                    <div class="qcs-f"><span>@Loc["Samples"]</span><span>@g.SampleCount Cartons</span></div>
                 </div>
                 <div class="col-md-4">
-                    <div class="qcs-f"><span>Sample Size</span><span>@g.SumSampleSize @g.SampleUnit</span></div>
-                    <div class="qcs-f"><span>PO Quantity</span><span>@Fmt.Dec2(g.SumPoQuantity)</span></div>
+                    <div class="qcs-f"><span>@Loc["Sample Size"]</span><span>@g.SumSampleSize @g.SampleUnit</span></div>
+                    <div class="qcs-f"><span>@Loc["PO Quantity"]</span><span>@Fmt.Dec2(g.SumPoQuantity)</span></div>
+                    <div class="qcs-f"><span>@Loc["Tara Weight"]</span><span>@(string.IsNullOrEmpty(g.TaraWeightText) ? "—" : g.TaraWeightText + " kg")</span></div>
                 </div>
             </div>
 
@@ -58,7 +59,7 @@ else
             @if (vis.Count > 0)
             {
                 <div class="mt-2">
-                    <div class="fw-semibold small text-decoration-underline text-muted">Readings</div>
+                    <div class="fw-semibold small text-decoration-underline text-muted">@Loc["Readings"]</div>
                     <div class="row g-1 small mt-0">
                         @foreach (var r in vis)
                         {
@@ -84,13 +85,13 @@ else
                                     <tr>
                                         <th style="color:@col">@sec.CategoryName</th>
                                         <th class="text-end text-muted fw-normal">@sec.Unit</th>
-                                        <th class="text-end text-muted fw-normal">Percentage</th>
+                                        <th class="text-end text-muted fw-normal">@Loc["Percentage"]</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     @if (sec.Rows.Count == 0)
                                     {
-                                        <tr><td colspan="3" class="fst-italic text-muted">No defects configured for this category in Defect Catalog.</td></tr>
+                                        <tr><td colspan="3" class="fst-italic text-muted">@Loc["No defects configured for this category in Defect Catalog."]</td></tr>
                                     }
                                     else
                                     {
@@ -103,7 +104,7 @@ else
                                             </tr>
                                         }
                                         <tr class="qcs-total">
-                                            <td class="fw-semibold">Total</td>
+                                            <td class="fw-semibold">@Loc["Total"]</td>
                                             <td class="text-end fw-semibold">@Fmt.Dec2(sec.TotalPieces)</td>
                                             <td class="text-end fw-bold" style="color:@col">@Fmt.Dec2(sec.TotalPct)%</td>
                                         </tr>

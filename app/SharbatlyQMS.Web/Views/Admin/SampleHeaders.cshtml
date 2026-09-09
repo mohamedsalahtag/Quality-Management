@@ -1,17 +1,17 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @model IReadOnlyList<SampleHeaderField>
 @{
-    ViewData["Title"] = "Sample Header Fields";
+    ViewData["Title"] = Loc["Sample Header Fields"];
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h1 class="h3 mb-0">
         <i class="bi bi-card-heading me-1"></i>Sample Header Fields
-        <small class="text-muted fs-6 fw-normal ms-2">Identification fields entered per sample or per material.</small>
+        <small class="text-muted fs-6 fw-normal ms-2">@Loc["Identification fields entered per sample or per material."]</small>
     </h1>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#shModal"
             data-mode="create">
-        <i class="bi bi-plus-circle me-1"></i>Add header field
+        <i class="bi bi-plus-circle me-1"></i>@Loc["Add header field"]
     </button>
 </div>
 
@@ -21,14 +21,14 @@
             <thead class="table-light">
                 <tr>
                     <th style="width:1%"></th>
-                    <th>Code</th>
-                    <th>Name</th>
-                    <th>Kind</th>
-                    <th>Scope</th>
-                    <th>Unit</th>
-                    <th>Mandatory</th>
-                    <th>Active</th>
-                    <th class="text-end" style="width: 120px">Actions</th>
+                    <th>@Loc["Code"]</th>
+                    <th>@Loc["Name"]</th>
+                    <th>@Loc["Kind"]</th>
+                    <th>@Loc["Scope"]</th>
+                    <th>@Loc["Unit"]</th>
+                    <th>@Loc["Mandatory"]</th>
+                    <th>@Loc["Active"]</th>
+                    <th class="text-end" style="width: 120px">@Loc["Actions"]</th>
                 </tr>
             </thead>
             <tbody>
@@ -42,22 +42,22 @@
                         <td>
                             @if (f.Scope == "Material")
                             {
-                                <span class="badge bg-info text-dark">Material</span>
+                                <span class="badge bg-info text-dark">@Loc["Material"]</span>
                             }
                             else
                             {
-                                <span class="badge bg-secondary">Sample</span>
+                                <span class="badge bg-secondary">@Loc["Sample"]</span>
                             }
                         </td>
                         <td>@f.DefaultUnit</td>
                         <td>
                             @if (f.IsMandatory)
                             {
-                                <span class="badge bg-danger"><i class="bi bi-exclamation-circle me-1"></i>Required</span>
+                                <span class="badge bg-danger"><i class="bi bi-exclamation-circle me-1"></i>@Loc["Required"]</span>
                             }
                             else
                             {
-                                <span class="text-muted small">Optional</span>
+                                <span class="text-muted small">@Loc["Optional"]</span>
                             }
                         </td>
                         <td>@(f.IsActive ? "Yes" : "No")</td>
@@ -100,7 +100,7 @@
                 }
                 @if (Model.Count == 0)
                 {
-                    <tr><td colspan="9" class="text-center text-muted small py-3">No sample header fields yet. Click <strong>Add header field</strong> to create one.</td></tr>
+                    <tr><td colspan="9" class="text-center text-muted small py-3">No sample header fields yet. Click <strong>@Loc["Add header field"]</strong> to create one.</td></tr>
                 }
             </tbody>
         </table>
@@ -112,51 +112,51 @@
         <form asp-action="SaveSampleHeaderField" method="post" class="modal-content">
             @Html.AntiForgeryToken()
             <input type="hidden" name="fieldId" id="sh-id" value="0" />
-            <div class="modal-header"><h5 class="modal-title" id="sh-title">Add header field</h5>
+            <div class="modal-header"><h5 class="modal-title" id="sh-title">@Loc["Add header field"]</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
                 <div class="row g-2">
-                    <div class="col-md-6"><label class="form-label">Code *</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["Code *"]</label>
                         <input name="fieldCode" id="sh-code" class="form-control" required
                                pattern="[A-Z0-9_]+" title="Uppercase letters, digits and underscore only" />
                         <small class="text-muted">Stable identifier (e.g. <code>GROWER</code>). Cannot be changed by saving — use Delete + Add if you need a different code.</small>
                     </div>
-                    <div class="col-md-6"><label class="form-label">Sort order</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["Sort order"]</label>
                         <input name="sortOrder" id="sh-sort" type="number" class="form-control" value="500" /></div>
-                    <div class="col-md-6"><label class="form-label">Name *</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["Name *"]</label>
                         <input name="fieldName" id="sh-name" class="form-control" required />
                     </div>
-                    <div class="col-md-6"><label class="form-label">Value kind *</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["Value kind *"]</label>
                         <select name="valueKind" id="sh-kind" class="form-select" required>
-                            <option value="Text">Text — free text input</option>
-                            <option value="Numeric">Numeric — number input</option>
-                            <option value="Date">Date — date picker</option>
+                            <option value="Text">@Loc["Text — free text input"]</option>
+                            <option value="Numeric">@Loc["Numeric — number input"]</option>
+                            <option value="Date">@Loc["Date — date picker"]</option>
                         </select>
                     </div>
-                    <div class="col-md-6"><label class="form-label">Default unit</label>
-                        <input name="defaultUnit" id="sh-unit" class="form-control" placeholder="kg, °C, …" />
+                    <div class="col-md-6"><label class="form-label">@Loc["Default unit"]</label>
+                        <input name="defaultUnit" id="sh-unit" class="form-control" placeholder='@Loc["kg, °C, …"]' />
                     </div>
-                    <div class="col-md-6"><label class="form-label">Scope *</label>
+                    <div class="col-md-6"><label class="form-label">@Loc["Scope *"]</label>
                         <select name="scope" id="sh-scope" class="form-select" required>
-                            <option value="Sample">Sample — entered on every sample</option>
-                            <option value="Material">Material — entered once per material, inherited by every sample</option>
+                            <option value="Sample">@Loc["Sample — entered on every sample"]</option>
+                            <option value="Material">@Loc["Material — entered once per material, inherited by every sample"]</option>
                         </select>
                     </div>
                     <div class="col-12"><div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" name="isActive" id="sh-active" value="true" checked />
-                        <label class="form-check-label" for="sh-active">Active</label>
+                        <label class="form-check-label" for="sh-active">@Loc["Active"]</label>
                     </div></div>
                     <div class="col-12"><div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" name="isMandatory" id="sh-mandatory" value="true" />
                         <label class="form-check-label" for="sh-mandatory">
-                            Mandatory <span class="text-muted small">— sample cannot be saved unless this field has a value</span>
+                            @Loc["Mandatory"] <span class="text-muted small">@Loc["— sample cannot be saved unless this field has a value"]</span>
                         </label>
                     </div></div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="submit" class="btn btn-primary">Save</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="submit" class="btn btn-primary">@Loc["Save"]</button>
             </div>
         </form>
     </div>

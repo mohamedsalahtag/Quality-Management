@@ -1,8 +1,8 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.ViewModels
 @model IReadOnlyList<QualityOrder>
 @{
-    ViewData["Title"] = "Quality Orders";
+    ViewData["Title"] = Loc["Quality Orders"];
     var f       = ViewBag.Filter as QoListFilter ?? new QoListFilter();
     var opts    = ViewBag.FilterOptions as QoFilterOptions ?? new QoFilterOptions();
     var status  = f.Status;
@@ -13,6 +13,29 @@
     // visible reason for it.
     var panelOpen = f.AnyPanelFilter;
     string D(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
+
+    // A dropdown filter whose value is no longer among its options rendered as
+    // "All ..." — the filter still ran on the server and still counted toward
+    // the badge, so the page looked like it had filtered itself: panel open, a
+    // badge, a short list, and every control apparently empty. It happens
+    // whenever the options move out from under a remembered or bookmarked
+    // value: a supplier with no orders left in scope, a plant/storage pairing
+    // that does not exist, a user who has opened nothing recently.
+    //
+    // Orphans are now rendered as a real, selected option so the value is
+    // visible and can be cleared.
+    bool Orphan(string? value, IEnumerable<string> options) =>
+        !string.IsNullOrWhiteSpace(value)
+        && !options.Any(o => string.Equals(o, value, StringComparison.OrdinalIgnoreCase));
+    var orphanSupplier = Orphan(f.Supplier, opts.Suppliers);
+    var orphanPlant    = plantScopeLocked == null && Orphan(f.Plant, opts.Plants);
+    var orphanOpenedBy = Orphan(f.OpenedBy, opts.OpenedBy);
+    // Storage is matched as a (plant, code) pair, so mirror the option's own
+    // selected test rather than comparing the code alone.
+    var orphanStorage  = !string.IsNullOrWhiteSpace(f.StorageLoc)
+        && !opts.StorageLocations.Any(sl =>
+               string.Equals(sl.Code, f.StorageLoc, StringComparison.OrdinalIgnoreCase)
+               && (string.IsNullOrEmpty(f.Plant) || string.Equals(sl.Plant, f.Plant, StringComparison.OrdinalIgnoreCase)));
 }
 
 <style>
@@ -37,7 +60,7 @@
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0"><i class="bi bi-clipboard-data me-1"></i>Quality Orders</h1>
+    <h1 class="h3 mb-0"><i class="bi bi-clipboard-data me-1"></i>@Loc["Quality Orders"]</h1>
 </div>
 
 @{
@@ -60,6 +83,41 @@
     string ActiveClass(string v, string baseCss) =>
         (status ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
 }
+@{
+    // Every filter actually in force, named. Whatever put a filter there — a
+    // bookmark, the remembered-filter restore, a value that has dropped off its
+    // own dropdown — it is spelled out here rather than being inferable only
+    // from a badge and a short list.
+    var activeFilters = new List<string>();
+    void Active(string label, string? value) { if (!string.IsNullOrWhiteSpace(value)) activeFilters.Add($"{label}: {value}"); }
+    Active("Status",      string.IsNullOrEmpty(f.Status) ? null : QualityOrderStatus.DisplayName(f.Status));
+    Active("Search",      f.Search);
+    Active("QO number",   f.QoNo);
+    Active("Container",   f.Container);
+    Active("BOL",         f.Bol);
+    Active("PO",          f.Po);
+    Active("Arrival no",  f.ArrivalNo);
+    Active("Material",    f.Material);
+    Active("Supplier",    f.Supplier);
+    Active("Plant",       f.Plant);
+    Active("Storage",     f.StorageLoc);
+    Active("Opened by",   f.OpenedBy);
+    Active("From",        D(f.From));
+    Active("To",          D(f.To));
+}
+@if (activeFilters.Count > 0)
+{
+    <div class="alert alert-warning py-2 px-3 small d-flex flex-wrap align-items-center gap-2 mb-2">
+        <i class="bi bi-funnel-fill"></i>
+        <strong>@Loc["Showing a filtered list."]</strong>
+        @foreach (var af in activeFilters)
+        {
+            <span class="badge bg-secondary">@af</span>
+        }
+        <a asp-action="Index" class="btn btn-sm btn-outline-dark py-0" data-filter-clear>@Loc["Show all records"]</a>
+    </div>
+}
+
 @* One form for everything: the always-visible quick bar and the collapsible
    panel below it. Collapsed inputs still submit (display:none is not disabled),
    which is exactly what we want -- the two sets AND together. *@
@@ -82,11 +140,11 @@
             </button>
             @if (f.Any)
             {
-                <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>Clear</a>
+                <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>@Loc["Clear"]</a>
             }
         </div>
         <div class="col-auto">
-            <div class="btn-group" role="group" aria-label="Filter by status">
+            <div class="btn-group" role="group" aria-label='@Loc["Filter by status"]'>
                 @foreach (var s in statuses)
                 {
                     <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)" style="min-width:6.5rem">@ChipLabel(s.Value)</button>
@@ -99,40 +157,44 @@
         <div class="card card-body mt-2 bg-body-tertiary">
             <div class="row g-2">
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Container</label>
+                    <label class="form-label small mb-1">@Loc["Container"]</label>
                     <input type="text" name="container" value="@f.Container" class="form-control form-control-sm"
-                           placeholder="any part" autocomplete="off" />
+                           placeholder='@Loc["any part"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">BOL</label>
+                    <label class="form-label small mb-1">@Loc["BOL"]</label>
                     <input type="text" name="bol" value="@f.Bol" class="form-control form-control-sm"
-                           placeholder="any part" autocomplete="off" />
+                           placeholder='@Loc["any part"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">PO</label>
+                    <label class="form-label small mb-1">@Loc["PO"]</label>
                     <input type="text" name="po" value="@f.Po" class="form-control form-control-sm"
-                           placeholder="EBELN" autocomplete="off" />
+                           placeholder='@Loc["EBELN"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">QC number</label>
+                    <label class="form-label small mb-1">@Loc["QC number"]</label>
                     <input type="text" name="qoNo" value="@f.QoNo" class="form-control form-control-sm"
-                           placeholder="QO-2026-000632 or 000632" autocomplete="off" />
+                           placeholder='@Loc["QO-2026-000632 or 000632"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Arrival no.</label>
+                    <label class="form-label small mb-1">@Loc["Arrival no."]</label>
                     <input type="text" name="arrivalNo" value="@f.ArrivalNo" class="form-control form-control-sm"
-                           placeholder="ARR-…" autocomplete="off" />
+                           placeholder='@Loc["ARR-…"]' autocomplete="off" />
                 </div>
                 <div class="col-12 col-md-4">
-                    <label class="form-label small mb-1">Material</label>
+                    <label class="form-label small mb-1">@Loc["Material"]</label>
                     <input type="text" name="material" value="@f.Material" class="form-control form-control-sm"
-                           placeholder="code or description" autocomplete="off" />
+                           placeholder='@Loc["code or description"]' autocomplete="off" />
                 </div>
 
                 <div class="col-12 col-md-4">
-                    <label class="form-label small mb-1">Supplier</label>
+                    <label class="form-label small mb-1">@Loc["Supplier"]</label>
                     <select name="supplier" class="form-select form-select-sm">
-                        <option value="">All suppliers</option>
+                        <option value="">@Loc["All suppliers"]</option>
+                        @if (orphanSupplier)
+                        {
+                            <option value="@f.Supplier" selected>@f.Supplier (no matching orders)</option>
+                        }
                         @foreach (var sup in opts.Suppliers)
                         {
                             <option value="@sup" selected="@(string.Equals(sup, f.Supplier, StringComparison.OrdinalIgnoreCase))">@sup</option>
@@ -141,7 +203,7 @@
                 </div>
 
                 <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">Plant</label>
+                    <label class="form-label small mb-1">@Loc["Plant"]</label>
                     @if (plantScopeLocked != null)
                     {
                         @* Scoped operator: the server forces this plant anyway, so
@@ -156,7 +218,11 @@
                     else
                     {
                         <select name="plant" id="qo-plant-filter" data-plant-filter="qo" class="form-select form-select-sm">
-                            <option value="">All plants</option>
+                            <option value="">@Loc["All plants"]</option>
+                            @if (orphanPlant)
+                            {
+                                <option value="@f.Plant" selected>@f.Plant (no matching orders)</option>
+                            }
                             @foreach (var pl in opts.Plants)
                             {
                                 <option value="@pl" selected="@(string.Equals(pl, f.Plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
@@ -165,9 +231,13 @@
                     }
                 </div>
                 <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">Storage location</label>
+                    <label class="form-label small mb-1">@Loc["Storage location"]</label>
                     <select name="storageLoc" id="qo-storage-filter" data-storage-filter="qo" class="form-select form-select-sm">
-                        <option value="">All storage locations</option>
+                        <option value="">@Loc["All storage locations"]</option>
+                        @if (orphanStorage)
+                        {
+                            <option value="@f.StorageLoc" data-plant="@f.Plant" selected>@f.StorageLoc (no matching orders)</option>
+                        }
                         @foreach (var sl in opts.StorageLocations)
                         {
                             <option value="@sl.Code" data-plant="@sl.Plant"
@@ -179,9 +249,13 @@
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Opened by</label>
+                    <label class="form-label small mb-1">@Loc["Opened by"]</label>
                     <select name="openedBy" class="form-select form-select-sm">
-                        <option value="">Anyone</option>
+                        <option value="">@Loc["Anyone"]</option>
+                        @if (orphanOpenedBy)
+                        {
+                            <option value="@f.OpenedBy" selected>@f.OpenedBy (no matching orders)</option>
+                        }
                         @foreach (var ob in opts.OpenedBy)
                         {
                             <option value="@ob" selected="@(string.Equals(ob, f.OpenedBy, StringComparison.OrdinalIgnoreCase))">@ob</option>
@@ -189,20 +263,20 @@
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Created from</label>
+                    <label class="form-label small mb-1">@Loc["Created from"]</label>
                     <input type="date" name="from" value="@D(f.From)" class="form-control form-control-sm" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Created to</label>
+                    <label class="form-label small mb-1">@Loc["Created to"]</label>
                     <input type="date" name="to" value="@D(f.To)" class="form-control form-control-sm" />
                 </div>
             </div>
             <div class="mt-2 d-flex gap-2">
-                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Apply filters</button>
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>@Loc["Apply filters"]</button>
                 @if (f.AnyPanelFilter)
                 {
                     <a asp-action="Index" asp-route-status="@status" asp-route-search="@search"
-                       class="btn btn-outline-secondary btn-sm">Reset these filters</a>
+                       class="btn btn-outline-secondary btn-sm">@Loc["Reset these filters"]</a>
                 }
             </div>
         </div>
@@ -214,27 +288,27 @@
         <table class="table table-hover align-middle mb-0 qms-index-table" data-tablekit data-page-size="50">
             <thead class="table-light">
                 <tr>
-                    <th data-sort>QO Number</th>
-                    <th data-sort>Container</th>
-                    <th data-sort>BOL</th>
-                    <th data-sort>PO</th>
-                    <th data-sort>Plant</th>
-                    <th data-sort>Supplier</th>
-                    <th data-sort>Arrival</th>
-                    <th>Materials</th>
-                    <th data-sort>Status</th>
-                    <th data-sort>Created</th>
+                    <th data-sort>@Loc["QO Number"]</th>
+                    <th data-sort>@Loc["Container"]</th>
+                    <th data-sort>@Loc["BOL"]</th>
+                    <th data-sort>@Loc["PO"]</th>
+                    <th data-sort>@Loc["Plant"]</th>
+                    <th data-sort>@Loc["Supplier"]</th>
+                    <th data-sort>@Loc["Arrival"]</th>
+                    <th>@Loc["Materials"]</th>
+                    <th data-sort>@Loc["Status"]</th>
+                    <th data-sort>@Loc["Created"]</th>
                     @* Who opened the QO, not who created it -- the inspector who
                        took ownership is the useful name. Blank while Initial. *@
-                    <th data-sort>Opened By</th>
-                    <th class="text-end">Actions</th>
+                    <th data-sort>@Loc["Opened By"]</th>
+                    <th class="text-end">@Loc["Actions"]</th>
                 </tr>
             </thead>
             <tbody>
                 @if (!Model.Any())
                 {
                     <tr><td colspan="12" class="text-center text-muted py-4">
-                        No Quality Orders yet. Complete an arrival, then click <em>Create Quality Order</em>.
+                        No Quality Orders yet. Complete an arrival, then click <em>@Loc["Create Quality Order"]</em>.
                     </td></tr>
                 }
                 else
@@ -292,7 +366,7 @@
                             <td>
                                 @if (firstMat == null)
                                 {
-                                    <span class="text-muted small fst-italic">No materials</span>
+                                    <span class="text-muted small fst-italic">@Loc["No materials"]</span>
                                 }
                                 else
                                 {

@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using SharbatlyQMS.Web.Services.Pdf;
 using Xunit;
 
@@ -54,6 +54,12 @@ public class ReportFieldVisibilityTests
     [InlineData("Lot No.")]
     [InlineData("Lot Number")]
     [InlineData("PUC")]
+    // A pallet number belongs to the individual carton that was sampled. Rolled
+    // up over a whole material group it says nothing -- "Pallet No: 12 / 47 /
+    // 103" is noise -- so it joins the identifiers hidden from the summary and
+    // still printed on each sample card.
+    [InlineData("Pallet No")]
+    [InlineData("PALLET_NO")]
     public void Identifier_fields_are_hidden_from_the_summary_only(string name)
     {
         Assert.True(HiddenInSummary(name));
@@ -67,8 +73,6 @@ public class ReportFieldVisibilityTests
     [InlineData("Pack Code")]      // deliberately still shown
     [InlineData("Label")]
     [InlineData("Net Weight")]
-    [InlineData("Pallet No")]      // in neither hidden set
-    [InlineData("PALLET_NO")]
     [InlineData("")]
     public void Other_fields_are_shown_everywhere(string name)
     {

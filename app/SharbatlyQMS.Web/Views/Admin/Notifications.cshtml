@@ -1,6 +1,6 @@
-@using SharbatlyQMS.Web.Services
+﻿@using SharbatlyQMS.Web.Services
 @{
-    ViewData["Title"] = "Notifications";
+    ViewData["Title"] = Loc["Notifications"];
     var people   = ViewBag.Candidates as IReadOnlyList<NotifyCandidate> ?? new List<NotifyCandidate>();
     var scope    = ViewBag.ScopeOptions as NotifyScopeOptions ?? new NotifyScopeOptions();
     var canEdit  = Perms.Can(Perm.Parameters.NotificationsEdit);
@@ -29,7 +29,7 @@
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h1 class="h3 mb-0">
         <i class="bi bi-bell me-1 text-primary"></i>Notifications
-        <small class="text-muted fs-6 fw-normal ms-2">Who is emailed when a quality order is finished</small>
+        <small class="text-muted fs-6 fw-normal ms-2">@Loc["Who is emailed when a quality order is finished"]</small>
     </h1>
 </div>
 
@@ -39,16 +39,16 @@
         The moment an order is finished, everyone ticked below receives a mail with the
         shipment's basic details and the QC summary &mdash; samples inspected and the
         defect breakdown per material group.
-        <strong>Nobody ticked means nobody is mailed</strong>, which is how the notification
+        <strong>@Loc["Nobody ticked means nobody is mailed"]</strong>, which is how the notification
         is switched off.
         <div class="mt-1">
             Each person can be narrowed to certain plants and procurement types.
-            <strong>Ticking nothing means everything</strong>, so a recipient you never narrow
+            <strong>@Loc["Ticking nothing means everything"]</strong>, so a recipient you never narrow
             keeps receiving every order &mdash; including for a plant or type added later.
         </div>
         <div class="text-muted mt-1">
             There is deliberately no &ldquo;select all&rdquo;: ticking all seven plants is
-            <em>not</em> the same as ticking none. It pins today&rsquo;s seven, so a plant added
+            <em>@Loc["not"]</em> the same as ticking none. It pins today&rsquo;s seven, so a plant added
             next month would quietly stop reaching that person. Leave them unticked instead.
         </div>
         <div class="text-muted mt-1">
@@ -70,9 +70,9 @@
             @if (canEdit && mailable.Count > 0)
             {
                 <span class="small">
-                    <a href="#" class="text-decoration-none" data-select-all>Select all</a>
+                    <a href="#" class="text-decoration-none" data-select-all>@Loc["Select all"]</a>
                     <span class="text-muted mx-1">&middot;</span>
-                    <a href="#" class="text-decoration-none" data-select-none>Clear</a>
+                    <a href="#" class="text-decoration-none" data-select-none>@Loc["Clear"]</a>
                 </span>
             }
         </div>
@@ -81,7 +81,7 @@
         {
             <div class="card-body text-muted">
                 No active user has an email address on their profile, so there is nobody to
-                notify yet. Add addresses on <a asp-action="Users">Users</a> first.
+                notify yet. Add addresses on <a asp-action="Users">@Loc["Users"]</a> first.
             </div>
         }
         else
@@ -91,22 +91,22 @@
                     <thead class="table-light">
                         <tr>
                             <th style="width:3rem"></th>
-                            <th style="width:14rem">Name</th>
-                            <th style="width:15rem">Email</th>
+                            <th style="width:14rem">@Loc["Name"]</th>
+                            <th style="width:15rem">@Loc["Email"]</th>
                             <th>
-                                Plants <span class="text-muted fw-normal">(none ticked = all)</span>
+                                @Loc["Plants"] <span class="text-muted fw-normal">@Loc["(none ticked = all)"]</span>
                                 @if (canEdit)
                                 {
                                     <a href="#" class="scope-links fw-normal ms-1" data-col-none="plant"
-                                       title="Untick every row, which notifies everyone for all plants">Clear every row</a>
+                                       title="Untick every row, which notifies everyone for all plants">@Loc["Clear every row"]</a>
                                 }
                             </th>
                             <th>
-                                Procurement types <span class="text-muted fw-normal">(none ticked = all)</span>
+                                @Loc["Procurement types"] <span class="text-muted fw-normal">@Loc["(none ticked = all)"]</span>
                                 @if (canEdit)
                                 {
                                     <a href="#" class="scope-links fw-normal ms-1" data-col-none="procurement type"
-                                       title="Untick every row, which notifies everyone for all types">Clear every row</a>
+                                       title="Untick every row, which notifies everyone for all types">@Loc["Clear every row"]</a>
                                 }
                             </th>
                         </tr>
@@ -149,7 +149,7 @@
                                                 @* No "All" here on purpose -- see the note by the
                                                    header. Clearing is the only safe bulk action. *@
                                                 <a href="#" class="scope-links" data-scope-none
-                                                   title="Untick everything, which notifies for all of them">Clear</a>
+                                                   title="Untick everything, which notifies for all of them">@Loc["Clear"]</a>
                                             }
                                         </div>
                                     </div>
@@ -174,7 +174,7 @@
                                                 @* No "All" here on purpose -- see the note by the
                                                    header. Clearing is the only safe bulk action. *@
                                                 <a href="#" class="scope-links" data-scope-none
-                                                   title="Untick everything, which notifies for all of them">Clear</a>
+                                                   title="Untick everything, which notifies for all of them">@Loc["Clear"]</a>
                                             }
                                         </div>
                                     </div>
@@ -196,7 +196,7 @@
             <i class="bi bi-exclamation-triangle me-1"></i>
             @noEmail.Count active user(s) have no email address and cannot be notified:
             <strong>@string.Join(", ", noEmail.Select(p => p.FullName))</strong>.
-            Add an address on the <a asp-action="Users">Users</a> screen to make them selectable.
+            Add an address on the <a asp-action="Users">@Loc["Users"]</a> screen to make them selectable.
         </div>
     }
     @if (inactive.Count > 0)
@@ -212,7 +212,7 @@
     @if (canEdit)
     {
         <button type="submit" class="btn btn-primary">
-            <i class="bi bi-save me-1"></i>Save recipients
+            <i class="bi bi-save me-1"></i>@Loc["Save recipients"]
         </button>
     }
 </form>

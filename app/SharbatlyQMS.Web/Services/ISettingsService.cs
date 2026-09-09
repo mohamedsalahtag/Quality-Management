@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.Services;
+﻿namespace SharbatlyQMS.Web.Services;
 
 /// <summary>
 /// Typed accessors over the SiteConfiguration key/value table.
@@ -31,6 +31,10 @@ public interface ISettingsService
 
     // ---- Alerts ----
     Task<AlertConfig> GetAlertConfigAsync();
+
+    /// <summary>Thresholds and clock basis for the Time Bar page.</summary>
+    Task<TimeBarConfig> GetTimeBarConfigAsync();
+    Task SaveTimeBarConfigAsync(TimeBarConfig cfg, int? updatedBy);
     Task SaveAlertConfigAsync(AlertConfig cfg, int? updatedBy);
 
     // ---- Report options (QO report) ----
@@ -124,6 +128,13 @@ public static class SettingKeys
     public const string ImageFitMode       = "image_fit_mode";
 
     // Alert thresholds
+    public const string RejectedContainerHeader = "report_rejected_container_header";
+
+    public const string TimeBarGoodDays       = "timebar_good_days";
+    public const string TimeBarWarnDays       = "timebar_warn_days";
+    public const string TimeBarArrivalBasis   = "timebar_arrival_basis";
+    public const string TimeBarStartDate      = "timebar_start_date";
+
     public const string AlertStaleArrivalDays = "alert_stale_arrival_days";
     public const string AlertOpenQoDays       = "alert_open_qo_days";
     public const string AlertDefectPctRed     = "alert_defect_pct_red";
@@ -175,7 +186,8 @@ public static class SettingKeys
     //   finish date. "Discharge" (default) or "Arrival".
     public const string TimeBarBasis       = "Report.TimeBarBasis";
     //   LayoutVersion: which visual layout the QO report PDF renders with.
-    //   "Classic" (default) or "Soft" — layout only, identical data.
+    //   Fixed at "Soft" — the layout is no longer selectable. The key is kept
+    //   so old stored values stay readable (and are ignored).
     public const string ReportLayoutVersion = "Report.LayoutVersion";
 
     // Active Directory (LDAP bind-only). Configured by SiteAdmin from
@@ -189,7 +201,12 @@ public static class SettingKeys
 
 public class QoMailTemplate
 {
-    public string Subject  { get; set; } = "Quality Control Report for Quality Order {QO_NO}";
+    /// <summary>Default only — an installation that has edited the subject in
+    /// Parameters → Mail Template keeps its own. Mirrors the standard line
+    /// QcSubjectLine builds for the finish notification, minus the inspection
+    /// status (a supplier should not learn of a potential claim from a subject
+    /// line).</summary>
+    public string Subject  { get; set; } = "Quality Control Report · QC {QC_NO} · Cont {CONTAINER} · {SUPPLIER} · BOL {BOL}";
     public string Body     { get; set; } =
         "Dear Supplier,\n\n" +
         "Please find attached the Quality Control Report for Quality Order {QO_NO}\n" +
@@ -382,16 +399,32 @@ public class ThumbnailConfig
     public string FitMode      { get; set; } = "Cover";
 }
 
+/// <summary>The shipped wording, in one place so the default cannot drift
+/// between the config class, the renderer and the settings form.</summary>
+public static class RejectedContainerDefaults
+{
+    public const string Header = "Not accepted container condition";
+}
+
 public class ReportConfig
 {
+    /// <summary>
+    /// The banner printed across the quality report of a container that was
+    /// refused on arrival. Editable under Site Configuration -> Report: the
+    /// exact wording is a commercial matter between the business and its
+    /// suppliers, not a development one.
+    /// </summary>
+    public string RejectedContainerHeader { get; set; } = RejectedContainerDefaults.Header;
+
     /// <summary>Which date the QO report Time Bar counts from to the QO finish
     /// date. One of <see cref="TimeBarBases"/>. Defaults to Discharge.</summary>
     public string TimeBarBasis { get; set; } = TimeBarBases.Discharge;
 
-    /// <summary>Which visual layout the QO report PDF renders with — one of
-    /// <see cref="ReportLayouts"/>. Layout only; the data/logic is identical
-    /// across versions. Defaults to Classic.</summary>
-    public string LayoutVersion { get; set; } = ReportLayouts.Classic;
+    /// <summary>Which visual layout the QO report PDF renders with. Fixed at
+    /// <see cref="ReportLayouts.Soft"/> — no longer selectable from Site
+    /// Configuration. Kept as a property so the report code has one place to
+    /// read the layout from.</summary>
+    public string LayoutVersion { get; set; } = ReportLayouts.Soft;
 }
 
 /// <summary>Allowed values for <see cref="ReportConfig.TimeBarBasis"/>.</summary>
@@ -404,8 +437,9 @@ public static class TimeBarBases
         v == Discharge || v == Arrival;
 }
 
-/// <summary>Allowed values for <see cref="ReportConfig.LayoutVersion"/>. Each is
-/// a distinct QuestPDF renderer over the SAME QualityReportData — layout only.</summary>
+/// <summary>Values for <see cref="ReportConfig.LayoutVersion"/>. Soft is the
+/// permanent QC-report layout; Classic is kept only so the legacy renderer and
+/// any old stored setting value still resolve.</summary>
 public static class ReportLayouts
 {
     public const string Classic = "Classic";
@@ -413,6 +447,65 @@ public static class ReportLayouts
 
     public static bool IsValid(string? v) =>
         v == Classic || v == Soft;
+}
+
+/// <summary>
+/// How the Time Bar page judges an inspection clock (Site Configuration →
+/// Alerts). Separate from <see cref="AlertConfig"/> on purpose: those
+/// thresholds drive the alert engine and its email fan-out, and these drive
+/// nothing but the colour of a bar.
+/// </summary>
+public class TimeBarConfig
+{
+    /// <summary>At or below this many days the bar is green. The optimum is one
+    /// day: a container arrives and is inspected the same or the next day.</summary>
+    public int GoodDays { get; set; } = 1;
+
+    /// <summary>Above this many days the bar is red. Between the two it is
+    /// amber. Clamped to at least GoodDays on save -- otherwise every row would
+    /// render red and nobody could work out why.</summary>
+    public int WarnDays { get; set; } = 3;
+
+    /// <summary>
+    /// Which date starts the clock. GoodsReceipt (the default) is SAP's
+    /// Receive_Date -- the field this application already stores as
+    /// arrival_date and labels "Arr" everywhere, so the Time Bar and the
+    /// container list agree. PortArrival is SAP's Arrival_Date, the true
+    /// physical landing: a truer basis for a claim window, and a LARGER number,
+    /// but one that disagrees with every other screen.
+    /// </summary>
+    public string ArrivalBasis { get; set; } = TimeBarArrivalBases.GoodsReceipt;
+
+    /// <summary>
+    /// A go-live floor: containers that arrived BEFORE this date are left out of
+    /// the page entirely -- not counted, not aged, not summarised.
+    ///
+    /// The page measures how long a container waited for its QC, and the years
+    /// of shipments that predate the process being enforced would otherwise
+    /// swamp it: 3,843 of today's 4,411 containers already sit above the three
+    /// day threshold, so without a floor the page opens on a wall of red that
+    /// says nothing about how the team is working now.
+    ///
+    /// Null means no floor, which is the shipped default -- a cutoff is a
+    /// deliberate act by whoever runs the site, not something that quietly
+    /// hides data. A container with NO arrival date at all is also dropped once
+    /// a floor is set: it cannot be shown to have arrived after it, and it has
+    /// no clock to measure either way.
+    /// </summary>
+    public DateOnly? StartDate { get; set; }
+}
+
+/// <summary>
+/// The two clock bases. Note the separate, older <see cref="TimeBarBases"/>
+/// (Discharge / Arrival) belongs to the QC REPORT's time bar and measures a
+/// different thing; the two must not share a key.
+/// </summary>
+public static class TimeBarArrivalBases
+{
+    public const string GoodsReceipt = "GoodsReceipt";
+    public const string PortArrival  = "PortArrival";
+    public static bool IsValid(string? v) =>
+        v == GoodsReceipt || v == PortArrival;
 }
 
 public class AlertConfig

@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Models.Security;
 using SharbatlyQMS.Web.Services;
@@ -137,7 +137,13 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         Assert.NotNull(built);
         var (subject, html) = built!.Value;
 
-        Assert.Contains("QC finished", subject);
+        // The subject is built by QcSubjectLine: the short QC number, the
+        // state, and the claim assessment when there is one -- e.g.
+        // "QC 1213 - Finished - No Potential Claim". Assert on what it must
+        // CARRY rather than on a fixed phrase, or every future refinement of
+        // the wording reads as a regression.
+        Assert.Contains("QC", subject);
+        Assert.Contains("Finished", subject);
         // The basics the reader needs before opening the system at all. Assert on
         // the VALUE, not a field label: the order number moved into the header
         // band during the redesign and a label check would have called that a

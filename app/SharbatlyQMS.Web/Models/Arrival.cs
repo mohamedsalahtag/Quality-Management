@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.Models;
+﻿namespace SharbatlyQMS.Web.Models;
 
 public class Arrival
 {
@@ -23,6 +23,15 @@ public class Arrival
     /// via ICodeDescriptionDirectory.</summary>
     public string?   PoType       { get; set; }
     public string    StatusCode   { get; set; } = "Draft";
+
+    /// <summary>When the container was refused, and by whom. Null unless the
+    /// arrival is Rejected.</summary>
+    public DateTime? RejectedAt   { get; set; }
+    public string?   RejectedBy   { get; set; }
+    /// <summary>Why it was refused. Mandatory at the point of rejection and
+    /// printed verbatim on the claim report, so it is the supplier-facing
+    /// record of the damage rather than an internal note.</summary>
+    public string?   RejectReason { get; set; }
     public DateTime  CreatedAt    { get; set; }
     public string    CreatedBy    { get; set; } = "";
     public DateTime? CompletedAt  { get; set; }
@@ -64,6 +73,31 @@ public static class ArrivalStatus
     public const string Draft     = "Draft";
     public const string Completed = "Completed";
     public const string Cancelled = "Cancelled";
+    /// <summary>
+    /// Terminal. The container arrived in bad condition and was refused, so no
+    /// inspection is performed; a quality order is raised anyway, already
+    /// finished and carrying a potential claim, to take the damage to the
+    /// supplier. A rejected arrival can never be Completed.
+    /// </summary>
+    public const string Rejected  = "Rejected";
+    /// <summary>
+    /// Bootstrap tone + label for a status badge. Added with Rejected because
+    /// every view was switching on raw string literals of its own, so a new
+    /// status meant finding four separate copies -- and the dashboard's copy
+    /// was already out of step with the list's.
+    /// </summary>
+    public static (string Tone, string Label) Badge(string? code) => code switch
+    {
+        Draft     => ("warning",   "Draft"),
+        Completed => ("success",   "Completed"),
+        Rejected  => ("danger",    "Rejected"),
+        Cancelled => ("secondary", "Cancelled"),
+        _         => ("secondary", code ?? "")
+    };
+
+    /// <summary>The status as a user should read it.</summary>
+    public static string DisplayName(string? code) => Badge(code).Label;
+
 }
 
 /// <summary>

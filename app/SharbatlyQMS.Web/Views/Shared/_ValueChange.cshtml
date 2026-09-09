@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Services
+﻿@using SharbatlyQMS.Web.Services
 @model AuditNarrator.FriendlyDiff
 @*
     One before/after pair, rendered so the change is visible at a glance rather
@@ -29,7 +29,7 @@
 
         default:
             <span class="v-old" title="Before">@Model.Old</span>
-            <i class="bi bi-arrow-right v-arrow" aria-label="changed to"></i>
+            <i class="bi bi-arrow-right v-arrow" aria-label='@Loc["changed to"]'></i>
             <span class="v-new" title="After">@Model.New</span>
             break;
     }

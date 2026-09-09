@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.Services.Sap;
+﻿namespace SharbatlyQMS.Web.Services.Sap;
 
 /// <summary>
 /// Read-only consumer for SAP S/4HANA CDS Views exposed via OData.
@@ -20,14 +20,22 @@ public interface ISapClient
     Task<IReadOnlyList<SapShipmentRow>> SearchAsync(SapSearchQuery query, CancellationToken ct = default);
 
     /// <summary>
-    /// Bulk-fetch every SAP shipment row whose document date (TOC_DATE) is
-    /// on/after <paramref name="sinceDocDate"/>. Pages are streamed to
+    /// Bulk-fetch every SAP shipment row whose ARRIVAL date (Receive_Date) is
+    /// on/after <paramref name="sinceArrivalDate"/>. Pages are streamed to
     /// <paramref name="onPage"/> so the caller (typically the container
     /// polling background service) can UPSERT incrementally without
     /// buffering the whole result. Returns the total row count fetched.
+    ///
+    /// The cutoff used to be the PO document date (Doc_Date). It is the arrival
+    /// date now because that is what the pending list is about -- a container
+    /// that arrived this week matters whether its purchase order was raised
+    /// this month or last quarter, and the PO date is no longer shown anywhere
+    /// on the page. Receive_Date is the field this application already stores as
+    /// <c>arrival_date</c> and labels "Arr"; it is 100% populated, where SAP's
+    /// own Arrival_Date is not.
     /// </summary>
     Task<int> FetchSinceAsync(
-        DateOnly sinceDocDate,
+        DateOnly sinceArrivalDate,
         Func<IReadOnlyList<SapShipmentRow>, CancellationToken, Task> onPage,
         CancellationToken ct = default);
 

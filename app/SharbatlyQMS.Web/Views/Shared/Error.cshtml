@@ -1,6 +1,6 @@
-@model ErrorViewModel
+﻿@model ErrorViewModel
 @{
-    ViewData["Title"] = "Something went wrong";
+    ViewData["Title"] = Loc["Something went wrong"];
     // SECURITY: this view is the friendly fallback for /Home/Error and is
     // wired up via app.UseExceptionHandler("/Home/Error") in Program.cs
     // ONLY when !Environment.IsDevelopment(). It must never render the
@@ -10,7 +10,7 @@
 }
 <div class="text-center py-5">
     <i class="bi bi-exclamation-octagon display-1 text-danger"></i>
-    <h1 class="h3 mt-3">Something went wrong</h1>
+    <h1 class="h3 mt-3">@Loc["Something went wrong"]</h1>
     <p class="text-muted">
         An unexpected error occurred while processing your request. Please try again,
         and contact your administrator if the problem continues.
@@ -22,6 +22,6 @@
         </p>
     }
     <a asp-controller="Home" asp-action="Index" class="btn btn-primary mt-3">
-        <i class="bi bi-house me-1"></i>Back to dashboard
+        <i class="bi bi-house me-1"></i>@Loc["Back to dashboard"]
     </a>
 </div>

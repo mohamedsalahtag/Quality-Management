@@ -1,0 +1,191 @@
+﻿@using SharbatlyQMS.Web.Services
+@model IReadOnlyList<UiLabel>
+@{
+    ViewData["Title"] = "Labels";
+    var screens      = ViewBag.Screens      as List<string?> ?? new List<string?>();
+    var screen       = ViewBag.Screen       as string;
+    var kind         = ViewBag.Kind         as string;
+    var kinds        = ViewBag.Kinds        as List<KeyValuePair<string, int>> ?? new();
+    var query        = ViewBag.Query        as string;
+    var changedOnly  = ViewBag.ChangedOnly  as bool?  ?? false;
+    var totalCount   = ViewBag.TotalCount   as int?   ?? 0;
+    var changedCount = ViewBag.ChangedCount as int?   ?? 0;
+    var canEdit      = Perms.Can(Perm.Admin.LabelsEdit);
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h1 class="h3 mb-0">
+        <i class="bi bi-translate me-1"></i>Labels
+        <span class="badge bg-secondary ms-2">@totalCount</span>
+        @if (changedCount > 0)
+        {
+            <span class="badge bg-info-subtle text-info-emphasis border border-info ms-1">@changedCount changed</span>
+        }
+        <small class="text-muted fs-6 fw-normal ms-2">
+            Rename any button, column header or caption. The change shows everywhere that label is used.
+        </small>
+    </h1>
+    @if (canEdit && changedCount > 0)
+    {
+        <form asp-action="Reset" method="post" class="m-0"
+              onsubmit="return confirm('Put every label on @(string.IsNullOrWhiteSpace(screen) ? "every screen" : screen) back to its original text?');">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="screen" value="@screen" />
+            <button type="submit" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>
+                Reset @(string.IsNullOrWhiteSpace(screen) ? "all" : "this screen")
+            </button>
+        </form>
+    }
+</div>
+
+<div class="alert alert-light border small d-flex align-items-start">
+    <i class="bi bi-info-circle me-2 mt-1"></i>
+    <div>
+        Every field label, grid column, button, heading, dropdown option, placeholder and
+        caption in the application is here — filter by <strong>Type</strong> to narrow it down,
+        e.g. <em>Field label</em> for things like &ldquo;Discharge Date&rdquo;. The list also grows
+        by itself as people move around the application, so if something is missing, open the
+        screen that shows it once and come back. Clearing a box puts that label back to its
+        original text.
+    </div>
+</div>
+
+@* ---- Type chips. A thousand labels in one alphabetical list is not
+       navigable; "show me the field labels" and "show me the grid columns" are
+       the questions an administrator actually has. The count rides on each chip
+       so the size of a group is visible before clicking it. ---- *@
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <span class="text-muted small text-uppercase fw-semibold">Type</span>
+    <a asp-action="Index" asp-route-screen="@screen" asp-route-q="@query"
+       asp-route-changedOnly="@(changedOnly ? "true" : null)"
+       class="btn btn-sm @(string.IsNullOrWhiteSpace(kind) ? "btn-secondary" : "btn-outline-secondary")">
+        All <span class="badge bg-light text-dark ms-1">@totalCount</span>
+    </a>
+    @foreach (var k in kinds)
+    {
+        <a asp-action="Index" asp-route-kind="@k.Key" asp-route-screen="@screen" asp-route-q="@query"
+           asp-route-changedOnly="@(changedOnly ? "true" : null)"
+           class="btn btn-sm @(string.Equals(k.Key, kind, StringComparison.OrdinalIgnoreCase) ? "btn-secondary" : "btn-outline-secondary")">
+            @k.Key <span class="badge bg-light text-dark ms-1">@k.Value</span>
+        </a>
+    }
+</div>
+
+@* ---- Filter bar ---- *@
+<form method="get" class="row g-2 align-items-end mb-3">
+    @* The chips and this form filter the same list, so each has to carry the
+       other's choice or using one would silently drop the other. *@
+    <input type="hidden" name="kind" value="@kind" />
+    <div class="col-md-3">
+        <label class="form-label small mb-1">Screen</label>
+        <select name="screen" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="">All screens</option>
+            @foreach (var s in screens)
+            {
+                <option value="@s" selected="@(string.Equals(s, screen, StringComparison.OrdinalIgnoreCase))">@s</option>
+            }
+        </select>
+    </div>
+    <div class="col-md-4">
+        <label class="form-label small mb-1">Search</label>
+        <input type="text" name="q" value="@query" class="form-control form-control-sm"
+               placeholder="original or renamed text" autocomplete="off" />
+    </div>
+    <div class="col-md-3 d-flex align-items-center gap-3">
+        <div class="form-check mt-3">
+            <input class="form-check-input" type="checkbox" name="changedOnly" value="true"
+                   id="changedOnly" checked="@changedOnly" onchange="this.form.submit()" />
+            <label class="form-check-label small" for="changedOnly">Changed only</label>
+        </div>
+    </div>
+    <div class="col-md-2 d-flex gap-2">
+        <button type="submit" class="btn btn-sm btn-primary"><i class="bi bi-search me-1"></i>Filter</button>
+        @if (!string.IsNullOrWhiteSpace(screen) || !string.IsNullOrWhiteSpace(query) || changedOnly)
+        {
+            <a asp-action="Index" class="btn btn-sm btn-outline-secondary">Clear</a>
+        }
+    </div>
+</form>
+
+<form asp-action="Save" method="post">
+    @Html.AntiForgeryToken()
+    @* Carry the current view so saving returns to the same filtered list
+       rather than dumping the administrator back at the top of everything. *@
+    <input type="hidden" name="screen"      value="@screen" />
+    <input type="hidden" name="kind"        value="@kind" />
+    <input type="hidden" name="q"           value="@query" />
+    <input type="hidden" name="changedOnly" value="@changedOnly.ToString().ToLowerInvariant()" />
+
+    <div class="card">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 qms-index-table">
+                <thead class="table-light">
+                    <tr>
+                        <th style="width: 12%">Type</th>
+                        <th style="width: 12%">Screen</th>
+                        <th style="width: 31%">Original text</th>
+                        <th style="width: 31%">Shown as</th>
+                        <th style="width: 14%">Last changed</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @if (Model.Count == 0)
+                {
+                    <tr><td colspan="5" class="text-center text-muted py-4">
+                        No labels match. Open the screen whose wording you want to change, then come back.
+                    </td></tr>
+                }
+                else
+                {
+                    foreach (var l in Model)
+                    {
+                        <tr class="@(l.IsOverridden ? "table-info" : "")">
+                            <td>
+                                <span class="badge bg-light text-dark border">@l.KindLabel</span>
+                            </td>
+                            <td class="small text-muted">@(string.IsNullOrWhiteSpace(l.ScreenKey) ? "—" : l.ScreenKey)</td>
+                            <td>
+                                <span class="fw-semibold">@l.Key</span>
+                                <input type="hidden" name="key" value="@l.Key" />
+                            </td>
+                            <td>
+                                @* The box shows the OVERRIDE, not the effective text:
+                                   an empty box is what "no override" looks like, and
+                                   pre-filling it with the default would turn every
+                                   label into an override on the first save. *@
+                                <input type="text" name="value" value="@l.CustomText"
+                                       class="form-control form-control-sm"
+                                       placeholder="@l.Key" maxlength="400"
+                                       disabled="@(!canEdit)" />
+                            </td>
+                            <td class="small text-muted">
+                                @if (l.UpdatedAt.HasValue)
+                                {
+                                    <text>@l.UpdatedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</text>
+                                    <div>@l.UpdatedBy</div>
+                                }
+                                else
+                                {
+                                    <span>—</span>
+                                }
+                            </td>
+                        </tr>
+                    }
+                }
+                </tbody>
+            </table>
+        </div>
+        @if (canEdit && Model.Count > 0)
+        {
+            <div class="card-footer d-flex justify-content-between align-items-center">
+                <span class="text-muted small">
+                    Showing @Model.Count label@(Model.Count == 1 ? "" : "s"). Empty box = original text.
+                </span>
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-save me-1"></i>Save changes
+                </button>
+            </div>
+        }
+    </div>
+</form>

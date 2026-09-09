@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using ClosedXML.Excel;
 using Dapper;
 using Microsoft.AspNetCore.Authorization;
@@ -36,6 +36,7 @@ public class ReportsController : Controller
     private readonly IDbService _db;
     private readonly ICodeDescriptionDirectory _codes;
     private readonly IDocumentService _docs;
+    private readonly IUserPermissions _me;
 
     // Hard cap on rows in a single flat-defects Excel export to bound memory.
     private const int MaxExportRows = 250_000;
@@ -46,7 +47,8 @@ public class ReportsController : Controller
         IPivotService pivot, IPerspectiveService perspectives,
         IReportBuilderExporter reportBuilder,
         IConfiguration config, IWebHostEnvironment env, ILogger<ReportsController> log,
-        IDbService db, ICodeDescriptionDirectory codes, IDocumentService docs)
+        IDbService db, ICodeDescriptionDirectory codes, IDocumentService docs,
+        IUserPermissions me)
     {
         _qos = qos; _arrivals = arrivals; _images = images;
         _settings = settings; _mara = mara;
@@ -54,7 +56,7 @@ public class ReportsController : Controller
         _pivot = pivot; _perspectives = perspectives;
         _reportBuilder = reportBuilder;
         _config = config; _env = env; _log = log;
-        _db = db; _codes = codes; _docs = docs;
+        _db = db; _codes = codes; _docs = docs; _me = me;
     }
 
     /// <summary>
@@ -109,6 +111,7 @@ public class ReportsController : Controller
             Shipment         = shipment,
             Branding         = branding,
             LogoAbsolutePath = logoPath,
+            ProcurementType  = _codes.PoTypeDisplay(arrival.PoType),
             Images           = images,
             CustomFields     = customFields.ToList(),
             ThumbnailW       = thumb.PdfWidth,
@@ -150,10 +153,15 @@ public class ReportsController : Controller
 
         string Substitute(string s) => (s ?? "")
             .Replace("{QO_NO}",     qo.QualityOrderNo)
+            // Short form of the QC number -- "QO-2026-000956" -> "956". The
+            // prefix is identical on every mail, so it only costs subject width.
+            .Replace("{QC_NO}",     QcSubjectLine.ShortQcNo(qo.QualityOrderNo))
             .Replace("{CONTAINER}", qo.ContainerNo ?? "")
             .Replace("{BOL}",       qo.BolNo ?? "")
             .Replace("{PO}",        qo.Ebeln ?? "")
             .Replace("{SUPPLIER}",  qo.VendorName ?? vendor?.Name ?? "")
+            .Replace("{VENDOR}",    qo.VendorName ?? vendor?.Name ?? "")
+            .Replace("{ARRIVAL_NO}", qo.ArrivalNo ?? "")
             .Replace("{TODAY}",     DateTime.Today.ToString("yyyy-MM-dd"));
 
         return Json(new
@@ -212,6 +220,10 @@ public class ReportsController : Controller
             return Json(new { ok = false, error = "Recipient email is required." });
 
         var data  = await BuildDataAsync(qo);
+        // The supplier's copy: Receive Date is our goods-receipt date, not
+        // theirs. Set here and nowhere else, so the download and the inline
+        // preview keep showing the complete report to internal users.
+        data.SupplierCopy = true;
         var bytes = QualityReportRenderer.Build(data);
         var fileName = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf";
 
@@ -360,6 +372,38 @@ public class ReportsController : Controller
         return File(bytes, "application/pdf", fileName);
     }
 
+    /// <summary>
+    /// The same report as <see cref="QualityOrderPdf"/>, served for INLINE
+    /// display so the QO page can preview it in a modal instead of making the
+    /// user download a file to find out what it says. Two deliberate
+    /// differences from the download action:
+    ///
+    ///   * Content-Disposition is "inline", so a browser renders it in place
+    ///     (the modal fetches it, but "Open in new tab" hits this URL directly).
+    ///   * It writes no qms_report_log row. That log answers "when was this
+    ///     report generated and sent"; filling it with every glance at the
+    ///     preview would bury the entries that matter.
+    ///
+    /// Same permission as the download — a preview shows exactly the same data.
+    /// </summary>
+    [RequirePermission(Perm.Qo.Pdf, Seed.Everyone, "Download the quality report PDF", ReadOnly = true)]
+    public async Task<IActionResult> QualityOrderPdfPreview(long id, CancellationToken ct = default)
+    {
+        var qo = await _qos.GetAsync(id);
+        if (qo == null) return NotFound();
+        ct.ThrowIfCancellationRequested();
+
+        var data  = await BuildDataAsync(qo);
+        var bytes = QualityReportRenderer.Build(data);
+
+        // ContentDisposition rather than File(..., fileName): the filename is
+        // what the viewer's own Save button offers, but the disposition has to
+        // stay "inline" or the browser downloads instead of rendering.
+        Response.Headers.ContentDisposition =
+            $"inline; filename=\"{qo.QualityOrderNo}.pdf\"";
+        return File(bytes, "application/pdf");
+    }
+
     private async Task<QualityReportData> BuildDataAsync(QualityOrder qo)
     {
         var data = new QualityReportData
@@ -405,6 +449,28 @@ public class ReportsController : Controller
         data.Shipment  = await _arrivals.GetShipmentAsync(qo.ArrivalId);
         data.Checklist = await _arrivals.GetChecklistAsync(qo.ArrivalId);
 
+        // A rejection order: no inspection happened, so the report leads with
+        // why the container was refused.
+        data.IsContainerRejection = qo.ContainerRejected;
+        data.RejectionHeader      = reportCfg.RejectedContainerHeader;
+        data.RejectionComment     = data.Arrival.RejectReason;
+
+        // Transit Days comes from the SAP cache, not from the shipment
+        // snapshot's frozen copy -- see IArrivalService.GetCachedTransitDaysAsync
+        // for why. Best-effort: never fail a report over one field.
+        if (data.Shipment != null)
+        {
+            try
+            {
+                var cached = await _arrivals.GetCachedTransitDaysAsync(qo.ArrivalId);
+                if (cached.HasValue) data.Shipment.TransitDays = cached.Value;
+            }
+            catch (Exception ex)
+            {
+                _log.LogWarning(ex, "Transit-days refresh from the SAP cache failed for arrival {ArrivalId}", qo.ArrivalId);
+            }
+        }
+
         // "Inspection Date" is when the QO was opened, NOT the arrival
         // checklist date the shipment snapshot carries -- those differ by days
         // (QO-2026-000399: checklist 08-11, opened 08-18). opened_at is UTC and
@@ -413,25 +479,6 @@ public class ReportsController : Controller
         data.InspectionDate = inspectedAtUtc == default
             ? null
             : DateTime.SpecifyKind(inspectedAtUtc, DateTimeKind.Utc).ToLocalTime();
-
-        // "Arrival Date" is the real port arrival from SAP (ZQC_Data.Arrival_Date),
-        // held in the container cache alongside -- not instead of -- the
-        // Receive_Date that arrival_date carries for /Arrivals/Pending. Same
-        // deterministic newest-row pick as the flat-defects view, so a container
-        // matched by several PO lines resolves reproducibly.
-        if (arrival != null)
-        {
-            using var cc = new SqlConnection(_config.GetConnectionString("Default"));
-            data.PortArrivalDate = await cc.ExecuteScalarAsync<DateTime?>(@"
-                SELECT TOP 1 c.port_arrival_date
-                FROM   qms_sap_container_cache c
-                WHERE  c.container_no = @container
-                  AND  c.bol_no       = @bol
-                  AND  c.ebeln        = @ebeln
-                  AND  c.port_arrival_date IS NOT NULL
-                ORDER  BY c.doc_date DESC, c.sto",
-                new { container = arrival.ContainerNo, bol = arrival.BolNo, ebeln = arrival.Ebeln });
-        }
 
         var materials = (await _qos.GetMaterialsAsync(qo.QualityOrderId)).ToList();
 
@@ -1472,15 +1519,23 @@ public class ReportsController : Controller
     [RequirePermission(Perm.Reports.SharePerspective, Seed.SupervisorOrAbove, "Save a perspective")]
     public async Task<IActionResult> DeletePerspective(long id, CancellationToken ct)
     {
-        var user        = User.Identity?.Name ?? "";
-        var isSiteAdmin = User.IsInRole(UserRoles.SiteAdmin);
-        var ok          = await _perspectives.DeleteAsync(id, user, isSiteAdmin, ct);
+        var user      = User.Identity?.Name ?? "";
+        // Was IsInRole("SiteAdmin") -- a pre-overhaul role name, while the role
+        // claim carries codes like "QcAdmin". It never matched anybody, so the
+        // delete-anyone's-perspective path was dead. Now a real permission.
+        var canDeleteAny = _me.Can(Perm.Reports.ManagePerspectives);
+        var ok        = await _perspectives.DeleteAsync(id, user, canDeleteAny, ct);
         return ok ? Json(new { ok = true }) : NotFound(new { error = "Perspective not found or not yours." });
     }
 
-    /// <summary>Manager / SiteAdmin gate for saving with scope='shared'.</summary>
-    private bool CanShare() =>
-        User.IsInRole(UserRoles.Manager) || User.IsInRole(UserRoles.SiteAdmin);
+    /// <summary>May save a perspective with scope='shared' -- publishing it to
+    /// everyone rather than keeping it private. This was
+    /// <c>IsInRole("Manager") || IsInRole("SiteAdmin")</c>, comparing against
+    /// the pre-overhaul role names while the claim carries "QcManager" /
+    /// "QcAdmin"; it therefore returned false for every user alive, and no
+    /// perspective could be published at all. A permission both fixes that and
+    /// puts the decision on the Security screen.</summary>
+    private bool CanShare() => _me.Can(Perm.Reports.PublishPerspective);
 
     // ===================================================================
     // Report Builder (2026-07-25) -- user-composed Excel reports.

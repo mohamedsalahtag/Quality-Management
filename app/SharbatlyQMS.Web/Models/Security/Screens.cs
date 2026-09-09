@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.Models.Security;
+﻿namespace SharbatlyQMS.Web.Models.Security;
 
 /// <summary>
 /// The screen keys seeded by migration M14. A screen is the unit an
@@ -27,6 +27,12 @@ public static class Screens
     public const string QoIndex            = "QualityOrders.Index";   // levelled
     public const string QoDetails          = "QualityOrders.Details"; // levelled
     public const string Claims             = "Claims";                // levelled
+    /// <summary>Every container SAP sent, with the days between its arrival and
+    /// the moment QC finished. Admin-only by default (Seed.AdminOnly on the
+    /// controller); granted onward from the Security screen. Filed under Records
+    /// rather than Admin so granting it to a manager does not also reveal an
+    /// Admin menu containing one item.</summary>
+    public const string TimeBar            = "TimeBar";
 
     // ---- Reports ----
     public const string ReportsDataHub     = "Reports.DataHub";
@@ -50,17 +56,21 @@ public static class Screens
     public const string AdminUsers         = "Admin.Users";
     public const string AdminAuditLog      = "Admin.AuditLog";
     public const string AdminSecurity      = "Admin.Security";
+    /// <summary>Rename any button, grid header or caption in the application
+    /// without a code change. Admin-level because a label change is visible to
+    /// every user at once.</summary>
+    public const string AdminLabels        = "Admin.Labels";
 
     public static readonly string[] All =
     {
         Dashboard, Attachments,
         ArrivalsPending, ArrivalsIndex, ArrivalsSearch, ArrivalsDetails,
-        QoIndex, QoDetails, Claims,
+        QoIndex, QoDetails, Claims, TimeBar,
         ReportsDataHub, ReportsBuilder,
         DefectCatalog, DefectCategories, ReadingTypes, SampleHeaders,
         ArrivalFields, ArrivalFieldRules, ReportUnits, CodeDescriptions, MailTemplate,
         Notifications,
-        AdminSettings, AdminUsers, AdminAuditLog, AdminSecurity
+        AdminSettings, AdminUsers, AdminAuditLog, AdminSecurity, AdminLabels
     };
 
     /// <summary>Screens whose nav entries live in the Parameters dropdown.</summary>
@@ -73,7 +83,7 @@ public static class Screens
     /// <summary>Screens whose nav entries live in the Admin dropdown.</summary>
     public static readonly string[] AdminGroup =
     {
-        AdminSettings, AdminUsers, AdminAuditLog, AdminSecurity, ArrivalFieldRules
+        AdminSettings, AdminUsers, AdminAuditLog, AdminSecurity, AdminLabels, ArrivalFieldRules
     };
 
     /// <summary>Screens whose nav entries live in the Reports dropdown.</summary>

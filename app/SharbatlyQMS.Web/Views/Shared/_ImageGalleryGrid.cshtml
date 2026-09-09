@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Services
+﻿@using SharbatlyQMS.Web.Services
 @using SharbatlyQMS.Web.ViewModels
 @model ImageGalleryVm
 @inject IImageService ImageSvc
@@ -12,7 +12,7 @@
 @if (images.Count == 0)
 {
     <div class="alert alert-light text-center text-muted">
-        <i class="bi bi-images me-1"></i>No images uploaded yet.
+        <i class="bi bi-images me-1"></i>@Loc["No images uploaded yet."]
     </div>
 }
 else
@@ -33,7 +33,13 @@ else
                     <div class="small fw-bold text-truncate" title="@img.OriginalName">@img.OriginalName</div>
                     <div class="small text-muted">@img.Category</div>
                     <div class="small text-muted">@img.UploadedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</div>
-                    @if (Model.Editable)
+                    @if (!string.IsNullOrWhiteSpace(img.UploadedBy))
+                    {
+                        <div class="small text-muted text-truncate" title="Uploaded by @img.UploadedBy">
+                            <i class="bi bi-person me-1"></i>@img.UploadedBy
+                        </div>
+                    }
+                    @if (Model.AllowDelete)
                     {
                         <form asp-controller="Images" asp-action="Delete" method="post"
                               data-confirm="Remove this image?" data-confirm-danger data-confirm-ok="Remove" class="mt-1">

@@ -102,7 +102,7 @@
                         {
                             <li class="nav-item">
                                 <a class="nav-link @(onPending ? "active" : "")" aria-current="@(onPending ? "page" : null)" asp-controller="Arrivals" asp-action="Pending">
-                                    <i class="bi bi-inbox me-1"></i>Pending Containers
+                                    <i class="bi bi-inbox me-1"></i>@Loc["Pending Containers"]
                                 </a>
                             </li>
                         }
@@ -110,7 +110,7 @@
                         {
                             <li class="nav-item">
                                 <a class="nav-link @(onArrivals ? "active" : "")" aria-current="@(onArrivals ? "page" : null)" asp-controller="Arrivals" asp-action="Index">
-                                    <i class="bi bi-box-arrow-in-down me-1"></i>Arrivals
+                                    <i class="bi bi-box-arrow-in-down me-1"></i>@Loc["Arrivals"]
                                 </a>
                             </li>
                         }
@@ -118,7 +118,7 @@
                         {
                             <li class="nav-item">
                                 <a class="nav-link @(NavOn("QualityOrders") ? "active" : "")" aria-current="@(NavOn("QualityOrders") ? "page" : null)" asp-controller="QualityOrders" asp-action="Index">
-                                    <i class="bi bi-clipboard-data me-1"></i>Quality Orders
+                                    <i class="bi bi-clipboard-data me-1"></i>@Loc["Quality Orders"]
                                 </a>
                             </li>
                         }
@@ -126,7 +126,7 @@
                         {
                             <li class="nav-item">
                                 <a class="nav-link @(NavOn("ClaimManagement") ? "active" : "")" aria-current="@(NavOn("ClaimManagement") ? "page" : null)" asp-controller="ClaimManagement" asp-action="Index">
-                                    <i class="bi bi-shield-exclamation me-1"></i>Claims
+                                    <i class="bi bi-shield-exclamation me-1"></i>@Loc["Claims"]
                                 </a>
                             </li>
                         }
@@ -138,13 +138,13 @@
                             @* Data hub + Report builder combined under one "Reports" menu. *@
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle @(NavOn("Reports") ? "active" : "")" aria-current="@(NavOn("Reports") ? "page" : null)" href="#" data-bs-toggle="dropdown">
-                                    <i class="bi bi-bar-chart me-1"></i>Reports
+                                    <i class="bi bi-bar-chart me-1"></i>@Loc["Reports"]
                                 </a>
                                 <ul class="dropdown-menu">
                                     @if (Perms.CanView(Screens.ReportsDataHub))
-                                    { <li><a class="dropdown-item @(ActOn("FlatDefects") ? "active" : "")" asp-controller="Reports" asp-action="FlatDefects"><i class="bi bi-grid-3x3-gap me-1"></i>Data hub</a></li> }
+                                    { <li><a class="dropdown-item @(ActOn("FlatDefects") ? "active" : "")" asp-controller="Reports" asp-action="FlatDefects"><i class="bi bi-grid-3x3-gap me-1"></i>@Loc["Data hub"]</a></li> }
                                     @if (Perms.CanView(Screens.ReportsBuilder))
-                                    { <li><a class="dropdown-item @(ActOn("ReportBuilder") ? "active" : "")" asp-controller="Reports" asp-action="ReportBuilder"><i class="bi bi-table me-1"></i>Report builder</a></li> }
+                                    { <li><a class="dropdown-item @(ActOn("ReportBuilder") ? "active" : "")" asp-controller="Reports" asp-action="ReportBuilder"><i class="bi bi-table me-1"></i>@Loc["Report builder"]</a></li> }
                                 </ul>
                             </li>
                         }
@@ -155,38 +155,51 @@
                                can access; Operator and Viewer cannot. *@
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle @(paramsOn ? "active" : "")" aria-current="@(paramsOn ? "page" : null)" href="#" data-bs-toggle="dropdown">
-                                    <i class="bi bi-sliders2 me-1"></i>Parameters
+                                    <i class="bi bi-sliders2 me-1"></i>@Loc["Parameters"]
                                 </a>
                                 <ul class="dropdown-menu">
-                                    <li><a class="dropdown-item @(ActOn("DefectCatalog") ? "active" : "")" asp-controller="Admin" asp-action="DefectCatalog"><i class="bi bi-list-check me-1"></i>Defect Catalog</a></li>
-                                    <li><a class="dropdown-item @(ActOn("DefectCategories") ? "active" : "")" asp-controller="Admin" asp-action="DefectCategories"><i class="bi bi-palette me-1"></i>Defect Categories</a></li>
-                                    <li><a class="dropdown-item @(ActOn("ReadingTypes") ? "active" : "")" asp-controller="Admin" asp-action="ReadingTypes"><i class="bi bi-rulers me-1"></i>Reading Types</a></li>
-                                    <li><a class="dropdown-item @(ActOn("SampleHeaders") ? "active" : "")" asp-controller="Admin" asp-action="SampleHeaders"><i class="bi bi-card-heading me-1"></i>Sample Headers</a></li>
-                                    <li><a class="dropdown-item @(ActOn("ArrivalFields") ? "active" : "")" asp-controller="Admin" asp-action="ArrivalFields"><i class="bi bi-input-cursor-text me-1"></i>Arrival Fields</a></li>
-                                    <li><a class="dropdown-item @(ActOn("ReportUnits") ? "active" : "")" asp-controller="Admin" asp-action="ReportUnits"><i class="bi bi-tags me-1"></i>Report Units</a></li>
-                                    <li><a class="dropdown-item @(ActOn("CodeDescriptions") ? "active" : "")" asp-controller="Admin" asp-action="CodeDescriptions"><i class="bi bi-translate me-1"></i>Code Descriptions</a></li>
-                                    <li><a class="dropdown-item @(ActOn("MailTemplate") ? "active" : "")" asp-controller="Admin" asp-action="MailTemplate"><i class="bi bi-envelope-paper me-1"></i>Mail Template</a></li>
-                                    <li><a class="dropdown-item @(ActOn("Notifications") ? "active" : "")" asp-controller="Admin" asp-action="Notifications"><i class="bi bi-bell me-1"></i>Notifications</a></li>
+                                    <li><a class="dropdown-item @(ActOn("DefectCatalog") ? "active" : "")" asp-controller="Admin" asp-action="DefectCatalog"><i class="bi bi-list-check me-1"></i>@Loc["Defect Catalog"]</a></li>
+                                    <li><a class="dropdown-item @(ActOn("DefectCategories") ? "active" : "")" asp-controller="Admin" asp-action="DefectCategories"><i class="bi bi-palette me-1"></i>@Loc["Defect Categories"]</a></li>
+                                    <li><a class="dropdown-item @(ActOn("ReadingTypes") ? "active" : "")" asp-controller="Admin" asp-action="ReadingTypes"><i class="bi bi-rulers me-1"></i>@Loc["Reading Types"]</a></li>
+                                    <li><a class="dropdown-item @(ActOn("SampleHeaders") ? "active" : "")" asp-controller="Admin" asp-action="SampleHeaders"><i class="bi bi-card-heading me-1"></i>@Loc["Sample Headers"]</a></li>
+                                    <li><a class="dropdown-item @(ActOn("ArrivalFields") ? "active" : "")" asp-controller="Admin" asp-action="ArrivalFields"><i class="bi bi-input-cursor-text me-1"></i>@Loc["Arrival Fields"]</a></li>
+                                    <li><a class="dropdown-item @(ActOn("ReportUnits") ? "active" : "")" asp-controller="Admin" asp-action="ReportUnits"><i class="bi bi-tags me-1"></i>@Loc["Report Units"]</a></li>
+                                    <li><a class="dropdown-item @(ActOn("CodeDescriptions") ? "active" : "")" asp-controller="Admin" asp-action="CodeDescriptions"><i class="bi bi-translate me-1"></i>@Loc["Code Descriptions"]</a></li>
+                                    <li><a class="dropdown-item @(ActOn("MailTemplate") ? "active" : "")" asp-controller="Admin" asp-action="MailTemplate"><i class="bi bi-envelope-paper me-1"></i>@Loc["Mail Template"]</a></li>
+                                    <li><a class="dropdown-item @(ActOn("Notifications") ? "active" : "")" asp-controller="Admin" asp-action="Notifications"><i class="bi bi-bell me-1"></i>@Loc["Notifications"]</a></li>
                                 </ul>
                             </li>
                         }
                         @if (canSeeAdmin)
                         {
+                        @if (Perms.CanView(Screens.TimeBar))
+                        {
+                            @* A records list, not a configuration screen, so it
+                               sits at the top level next to Claims. *@
+                            <li class="nav-item">
+                                <a class="nav-link @(NavOn("TimeBar") ? "active" : "")"
+                                   asp-controller="TimeBar" asp-action="Index">
+                                    <i class="bi bi-hourglass-split me-1"></i>@Loc["Time Bar"]
+                                </a>
+                            </li>
+                        }
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle @(adminOn ? "active" : "")" aria-current="@(adminOn ? "page" : null)" href="#" data-bs-toggle="dropdown">
-                                    <i class="bi bi-gear me-1"></i>Admin
+                                    <i class="bi bi-gear me-1"></i>@Loc["Admin"]
                                 </a>
                                 <ul class="dropdown-menu">
                                     @if (Perms.CanView(Screens.AdminSettings))
-                                    { <li><a class="dropdown-item @(ActOn("Settings") ? "active" : "")" asp-controller="Admin" asp-action="Settings"><i class="bi bi-sliders me-1"></i>Site Configuration</a></li> }
+                                    { <li><a class="dropdown-item @(ActOn("Settings") ? "active" : "")" asp-controller="Admin" asp-action="Settings"><i class="bi bi-sliders me-1"></i>@Loc["Site Configuration"]</a></li> }
                                     @if (Perms.CanView(Screens.AdminUsers))
-                                    { <li><a class="dropdown-item @(ActOn("Users") ? "active" : "")" asp-controller="Admin" asp-action="Users"><i class="bi bi-people me-1"></i>Users</a></li> }
+                                    { <li><a class="dropdown-item @(ActOn("Users") ? "active" : "")" asp-controller="Admin" asp-action="Users"><i class="bi bi-people me-1"></i>@Loc["Users"]</a></li> }
                                     @if (Perms.CanView(Screens.ArrivalFieldRules))
-                                    { <li><a class="dropdown-item @(ActOn("ArrivalFieldRules") ? "active" : "")" asp-controller="Admin" asp-action="ArrivalFieldRules"><i class="bi bi-sliders me-1"></i>Arrival Field Rules</a></li> }
+                                    { <li><a class="dropdown-item @(ActOn("ArrivalFieldRules") ? "active" : "")" asp-controller="Admin" asp-action="ArrivalFieldRules"><i class="bi bi-sliders me-1"></i>@Loc["Arrival Field Rules"]</a></li> }
                                     @if (Perms.CanView(Screens.AdminAuditLog))
-                                    { <li><a class="dropdown-item @(NavOn("Audit") ? "active" : "")" asp-controller="Audit" asp-action="Index"><i class="bi bi-shield-shaded me-1"></i>Audit Log</a></li> }
+                                    { <li><a class="dropdown-item @(NavOn("Audit") ? "active" : "")" asp-controller="Audit" asp-action="Index"><i class="bi bi-shield-shaded me-1"></i>@Loc["Audit Log"]</a></li> }
                                     @if (Perms.CanView(Screens.AdminSecurity))
-                                    { <li><a class="dropdown-item @(NavOn("Security") ? "active" : "")" asp-controller="Security" asp-action="Index"><i class="bi bi-shield-lock me-1"></i>Security</a></li> }
+                                    { <li><a class="dropdown-item @(NavOn("Security") ? "active" : "")" asp-controller="Security" asp-action="Index"><i class="bi bi-shield-lock me-1"></i>@Loc["Security"]</a></li> }
+                                    @if (Perms.CanView(Screens.AdminLabels))
+                                    { <li><a class="dropdown-item @(NavOn("Labels") ? "active" : "")" asp-controller="Labels" asp-action="Index"><i class="bi bi-translate me-1"></i>@Loc["Labels"]</a></li> }
                                 </ul>
                             </li>
                         }
@@ -203,7 +216,7 @@
                                     <i class="bi bi-incognito me-1"></i>View as: @(Perms.EffectiveRole ?? role)
                                 </a>
                                 <ul class="dropdown-menu dropdown-menu-end">
-                                    <li><h6 class="dropdown-header">View site as</h6></li>
+                                    <li><h6 class="dropdown-header">@Loc["View site as"]</h6></li>
                                     @* Driven by the role table, so a role composed on the Security
                                        screen can be previewed the moment it is created -- which is
                                        the only practical way to check one before assigning it. *@
@@ -227,7 +240,7 @@
                                             <input type="hidden" name="role" value="" />
                                             <input type="hidden" name="returnUrl" value="@returnUrl" />
                                             <button type="submit" class="dropdown-item @(!impersonating ? "active" : "")">
-                                                <i class="bi bi-person-check me-2"></i>Stop previewing
+                                                <i class="bi bi-person-check me-2"></i>@Loc["Stop previewing"]
                                             </button>
                                         </form>
                                     </li>
@@ -236,17 +249,17 @@
                         }
                         @* theme-pack picker *@
                         <li class="nav-item dropdown">
-                            <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" title="Theme" aria-label="Theme picker">
+                            <a class="nav-link dropdown-toggle" href="#" data-bs-toggle="dropdown" title="Theme" aria-label='@Loc["Theme picker"]'>
                                 <i class="bi bi-palette"></i>
                             </a>
                             <ul class="dropdown-menu dropdown-menu-end">
-                                <li><h6 class="dropdown-header">Theme</h6></li>
-                                <li><a class="dropdown-item theme-pick" data-theme="light"  href="#"><i class="bi bi-sun me-2"></i>Light</a></li>
-                                <li><a class="dropdown-item theme-pick" data-theme="dark"   href="#"><i class="bi bi-moon-stars me-2"></i>Dark</a></li>
-                                <li><a class="dropdown-item theme-pick" data-theme="blue"   href="#"><i class="bi bi-droplet me-2"></i>Blue</a></li>
-                                <li><a class="dropdown-item theme-pick" data-theme="sepia"  href="#"><i class="bi bi-cup-hot me-2"></i>Sepia</a></li>
-                                <li><a class="dropdown-item theme-pick" data-theme="forest" href="#"><i class="bi bi-tree me-2"></i>Forest</a></li>
-                                <li><a class="dropdown-item theme-pick" data-theme="rose"   href="#"><i class="bi bi-flower1 me-2"></i>Rose</a></li>
+                                <li><h6 class="dropdown-header">@Loc["Theme"]</h6></li>
+                                <li><a class="dropdown-item theme-pick" data-theme="light"  href="#"><i class="bi bi-sun me-2"></i>@Loc["Light"]</a></li>
+                                <li><a class="dropdown-item theme-pick" data-theme="dark"   href="#"><i class="bi bi-moon-stars me-2"></i>@Loc["Dark"]</a></li>
+                                <li><a class="dropdown-item theme-pick" data-theme="blue"   href="#"><i class="bi bi-droplet me-2"></i>@Loc["Blue"]</a></li>
+                                <li><a class="dropdown-item theme-pick" data-theme="sepia"  href="#"><i class="bi bi-cup-hot me-2"></i>@Loc["Sepia"]</a></li>
+                                <li><a class="dropdown-item theme-pick" data-theme="forest" href="#"><i class="bi bi-tree me-2"></i>@Loc["Forest"]</a></li>
+                                <li><a class="dropdown-item theme-pick" data-theme="rose"   href="#"><i class="bi bi-flower1 me-2"></i>@Loc["Rose"]</a></li>
                             </ul>
                         </li>
                         <li class="nav-item dropdown">
@@ -263,13 +276,13 @@
                             </a>
                             <ul class="dropdown-menu dropdown-menu-end">
                                 <li><h6 class="dropdown-header">@role @if (plantScope != null) { <text>— @Codes.PlantLabel(plantScope)</text> }</h6></li>
-                                <li><a class="dropdown-item" asp-controller="Account" asp-action="Profile"><i class="bi bi-person-vcard me-1"></i>My Profile</a></li>
+                                <li><a class="dropdown-item" asp-controller="Account" asp-action="Profile"><i class="bi bi-person-vcard me-1"></i>@Loc["My Profile"]</a></li>
                                 <li><hr class="dropdown-divider" /></li>
                                 <li>
                                     <form asp-controller="Account" asp-action="Logout" method="post" class="d-inline">
                                         @Html.AntiForgeryToken()
                                         <button type="submit" class="dropdown-item">
-                                            <i class="bi bi-box-arrow-right me-1"></i>Sign out
+                                            <i class="bi bi-box-arrow-right me-1"></i>@Loc["Sign out"]
                                         </button>
                                     </form>
                                 </li>
@@ -289,7 +302,7 @@
                     <input type="hidden" name="role" value="" />
                     <input type="hidden" name="returnUrl" value="@returnUrl" />
                     <button type="submit" class="btn btn-sm btn-warning">
-                        <i class="bi bi-person-check me-1"></i>Become self
+                        <i class="bi bi-person-check me-1"></i>@Loc["Become self"]
                     </button>
                 </form>
             </div>
@@ -357,6 +370,9 @@
     <script src="~/js/image-gallery-ajax.js" defer></script>
     <script src="~/js/image-lightbox.js" defer></script>
     <script src="~/js/document-list-ajax.js" defer></script>
+    @* Shared fetch->blob->iframe viewer: the QC report preview and the document
+       lists on both the arrival and quality-order pages all use it. *@
+    <script src="~/js/file-preview.js" defer></script>
     @await RenderSectionAsync("Scripts", required: false)
 </body>
 </html>

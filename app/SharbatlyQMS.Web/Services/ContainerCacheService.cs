@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Dapper;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Services.Sap;
@@ -93,8 +93,10 @@ public class ContainerCacheService : IContainerCacheService
         string? plant = null, string? poType = null, string? storageLoc = null,
         string? supplier = null, string? material = null,
         DateOnly? from = null, DateOnly? to = null,
+        DateOnly? arrFrom = null, DateOnly? arrTo = null,
         int page = 1, int pageSize = 100,
         Models.PlantScope? scope = null,
+        bool archived = false,
         CancellationToken ct = default)
     {
         var sc = scope ?? Models.PlantScope.All;
@@ -116,8 +118,24 @@ public class ContainerCacheService : IContainerCacheService
         // ANY line in the triplet (grouping already collapses lines, so a plain
         // predicate matches the whole triplet). doc_date is a SQL DATE, so the
         // From/To range needs no timezone conversion (unlike the arrivals list).
+        //
+        // ArrFrom/ArrTo filter arrival_date -- SAP's Receive_Date, which is the
+        // same column the grid's "Arr" cell shows as MAX(arrival_date), so the
+        // filter and what the operator reads always agree. port_arrival_date is
+        // the truer port arrival but is only ~a third populated (measured over
+        // 1,000 live rows, M18), so a range over it would look broken. Like the
+        // PO-date filter these are per-LINE predicates evaluated before the
+        // GROUP BY: a triplet whose lines disagree can match on one line while
+        // the cell shows a different MAX.
+        //
+        // @Archived flips the page between the live pending list and the
+        // archive. Archiving is a flag rather than a delete because the next
+        // SAP sweep would re-insert any row we removed (same reason as
+        // override_plant), so every pending query has to exclude it explicitly.
         const string filterClause = @"
             has_arrival = 0
+            AND ((@Archived = 0 AND archived_at IS NULL)
+              OR (@Archived = 1 AND archived_at IS NOT NULL))
             AND (@Container  IS NULL OR container_no LIKE @Container)
             AND (@Bol        IS NULL OR bol_no       LIKE @Bol)
             AND (@Po         IS NULL OR ebeln        LIKE @Po)
@@ -128,6 +146,8 @@ public class ContainerCacheService : IContainerCacheService
             AND (@StorageLoc IS NULL OR storage_loc  = @StorageLoc)
             AND (@From       IS NULL OR doc_date    >= @From)
             AND (@To         IS NULL OR doc_date    <= @To)
+            AND (@ArrFrom    IS NULL OR arrival_date >= @ArrFrom)
+            AND (@ArrTo      IS NULL OR arrival_date <= @ArrTo)
             AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)";
 
         // SQL LIKE wildcards: empty input -> NULL (match everything);
@@ -156,8 +176,11 @@ public class ContainerCacheService : IContainerCacheService
             // bounds are inclusive (doc_date has no time component).
             From       = from?.ToDateTime(TimeOnly.MinValue),
             To         = to?.ToDateTime(TimeOnly.MinValue),
+            ArrFrom    = arrFrom?.ToDateTime(TimeOnly.MinValue),
+            ArrTo      = arrTo?.ToDateTime(TimeOnly.MinValue),
             sUnrestricted = sc.Unrestricted,
             sPlants       = sc.QueryPlants,
+            Archived      = archived,
             offset, pageSize
         };
 
@@ -195,7 +218,9 @@ public class ContainerCacheService : IContainerCacheService
                 MAX(arrival_date)  AS ArrivalDate,
                 MAX(receive_date)  AS ReceiveDate,
                 MAX(transit_days)  AS TransitDays,
-                MIN(first_seen_at) AS FirstSeenAt
+                MIN(first_seen_at) AS FirstSeenAt,
+                MAX(archived_at)   AS ArchivedAt,
+                MAX(archived_by)   AS ArchivedBy
             INTO   #page
             FROM   qms_sap_container_cache
             WHERE  {filterClause}
@@ -242,7 +267,7 @@ public class ContainerCacheService : IContainerCacheService
     }
 
     public async Task<PendingFilterOptions> GetPendingFilterOptionsAsync(
-        Models.PlantScope? scope = null, CancellationToken ct = default)
+        Models.PlantScope? scope = null, bool archived = false, CancellationToken ct = default)
     {
         var sc = scope ?? Models.PlantScope.All;
         using var c = Open();
@@ -257,16 +282,20 @@ public class ContainerCacheService : IContainerCacheService
         // Dropdowns list the EFFECTIVE plant (override when set, else SAP's) so
         // they line up with what ListPendingAsync filters and shows, and a
         // reassigned container appears under its target plant.
+        // All three also honour @Archived, so the archive view's dropdowns list
+        // the codes present in the ARCHIVE rather than in the live pending list.
         using var grid = await c.QueryMultipleAsync(@"
             SELECT DISTINCT COALESCE(override_plant, plant) AS Plant
             FROM   qms_sap_container_cache
             WHERE  has_arrival = 0 AND COALESCE(override_plant, plant) IS NOT NULL AND COALESCE(override_plant, plant) <> ''
+              AND ((@Archived = 0 AND archived_at IS NULL) OR (@Archived = 1 AND archived_at IS NOT NULL))
               AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)
             ORDER  BY Plant;
 
             SELECT DISTINCT po_type
             FROM   qms_sap_container_cache
             WHERE  has_arrival = 0 AND po_type IS NOT NULL AND po_type <> ''
+              AND ((@Archived = 0 AND archived_at IS NULL) OR (@Archived = 1 AND archived_at IS NOT NULL))
               AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)
             ORDER  BY po_type;
 
@@ -275,9 +304,10 @@ public class ContainerCacheService : IContainerCacheService
             WHERE  has_arrival = 0
               AND  COALESCE(override_plant, plant) IS NOT NULL AND COALESCE(override_plant, plant) <> ''
               AND  storage_loc IS NOT NULL AND storage_loc <> ''
+              AND ((@Archived = 0 AND archived_at IS NULL) OR (@Archived = 1 AND archived_at IS NOT NULL))
               AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)
             ORDER  BY Plant, storage_loc;",
-            new { sUnrestricted = sc.Unrestricted, sPlants = sc.QueryPlants });
+            new { sUnrestricted = sc.Unrestricted, sPlants = sc.QueryPlants, Archived = archived });
 
         var plants    = (await grid.ReadAsync<string>()).ToList();
         var poTypes   = (await grid.ReadAsync<string>()).ToList();
@@ -380,6 +410,105 @@ public class ContainerCacheService : IContainerCacheService
             new { containerNo, bolNo, ebeln });
     }
 
+    public async Task<int> CountArchivedTripletsAsync(Models.PlantScope? scope = null, CancellationToken ct = default)
+    {
+        var sc = scope ?? Models.PlantScope.All;
+        using var c = Open();
+        return await c.ExecuteScalarAsync<int>(@"
+            SELECT COUNT(*) FROM (
+                SELECT DISTINCT container_no, bol_no, ebeln
+                FROM   qms_sap_container_cache
+                WHERE  has_arrival = 0 AND archived_at IS NOT NULL
+                  AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)
+            ) AS x",
+            new { sUnrestricted = sc.Unrestricted, sPlants = sc.QueryPlants });
+    }
+
+    public Task<int> ArchiveByArrivalDateRangeAsync(DateOnly? from, DateOnly? to, string user,
+        Models.PlantScope? scope = null, CancellationToken ct = default)
+        => SetArchivedByArrivalDateRangeAsync(from, to, user, scope, archive: true);
+
+    public Task<int> RestoreByArrivalDateRangeAsync(DateOnly? from, DateOnly? to, string user,
+        Models.PlantScope? scope = null, CancellationToken ct = default)
+        => SetArchivedByArrivalDateRangeAsync(from, to, user, scope, archive: false);
+
+    /// <summary>
+    /// Shared body of the two range operations — they differ only in which side
+    /// of the flag they select and which side they write, so one query with two
+    /// parameters beats two near-identical copies drifting apart.
+    /// </summary>
+    private async Task<int> SetArchivedByArrivalDateRangeAsync(DateOnly? from, DateOnly? to, string user,
+        Models.PlantScope? scope, bool archive)
+    {
+        var sc = scope ?? Models.PlantScope.All;
+        using var c = Open();
+        // The range is matched on MAX(arrival_date) PER TRIPLET, not per row:
+        // that is the "Arr" date the grid prints, so the operator archives
+        // exactly the containers the list showed them. A triplet whose lines
+        // carry different arrival dates is decided by the one date they can see.
+        //
+        // Was doc_date (the PO date) until the PO date was removed from the page
+        // entirely -- archiving by a date nobody can see is not a usable action.
+        //
+        // #t is materialised first so the UPDATE and the returned count come
+        // from the same set -- counting rows affected would report cache LINES
+        // (a triplet has several), which reads as a wildly inflated number.
+        return await c.ExecuteScalarAsync<int>(@"
+            SELECT container_no, bol_no, ebeln
+            INTO   #t
+            FROM   qms_sap_container_cache
+            WHERE  has_arrival = 0
+              AND ((@Archive = 1 AND archived_at IS NULL)
+                OR (@Archive = 0 AND archived_at IS NOT NULL))
+              AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)
+            GROUP  BY container_no, bol_no, ebeln
+            HAVING (@From IS NULL OR MAX(arrival_date) >= @From)
+               AND (@To   IS NULL OR MAX(arrival_date) <= @To);
+
+            UPDATE cc
+            SET    archived_at = CASE WHEN @Archive = 1 THEN SYSUTCDATETIME() END,
+                   archived_by = CASE WHEN @Archive = 1 THEN @user END
+            FROM   qms_sap_container_cache cc
+            JOIN   #t t
+              ON   t.container_no = cc.container_no
+             AND   t.bol_no       = cc.bol_no
+             AND   t.ebeln        = cc.ebeln
+            WHERE  cc.has_arrival = 0;
+
+            SELECT COUNT(*) FROM #t;
+
+            DROP TABLE #t;",
+            new
+            {
+                // doc_date is a SQL DATE with no time part, so both bounds are
+                // inclusive; DateOnly needs the same DateTime conversion the
+                // list query does (this Dapper/SqlClient pairing won't bind it).
+                From    = from?.ToDateTime(TimeOnly.MinValue),
+                To      = to?.ToDateTime(TimeOnly.MinValue),
+                Archive = archive,
+                user,
+                sUnrestricted = sc.Unrestricted,
+                sPlants       = sc.QueryPlants
+            });
+    }
+
+    public async Task<int> SetArchivedAsync(string containerNo, string bolNo, string ebeln,
+        bool archived, string user, CancellationToken ct = default)
+    {
+        using var c = Open();
+        // Whole triplet at once: the pending list groups by it, so leaving some
+        // of its lines unarchived would make the container reappear.
+        return await c.ExecuteAsync(@"
+            UPDATE qms_sap_container_cache
+            SET    archived_at = CASE WHEN @archived = 1 THEN SYSUTCDATETIME() END,
+                   archived_by = CASE WHEN @archived = 1 THEN @user END
+            WHERE  container_no = @containerNo
+              AND  bol_no       = @bolNo
+              AND  ebeln        = @ebeln
+              AND  has_arrival  = 0",
+            new { containerNo, bolNo, ebeln, archived, user });
+    }
+
     public async Task<int> ReconcileWithArrivalsAsync(CancellationToken ct = default)
     {
         using var c = Open();
@@ -404,7 +533,7 @@ public class ContainerCacheService : IContainerCacheService
             SELECT COUNT(*) FROM (
                 SELECT DISTINCT container_no, bol_no, ebeln
                 FROM   qms_sap_container_cache
-                WHERE  has_arrival = 0
+                WHERE  has_arrival = 0 AND archived_at IS NULL
             ) AS x");
     }
 

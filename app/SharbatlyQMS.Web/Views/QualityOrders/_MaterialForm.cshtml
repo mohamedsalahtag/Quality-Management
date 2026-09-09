@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.ViewModels
 @model MaterialFormVm
 @{
@@ -59,7 +59,7 @@
             }
             @if (Model.HeaderFields.Count == 0)
             {
-                <div class="col-12"><div class="text-muted small">No material-level header fields configured. Manage them (and their scope) in <a asp-controller="Admin" asp-action="SampleHeaders">Admin → Sample Headers</a>.</div></div>
+                <div class="col-12"><div class="text-muted small">No material-level header fields configured. Manage them (and their scope) in <a asp-controller="Admin" asp-action="SampleHeaders">@Loc["Admin → Sample Headers"]</a>.</div></div>
             }
         </div>
     </fieldset>

@@ -1,0 +1,403 @@
+﻿@using SharbatlyQMS.Web.ViewModels
+@using SharbatlyQMS.Web.Services
+@model IReadOnlyList<TimeBarRow>
+@{
+    ViewData["Title"] = Loc["Time Bar"];
+    var f          = ViewBag.Filter        as TimeBarFilter  ?? new TimeBarFilter();
+    var cfg        = ViewBag.Config        as TimeBarConfig  ?? new TimeBarConfig();
+    var summary    = ViewBag.Summary       as TimeBarSummary ?? new TimeBarSummary();
+    var plants     = ViewBag.PlantOptions  as IReadOnlyList<string> ?? Array.Empty<string>();
+    var poTypes    = ViewBag.PoTypeOptions as IReadOnlyList<string> ?? Array.Empty<string>();
+    var statuses   = ViewBag.StatusOptions as IReadOnlyList<string> ?? Array.Empty<string>();
+    var lockedPlant= ViewBag.PlantScopeLocked as string;
+    var asOf       = ViewBag.AsOf as DateTime? ?? DateTime.Now;
+    var canConfigure = Perms.CanView(SharbatlyQMS.Web.Models.Security.Screens.AdminSettings);
+
+    var total      = ViewBag.Total    as int? ?? Model.Count;
+    var pageNo     = ViewBag.Page     as int? ?? 1;
+    var pageSize   = ViewBag.PageSize as int? ?? 100;
+    var pageCount  = (int)Math.Ceiling((double)Math.Max(total, 1) / pageSize);
+    var firstRow   = total == 0 ? 0 : (pageNo - 1) * pageSize + 1;
+    var lastRow    = Math.Min(pageNo * pageSize, total);
+
+    string Dstr(DateOnly? d) => d?.ToString("yyyy-MM-dd") ?? "";
+
+    // Every link keeps the current view; only what it changes is overridden.
+    Func<object, Dictionary<string, string>> Route = overrides =>
+    {
+        var d = new Dictionary<string, string>();
+        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) d[k] = v!; }
+        Add("search", f.Search);      Add("stage", f.Stage);       Add("status", f.Status);
+        Add("plant", f.Plant);        Add("poType", f.PoType);     Add("supplier", f.Supplier);
+        Add("container", f.Container);Add("bol", f.Bol);           Add("po", f.Po);
+        Add("from", Dstr(f.From));    Add("to", Dstr(f.To));
+        if (f.OverOnly)        d["overOnly"] = "true";
+        if (f.NoCacheOnly)     d["noCacheOnly"] = "true";
+        if (f.IncludeArchived) d["includeArchived"] = "true";
+        if (f.MinDays.HasValue) d["minDays"] = f.MinDays.Value.ToString();
+        Add("sort", f.Sort);          Add("dir", f.Dir);
+        d["pageSize"] = pageSize.ToString();
+        foreach (var pi in overrides.GetType().GetProperties())
+        {
+            var v = pi.GetValue(overrides)?.ToString();
+            if (string.IsNullOrEmpty(v)) d.Remove(pi.Name); else d[pi.Name] = v;
+        }
+        return d;
+    };
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h1 class="h3 mb-0">
+        <i class="bi bi-hourglass-split me-1"></i>@Loc["Time Bar"]
+        <span class="badge bg-secondary ms-2">@total</span>
+        <small class="text-muted fs-6 fw-normal ms-2">
+            @Loc["Days from a container's arrival to the moment QC finished. Optimum is"] @cfg.GoodDays @Loc["day(s)."]
+        </small>
+    </h1>
+    <span class="text-muted small">
+        <i class="bi bi-clock-history me-1"></i>@Loc["As of"] @asOf.ToString("yyyy-MM-dd HH:mm")
+    </span>
+</div>
+
+@* A page that silently hides most of the fleet would be read as a bug. Say the
+   floor is on, say what it is, and say who can change it. *@
+@if (cfg.StartDate.HasValue)
+{
+    <div class="alert alert-info d-flex align-items-center py-2 small">
+        <i class="bi bi-funnel-fill me-2"></i>
+        <div>
+            @Loc["Counting only containers that arrived on or after"]
+            <strong>@cfg.StartDate.Value.ToString("yyyy-MM-dd")</strong>.
+            @Loc["Earlier arrivals are left out of every number on this page."]
+            @if (canConfigure)
+            {
+                <a asp-controller="Admin" asp-action="Settings" asp-fragment="alerts"
+                   class="alert-link ms-1">@Loc["Change it"]</a>
+            }
+        </div>
+    </div>
+}
+
+@* ---- The one-line answer, before any row is read. Computed over the whole
+       filtered set, not the visible page. ---- *@
+<div class="row g-3 mb-3">
+    @{
+        var tiles = new (string Label, string Value, string Tone, string Icon, string Hint)[]
+        {
+            (Loc["Containers"],     summary.Containers.ToString(),    "secondary", "bi-box-seam",       Loc["In this view"]),
+            (Loc["Not started"],    summary.Pending.ToString(),       summary.Pending > 0 ? "danger" : "success", "bi-hourglass",       Loc["No arrival created yet"]),
+            (Loc["Clock running"],  summary.Running.ToString(),       summary.Running > 0 ? "warning" : "success", "bi-play-circle",     Loc["QC not finished"]),
+            (Loc["Over threshold"], summary.OverThreshold.ToString(), summary.OverThreshold > 0 ? "danger" : "success", "bi-exclamation-triangle", $"{Loc["More than"]} {cfg.WarnDays} {Loc["day(s)"]}"),
+            (Loc["Median (finished)"], summary.MedianSettled?.ToString() ?? "—", "info", "bi-graph-down", Loc["Typical days to finish"]),
+        };
+    }
+    @foreach (var t in tiles)
+    {
+        <div class="col-6 col-md-4 col-xl">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body py-3">
+                    <div class="text-muted small text-uppercase fw-semibold mb-1">
+                        <i class="bi @t.Icon text-@t.Tone me-1"></i>@t.Label
+                    </div>
+                    <div class="fs-2 fw-semibold lh-1 text-@t.Tone">@t.Value</div>
+                    <div class="text-muted small mt-1">@t.Hint</div>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@* ---- Stage chips + the two toggles that matter ---- *@
+<div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+    <span class="text-muted small text-uppercase fw-semibold">@Loc["Stage"]</span>
+    <div class="btn-group btn-group-sm">
+        <a asp-action="Index" asp-all-route-data='Route(new { stage = (string?)null })'
+           class="btn @(string.IsNullOrWhiteSpace(f.Stage) ? "btn-secondary" : "btn-outline-secondary")">@Loc["All"]</a>
+        @foreach (var st in TimeBarStages.All)
+        {
+            <a asp-action="Index" asp-all-route-data="Route(new { stage = st })"
+               class="btn @(string.Equals(st, f.Stage, StringComparison.OrdinalIgnoreCase) ? "btn-secondary" : "btn-outline-secondary")">
+                @(st == TimeBarStages.Pending ? Loc["Not started"] : (st == TimeBarStages.Qc ? Loc["In QC"] : Loc["Arrival only"]))
+            </a>
+        }
+    </div>
+
+    <a asp-action="Index" asp-all-route-data='Route(new { overOnly = f.OverOnly ? null : "true" })'
+       class="btn btn-sm @(f.OverOnly ? "btn-danger" : "btn-outline-danger")">
+        <i class="bi bi-exclamation-triangle me-1"></i>@Loc["Over threshold only"]
+    </a>
+    <a asp-action="Index" asp-all-route-data='Route(new { noCacheOnly = f.NoCacheOnly ? null : "true" })'
+       class="btn btn-sm @(f.NoCacheOnly ? "btn-secondary" : "btn-outline-secondary")"
+       title='@Loc["Arrivals created by searching SAP directly, with no cached container behind them."]'>
+        @Loc["Not in SAP cache"]
+    </a>
+    <a asp-action="Index" asp-all-route-data='Route(new { includeArchived = f.IncludeArchived ? null : "true" })'
+       class="btn btn-sm @(f.IncludeArchived ? "btn-secondary" : "btn-outline-secondary")">
+        <i class="bi bi-archive me-1"></i>@Loc["Include archived"]
+    </a>
+</div>
+
+@* ---- Filters ---- *@
+<div class="mb-3">
+    <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-toggle="collapse"
+            data-bs-target="#timeBarFilters" aria-expanded="@(f.Any ? "true" : "false")">
+        <i class="bi bi-funnel me-1"></i>@Loc["Filters"]
+    </button>
+    <div class="collapse @(f.Any ? "show" : "")" id="timeBarFilters">
+        <div class="card card-body mt-2">
+            <form method="get" class="row g-2 mb-0">
+                <div class="col-md-3">
+                    <label class="form-label small mb-1">@Loc["Search"]</label>
+                    <input type="text" name="search" value="@f.Search" class="form-control form-control-sm"
+                           placeholder='@Loc["container, BOL, PO, QC no, supplier"]' autocomplete="off" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["Container"]</label>
+                    <input type="text" name="container" value="@f.Container" class="form-control form-control-sm" autocomplete="off" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["PO"]</label>
+                    <input type="text" name="po" value="@f.Po" class="form-control form-control-sm" autocomplete="off" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">@Loc["Plant"]</label>
+                    @if (lockedPlant != null)
+                    {
+                        <div class="form-control form-control-sm bg-light d-flex align-items-center">
+                            <i class="bi bi-lock-fill text-muted me-1"></i>
+                            <span class="small">@Codes.PlantLabel(lockedPlant)</span>
+                        </div>
+                        <input type="hidden" name="plant" value="@lockedPlant" />
+                    }
+                    else
+                    {
+                        <select name="plant" class="form-select form-select-sm">
+                            <option value="">@Loc["All plants"]</option>
+                            @foreach (var pl in plants)
+                            {
+                                <option value="@pl" selected="@(string.Equals(pl, f.Plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
+                            }
+                        </select>
+                    }
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">@Loc["Status"]</label>
+                    <select name="status" class="form-select form-select-sm">
+                        <option value="">@Loc["Any status"]</option>
+                        @foreach (var st in statuses)
+                        {
+                            <option value="@st" selected="@(string.Equals(st, f.Status, StringComparison.OrdinalIgnoreCase))">@st</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-1">
+                    <label class="form-label small mb-1">@Loc["PO type"]</label>
+                    <select name="poType" class="form-select form-select-sm">
+                        <option value="">@Loc["All"]</option>
+                        @foreach (var pt in poTypes)
+                        {
+                            <option value="@pt" selected="@(string.Equals(pt, f.PoType, StringComparison.OrdinalIgnoreCase))">@Codes.PoTypeDisplay(pt)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["Arrived from"]</label>
+                    <input type="date" name="from" value="@Dstr(f.From)" class="form-control form-control-sm" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["Arrived to"]</label>
+                    <input type="date" name="to" value="@Dstr(f.To)" class="form-control form-control-sm" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["At least (days)"]</label>
+                    <input type="number" min="0" name="minDays" value="@f.MinDays" class="form-control form-control-sm" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["Supplier"]</label>
+                    <input type="text" name="supplier" value="@f.Supplier" class="form-control form-control-sm" autocomplete="off" />
+                </div>
+                @* Chip state has to survive a filter submit, or using one control
+                   would silently clear the other. *@
+                @if (f.OverOnly)        { <input type="hidden" name="overOnly" value="true" /> }
+                @if (f.NoCacheOnly)     { <input type="hidden" name="noCacheOnly" value="true" /> }
+                @if (f.IncludeArchived) { <input type="hidden" name="includeArchived" value="true" /> }
+                @if (!string.IsNullOrWhiteSpace(f.Stage)) { <input type="hidden" name="stage" value="@f.Stage" /> }
+                <div class="col-md-2 d-flex align-items-end gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>@Loc["Filter"]</button>
+                    @if (f.Any)
+                    {
+                        <a asp-action="Index" class="btn btn-outline-secondary btn-sm">@Loc["Clear"]</a>
+                    }
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="table-responsive">
+        <table id="time-bar" class="table table-hover align-middle mb-0 qms-index-table"
+               data-tablekit data-no-pager data-coltoggle>
+            <thead class="table-light">
+                <tr>
+                    <th data-sort data-col-key="container">@Loc["Container"]</th>
+                    <th data-sort data-col-key="po">@Loc["PO / STO"]</th>
+                    <th data-sort data-col-key="vendor">@Loc["Supplier"]</th>
+                    <th data-sort data-col-key="plant">@Loc["Plant"]</th>
+                    <th data-sort data-col-key="arrived">@Loc["Arrived"]</th>
+                    <th data-sort data-col-key="status">@Loc["Status"]</th>
+                    <th data-sort data-col-key="finished">@Loc["QC finished"]</th>
+                    <th style="width:22%" data-col-key="bar">@Loc["Inspection time bar"]</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Count == 0)
+            {
+                <tr><td colspan="8" class="text-center text-muted py-4">
+                    @if (f.Any)
+                    {
+                        <span>@Loc["No containers match the filter."] <a asp-action="Index">@Loc["Clear"]</a></span>
+                    }
+                    else
+                    {
+                        <span>@Loc["No containers yet."]</span>
+                    }
+                </td></tr>
+            }
+            else
+            {
+                foreach (var r in Model)
+                {
+                    var tone = r.Tone(cfg.GoodDays, cfg.WarnDays);
+                    @* Cap the bar's width so one 90-day outlier does not squash
+                       every other row into an unreadable sliver; the number is
+                       printed beside it so the cap never hides the truth. *@
+                    var pct  = r.ElapsedDays is null || cfg.WarnDays <= 0
+                                ? 0
+                                : Math.Min(100, (int)(r.ElapsedDays.Value * 100.0 / Math.Max(1, cfg.WarnDays * 2)));
+                    <tr class="@(r.IsArchived ? "opacity-75" : "")">
+                        <td class="pp-code">
+                            <strong>@r.ContainerNo</strong>
+                            @if (r.NotInCache)
+                            {
+                                <span class="badge bg-light text-dark border ms-1"
+                                      title='@Loc["Created by searching SAP directly; no cached container row."]'>@Loc["not in cache"]</span>
+                            }
+                            @if (r.IsArchived)
+                            {
+                                <span class="badge bg-light text-dark border ms-1">@Loc["archived"]</span>
+                            }
+                            @if (!string.IsNullOrEmpty(r.BolNo))
+                            {
+                                <div class="pp-sub">@r.BolNo</div>
+                            }
+                        </td>
+                        <td class="pp-code">
+                            @r.Ebeln
+                            @if (!string.IsNullOrEmpty(r.Sto)) { <div class="pp-sub">STO @r.Sto</div> }
+                        </td>
+                        <td title="@r.VendorName" class="text-truncate" style="max-width:14rem">@r.VendorName</td>
+                        <td>
+                            @if (!string.IsNullOrEmpty(r.Plant))
+                            {
+                                <span class="badge bg-light text-dark border" title="@r.Plant">@Codes.PlantDisplay(r.Plant)</span>
+                            }
+                        </td>
+                        <td class="pp-code">
+                            @(r.ArrivalDate?.ToString("yyyy-MM-dd") ?? "—")
+                            @if (!string.IsNullOrEmpty(r.ArrivalSource) && r.ArrivalSource != "Receipt")
+                            {
+                                <div class="pp-sub" title='@Loc["Which date started the clock"]'>@r.ArrivalSource</div>
+                            }
+                        </td>
+                        <td>
+                            @{
+                                var stageTone = r.Stage == TimeBarStages.Pending ? "danger"
+                                              : r.Stage == TimeBarStages.Qc      ? "primary" : "warning";
+                            }
+                            <span class="badge bg-@stageTone-subtle text-@stageTone-emphasis border border-@stageTone">
+                                @r.StatusLabel
+                            </span>
+                            @if (r.ArrivalNo != null)
+                            {
+                                <div class="pp-sub">
+                                    <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@r.ArrivalId"
+                                       class="text-decoration-none">@r.ArrivalNo</a>
+                                    @if (r.QualityOrderNo != null)
+                                    {
+                                        <text> · </text>
+                                        <a asp-controller="QualityOrders" asp-action="Details" asp-route-id="@r.QualityOrderId"
+                                           class="text-decoration-none">@r.QualityOrderNo</a>
+                                    }
+                                </div>
+                            }
+                        </td>
+                        <td class="pp-code">
+                            @(r.ClosedAt?.ToLocalTime().ToString("yyyy-MM-dd") ?? "—")
+                        </td>
+                        <td>
+                            @if (r.ElapsedDays is null)
+                            {
+                                <span class="text-muted small">@Loc["No arrival date recorded"]</span>
+                            }
+                            else
+                            {
+                                <div class="d-flex align-items-center gap-2">
+                                    <div class="progress flex-grow-1" style="height:.6rem;min-width:5rem"
+                                         role="progressbar" aria-label='@Loc["Inspection time bar"]'>
+                                        <div class="progress-bar bg-@tone @(r.IsRunning ? "progress-bar-striped progress-bar-animated" : "")"
+                                             style="width:@pct%"></div>
+                                    </div>
+                                    <span class="text-nowrap fw-semibold text-@tone">
+                                        @r.ElapsedDays @Loc["d"]
+                                    </span>
+                                    @if (r.IsRunning)
+                                    {
+                                        <i class="bi bi-hourglass-split text-muted"
+                                           title='@Loc["Still running — QC has not finished"]'></i>
+                                    }
+                                    @if (r.IsBackwards)
+                                    {
+                                        <i class="bi bi-exclamation-triangle text-warning"
+                                           title='@Loc["QC finished before the recorded arrival date — check the dates"]'></i>
+                                    }
+                                </div>
+                            }
+                        </td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+
+    @if (total > 0)
+    {
+        <div class="tk-pager d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 border-top">
+            <span class="text-muted small">@Loc["Showing"] @firstRow–@lastRow @Loc["of"] @total</span>
+            @if (pageCount > 1)
+            {
+                <nav>
+                    <ul class="pagination pagination-sm mb-0">
+                        @{
+                            var from = Math.Max(1, pageNo - 2);
+                            var to   = Math.Min(pageCount, pageNo + 2);
+                        }
+                        <li class="page-item @(pageNo == 1 ? "disabled" : "")">
+                            <a class="page-link" asp-action="Index" asp-all-route-data="Route(new { page = pageNo - 1 })">«</a>
+                        </li>
+                        @for (var pp = from; pp <= to; pp++)
+                        {
+                            <li class="page-item @(pp == pageNo ? "active" : "")">
+                                <a class="page-link" asp-action="Index" asp-all-route-data="Route(new { page = pp })">@pp</a>
+                            </li>
+                        }
+                        <li class="page-item @(pageNo == pageCount ? "disabled" : "")">
+                            <a class="page-link" asp-action="Index" asp-all-route-data="Route(new { page = pageNo + 1 })">»</a>
+                        </li>
+                    </ul>
+                </nav>
+            }
+        </div>
+    }
+</div>

@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Dapper;
@@ -48,6 +48,9 @@ public class ArrivalService : IArrivalService
                a.created_by     CreatedBy,
                a.completed_at   CompletedAt,
                a.completed_by   CompletedBy,
+               a.rejected_at    RejectedAt,
+               a.rejected_by    RejectedBy,
+               a.reject_reason  RejectReason,
                qo.quality_order_id QualityOrderId,
                qo.quality_order_no QualityOrderNo,
                qo.status_code      QualityOrderStatus
@@ -369,6 +372,26 @@ public class ArrivalService : IArrivalService
                    internal_damage_photo_taken       InternalDamagePhotoTaken
             FROM   qms_arrival_checklist
             WHERE  arrival_id = @arrivalId", new { arrivalId });
+    }
+
+    public async Task<short?> GetCachedTransitDaysAsync(long arrivalId)
+    {
+        using var c = Open();
+        // TOP 1 over the triplet, not a join: the cache key is wider than
+        // (container, BOL, PO) -- one row per PO line -- so a plain join fans
+        // out. Ordered the same way the flat views resolve a triplet to one
+        // cache row, so the number here and the number in the Data Hub agree.
+        return await c.ExecuteScalarAsync<short?>(@"
+            SELECT TOP 1 cc.transit_days
+            FROM   qms_sap_container_cache cc
+            JOIN   qms_arrival a
+              ON   a.container_no = cc.container_no
+             AND   a.bol_no       = cc.bol_no
+             AND   a.ebeln        = cc.ebeln
+            WHERE  a.arrival_id = @arrivalId
+              AND  cc.transit_days IS NOT NULL
+            ORDER  BY cc.doc_date DESC, cc.sto",
+            new { arrivalId });
     }
 
     public async Task<ShipmentSnapshot?> GetShipmentAsync(long arrivalId)
@@ -724,6 +747,130 @@ public class ArrivalService : IArrivalService
             },
             actor: updatedBy);
         tx.Commit();
+    }
+
+    public async Task<(bool ok, string? error, long? qoId)> RejectAsync(long arrivalId, string reason, string user)
+    {
+        // Validated server-side. The modal marks the box required, but a crafted
+        // POST ignores that, and this text is printed verbatim on the report the
+        // supplier receives -- an empty or one-word rejection is not a claim.
+        reason = (reason ?? "").Trim();
+        if (reason.Length < 10)
+            return (false, "Say why the container is being refused — at least a short sentence. " +
+                           "This text is printed on the report sent to the supplier.", null);
+        if (reason.Length > 500) reason = reason[..500];
+
+        var arrival = await GetAsync(arrivalId);
+        if (arrival == null) return (false, "Arrival not found.", null);
+        if (arrival.StatusCode != ArrivalStatus.Draft)
+            return (false, $"Only a Draft arrival can be rejected (this one is {arrival.StatusCode}). " +
+                           "Reopen it for edit first if the container must be refused.", null);
+
+        // Deliberately NOT running the mandatory-field check CompleteAsync does:
+        // those fields describe an inspection, and the point of a rejection is
+        // that no inspection happens. The arrival stays editable afterwards so
+        // the claim dates can still be filled in.
+
+        using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+
+        // Guarded on Draft so a Complete that slipped in between the read above
+        // and here makes this affect zero rows rather than double-writing.
+        var updated = await c.ExecuteAsync(@"
+            UPDATE qms_arrival
+            SET    status_code='Rejected', rejected_at=SYSUTCDATETIME(),
+                   rejected_by=@user, reject_reason=@reason
+            WHERE  arrival_id=@arrivalId AND status_code='Draft'",
+            new { arrivalId, user, reason }, tx);
+        if (updated != 1)
+        {
+            tx.Rollback();
+            return (false, "This arrival was changed by someone else. Please refresh and try again.", null);
+        }
+
+        // Freeze the shipment snapshot, exactly as completing does: the dates
+        // the claim report prints must stop moving.
+        await c.ExecuteAsync(
+            "UPDATE qms_shipment_snapshot SET status_code='Confirmed' WHERE arrival_id=@arrivalId",
+            new { arrivalId }, tx);
+
+        long qoId;
+        try
+        {
+            (qoId, _) = await RejectionOrder.CreateClosedAsync(c, tx, _audit, arrivalId, reason, user);
+        }
+        catch (InvalidOperationException ex)
+        {
+            tx.Rollback();
+            return (false, ex.Message, null);
+        }
+
+        await c.ExecuteAsync(@"
+            INSERT INTO qms_status_history
+                (entity_type, entity_id, old_status, new_status, reason, changed_at, changed_by)
+            VALUES ('Arrival', @arrivalId, 'Draft', 'Rejected', @reason, SYSUTCDATETIME(), @user)",
+            new { arrivalId, reason, user }, tx);
+
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Arrival, arrivalId, ActionCodes.Updated,
+            oldValues: new { status_code = "Draft" },
+            newValues: new { status_code = "Rejected", reason },
+            actor: user);
+
+        tx.Commit();
+        return (true, null, qoId);
+    }
+
+    public async Task<(bool ok, string? error)> CancelRejectionAsync(long arrivalId, string reason, string user)
+    {
+        reason = (reason ?? "").Trim();
+        if (reason.Length < 5)
+            return (false, "Give a reason for undoing the rejection.");
+        if (reason.Length > 500) reason = reason[..500];
+
+        var arrival = await GetAsync(arrivalId);
+        if (arrival == null) return (false, "Arrival not found.");
+        if (arrival.StatusCode != ArrivalStatus.Rejected)
+            return (false, $"This arrival is {arrival.StatusCode}, not Rejected.");
+
+        using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+
+        // The order first: if it cannot be cancelled the arrival must not move,
+        // or the container ends up Draft with an orphaned closed claim order.
+        await RejectionOrder.CancelAsync(c, tx, _audit, arrivalId, reason, user);
+
+        var updated = await c.ExecuteAsync(@"
+            UPDATE qms_arrival
+            SET    status_code='Draft', rejected_at=NULL, rejected_by=NULL, reject_reason=NULL
+            WHERE  arrival_id=@arrivalId AND status_code='Rejected'",
+            new { arrivalId }, tx);
+        if (updated != 1)
+        {
+            tx.Rollback();
+            return (false, "This arrival was changed by someone else. Please refresh and try again.");
+        }
+
+        await c.ExecuteAsync(
+            "UPDATE qms_shipment_snapshot SET status_code='Draft' WHERE arrival_id=@arrivalId",
+            new { arrivalId }, tx);
+
+        await c.ExecuteAsync(@"
+            INSERT INTO qms_status_history
+                (entity_type, entity_id, old_status, new_status, reason, changed_at, changed_by)
+            VALUES ('Arrival', @arrivalId, 'Rejected', 'Draft', @reason, SYSUTCDATETIME(), @user)",
+            new { arrivalId, reason, user }, tx);
+
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Arrival, arrivalId, ActionCodes.Updated,
+            oldValues: new { status_code = "Rejected" },
+            newValues: new { status_code = "Draft", reason },
+            actor: user);
+
+        tx.Commit();
+        return (true, null);
     }
 
     public async Task<(bool ok, string? error)> CompleteAsync(long arrivalId, string user)

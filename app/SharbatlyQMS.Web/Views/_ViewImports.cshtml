@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web
+﻿@using SharbatlyQMS.Web
 @using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.Models.Security
 @using SharbatlyQMS.Web.Security
@@ -12,3 +12,7 @@
    Injected globally because several list views resolve names per table cell;
    `Codes` is a singleton holding immutable dictionaries, so this is free. *@
 @inject ICodeDescriptionDirectory Codes
+@* Editable UI text. @Loc["Container"] prints "Container" until an administrator
+   renames it on Admin -> Labels, and the English in the view stays the key, so
+   the markup still says what it renders. *@
+@inject ILabelService Loc

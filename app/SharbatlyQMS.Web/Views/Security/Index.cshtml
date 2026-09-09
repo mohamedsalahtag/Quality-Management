@@ -1,8 +1,8 @@
-@using SharbatlyQMS.Web.ViewModels
+﻿@using SharbatlyQMS.Web.ViewModels
 @using SharbatlyQMS.Web.Services
 @model SecurityVm
 @{
-    ViewData["Title"] = "Security";
+    ViewData["Title"] = Loc["Security"];
     var sel = Model.Selected;
     var groups = Model.Cards.GroupBy(c => c.GroupName)
                             .OrderBy(g => Array.IndexOf(new[] { "General", "Records", "Reports", "Parameters", "Admin" }, g.Key))
@@ -20,7 +20,7 @@
     </h1>
     <div class="d-flex gap-2 flex-wrap">
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newRoleModal">
-            <i class="bi bi-plus-circle me-1"></i>New role
+            <i class="bi bi-plus-circle me-1"></i>@Loc["New role"]
         </button>
         <form asp-action="Rescan" method="post" class="m-0"
               data-confirm="Re-scan the application for new screens and buttons? Nothing already granted is changed."
@@ -28,7 +28,7 @@
             @Html.AntiForgeryToken()
             <button type="submit" class="btn btn-outline-secondary"
                     title="Runs automatically when the app restarts. Use this after a deployment to pick up new buttons immediately.">
-                <i class="bi bi-arrow-repeat me-1"></i>Refresh list
+                <i class="bi bi-arrow-repeat me-1"></i>@Loc["Refresh list"]
             </button>
         </form>
     </div>
@@ -47,8 +47,8 @@
 
 @{ var openCompare = (bool?)ViewBag.OpenCompare ?? false; }
 <ul class="nav nav-tabs mb-3">
-    <li class="nav-item"><a class="nav-link @(openCompare ? "" : "active")" data-bs-toggle="tab" href="#tab-editor">Role editor</a></li>
-    <li class="nav-item"><a class="nav-link @(openCompare ? "active" : "")" data-bs-toggle="tab" href="#tab-matrix">Compare all roles</a></li>
+    <li class="nav-item"><a class="nav-link @(openCompare ? "" : "active")" data-bs-toggle="tab" href="#tab-editor">@Loc["Role editor"]</a></li>
+    <li class="nav-item"><a class="nav-link @(openCompare ? "active" : "")" data-bs-toggle="tab" href="#tab-matrix">@Loc["Compare all roles"]</a></li>
 </ul>
 
 <div class="tab-content">
@@ -58,7 +58,7 @@
             @* ---- Role list ---- *@
             <div class="col-lg-3">
                 <div class="card">
-                    <div class="card-header py-2"><i class="bi bi-person-badge me-1"></i>Roles</div>
+                    <div class="card-header py-2"><i class="bi bi-person-badge me-1"></i>@Loc["Roles"]</div>
                     <div class="list-group list-group-flush">
                         @foreach (var r in Model.Roles)
                         {
@@ -72,8 +72,8 @@
                                         </div>
                                     </div>
                                     <div class="text-end">
-                                        @if (r.IsBuiltIn) { <span class="badge bg-secondary-subtle text-secondary-emphasis">Built-in</span> }
-                                        @if (!r.IsActive) { <span class="badge bg-warning text-dark">Inactive</span> }
+                                        @if (r.IsBuiltIn) { <span class="badge bg-secondary-subtle text-secondary-emphasis">@Loc["Built-in"]</span> }
+                                        @if (!r.IsActive) { <span class="badge bg-warning text-dark">@Loc["Inactive"]</span> }
                                     </div>
                                 </div>
                             </a>
@@ -86,7 +86,7 @@
             <div class="col-lg-9">
                 @if (sel == null)
                 {
-                    <div class="alert alert-light border">No roles yet. Click <em>New role</em> to create one.</div>
+                    <div class="alert alert-light border">No roles yet. Click <em>@Loc["New role"]</em> to create one.</div>
                 }
                 else
                 {
@@ -96,14 +96,14 @@
                                 @Html.AntiForgeryToken()
                                 <input type="hidden" name="roleCode" value="@sel.RoleCode" />
                                 <div class="col-md-4">
-                                    <label class="form-label small mb-1">Role name</label>
+                                    <label class="form-label small mb-1">@Loc["Role name"]</label>
                                     <input type="text" name="displayName" value="@sel.DisplayName" maxlength="60"
                                            class="form-control form-control-sm" @(sel.IsBuiltIn ? "readonly" : "") />
                                 </div>
                                 <div class="col-md-4">
-                                    <label class="form-label small mb-1">Description</label>
+                                    <label class="form-label small mb-1">@Loc["Description"]</label>
                                     <input type="text" name="description" value="@sel.Description" maxlength="400"
-                                           class="form-control form-control-sm" placeholder="What is this role for?" />
+                                           class="form-control form-control-sm" placeholder='@Loc["What is this role for?"]' />
                                 </div>
                                 @* Plant access is a per-USER setting now (assigned on the Users
                                    screen), not a per-role flag, so the old "One plant only"
@@ -114,11 +114,11 @@
                                         <input class="form-check-input" type="checkbox" name="isActive" value="true"
                                                id="sel-active" @(sel.IsActive ? "checked" : "") @(sel.IsBuiltIn ? "disabled" : "") />
                                         <input type="hidden" name="isActive" value="@(sel.IsBuiltIn ? "true" : "false")" />
-                                        <label class="form-check-label small" for="sel-active">Active</label>
+                                        <label class="form-check-label small" for="sel-active">@Loc["Active"]</label>
                                     </div>
                                 </div>
                                 <div class="col-md-2 d-flex gap-2">
-                                    <button type="submit" class="btn btn-outline-primary btn-sm">Save details</button>
+                                    <button type="submit" class="btn btn-outline-primary btn-sm">@Loc["Save details"]</button>
                                 </div>
                             </form>
                             @if (!sel.IsBuiltIn)
@@ -128,7 +128,7 @@
                                       data-confirm-danger data-confirm-ok="Delete role">
                                     @Html.AntiForgeryToken()
                                     <input type="hidden" name="roleCode" value="@sel.RoleCode" />
-                                    <button type="submit" class="btn btn-link btn-sm text-danger p-0">Delete this role</button>
+                                    <button type="submit" class="btn btn-link btn-sm text-danger p-0">@Loc["Delete this role"]</button>
                                 </form>
                             }
                         </div>
@@ -139,7 +139,7 @@
                         <div class="alert alert-warning d-flex align-items-center gap-2">
                             <i class="bi bi-exclamation-triangle fs-5"></i>
                             <div>
-                                <strong>This is your own role.</strong> Permission changes to it are refused, so that
+                                <strong>@Loc["This is your own role."]</strong> Permission changes to it are refused, so that
                                 nobody can accidentally remove their own access to this screen. Sign in as a different
                                 administrator to change it.
                             </div>
@@ -150,7 +150,7 @@
                         <div class="alert alert-secondary d-flex align-items-center gap-2">
                             <i class="bi bi-shield-lock-fill fs-5"></i>
                             <div>
-                                <strong>The Administrator is a super role.</strong> It always holds every permission —
+                                <strong>@Loc["The Administrator is a super role."]</strong> It always holds every permission —
                                 including any added later — and can never be locked out, so its access is shown
                                 read-only here.
                             </div>
@@ -160,7 +160,7 @@
                     <ul class="nav nav-pills mb-3">
                         <li class="nav-item">
                             <a class="nav-link @(usersTab ? "" : "active")" data-bs-toggle="tab" href="#sub-permissions">
-                                <i class="bi bi-ui-checks me-1"></i>Permissions
+                                <i class="bi bi-ui-checks me-1"></i>@Loc["Permissions"]
                             </a>
                         </li>
                         <li class="nav-item">
@@ -179,9 +179,9 @@
 
                         <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
                             <input type="search" id="permSearch" class="form-control form-control-sm" style="max-width: 22rem"
-                                   placeholder="Search screens and buttons…" autocomplete="off" />
-                            <button type="button" class="btn btn-outline-secondary btn-sm" data-expand-all>Expand all</button>
-                            <button type="button" class="btn btn-outline-secondary btn-sm" data-collapse-all>Collapse all</button>
+                                   placeholder='@Loc["Search screens and buttons…"]' autocomplete="off" />
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-expand-all>@Loc["Expand all"]</button>
+                            <button type="button" class="btn btn-outline-secondary btn-sm" data-collapse-all>@Loc["Collapse all"]</button>
                             <span class="ms-auto small text-muted" id="grantTotal"></span>
                         </div>
 
@@ -202,7 +202,7 @@
                                         @if (card.SupportsAccessLevel)
                                         {
                                             <span class="badge bg-info-subtle text-info-emphasis" title="This screen can be set to read-only.">
-                                                read-only or edit
+                                                @Loc["read-only or edit"]
                                             </span>
                                         }
                                     </div>
@@ -211,7 +211,7 @@
                                             @if (card.HasScreenPermission)
                                             {
                                                 <div class="mb-2 pb-2 border-bottom">
-                                                    <label class="form-label small mb-1 d-block">Access to this screen</label>
+                                                    <label class="form-label small mb-1 d-block">@Loc["Access to this screen"]</label>
                                                     @if (card.SupportsAccessLevel)
                                                     {
                                                         <div class="btn-group btn-group-sm" role="group" data-screen-level="@card.ScreenKey">
@@ -225,11 +225,11 @@
                                                             }
                                                         </div>
                                                         <div class="form-text">
-                                                            <strong>No access</strong> — the role cannot open or even see this screen.
-                                                            <strong>Read only</strong> — the role can open and view the screen; only the
-                                                            <span class="badge bg-info-subtle text-info-emphasis">view / export</span>
+                                                            <strong>@Loc["No access"]</strong> — the role cannot open or even see this screen.
+                                                            <strong>@Loc["Read only"]</strong> — the role can open and view the screen; only the
+                                                            <span class="badge bg-info-subtle text-info-emphasis">@Loc["view / export"]</span>
                                                             buttons below can be granted, every button that changes data is switched off.
-                                                            <strong>Edit</strong> — every button below can be granted.
+                                                            <strong>@Loc["Edit"]</strong> — every button below can be granted.
                                                         </div>
                                                         @* Restated for the current choice, updated live by security-matrix.js. *@
                                                         <div class="form-text fw-semibold text-body" data-level-hint></div>
@@ -242,7 +242,7 @@
                                                                    data-screen-toggle="@card.ScreenKey"
                                                                    @(card.ScreenLevel != AccessLevel.None ? "checked" : "")
                                                                    @(Model.SelectedIsSuper ? "disabled" : "") />
-                                                            <label class="form-check-label" for="@id">Can open this screen</label>
+                                                            <label class="form-check-label" for="@id">@Loc["Can open this screen"]</label>
                                                         </div>
                                                     }
                                                 </div>
@@ -250,13 +250,13 @@
 
                                             @if (card.Actions.Count == 0)
                                             {
-                                                <div class="text-muted small fst-italic">No individual buttons on this screen.</div>
+                                                <div class="text-muted small fst-italic">@Loc["No individual buttons on this screen."]</div>
                                             }
                                             else
                                             {
                                                 <div class="d-flex gap-2 mb-2">
-                                                    <button type="button" class="btn btn-link btn-sm p-0" data-select-all>Select all</button>
-                                                    <button type="button" class="btn btn-link btn-sm p-0" data-select-none>None</button>
+                                                    <button type="button" class="btn btn-link btn-sm p-0" data-select-all>@Loc["Select all"]</button>
+                                                    <button type="button" class="btn btn-link btn-sm p-0" data-select-none>@Loc["None"]</button>
                                                 </div>
                                                 <div class="row g-1">
                                                     @foreach (var a in card.Actions)
@@ -275,7 +275,7 @@
                                                                     @if (a.IsReadOnlyAction)
                                                                     {
                                                                         <span class="badge bg-info-subtle text-info-emphasis ms-1"
-                                                                              title="Only reads data. Stays available when this screen is set to read-only.">view / export</span>
+                                                                              title="Only reads data. Stays available when this screen is set to read-only.">@Loc["view / export"]</span>
                                                                     }
                                                                     @if (a.IsLocked)
                                                                     {
@@ -285,7 +285,7 @@
                                                                     @if (a.IsObsolete)
                                                                     {
                                                                         <span class="badge bg-warning text-dark ms-1"
-                                                                              title="This button no longer exists in the application.">retired</span>
+                                                                              title="This button no longer exists in the application.">@Loc["retired"]</span>
                                                                     }
                                                                 </label>
                                                             </div>
@@ -303,7 +303,7 @@
                             <button type="submit" class="btn btn-primary" @((Model.EditingOwnRole || Model.SelectedIsSuper) ? "disabled" : "")>
                                 <i class="bi bi-save me-1"></i>Save permissions for @sel.DisplayName
                             </button>
-                            <span class="text-muted small">Takes effect on the next page anyone loads — no sign-out needed.</span>
+                            <span class="text-muted small">@Loc["Takes effect on the next page anyone loads — no sign-out needed."]</span>
                         </div>
                     </form>
                     </div>@* /sub-permissions *@
@@ -321,7 +321,7 @@
                                 {
                                     <a asp-controller="Admin" asp-action="Users" asp-route-role="@sel.RoleCode"
                                        class="btn btn-sm btn-outline-secondary ms-auto">
-                                        <i class="bi bi-box-arrow-up-right me-1"></i>Manage on the Users screen
+                                        <i class="bi bi-box-arrow-up-right me-1"></i>@Loc["Manage on the Users screen"]
                                     </a>
                                 }
                             </div>
@@ -329,12 +329,12 @@
                                 <table class="table table-sm table-hover align-middle mb-0">
                                     <thead class="table-light">
                                         <tr>
-                                            <th>Full name</th>
-                                            <th>Username</th>
-                                            <th>Email</th>
-                                            <th>Department</th>
-                                            @if (sel.IsPlantScoped) { <th>Plant</th> }
-                                            <th>Status</th>
+                                            <th>@Loc["Full name"]</th>
+                                            <th>@Loc["Username"]</th>
+                                            <th>@Loc["Email"]</th>
+                                            <th>@Loc["Department"]</th>
+                                            @if (sel.IsPlantScoped) { <th>@Loc["Plant"]</th> }
+                                            <th>@Loc["Status"]</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -342,7 +342,7 @@
                                         {
                                             var cols = 5 + (sel.IsPlantScoped ? 1 : 0);
                                             <tr><td colspan="@cols" class="text-center text-muted py-4">
-                                                Nobody holds this role yet.
+                                                @Loc["Nobody holds this role yet."]
                                             </td></tr>
                                         }
                                         else
@@ -359,8 +359,8 @@
                                                         <td>@(string.IsNullOrWhiteSpace(m.PlantCode) ? "—" : Codes.PlantDisplay(m.PlantCode))</td>
                                                     }
                                                     <td>
-                                                        @if (m.IsActive) { <span class="badge bg-success">Active</span> }
-                                                        else { <span class="badge bg-secondary">Disabled</span> }
+                                                        @if (m.IsActive) { <span class="badge bg-success">@Loc["Active"]</span> }
+                                                        else { <span class="badge bg-secondary">@Loc["Disabled"]</span> }
                                                     </td>
                                                 </tr>
                                             }
@@ -389,7 +389,7 @@
             }
             <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
                 <input type="search" id="matrixSearch" class="form-control form-control-sm" style="max-width: 22rem"
-                       placeholder="Filter permissions…" autocomplete="off" />
+                       placeholder='@Loc["Filter permissions…"]' autocomplete="off" />
                 @if (Model.AnyObsolete)
                 {
                     <a class="btn btn-outline-secondary btn-sm" asp-action="Index"
@@ -399,11 +399,11 @@
                 }
                 <span class="small text-muted">@Model.MatrixRows.Count permissions × @Model.Roles.Count roles</span>
                 <button type="submit" class="btn btn-primary btn-sm ms-auto">
-                    <i class="bi bi-save me-1"></i>Save all roles
+                    <i class="bi bi-save me-1"></i>@Loc["Save all roles"]
                 </button>
             </div>
             <div class="alert alert-info py-1 px-2 small mb-2">
-                Edit any role's access here, then <strong>Save all roles</strong>. An action can only be
+                Edit any role's access here, then <strong>@Loc["Save all roles"]</strong>. An action can only be
                 granted once its screen is set to Read only or Edit. The Administrator's core cells and the
                 role you are signed in as cannot be changed.
             </div>
@@ -412,8 +412,8 @@
                     <table class="table table-sm table-hover align-middle mb-0" id="matrixTable">
                         <thead class="table-light" style="position:sticky; top:0; z-index:2;">
                             <tr>
-                                <th>Screen</th>
-                                <th>Permission</th>
+                                <th>@Loc["Screen"]</th>
+                                <th>@Loc["Permission"]</th>
                                 @foreach (var r in Model.Roles)
                                 {
                                     <th class="text-center small" title="@r.Description">
@@ -433,8 +433,8 @@
                                 <td class="small text-muted">@row.ScreenTitle</td>
                                 <td class="small">
                                     @(row.Kind == "Screen" ? "Open the screen" : row.DisplayName)
-                                    @if (row.IsReadOnlyAction) { <span class="badge bg-info-subtle text-info-emphasis ms-1">view / export</span> }
-                                    @if (row.IsObsolete) { <span class="badge bg-warning text-dark ms-1">retired</span> }
+                                    @if (row.IsReadOnlyAction) { <span class="badge bg-info-subtle text-info-emphasis ms-1">@Loc["view / export"]</span> }
+                                    @if (row.IsObsolete) { <span class="badge bg-warning text-dark ms-1">@Loc["retired"]</span> }
                                 </td>
                                 @for (int i = 0; i < row.Cells.Count; i++)
                                 {
@@ -445,7 +445,7 @@
                                         {
                                             @if (cell.Locked)
                                             {
-                                                <span class="badge bg-success-subtle text-success-emphasis" title="Always on for the Administrator">Edit</span>
+                                                <span class="badge bg-success-subtle text-success-emphasis" title="Always on for the Administrator">@Loc["Edit"]</span>
                                                 <input type="hidden" name="screenLevel_@rc" value="@(row.ScreenKey)=2" />
                                             }
                                             else
@@ -453,10 +453,10 @@
                                                 <select class="form-select form-select-sm d-inline-block matrix-screen"
                                                         style="width:auto; min-width:5.5rem"
                                                         name="screenLevel_@rc" data-role="@rc" data-screen="@row.ScreenKey">
-                                                    <option value="@(row.ScreenKey)=0" selected="@(cell.Level == AccessLevel.None)">No access</option>
+                                                    <option value="@(row.ScreenKey)=0" selected="@(cell.Level == AccessLevel.None)">@Loc["No access"]</option>
                                                     @if (row.SupportsAccessLevel)
                                                     {
-                                                        <option value="@(row.ScreenKey)=1" selected="@(cell.Level == AccessLevel.Read)">Read only</option>
+                                                        <option value="@(row.ScreenKey)=1" selected="@(cell.Level == AccessLevel.Read)">@Loc["Read only"]</option>
                                                     }
                                                     <option value="@(row.ScreenKey)=2" selected="@(cell.Level == AccessLevel.Edit)">@(row.SupportsAccessLevel ? "Edit" : "Access")</option>
                                                 </select>
@@ -496,39 +496,39 @@
         <form asp-action="CreateRole" method="post" class="modal-content">
             @Html.AntiForgeryToken()
             <div class="modal-header">
-                <h5 class="modal-title">New role</h5>
+                <h5 class="modal-title">@Loc["New role"]</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
                 <div class="mb-3">
-                    <label class="form-label">Role name</label>
+                    <label class="form-label">@Loc["Role name"]</label>
                     <input type="text" name="displayName" class="form-control" maxlength="60" required
-                           placeholder="e.g. Night Shift Inspector" autocomplete="off" />
-                    <div class="form-text">Shown on the Users screen. The internal code is generated for you.</div>
+                           placeholder='@Loc["e.g. Night Shift Inspector"]' autocomplete="off" />
+                    <div class="form-text">@Loc["Shown on the Users screen. The internal code is generated for you."]</div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Description</label>
+                    <label class="form-label">@Loc["Description"]</label>
                     <input type="text" name="description" class="form-control" maxlength="400"
-                           placeholder="What is this role for?" autocomplete="off" />
+                           placeholder='@Loc["What is this role for?"]' autocomplete="off" />
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Start from</label>
+                    <label class="form-label">@Loc["Start from"]</label>
                     <select name="copyFrom" class="form-select">
-                        <option value="">Nothing — start with no permissions</option>
+                        <option value="">@Loc["Nothing — start with no permissions"]</option>
                         @foreach (var r in Model.Roles.Where(x => x.IsActive))
                         {
                             <option value="@r.RoleCode">A copy of @r.DisplayName (@r.GrantCount permissions)</option>
                         }
                     </select>
-                    <div class="form-text">Copying is usually quicker than ticking a hundred boxes.</div>
+                    <div class="form-text">@Loc["Copying is usually quicker than ticking a hundred boxes."]</div>
                 </div>
                 @* Plant access is assigned per user on the Users screen, so a new
                    role no longer carries a plant flag. *@
                 <input type="hidden" name="isPlantScoped" value="false" />
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="submit" class="btn btn-primary">Create role</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="submit" class="btn btn-primary">@Loc["Create role"]</button>
             </div>
         </form>
     </div>

@@ -119,6 +119,47 @@ public class DocumentsController : Controller
         return File(stream, _docs.ContentTypeFor(doc.OriginalName), doc.OriginalName);
     }
 
+    /// <summary>
+    /// The same bytes as <see cref="Download"/>, served INLINE so the browser
+    /// renders them in place instead of putting a file on disk. Reading an
+    /// attachment used to mean downloading it, opening it, and deleting it
+    /// again just to find out what it was.
+    ///
+    /// Same permission and same plant gate as the download -- a preview shows
+    /// exactly the same content, so it cannot be a weaker check. Two things are
+    /// NOT the same:
+    ///   * only a short allow-list of types is served inline (PDF and plain
+    ///     text); anything else falls back to attachment, because an inline
+    ///     response executes in our origin and these files come from users;
+    ///   * X-Content-Type-Options: nosniff, so a mislabelled file cannot be
+    ///     re-interpreted as something executable.
+    /// </summary>
+    [HttpGet]
+    [RequirePermission(Perm.Attachments.Download, Seed.Everyone, "Download a document", ReadOnly = true)]
+    public async Task<IActionResult> Preview(long id)
+    {
+        var doc = await _docs.GetAsync(id);
+        if (doc == null) return NotFound();
+        if (await GateReadAsync(doc.OwnerType, doc.OwnerId) is { } block) return block;
+
+        var path = _docs.ResolveAbsolutePath(doc);
+        if (path == null || !System.IO.File.Exists(path)) return NotFound();
+
+        var stream      = System.IO.File.OpenRead(path);
+        var contentType = _docs.ContentTypeFor(doc.OriginalName);
+
+        if (!_docs.CanPreviewInline(doc.OriginalName))
+            return File(stream, contentType, doc.OriginalName);   // attachment
+
+        Response.Headers["X-Content-Type-Options"] = "nosniff";
+        // No fileName argument: that is what keeps the disposition inline. The
+        // name still rides along so the viewer's own Save offers something
+        // sensible.
+        Response.Headers.ContentDisposition =
+            $"inline; filename=\"{System.Net.WebUtility.UrlEncode(doc.OriginalName)}\"";
+        return File(stream, contentType);
+    }
+
     // ---- gates ---------------------------------------------------------
     // Two distinct gates. Edit requires the parent record to still be open;
     // read only requires the caller to be in the right plant. Collapsing them

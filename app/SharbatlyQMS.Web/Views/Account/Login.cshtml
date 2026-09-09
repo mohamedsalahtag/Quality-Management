@@ -1,7 +1,7 @@
-@model SharbatlyQMS.Web.Models.LoginViewModel
+﻿@model SharbatlyQMS.Web.Models.LoginViewModel
 @{
     Layout = null;
-    ViewData["Title"] = "Sign in";
+    ViewData["Title"] = Loc["Sign in"];
 }
 <!DOCTYPE html>
 <html lang="en">
@@ -29,19 +29,19 @@
         <div class="login-card mx-auto">
             <div class="text-center mb-4">
                 <i class="bi bi-clipboard2-check display-4 text-primary"></i>
-                <h1 class="h4 mt-2">Sharbatly QMS</h1>
-                <p class="text-muted small">Quality Management System</p>
+                <h1 class="h4 mt-2">@Loc["Sharbatly QMS"]</h1>
+                <p class="text-muted small">@Loc["Quality Management System"]</p>
             </div>
 
             <div class="card shadow-sm">
                 <div class="card-body p-4">
-                    <h2 class="h5 mb-3">Sign in</h2>
+                    <h2 class="h5 mb-3">@Loc["Sign in"]</h2>
 
                     @if ((bool?)ViewBag.AdEnabled == true)
                     {
                         <div class="alert alert-info py-2 small mb-3" role="alert">
                             <i class="bi bi-shield-check me-1"></i>
-                            Use your <strong>domain credentials</strong> (Windows / Active Directory).
+                            Use your <strong>@Loc["domain credentials"]</strong> (Windows / Active Directory).
                         </div>
                     }
 
@@ -60,32 +60,32 @@
                         <input type="hidden" asp-for="ReturnUrl" value="@ViewBag.ReturnUrl" />
 
                         <div class="mb-3">
-                            <label asp-for="Username" class="form-label">Username</label>
+                            <label asp-for="Username" class="form-label">@Loc["Username"]</label>
                             <input asp-for="Username" class="form-control" autocomplete="username"
-                                   placeholder="e.g. mohamed.tag" autofocus required />
+                                   placeholder='@Loc["e.g. mohamed.tag"]' autofocus required />
                             <div class="form-text">Your domain username — with or without @@sharbatlyfruit.com.</div>
                         </div>
 
                         <div class="mb-3">
-                            <label asp-for="Password" class="form-label">Password</label>
+                            <label asp-for="Password" class="form-label">@Loc["Password"]</label>
                             <input asp-for="Password" type="password" class="form-control"
                                    autocomplete="current-password" required />
                         </div>
 
                         <div class="form-check mb-3">
                             <input asp-for="RememberMe" class="form-check-input" />
-                            <label asp-for="RememberMe" class="form-check-label">Keep me signed in for 30 days</label>
+                            <label asp-for="RememberMe" class="form-check-label">@Loc["Keep me signed in for 30 days"]</label>
                         </div>
 
                         <button type="submit" class="btn btn-primary w-100">
-                            <i class="bi bi-box-arrow-in-right me-1"></i>Sign in
+                            <i class="bi bi-box-arrow-in-right me-1"></i>@Loc["Sign in"]
                         </button>
                     </form>
                 </div>
             </div>
 
             <p class="text-muted text-center small mt-3">
-                Forgot your password? Contact your administrator.
+                @Loc["Forgot your password? Contact your administrator."]
             </p>
         </div>
     </div>

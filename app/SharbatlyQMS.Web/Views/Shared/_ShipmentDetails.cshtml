@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.ViewModels
+﻿@using SharbatlyQMS.Web.ViewModels
 @model ShipmentDetailsVm
 @*
     The Shipment Details block — the same header the QC report PDF prints, shown
@@ -14,44 +14,55 @@
     string YN(bool? b)    => b == true ? "Yes" : (b == false ? "No" : "—");
 }
 <div class="mb-3">
-    <div class="fw-semibold text-primary mb-2"><i class="bi bi-truck me-1"></i>Shipment Details</div>
+    <div class="fw-semibold text-primary mb-2"><i class="bi bi-truck me-1"></i>@Loc["Shipment Details"]</div>
     <div class="row g-3 small">
         <div class="col-md-4">
-            <div class="qcs-f"><span>Shipper</span><span>@V(a.VendorName)</span></div>
-            <div class="qcs-f"><span>Report Location</span><span>@V(a.Plant)</span></div>
-            <div class="qcs-f"><span>Bill of Lading No.</span><span>@V(a.BolNo)</span></div>
-            <div class="qcs-f"><span>Container</span><span>@V(a.ContainerNo)</span></div>
-            <div class="qcs-f"><span>Purch.Doc.</span><span>@V(a.Ebeln)</span></div>
+            <div class="qcs-f"><span>@Loc["Shipper"]</span><span>@V(a.VendorName)</span></div>
+            <div class="qcs-f"><span>@Loc["Report Location"]</span><span>@V(a.Plant)</span></div>
+            <div class="qcs-f"><span>@Loc["Bill of Lading No."]</span><span>@V(a.BolNo)</span></div>
+            <div class="qcs-f"><span>@Loc["Container"]</span><span>@V(a.ContainerNo)</span></div>
+            <div class="qcs-f"><span>@Loc["Purch.Doc."]</span><span>@V(a.Ebeln)</span></div>
             @* SAP's purchase-order document type (EKKO.BSART) — what the business
                calls the procurement type. Shown by its configured name, with the
                raw code on hover for anyone cross-checking against SAP. *@
             <div class="qcs-f">
-                <span>Procurement Type</span>
+                <span>@Loc["Procurement Type"]</span>
                 <span title="@a.PoType">@V(Codes.PoTypeDisplay(a.PoType))</span>
             </div>
-            <div class="qcs-f"><span>Country Of Origin</span><span>@V(s?.LoadingCountry)</span></div>
-            <div class="qcs-f"><span>Loading Port</span><span>@V(s?.LoadingPort)</span></div>
-            <div class="qcs-f"><span>Port Of Arrival</span><span>@V(s?.ArrivalPlace)</span></div>
-            <div class="qcs-f"><span>Loading Date</span><span>@D(s?.SailingDate)</span></div>
+            <div class="qcs-f">
+                <span>@Loc["Country Of Origin"]</span>
+                <span title="@s?.LoadingCountry">@V(Countries.Display(s?.LoadingCountry))</span>
+            </div>
+            <div class="qcs-f"><span>@Loc["Loading Port"]</span><span>@V(s?.LoadingPort)</span></div>
+            <div class="qcs-f"><span>@Loc["Port Of Arrival"]</span><span>@V(s?.ArrivalPlace)</span></div>
+            <div class="qcs-f"><span>@Loc["Vessel Name"]</span><span>@V(s?.VesselName)</span></div>
+        </div>
+        @* Middle column is the shipment TIMELINE, in the order the events
+           actually happen -- loading, discharge, pullout, receive, unloading,
+           inspection -- so a gap or an out-of-order date is visible at a
+           glance. Arrival Date is deliberately left out of the summary; the
+           QC report PDF still prints it from SAP's port-arrival date.
+           The derived figures (transit days) close the column. *@
+        <div class="col-md-4">
+            <div class="qcs-f"><span>@Loc["Loading Date"]</span><span>@D(s?.SailingDate)</span></div>
+            <div class="qcs-f"><span>@Loc["Discharge Date"]</span><span>@D(s?.DischargeDate)</span></div>
+            <div class="qcs-f"><span>@Loc["Pullout Date"]</span><span>@D(s?.PullOutDate)</span></div>
+            <div class="qcs-f"><span>@Loc["Receive Date"]</span><span>@D(s?.ReceiveDate)</span></div>
+            <div class="qcs-f"><span>@Loc["Unloading Date"]</span><span>@D(s?.UnloadingDate)</span></div>
+            @* The QO's open date, not the arrival checklist's inspection date --
+               they differ whenever the order is raised days after the container
+               was checked in. Matches the QC report. *@
+            <div class="qcs-f"><span>@Loc["Inspection Date"]</span><span>@D(Model.InspectionDate ?? s?.InspectionDate)</span></div>
+            <div class="qcs-f"><span>@Loc["Transit Days"]</span><span>@(s?.TransitDays?.ToString() ?? "—")</span></div>
         </div>
         <div class="col-md-4">
-            <div class="qcs-f"><span>Vessel Name</span><span>@V(s?.VesselName)</span></div>
-            <div class="qcs-f"><span>Arrival Date</span><span>@D(s?.ArrivalDate)</span></div>
-            <div class="qcs-f"><span>Pullout Date</span><span>@D(s?.PullOutDate)</span></div>
-            <div class="qcs-f"><span>Receive Date</span><span>@D(s?.ReceiveDate)</span></div>
-            <div class="qcs-f"><span>Unloading Date</span><span>@D(s?.UnloadingDate)</span></div>
-            <div class="qcs-f"><span>Inspection Date</span><span>@D(s?.InspectionDate)</span></div>
-            <div class="qcs-f"><span>Discharge Date</span><span>@D(s?.DischargeDate)</span></div>
-            <div class="qcs-f"><span>Transit Days</span><span>@(s?.TransitDays?.ToString() ?? "—")</span></div>
-            <div class="qcs-f"><span>Logger Serial</span><span>@V(cl?.DataLoggerSerial)</span></div>
-        </div>
-        <div class="col-md-4">
-            <div class="qcs-f"><span>Seal No</span><span>@V(cl?.SealNo?.Replace("\n", ", "))</span></div>
-            <div class="qcs-f"><span>Temperature</span><span>@Fmt.Dec2(cl?.LoggerTemperature)</span></div>
-            <div class="qcs-f"><span>Joint Survey</span><span>@YN(s?.JointSurvey)</span></div>
-            <div class="qcs-f"><span>Seal Intact?</span><span>@YN(cl?.SealIntact)</span></div>
-            <div class="qcs-f"><span>External damage</span><span>@YN(cl?.ExternalDamageExists)</span></div>
-            <div class="qcs-f"><span>Visual cargo acceptable</span><span>@YN(cl?.VisualCargoAcceptable)</span></div>
+            <div class="qcs-f"><span>@Loc["Logger Serial"]</span><span>@V(cl?.DataLoggerSerial)</span></div>
+            <div class="qcs-f"><span>@Loc["Seal No"]</span><span>@V(cl?.SealNo?.Replace("\n", ", "))</span></div>
+            <div class="qcs-f"><span>@Loc["Temperature"]</span><span>@Fmt.Dec2(cl?.LoggerTemperature)</span></div>
+            <div class="qcs-f"><span>@Loc["Joint Survey"]</span><span>@YN(s?.JointSurvey)</span></div>
+            <div class="qcs-f"><span>@Loc["Seal Intact?"]</span><span>@YN(cl?.SealIntact)</span></div>
+            <div class="qcs-f"><span>@Loc["External damage"]</span><span>@YN(cl?.ExternalDamageExists)</span></div>
+            <div class="qcs-f"><span>@Loc["Visual cargo acceptable"]</span><span>@YN(cl?.VisualCargoAcceptable)</span></div>
             <div class="qcs-f"><span>Logger active &amp; data</span><span>@YN(cl?.LoggerActiveDataAvailable)</span></div>
         </div>
     </div>
@@ -59,7 +70,7 @@
     @if (Model.CustomFields.Count > 0)
     {
         <div class="mt-2">
-            <div class="fw-semibold small text-decoration-underline text-muted">Additional Fields</div>
+            <div class="fw-semibold small text-decoration-underline text-muted">@Loc["Additional Fields"]</div>
             <div class="row g-1 small mt-0">
                 @foreach (var f in Model.CustomFields.OrderBy(x => x.SortOrder).ThenBy(x => x.FieldName))
                 {

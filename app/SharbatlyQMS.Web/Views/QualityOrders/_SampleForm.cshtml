@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.ViewModels
 @model SampleFormVm
 @{
@@ -150,7 +150,7 @@
            data-sample-size hook the defect-% JS relies on. *@
         <div class="card mb-2">
             <div class="card-header bg-primary text-white sample-header-bar py-1">
-                <span class="shb-title"><i class="bi bi-clipboard-data me-1"></i>Sample header</span>
+                <span class="shb-title"><i class="bi bi-clipboard-data me-1"></i>@Loc["Sample header"]</span>
                 <span class="sample-size-chip shb-size">
                     <label class="mb-0" for="sampleSizeInput-@s.SampleId"><i class="bi bi-rulers me-1"></i>Sample size</label>
                     <input id="sampleSizeInput-@s.SampleId" name="SampleSize" type="number" min="1" step="1" inputmode="numeric"
@@ -224,16 +224,16 @@
         {
             <div class="card mb-2 material-details-card @(matIncomplete ? "md-incomplete" : "md-complete")">
                 <div class="card-header d-flex justify-content-between align-items-center gap-2 py-1">
-                    <span><i class="bi bi-box-seam me-1"></i>Material details</span>
+                    <span><i class="bi bi-box-seam me-1"></i>@Loc["Material details"]</span>
                     @if (Model.MaterialHeaderFields.Count > 0)
                     {
                         @if (matIncomplete)
                         {
-                            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>Not filled in</span>
+                            <span class="badge bg-warning text-dark"><i class="bi bi-exclamation-triangle me-1"></i>@Loc["Not filled in"]</span>
                         }
                         else
                         {
-                            <span class="badge bg-success"><i class="bi bi-check2 me-1"></i>Filled</span>
+                            <span class="badge bg-success"><i class="bi bi-check2 me-1"></i>@Loc["Filled"]</span>
                         }
                     }
                 </div>
@@ -246,7 +246,7 @@
                         @* Tare weight: entered once per material; every sample's net
                            weight is its own gross minus this value. *@
                         <div class="col-6 col-md-3">
-                            <label class="form-label">Tare weight</label>
+                            <label class="form-label">@Loc["Tare weight"]</label>
                             <input name="mat_tara" type="number" step="any" inputmode="decimal"
                                    class="form-control form-control-sm" value="@Fmt.Dec2(qoMat?.TaraWeight)"
                                    data-weight-role="mattara"
@@ -318,7 +318,7 @@
                                                .Select(r => RnumOf(r.ReadingTypeCode))
                                                .FirstOrDefault();
         }
-        <div class="section-label">Readings</div>
+        <div class="section-label">@Loc["Readings"]</div>
         <div class="row g-1">
             @foreach (var rt in readingTypes)
             {
@@ -357,7 +357,7 @@
                         }
                         @if (isNet)
                         {
-                            <span class="badge bg-secondary ms-1">auto</span>
+                            <span class="badge bg-secondary ms-1">@Loc["auto"]</span>
                         }
                     </label>
                     @if (rt.ValueKind == "Numeric")
@@ -369,7 +369,7 @@
                                    value="@Fmt.Dec2(numValue)" readonly tabindex="-1"
                                    data-weight-role="net" />
                             <div class="small text-danger net-weight-error d-none mt-1">
-                                <i class="bi bi-exclamation-triangle me-1"></i>Tare exceeds gross — net can't be negative.
+                                <i class="bi bi-exclamation-triangle me-1"></i>@Loc["Tare exceeds gross — net can't be negative."]
                             </div>
                         }
                         else
@@ -390,7 +390,7 @@
             }
             @if (readingTypes.Count == 0)
             {
-                <div class="col-12"><div class="text-muted small">No reading types configured for this material group.</div></div>
+                <div class="col-12"><div class="text-muted small">@Loc["No reading types configured for this material group."]</div></div>
             }
         </div>
 
@@ -409,7 +409,7 @@
         <div class="row g-2 mt-2">
             @if (defectGroups.Count == 0)
             {
-                <div class="col-12"><div class="text-muted small">No defects configured for this material group.</div></div>
+                <div class="col-12"><div class="text-muted small">@Loc["No defects configured for this material group."]</div></div>
             }
             @foreach (var grp in defectGroups)
             {
@@ -462,12 +462,12 @@
         <div class="card mt-3">
             <div class="card-header py-2 d-flex align-items-center gap-2">
                 <i class="bi bi-images"></i>
-                <strong>Photos</strong>
+                <strong>@Loc["Photos"]</strong>
             </div>
             <div class="card-body">
                 @if (s.SampleId == 0)
                 {
-                    <div class="text-muted small">Save the sample first to enable photo uploads for it.</div>
+                    <div class="text-muted small">@Loc["Save the sample first to enable photo uploads for it."]</div>
                 }
                 else
                 {
@@ -490,7 +490,7 @@
             <div class="position-sticky bottom-0 bg-white border-top mt-2 py-2 px-2 text-end"
                  style="z-index: 5; box-shadow: 0 -2px 6px rgba(0,0,0,.06); margin-left:-1rem; margin-right:-1rem; padding-left:1rem !important; padding-right:1rem !important;">
                 <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-save me-1"></i>Save sample
+                    <i class="bi bi-save me-1"></i>@Loc["Save sample"]
                 </button>
             </div>
         }

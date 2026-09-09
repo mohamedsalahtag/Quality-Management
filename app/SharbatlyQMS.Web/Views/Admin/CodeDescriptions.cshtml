@@ -1,7 +1,7 @@
-@using SharbatlyQMS.Web.Services
+﻿@using SharbatlyQMS.Web.Services
 @model IReadOnlyList<CodeDescriptionEntry>
 @{
-    ViewData["Title"] = "Code Descriptions";
+    ViewData["Title"] = Loc["Code Descriptions"];
     var domain     = ViewBag.Domain as string ?? CodeDomains.Plant;
     var query      = ViewBag.Query  as string;
     var counts     = ViewBag.Counts as IDictionary<string, int> ?? new Dictionary<string, int>();
@@ -17,7 +17,7 @@
         </small>
     </h1>
     <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#cdModal" data-mode="create">
-        <i class="bi bi-plus-circle me-1"></i>Add description
+        <i class="bi bi-plus-circle me-1"></i>@Loc["Add description"]
     </button>
 </div>
 
@@ -41,10 +41,10 @@
                placeholder="Search code, name@(isStorage ? " or plant" : "")…" autocomplete="off" />
     </div>
     <div class="col-md-3 d-flex gap-2">
-        <button type="submit" class="btn btn-outline-secondary btn-sm"><i class="bi bi-search me-1"></i>Search</button>
+        <button type="submit" class="btn btn-outline-secondary btn-sm"><i class="bi bi-search me-1"></i>@Loc["Search"]</button>
         @if (!string.IsNullOrWhiteSpace(query))
         {
-            <a asp-action="CodeDescriptions" asp-route-domain="@domain" class="btn btn-outline-secondary btn-sm">Clear</a>
+            <a asp-action="CodeDescriptions" asp-route-domain="@domain" class="btn btn-outline-secondary btn-sm">@Loc["Clear"]</a>
         }
     </div>
 </form>
@@ -63,12 +63,12 @@
         <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="50">
             <thead class="table-light">
                 <tr>
-                    @if (isStorage) { <th data-sort>Plant</th> }
-                    <th data-sort>Code</th>
-                    <th data-sort>Description</th>
-                    <th data-sort>Active</th>
-                    <th data-sort>Updated</th>
-                    <th class="text-end" style="width: 120px">Actions</th>
+                    @if (isStorage) { <th data-sort>@Loc["Plant"]</th> }
+                    <th data-sort>@Loc["Code"]</th>
+                    <th data-sort>@Loc["Description"]</th>
+                    <th data-sort>@Loc["Active"]</th>
+                    <th data-sort>@Loc["Updated"]</th>
+                    <th class="text-end" style="width: 120px">@Loc["Actions"]</th>
                 </tr>
             </thead>
             <tbody>
@@ -77,11 +77,11 @@
                 <tr><td colspan="@(isStorage ? 6 : 5)" class="text-center text-muted py-4">
                     @if (!string.IsNullOrWhiteSpace(query))
                     {
-                        <span>Nothing matches that search.</span>
+                        <span>@Loc["Nothing matches that search."]</span>
                     }
                     else
                     {
-                        <span>No entries yet — click <em>Add description</em>.</span>
+                        <span>No entries yet — click <em>@Loc["Add description"]</em>.</span>
                     }
                 </td></tr>
             }
@@ -99,11 +99,11 @@
                         <td>
                             @if (e.IsActive)
                             {
-                                <span class="badge bg-success-subtle text-success-emphasis">Yes</span>
+                                <span class="badge bg-success-subtle text-success-emphasis">@Loc["Yes"]</span>
                             }
                             else
                             {
-                                <span class="badge bg-secondary-subtle text-secondary-emphasis">No</span>
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis">@Loc["No"]</span>
                             }
                         </td>
                         <td class="text-muted small">
@@ -149,7 +149,7 @@
             <input type="hidden" name="codeDescId" id="cd-id" value="0" />
             <input type="hidden" name="domain" value="@domain" />
             <div class="modal-header">
-                <h5 class="modal-title" id="cd-title">Add description</h5>
+                <h5 class="modal-title" id="cd-title">@Loc["Add description"]</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
@@ -157,43 +157,43 @@
                     @if (isStorage)
                     {
                         <div class="col-12">
-                            <label class="form-label">Plant</label>
+                            <label class="form-label">@Loc["Plant"]</label>
                             <select name="parentCode" id="cd-parent" class="form-select" required>
-                                <option value="">— pick the owning plant —</option>
+                                <option value="">@Loc["— pick the owning plant —"]</option>
                                 @foreach (var p in plantCodes)
                                 {
                                     <option value="@p">@Codes.PlantLabel(p)</option>
                                 }
                             </select>
-                            <div class="form-text">The same storage-location code exists under several plants, so it needs one.</div>
+                            <div class="form-text">@Loc["The same storage-location code exists under several plants, so it needs one."]</div>
                         </div>
                     }
                     <div class="col-6">
-                        <label class="form-label">SAP code</label>
+                        <label class="form-label">@Loc["SAP code"]</label>
                         <input type="text" name="code" id="cd-code" class="form-control" maxlength="10" required
                                autocomplete="off" />
                     </div>
                     <div class="col-6">
-                        <label class="form-label">Sort order</label>
+                        <label class="form-label">@Loc["Sort order"]</label>
                         <input type="number" name="sortOrder" id="cd-sort" class="form-control" value="500" />
                     </div>
                     <div class="col-12">
-                        <label class="form-label">Description</label>
+                        <label class="form-label">@Loc["Description"]</label>
                         <input type="text" name="description" id="cd-description" class="form-control" maxlength="80" required
-                               placeholder="e.g. Air Shipment" autocomplete="off" />
+                               placeholder='@Loc["e.g. Air Shipment"]' autocomplete="off" />
                     </div>
                     <div class="col-12">
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" name="isActive" id="cd-active" value="true" checked />
                             <input type="hidden" name="isActive" value="false" />
-                            <label class="form-check-label" for="cd-active">Active</label>
+                            <label class="form-check-label" for="cd-active">@Loc["Active"]</label>
                         </div>
                     </div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="submit" class="btn btn-primary">Save</button>
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="submit" class="btn btn-primary">@Loc["Save"]</button>
             </div>
         </form>
     </div>

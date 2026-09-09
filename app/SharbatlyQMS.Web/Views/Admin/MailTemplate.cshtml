@@ -1,25 +1,28 @@
-@using SharbatlyQMS.Web.Services
+﻿@using SharbatlyQMS.Web.Services
 @model QoMailTemplate
 @{
-    ViewData["Title"] = "Mail Template";
+    ViewData["Title"] = Loc["Mail Template"];
 
     // The one and only substitution list — ReportsController.PrepareSendQualityReport.
     // Keep this table in step with that method; a token that is not in the
     // Substitute() chain there is sent to the supplier as literal text.
     var tokens = new (string Token, string Means, string Example)[]
     {
-        ("{QO_NO}",     "Quality Order number",                     "QO-2026-000399"),
+        ("{QO_NO}",     "Quality Order number, in full",            "QO-2026-000399"),
+        ("{QC_NO}",     "Short QC number — no prefix, no zeros",    "399"),
         ("{CONTAINER}", "Container number from the arrival",        "MNBU3969264"),
         ("{BOL}",       "Bill of Lading number",                    "065-49966700"),
         ("{PO}",        "SAP purchase order (EBELN)",               "5300003964"),
         ("{SUPPLIER}",  "Supplier name, as SAP spells it",          "SQ FLORA B.V."),
+        ("{VENDOR}",    "Same as {SUPPLIER}",                       "SQ FLORA B.V."),
+        ("{ARRIVAL_NO}","Arrival number the order was raised from", "ARR-2026-001364"),
         ("{TODAY}",     "Date the e-mail is prepared (yyyy-MM-dd)", "2026-08-20"),
     };
 }
 
 <h1 class="h3 mb-3">
     <i class="bi bi-envelope-paper me-1"></i>Mail Template &mdash; Quality Order Report
-    <small class="text-muted fs-6 fw-normal ms-2">Subject and body used when sending the QO report to suppliers.</small>
+    <small class="text-muted fs-6 fw-normal ms-2">@Loc["Subject and body used when sending the QO report to suppliers."]</small>
 </h1>
 
 <div class="row g-3">
@@ -28,27 +31,27 @@
             @Html.AntiForgeryToken()
             <div class="card-body">
                 <div class="mb-3">
-                    <label class="form-label" for="m-subject">Subject *</label>
+                    <label class="form-label" for="m-subject">@Loc["Subject *"]</label>
                     <input name="Subject" id="m-subject" class="form-control" value="@Model.Subject" required data-token-target />
                 </div>
                 <div class="mb-3">
-                    <label class="form-label" for="m-cc">Always CC</label>
+                    <label class="form-label" for="m-cc">@Loc["Always CC"]</label>
                     <input name="Cc" id="m-cc" class="form-control" value="@Model.Cc"
                            placeholder="quality@sharbatlyfruit.com, manager@sharbatlyfruit.com" />
                     <div class="form-text">
-                        Copied on <strong>every</strong> report sent to a supplier, on top of any CC
+                        Copied on <strong>@Loc["every"]</strong> report sent to a supplier, on top of any CC
                         the sender adds. Comma- or semicolon-separated; leave blank for none.
                         The sender can see these in the send dialog but cannot remove them.
                     </div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label" for="m-body">Body *</label>
+                    <label class="form-label" for="m-body">@Loc["Body *"]</label>
                     <textarea name="Body" id="m-body" class="form-control" rows="12" required data-token-target>@Model.Body</textarea>
-                    <div class="form-text">Plain text. Newlines preserved. HTML is not rendered to the supplier.</div>
+                    <div class="form-text">@Loc["Plain text. Newlines preserved. HTML is not rendered to the supplier."]</div>
                 </div>
             </div>
             <div class="card-footer text-end">
-                <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>Save template</button>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>@Loc["Save template"]</button>
             </div>
         </form>
     </div>
@@ -56,7 +59,7 @@
     <div class="col-lg-5">
         <div class="card h-100">
             <div class="card-header">
-                <i class="bi bi-braces me-1"></i>Placeholders
+                <i class="bi bi-braces me-1"></i>@Loc["Placeholders"]
             </div>
             <div class="card-body">
                 <p class="small text-muted">
@@ -67,7 +70,7 @@
                 <div class="table-responsive">
                     <table class="table table-sm align-middle mb-0">
                         <thead class="table-light">
-                            <tr><th>Placeholder</th><th>Becomes</th><th>Example</th></tr>
+                            <tr><th>@Loc["Placeholder"]</th><th>@Loc["Becomes"]</th><th>@Loc["Example"]</th></tr>
                         </thead>
                         <tbody>
                             @foreach (var t in tokens)
@@ -87,10 +90,10 @@
 
                 <div class="alert alert-warning small mt-3 mb-0">
                     <i class="bi bi-exclamation-triangle me-1"></i>
-                    <strong>Spelling matters.</strong> Placeholders are case-sensitive and must
+                    <strong>@Loc["Spelling matters."]</strong> Placeholders are case-sensitive and must
                     include both braces. Anything that is not on this list &mdash; a typo like
                     <code>{QO NO}</code> or an invented one like <code>{VESSEL}</code> &mdash; is
-                    <em>not</em> replaced: the supplier receives it as literal text.
+                    <em>@Loc["not"]</em> replaced: the supplier receives it as literal text.
                 </div>
                 <div class="alert alert-info small mt-2 mb-0">
                     <i class="bi bi-info-circle me-1"></i>

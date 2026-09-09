@@ -2,7 +2,7 @@
 @using SharbatlyQMS.Web.ViewModels
 @model IReadOnlyList<ReportUnitRow>
 @{
-    ViewData["Title"] = "Report Units";
+    ViewData["Title"] = Loc["Report Units"];
     var configuredCount = Model.Count(r => r.IsConfigured);
 }
 
@@ -22,7 +22,7 @@
 <div class="alert alert-light border small">
     <i class="bi bi-info-circle me-1"></i>
     The unit replaces the word <strong>@ReportUnit.DefaultLabel</strong> in two places on the Quality Order PDF:
-    <strong>Sample Size</strong> in the material-group summary, and the <strong>count column header</strong>
+    <strong>@Loc["Sample Size"]</strong> in the material-group summary, and the <strong>@Loc["count column header"]</strong>
     above every defect list — both in the page-1 summary and on each individual sample.
     Leave a group at <em>@ReportUnit.DefaultLabel</em> to keep the default.
     Percentages and totals are unaffected; this is a label only.
@@ -40,10 +40,10 @@
             <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="50">
                 <thead class="table-light">
                     <tr>
-                        <th data-sort>Material group</th>
-                        <th data-sort>Description</th>
-                        <th style="width: 220px">Unit on report</th>
-                        <th data-sort style="width: 120px">Status</th>
+                        <th data-sort>@Loc["Material group"]</th>
+                        <th data-sort>@Loc["Description"]</th>
+                        <th style="width: 220px">@Loc["Unit on report"]</th>
+                        <th data-sort style="width: 120px">@Loc["Status"]</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -73,11 +73,11 @@
                             <td>
                                 @if (r.IsConfigured)
                                 {
-                                    <span class="badge bg-success-subtle text-success-emphasis">Customised</span>
+                                    <span class="badge bg-success-subtle text-success-emphasis">@Loc["Customised"]</span>
                                 }
                                 else
                                 {
-                                    <span class="text-muted small">Default</span>
+                                    <span class="text-muted small">@Loc["Default"]</span>
                                 }
                             </td>
                         </tr>
@@ -101,8 +101,8 @@
 
     <div class="mt-3">
         <button type="submit" class="btn btn-primary">
-            <i class="bi bi-save me-1"></i>Save units
+            <i class="bi bi-save me-1"></i>@Loc["Save units"]
         </button>
-        <span class="text-muted small ms-2">Takes effect on the next report you generate.</span>
+        <span class="text-muted small ms-2">@Loc["Takes effect on the next report you generate."]</span>
     </div>
 </form>

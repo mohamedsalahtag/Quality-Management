@@ -1,4 +1,4 @@
-using System.Security.Claims;
+﻿using System.Security.Claims;
 using SharbatlyQMS.Web.Models;
 
 namespace SharbatlyQMS.Web.Extensions;
@@ -64,7 +64,4 @@ public static class ClaimsPrincipalExtensions
             : new PlantScope(false, plants.ToArray());
     }
 
-    /// <summary>True when the user is in the Operator role.</summary>
-    public static bool IsOperator(this ClaimsPrincipal user) =>
-        user.IsInRole(UserRoles.Operator);
 }

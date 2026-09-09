@@ -1,4 +1,5 @@
 ﻿@using SharbatlyQMS.Web.Models
+@inject SharbatlyQMS.Web.Services.IDocumentService DocSvc
 @model Arrival
 @{
     ViewData["Title"] = "Arrival " + Model.ArrivalNo;
@@ -7,6 +8,9 @@
     var shipment  = ViewBag.Shipment  as ShipmentSnapshot;
     // V36: admin-defined fields applicable to this arrival's material groups.
     var customFields = ViewBag.CustomFields as IReadOnlyList<ArrivalCustomField> ?? new List<ArrivalCustomField>();
+    // Counted server-side so the badge is right on first paint; document-list-ajax.js
+    // keeps it right after an upload or a delete without a page reload.
+    var docCount  = (await DocSvc.ListAsync("Arrival", Model.ArrivalId)).Count;
     var draft     = Model.StatusCode == ArrivalStatus.Draft;
     var role      = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value;
     var canEdit       = Perms.CanEdit(Screens.ArrivalsDetails);
@@ -30,13 +34,10 @@
         ArrivalFieldRegistry.All.Where(f => f.Form == ArrivalFieldRegistry.Checklist).Any(f => fieldEditable(f.Key))
         || fieldEditable("__photo_flags__");   // true for Draft (all) or admin
     var hasQo     = Model.QualityOrderId.HasValue;
-    var (cls, label) = Model.StatusCode switch
-    {
-        "Draft"     => ("warning", "Draft"),
-        "Completed" => ("success", "Completed"),
-        "Cancelled" => ("secondary", "Cancelled"),
-        _           => ("secondary", Model.StatusCode)
-    };
+    // One helper, shared with the list and the dashboard. Each of the three
+    // used to carry its own switch on raw string literals, so adding a status
+    // meant finding all of them -- and they had already drifted apart.
+    var (cls, label) = ArrivalStatus.Badge(Model.StatusCode);
     string YN(bool? b) => b switch { true => "Yes", false => "No", _ => "—" };
 
     // Tablet-friendly Yes/No toggle. The CSS in this view gives the SELECTED
@@ -81,10 +82,10 @@
         <span class="text-muted small ms-2">created @Model.CreatedAt.ToLocalTime().ToString("g") by @Model.CreatedBy</span>
     </div>
     <div class="d-flex gap-2">
-        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Back</a>
+        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>@Loc["Back"]</a>
         <a asp-controller="Reports" asp-action="ArrivalChecklistPdf" asp-route-id="@Model.ArrivalId"
            class="btn btn-outline-danger" target="_blank" title="Download Arrival Checklist PDF">
-            <i class="bi bi-file-earmark-pdf me-1"></i>Download checklist PDF
+            <i class="bi bi-file-earmark-pdf me-1"></i>@Loc["Download checklist PDF"]
         </a>
         @if (draft && canEdit)
         {
@@ -93,9 +94,26 @@
                   data-confirm-title="Complete arrival" data-confirm-ok="Complete">
                 @Html.AntiForgeryToken()
                 <button type="submit" class="btn btn-success">
-                    <i class="bi bi-check-circle me-1"></i>Complete arrival
+                    <i class="bi bi-check-circle me-1"></i>@Loc["Complete arrival"]
                 </button>
             </form>
+        }
+        @* Refusing a damaged container. Draft only: past that an order may
+           already exist, and rejecting around one would either strand it or
+           destroy inspection data. *@
+        @if (draft && Perms.Can(Perm.Arrivals.Reject))
+        {
+            <button type="button" class="btn btn-danger"
+                    data-bs-toggle="modal" data-bs-target="#rejectContainerModal">
+                <i class="bi bi-x-octagon me-1"></i>@Loc["Reject container"]
+            </button>
+        }
+        @if (Model.StatusCode == ArrivalStatus.Rejected && Perms.Can(Perm.Arrivals.CancelRejection))
+        {
+            <button type="button" class="btn btn-outline-secondary"
+                    data-bs-toggle="modal" data-bs-target="#cancelRejectionModal">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Undo rejection"]
+            </button>
         }
         @if (Model.StatusCode == ArrivalStatus.Completed && !hasQo && canEdit)
         {
@@ -103,7 +121,7 @@
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="arrivalId" value="@Model.ArrivalId" />
                 <button type="submit" class="btn btn-primary">
-                    <i class="bi bi-clipboard-data me-1"></i>Create Quality Order
+                    <i class="bi bi-clipboard-data me-1"></i>@Loc["Create Quality Order"]
                 </button>
             </form>
         }
@@ -119,14 +137,14 @@
         {
             <button type="button" class="btn btn-outline-warning"
                     data-bs-toggle="modal" data-bs-target="#reopenEditModal">
-                <i class="bi bi-pencil-square me-1"></i>Edit
+                <i class="bi bi-pencil-square me-1"></i>@Loc["Edit"]
             </button>
         }
         @if (isAdmin && !hasQo)
         {
             <button type="button" class="btn btn-outline-danger"
                     data-bs-toggle="modal" data-bs-target="#deleteArrivalModal">
-                <i class="bi bi-trash me-1"></i>Delete
+                <i class="bi bi-trash me-1"></i>@Loc["Delete"]
             </button>
         }
     </div>
@@ -139,20 +157,20 @@
         <div class="modal-dialog">
             <form asp-action="ReopenForEdit" asp-route-id="@Model.ArrivalId" method="post" class="modal-content">
                 @Html.AntiForgeryToken()
-                <div class="modal-header"><h5 class="modal-title">Re-open arrival for edit</h5>
+                <div class="modal-header"><h5 class="modal-title">@Loc["Re-open arrival for edit"]</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
                 <div class="modal-body">
                     <p class="small text-muted mb-2">
-                        The arrival will return to <strong>Draft</strong> so checklist and shipment
+                        The arrival will return to <strong>@Loc["Draft"]</strong> so checklist and shipment
                         details become editable. The action is logged in the status history. Complete
                         the arrival again when you finish editing.
                     </p>
-                    <label class="form-label">Reason</label>
-                    <textarea name="reason" class="form-control" rows="2" placeholder="Why is the arrival being re-opened?"></textarea>
+                    <label class="form-label">@Loc["Reason"]</label>
+                    <textarea name="reason" class="form-control" rows="2" placeholder='@Loc["Why is the arrival being re-opened?"]'></textarea>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-warning"><i class="bi bi-pencil-square me-1"></i>Re-open for edit</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-warning"><i class="bi bi-pencil-square me-1"></i>@Loc["Re-open for edit"]</button>
                 </div>
             </form>
         </div>
@@ -173,12 +191,12 @@
                         &mdash; cancel them first if there are any.
                     </p>
                     <div class="alert alert-warning small mb-0">
-                        <i class="bi bi-exclamation-triangle me-1"></i>This cannot be undone.
+                        <i class="bi bi-exclamation-triangle me-1"></i>@Loc["This cannot be undone."]
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>Delete permanently</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>@Loc["Delete permanently"]</button>
                 </div>
             </form>
         </div>
@@ -194,12 +212,12 @@
 }
 
 <ul class="nav nav-tabs mb-3" id="arrivalTabs" role="tablist">
-    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-checklist"><i class="bi bi-clipboard-check me-1"></i>Inspection Checklist</button></li>
-    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-shipment"><i class="bi bi-truck me-1"></i>Shipment</button></li>
-    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-summary"><i class="bi bi-info-circle me-1"></i>Summary</button></li>
+    <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-checklist"><i class="bi bi-clipboard-check me-1"></i>@Loc["Inspection Checklist"]</button></li>
+    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-shipment"><i class="bi bi-truck me-1"></i>@Loc["Shipment"]</button></li>
+    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-summary"><i class="bi bi-info-circle me-1"></i>@Loc["Summary"]</button></li>
     <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-materials"><i class="bi bi-list-ul me-1"></i>Materials (@items.Count)</button></li>
-    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-images"><i class="bi bi-images me-1"></i>Images</button></li>
-    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-documents"><i class="bi bi-paperclip me-1"></i>Documents</button></li>
+    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-images"><i class="bi bi-images me-1"></i>@Loc["Images"]</button></li>
+    <li class="nav-item"><button class="nav-link"        data-bs-toggle="tab" data-bs-target="#tab-documents"><i class="bi bi-paperclip me-1"></i>@Loc["Documents"]<span class="badge rounded-pill bg-secondary ms-1" data-doc-count-badge="Arrival-@Model.ArrivalId" hidden="@(docCount == 0)">@docCount</span></button></li>
 </ul>
 
 <div class="tab-content">
@@ -209,32 +227,33 @@
     <div class="row g-3">
         <div class="col-lg-6">
             <div class="card h-100">
-                <div class="card-header"><i class="bi bi-truck me-1"></i>Shipment identity</div>
+                <div class="card-header"><i class="bi bi-truck me-1"></i>@Loc["Shipment identity"]</div>
                 <div class="card-body">
                     <dl class="row mb-0 small">
-                        <dt class="col-sm-4">Container</dt><dd class="col-sm-8"><code>@Model.ContainerNo</code></dd>
-                        <dt class="col-sm-4">BOL</dt><dd class="col-sm-8">@Model.BolNo</dd>
-                        <dt class="col-sm-4">PO (EBELN)</dt><dd class="col-sm-8">@Model.Ebeln</dd>
-                        <dt class="col-sm-4">Vendor</dt><dd class="col-sm-8">@Model.VendorName (@Model.VendorNo)</dd>
-                        <dt class="col-sm-4">Vessel / Voyage</dt><dd class="col-sm-8">@shipment?.VesselName / @shipment?.VoyageNumber</dd>
-                        <dt class="col-sm-4">Loading port</dt><dd class="col-sm-8">@shipment?.LoadingPort, @shipment?.LoadingCountry</dd>
-                        <dt class="col-sm-4">Arrival port</dt><dd class="col-sm-8">@shipment?.ArrivalPlace</dd>
+                        <dt class="col-sm-4">@Loc["Container"]</dt><dd class="col-sm-8"><code>@Model.ContainerNo</code></dd>
+                        <dt class="col-sm-4">@Loc["BOL"]</dt><dd class="col-sm-8">@Model.BolNo</dd>
+                        <dt class="col-sm-4">@Loc["PO (EBELN)"]</dt><dd class="col-sm-8">@Model.Ebeln</dd>
+                        <dt class="col-sm-4">@Loc["Vendor"]</dt><dd class="col-sm-8">@Model.VendorName (@Model.VendorNo)</dd>
+                        <dt class="col-sm-4">@Loc["Procurement type"]</dt><dd class="col-sm-8">@(string.IsNullOrWhiteSpace(Model.PoType) ? "—" : Codes.PoTypeDisplay(Model.PoType))</dd>
+                        <dt class="col-sm-4">@Loc["Vessel / Voyage"]</dt><dd class="col-sm-8">@shipment?.VesselName / @shipment?.VoyageNumber</dd>
+                        <dt class="col-sm-4">@Loc["Loading port"]</dt><dd class="col-sm-8">@shipment?.LoadingPort, @Countries.Display(shipment?.LoadingCountry)</dd>
+                        <dt class="col-sm-4">@Loc["Arrival port"]</dt><dd class="col-sm-8">@shipment?.ArrivalPlace</dd>
                     </dl>
                 </div>
             </div>
         </div>
         <div class="col-lg-6">
             <div class="card h-100">
-                <div class="card-header"><i class="bi bi-clipboard-check me-1"></i>Inspection summary</div>
+                <div class="card-header"><i class="bi bi-clipboard-check me-1"></i>@Loc["Inspection summary"]</div>
                 <div class="card-body">
                     <dl class="row mb-0 small">
-                        <dt class="col-sm-5">Seal #</dt><dd class="col-sm-7">@(string.Join(", ", (checklist.SealNo ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim())))</dd>
-                        <dt class="col-sm-5">Seal intact</dt><dd class="col-sm-7">@YN(checklist.SealIntact)</dd>
-                        <dt class="col-sm-5">External damage</dt><dd class="col-sm-7">@YN(checklist.ExternalDamageExists)</dd>
-                        <dt class="col-sm-5">Visual cargo OK</dt><dd class="col-sm-7">@YN(checklist.VisualCargoAcceptable)</dd>
-                        <dt class="col-sm-5">Set / Display temp</dt><dd class="col-sm-7">@checklist.SetTemperature / @checklist.DisplayTemperature °C</dd>
-                        <dt class="col-sm-5">Pulp F/M/B</dt><dd class="col-sm-7">@checklist.PulpTempFront / @checklist.PulpTempMiddle / @checklist.PulpTempBack °C</dd>
-                        <dt class="col-sm-5">Logger serial</dt><dd class="col-sm-7">@(string.Join(", ", (checklist.DataLoggerSerial ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim())))</dd>
+                        <dt class="col-sm-5">@Loc["Seal #"]</dt><dd class="col-sm-7">@(string.Join(", ", (checklist.SealNo ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim())))</dd>
+                        <dt class="col-sm-5">@Loc["Seal intact"]</dt><dd class="col-sm-7">@YN(checklist.SealIntact)</dd>
+                        <dt class="col-sm-5">@Loc["External damage"]</dt><dd class="col-sm-7">@YN(checklist.ExternalDamageExists)</dd>
+                        <dt class="col-sm-5">@Loc["Visual cargo OK"]</dt><dd class="col-sm-7">@YN(checklist.VisualCargoAcceptable)</dd>
+                        <dt class="col-sm-5">@Loc["Set / Display temp"]</dt><dd class="col-sm-7">@checklist.SetTemperature / @checklist.DisplayTemperature °C</dd>
+                        <dt class="col-sm-5">@Loc["Pulp F/M/B"]</dt><dd class="col-sm-7">@checklist.PulpTempFront / @checklist.PulpTempMiddle / @checklist.PulpTempBack °C</dd>
+                        <dt class="col-sm-5">@Loc["Logger serial"]</dt><dd class="col-sm-7">@(string.Join(", ", (checklist.DataLoggerSerial ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Trim())))</dd>
                     </dl>
                 </div>
             </div>
@@ -258,56 +277,75 @@
             <div class="card-body">
                 <fieldset @(anyShipmentEditable ? "" : "disabled")>
                     <div class="row g-3">
-                        <div class="col-md-3"><label class="form-label">Vessel name</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Vessel name"]</label>
                             <input class="form-control" value="@shipment?.VesselName" disabled /></div>
-                        <div class="col-md-3"><label class="form-label">Voyage number</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Voyage number"]</label>
                             <input class="form-control" value="@shipment?.VoyageNumber" disabled /></div>
-                        <div class="col-md-3"><label class="form-label">Loading port</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Loading port"]</label>
                             <input class="form-control" value="@shipment?.LoadingPort" disabled /></div>
-                        <div class="col-md-3"><label class="form-label">Country of origin</label>
-                            <input class="form-control" value="@shipment?.LoadingCountry" disabled /></div>
+                        <div class="col-md-3"><label class="form-label">@Loc["Country of origin"]</label>
+                            <input class="form-control" value="@Countries.DisplayWithCode(shipment?.LoadingCountry)" disabled /></div>
 
-                        <div class="col-md-3"><label class="form-label">Loading date</label>
+                        @* Procurement type is SAP-owned (EKKO.BSART on the PO,
+                           copied onto the arrival at creation) -- read-only here. *@
+                        <div class="col-md-3"><label class="form-label">@Loc["Procurement type"]</label>
+                            <input class="form-control" value="@Codes.PoTypeDisplay(Model.PoType)" disabled />
+                            <small class="text-muted">@Loc["From SAP (PO type)"]</small></div>
+
+                        @* Dates run in the order the events actually happen --
+                           loading -> examination -> arrival -> discharge ->
+                           pullout -> receive -> unloading -> inspection -- so
+                           the row reads as the shipment's timeline and an
+                           out-of-order entry is obvious. Same sequence as the
+                           QC report, the QO page and the Claims page. Editable
+                           and read-only fields are interleaved by date, not
+                           grouped by who owns them. *@
+                        <div class="col-md-3"><label class="form-label">@Loc["Loading date"]</label>
                             <input type="date" class="form-control" value="@shipment?.SailingDate?.ToString("yyyy-MM-dd")" disabled /></div>
-                        <div class="col-md-3"><label class="form-label">Examination date</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Examination date"]</label>
                             <input type="date" class="form-control" value="@shipment?.ExaminationDate?.ToString("yyyy-MM-dd")" disabled /></div>
-                        <div class="col-md-3"><label class="form-label">Arrival date</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Arrival date"]</label>
                             <input type="date" class="form-control" value="@shipment?.ArrivalDate?.ToString("yyyy-MM-dd")" disabled /></div>
-                        <div class="col-md-3"><label class="form-label">Discharge date@(FMand("discharge_date") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Discharge date"]@(FMand("discharge_date") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <input name="DischargeDate" type="date" class="form-control" value="@shipment?.DischargeDate?.ToString("yyyy-MM-dd")" @FDis("discharge_date") />
-                            <small class="text-muted">Basis for the report Time Bar</small></div>
+                            <small class="text-muted">@Loc["Basis for the report Time Bar"]</small></div>
 
-                        <div class="col-md-3"><label class="form-label">Unloading date@(FMand("unloading_date") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
-                            <input name="UnloadingDate" type="date" class="form-control" value="@shipment?.UnloadingDate?.ToString("yyyy-MM-dd")" @FDis("unloading_date") /></div>
-                        <div class="col-md-3"><label class="form-label">Inspection date</label>
-                            <input type="date" class="form-control" disabled
-                                   value="@(shipment?.InspectionDate?.ToString("yyyy-MM-dd") ?? Model.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd"))" />
-                            <small class="text-muted">Auto — arrival creation date</small></div>
-                        <div class="col-md-3"><label class="form-label">Pull-out date@(FMand("pullout_date") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Pull-out date"]@(FMand("pullout_date") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <input name="PullOutDate" type="date" class="form-control" value="@shipment?.PullOutDate?.ToString("yyyy-MM-dd")" @FDis("pullout_date") /></div>
-                        <div class="col-md-3"><label class="form-label">Receive date</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Receive date"]</label>
                             <input type="date" class="form-control" disabled
                                    value="@shipment?.ReceiveDate?.ToString("yyyy-MM-dd")" />
-                            <small class="text-muted">From SAP (Receive_Date)</small></div>
+                            <small class="text-muted">@Loc["From SAP (Receive_Date)"]</small></div>
+                        <div class="col-md-3"><label class="form-label">@Loc["Unloading date"]@(FMand("unloading_date") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
+                            <input name="UnloadingDate" type="date" class="form-control" value="@shipment?.UnloadingDate?.ToString("yyyy-MM-dd")" @FDis("unloading_date") /></div>
+                        @* This is the ARRIVAL's own date (when the container was
+                           checked in). The QC report and the Claims window show
+                           the date the Quality Order was opened instead, which
+                           is often days later — they are different events, not a
+                           discrepancy. Labelled so nobody reconciles the two. *@
+                        <div class="col-md-3"><label class="form-label">@Loc["Inspection date"]</label>
+                            <input type="date" class="form-control" disabled
+                                   value="@(shipment?.InspectionDate?.ToString("yyyy-MM-dd") ?? Model.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd"))" />
+                            <small class="text-muted">Auto — arrival check-in date. The QC report uses the date its Quality Order was opened.</small></div>
 
-                        <div class="col-md-3"><label class="form-label">Transit days</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Transit days"]</label>
                             <input type="number" class="form-control" value="@shipment?.TransitDays" disabled /></div>
-                        <div class="col-md-3"><label class="form-label">Time bar (days)@(FMand("time_bar") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Time bar (days)"]@(FMand("time_bar") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <input name="TimeBar" type="number" class="form-control" value="@shipment?.TimeBar" @FDis("time_bar") /></div>
-                        <div class="col-md-3"><label class="form-label">Arrival port@(FMand("arrival_place") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Arrival port"]@(FMand("arrival_place") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <input name="ArrivalPlace" class="form-control" value="@shipment?.ArrivalPlace" @FDis("arrival_place") /></div>
-                        <div class="col-md-3"><label class="form-label">Inspection point@(FMand("inspection_point") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
+                        <div class="col-md-3"><label class="form-label">@Loc["Inspection point"]@(FMand("inspection_point") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <input name="InspectionPoint" class="form-control" value="@shipment?.InspectionPoint" @FDis("inspection_point") /></div>
 
                         @* Joint Survey / Time Bar Exceeded use radios; wrap each in
                            its own fieldset so it can be locked/unlocked per policy
                            independently of the surrounding form. *@
                         <div class="col-md-4">
-                            <label class="form-label d-block">Joint Survey@(FMand("joint_survey") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
+                            <label class="form-label d-block">@Loc["Joint Survey"]@(FMand("joint_survey") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <fieldset class="border-0 p-0 m-0" @FDis("joint_survey")>@Html.Raw(TriRadio("JointSurvey", shipment?.JointSurvey))</fieldset>
                         </div>
                         <div class="col-md-4">
-                            <label class="form-label d-block">Time Bar Exceeded@(FMand("time_bar_exceeded") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
+                            <label class="form-label d-block">@Loc["Time Bar Exceeded"]@(FMand("time_bar_exceeded") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <fieldset class="border-0 p-0 m-0" @FDis("time_bar_exceeded")>@Html.Raw(TriRadio("TimeBarExceeded", shipment?.TimeBarExceeded))</fieldset>
                         </div>
                     </div>
@@ -316,10 +354,10 @@
             @if (anyShipmentEditable)
             {
                 <div class="card-footer text-end">
-                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>Save shipment details</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-save me-1"></i>@Loc["Save shipment details"]</button>
                     @if (!draft)
                     {
-                        <span class="small text-warning ms-2"><i class="bi bi-shield-lock me-1"></i>Editing a Completed arrival — only unlocked fields will change</span>
+                        <span class="small text-warning ms-2"><i class="bi bi-shield-lock me-1"></i>@Loc["Editing a Completed arrival — only unlocked fields will change"]</span>
                     }
                 </div>
             }
@@ -448,11 +486,11 @@
         <div class="card mb-2 border-secondary">
             <div class="card-body py-2">
                 <div class="row g-2 small">
-                    <div class="col-6 col-md-3"><span class="text-muted">Vendor</span><br /><strong>@Model.VendorName</strong></div>
-                    <div class="col-6 col-md-3"><span class="text-muted">BOL</span><br /><strong>@Model.BolNo</strong></div>
-                    <div class="col-6 col-md-3"><span class="text-muted">Container</span><br /><code>@Model.ContainerNo</code></div>
+                    <div class="col-6 col-md-3"><span class="text-muted">@Loc["Vendor"]</span><br /><strong>@Model.VendorName</strong></div>
+                    <div class="col-6 col-md-3"><span class="text-muted">@Loc["BOL"]</span><br /><strong>@Model.BolNo</strong></div>
+                    <div class="col-6 col-md-3"><span class="text-muted">@Loc["Container"]</span><br /><code>@Model.ContainerNo</code></div>
                     <div class="col-6 col-md-3">
-                        <label class="text-muted small">Carrier Name</label>
+                        <label class="text-muted small">@Loc["Carrier Name"]</label>
                         <input class="form-control form-control-sm" value="@checklist.CarrierName" disabled />
                     </div>
                 </div>
@@ -466,11 +504,11 @@
 
                 <div class="card mb-2 border-primary">
                     <div class="card-header py-1 bg-primary text-white d-flex justify-content-between align-items-center">
-                        <span><i class="bi bi-shield-check me-1"></i><strong>1. External Inspection</strong></span>
+                        <span><i class="bi bi-shield-check me-1"></i><strong>@Loc["1. External Inspection"]</strong></span>
                     </div>
                     <div class="card-body py-2">
                         <div class="row g-2 align-items-center mb-2">
-                            <label class="col-4 col-md-3 col-form-label small">Seal No <span class="text-muted">(up to 4)</span></label>
+                            <label class="col-4 col-md-3 col-form-label small">@Loc["Seal No"] <span class="text-muted">@Loc["(up to 4)"]</span></label>
                             <div class="col-8 col-md-9">
                                 @{
                                     var sealParts = (checklist.SealNo ?? "")
@@ -492,15 +530,15 @@
                         <table class="table table-borderless table-sm align-middle mb-0 checklist-qa">
                             <tbody>
                                 <tr>
-                                    <td>Seal Intact?</td>
+                                    <td>@Loc["Seal Intact?"]</td>
                                     <td class="text-end">@Html.Raw(YesNo("SealIntact", checklist.SealIntact))</td>
                                 </tr>
                                 <tr>
-                                    <td>Seal number matches documents?</td>
+                                    <td>@Loc["Seal number matches documents?"]</td>
                                     <td class="text-end">@Html.Raw(YesNo("SealMatchesDocuments", checklist.SealMatchesDocuments))</td>
                                 </tr>
                                 <tr>
-                                    <td>External damage to container / pallet?</td>
+                                    <td>@Loc["External damage to container / pallet?"]</td>
                                     <td class="text-end">@Html.Raw(YesNo("ExternalDamageExists", checklist.ExternalDamageExists))</td>
                                 </tr>
                             </tbody>
@@ -509,17 +547,17 @@
                 </div>
 
                 <div class="card mb-2 border-info">
-                    <div class="card-header py-1 bg-info text-dark"><i class="bi bi-thermometer-half me-1"></i><strong>Temperature Unit Reading</strong></div>
+                    <div class="card-header py-1 bg-info text-dark"><i class="bi bi-thermometer-half me-1"></i><strong>@Loc["Temperature Unit Reading"]</strong></div>
                     <div class="card-body py-2">
                         <div class="row g-2 align-items-center mb-2">
-                            <label class="col-5 col-form-label small">Set Temp (°C)</label>
+                            <label class="col-5 col-form-label small">@Loc["Set Temp (°C)"]</label>
                             <div class="col-7">
                                 <input name="SetTemperature" type="number" step="0.1" inputmode="decimal"
                                        class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.SetTemperature)" />
                             </div>
                         </div>
                         <div class="row g-2 align-items-center mb-2">
-                            <label class="col-5 col-form-label small">Display Temp (°C)</label>
+                            <label class="col-5 col-form-label small">@Loc["Display Temp (°C)"]</label>
                             <div class="col-7">
                                 <input name="DisplayTemperature" type="number" step="0.1" inputmode="decimal"
                                        class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.DisplayTemperature)" />
@@ -532,20 +570,20 @@
                 </div>
 
                 <div class="card mb-2 border-primary">
-                    <div class="card-header py-1 bg-primary text-white"><i class="bi bi-box-seam me-1"></i><strong>2. Internal Inspection</strong></div>
+                    <div class="card-header py-1 bg-primary text-white"><i class="bi bi-box-seam me-1"></i><strong>@Loc["2. Internal Inspection"]</strong></div>
                     <div class="card-body py-2">
                         <table class="table table-borderless table-sm align-middle mb-2 checklist-qa">
                             <tbody>
                                 <tr>
-                                    <td>Cargo smell normal?</td>
+                                    <td>@Loc["Cargo smell normal?"]</td>
                                     <td class="text-end">@Html.Raw(YesNo("CargoSmellNormal", checklist.CargoSmellNormal))</td>
                                 </tr>
                                 <tr>
-                                    <td>Visual cargo condition acceptable?</td>
+                                    <td>@Loc["Visual cargo condition acceptable?"]</td>
                                     <td class="text-end">@Html.Raw(YesNo("VisualCargoAcceptable", checklist.VisualCargoAcceptable))</td>
                                 </tr>
                                 <tr>
-                                    <td>Any cargo shifted / collapsed / water?</td>
+                                    <td>@Loc["Any cargo shifted / collapsed / water?"]</td>
                                     <td class="text-end">@Html.Raw(YesNo("CargoShiftedCollapsedWater", checklist.CargoShiftedCollapsedWater))</td>
                                 </tr>
                             </tbody>
@@ -562,24 +600,24 @@
             <div class="col-12 col-lg-6">
 
                 <div class="card mb-2 border-info">
-                    <div class="card-header py-1 bg-info text-dark"><i class="bi bi-thermometer me-1"></i><strong>3. Pulp Temperature Check</strong></div>
+                    <div class="card-header py-1 bg-info text-dark"><i class="bi bi-thermometer me-1"></i><strong>@Loc["3. Pulp Temperature Check"]</strong></div>
                     <div class="card-body py-2">
                         <div class="row g-2 align-items-center mb-2">
-                            <label class="col-4 col-form-label small">Front (°C)</label>
+                            <label class="col-4 col-form-label small">@Loc["Front (°C)"]</label>
                             <div class="col-8">
                                 <input name="PulpTempFront" type="number" step="0.1" inputmode="decimal"
                                        class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.PulpTempFront)" />
                             </div>
                         </div>
                         <div class="row g-2 align-items-center mb-2">
-                            <label class="col-4 col-form-label small">Middle (°C)</label>
+                            <label class="col-4 col-form-label small">@Loc["Middle (°C)"]</label>
                             <div class="col-8">
                                 <input name="PulpTempMiddle" type="number" step="0.1" inputmode="decimal"
                                        class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.PulpTempMiddle)" />
                             </div>
                         </div>
                         <div class="row g-2 align-items-center mb-2">
-                            <label class="col-4 col-form-label small">Back (°C)</label>
+                            <label class="col-4 col-form-label small">@Loc["Back (°C)"]</label>
                             <div class="col-8">
                                 <input name="PulpTempBack" type="number" step="0.1" inputmode="decimal"
                                        class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.PulpTempBack)" />
@@ -592,16 +630,16 @@
                 </div>
 
                 <div class="card mb-2 border-primary">
-                    <div class="card-header py-1 bg-primary text-white"><i class="bi bi-broadcast me-1"></i><strong>4. Data Logger Inspection</strong></div>
+                    <div class="card-header py-1 bg-primary text-white"><i class="bi bi-broadcast me-1"></i><strong>@Loc["4. Data Logger Inspection"]</strong></div>
                     <div class="card-body py-2">
                         <table class="table table-borderless table-sm align-middle mb-2 checklist-qa">
                             <tbody>
                                 <tr>
-                                    <td>Locate and retrieve data logger?</td>
+                                    <td>@Loc["Locate and retrieve data logger?"]</td>
                                     <td class="text-end">@Html.Raw(YesNo("DataLoggerLocated", checklist.DataLoggerLocated))</td>
                                 </tr>
                                 <tr>
-                                    <td>Hand over to Quality / Logistics?</td>
+                                    <td>@Loc["Hand over to Quality / Logistics?"]</td>
                                     <td class="text-end">@Html.Raw(YesNo("LoggerHandedOver", checklist.LoggerHandedOver))</td>
                                 </tr>
                                 <tr>
@@ -611,7 +649,7 @@
                             </tbody>
                         </table>
                         <div class="row g-2 align-items-center mb-2">
-                            <label class="col-5 col-form-label small">Logger serial <span class="text-muted">(up to 4)</span></label>
+                            <label class="col-5 col-form-label small">@Loc["Logger serial"] <span class="text-muted">@Loc["(up to 4)"]</span></label>
                             <div class="col-7">
                                 @{
                                     var loggerParts = (checklist.DataLoggerSerial ?? "")
@@ -631,7 +669,7 @@
                             </div>
                         </div>
                         <div class="row g-2 align-items-center mb-2">
-                            <label class="col-5 col-form-label small">Logger temp (°C)</label>
+                            <label class="col-5 col-form-label small">@Loc["Logger temp (°C)"]</label>
                             <div class="col-7">
                                 <input name="LoggerTemperature" type="number" step="0.1" inputmode="decimal"
                                        class="form-control form-control-sm text-end" value="@Fmt.Dec2(checklist.LoggerTemperature)" />
@@ -648,16 +686,16 @@
 
         @* ===== Notes (full width) ===== *@
         <div class="card mb-2 border-secondary">
-            <div class="card-header py-1 bg-light"><i class="bi bi-journal-text me-1"></i><strong>5. Notes / Observations</strong></div>
+            <div class="card-header py-1 bg-light"><i class="bi bi-journal-text me-1"></i><strong>@Loc["5. Notes / Observations"]</strong></div>
             <div class="card-body py-2">
-                <textarea name="Notes" class="form-control" rows="2" placeholder="Anything the report should mention -- weather, paperwork, special handling, etc.">@checklist.Notes</textarea>
+                <textarea name="Notes" class="form-control" rows="2" placeholder='@Loc["Anything the report should mention -- weather, paperwork, special handling, etc."]'>@checklist.Notes</textarea>
             </div>
         </div>
 
         @* ===== Photo checklist (single flag bank) ===== *@
         <div class="card mb-3 border-warning">
-            <div class="card-header py-1 bg-warning"><i class="bi bi-images me-1"></i><strong>6. Photo Attachments Checklist</strong>
-                <span class="small text-muted ms-2">Tick each photo as you capture it. Actual files are uploaded on the Images tab.</span>
+            <div class="card-header py-1 bg-warning"><i class="bi bi-images me-1"></i><strong>@Loc["6. Photo Attachments Checklist"]</strong>
+                <span class="small text-muted ms-2">@Loc["Tick each photo as you capture it. Actual files are uploaded on the Images tab."]</span>
             </div>
             <div class="card-body py-2">
                 <div class="row g-2 photo-grid">
@@ -712,8 +750,8 @@
                                         case "YesNo":
                                             <select name="cf_@cf.FieldId" class="form-select">
                                                 <option value="" selected="@(string.IsNullOrEmpty(cf.TextValue))">—</option>
-                                                <option value="Yes" selected="@(cf.TextValue == "Yes")">Yes</option>
-                                                <option value="No" selected="@(cf.TextValue == "No")">No</option>
+                                                <option value="Yes" selected="@(cf.TextValue == "Yes")">@Loc["Yes"]</option>
+                                                <option value="No" selected="@(cf.TextValue == "No")">@Loc["No"]</option>
                                             </select>
                                             break;
                                         default:
@@ -735,7 +773,7 @@
                     <i class="bi bi-save me-1"></i>Save checklist
                     @if (!draft)
                     {
-                        <span class="small ms-2"><i class="bi bi-shield-lock me-1"></i>Only unlocked fields will change</span>
+                        <span class="small ms-2"><i class="bi bi-shield-lock me-1"></i>@Loc["Only unlocked fields will change"]</span>
                     }
                 </button>
             </div>
@@ -799,18 +837,18 @@
             <table class="table table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>
-                        <th>PO / Item</th>
-                        <th>Material</th>
-                        <th>Description</th>
-                        <th>Variety</th>
-                        <th>Class</th>
-                        <th>Material group</th>
-                        <th>Major category</th>
-                        <th>Plant</th>
-                        <th>Storage</th>
-                        <th>Batch</th>
-                        <th class="text-end">Qty</th>
-                        <th>UoM</th>
+                        <th>@Loc["PO / Item"]</th>
+                        <th>@Loc["Material"]</th>
+                        <th>@Loc["Description"]</th>
+                        <th>@Loc["Variety"]</th>
+                        <th>@Loc["Class"]</th>
+                        <th>@Loc["Material group"]</th>
+                        <th>@Loc["Major category"]</th>
+                        <th>@Loc["Plant"]</th>
+                        <th>@Loc["Storage"]</th>
+                        <th>@Loc["Batch"]</th>
+                        <th class="text-end">@Loc["Qty"]</th>
+                        <th>@Loc["UoM"]</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -844,11 +882,24 @@
         {
             OwnerType = "Arrival",
             OwnerId   = Model.ArrivalId,
-            // Photos can be added/removed after the arrival is closed too
-            // (e.g. quality manager attaches an evidence shot once the
-            // checklist is signed off). All other Arrival edits remain
-            // gated by `draft` -- this gate is the only one relaxed.
-            Editable  = canEdit,
+            // Supporting photos may still be ADDED once the checklist is
+            // completed (e.g. the quality manager attaches an evidence shot
+            // after sign-off); every such upload is written to the audit trail
+            // with the arrival's status. Removing a photo stays Draft-only, so
+            // a signed-off photo set is append-only. A Cancelled arrival takes
+            // neither. ImagesController.GateOwnerAsync enforces the same rule
+            // server-side. All other Arrival edits remain gated by `draft`.
+            Editable    = canEdit && Model.StatusCode != ArrivalStatus.Cancelled,
+            // The signed-off override (Attachments.PhotoDeleteAfterClose, admins
+            // only) also unlocks Remove here. ImagesController.GateOwnerAsync
+            // applies the identical rule, and the AJAX redraw asks that gate
+            // directly -- so the button and the endpoint cannot drift apart.
+            AllowDelete = canEdit && (draft || Perms.Can(Perm.Attachments.PhotoDeleteAfterClose)),
+            Notice      = Model.StatusCode == ArrivalStatus.Completed
+                            ? (Perms.Can(Perm.Attachments.PhotoDeleteAfterClose)
+                                ? "This arrival is Completed. New photos are still recorded in the audit trail, and you may remove one because you hold the signed-off override."
+                                : "This arrival is Completed. New photos can still be added and are recorded in the audit trail; existing photos can no longer be removed.")
+                            : null,
             Ajax      = true,
             Categories = new[] { "ArrivalExternal", "ArrivalInternal", "TemperatureDisplay", "DataLogger" }
         };
@@ -857,6 +908,100 @@
 </div>
 
 @* ===== Documents (V39) ===== *@
+@* ---- Rejection: the record, and the two ways in and out of it ---- *@
+@if (Model.StatusCode == ArrivalStatus.Rejected)
+{
+    <div class="alert alert-danger d-flex align-items-start" role="alert">
+        <i class="bi bi-x-octagon-fill me-2 mt-1"></i>
+        <div>
+            <strong>@Loc["Container rejected"]</strong>
+            @if (Model.RejectedAt.HasValue)
+            {
+                <text> — @Model.RejectedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm") @Loc["by"] @Model.RejectedBy</text>
+            }
+            @if (!string.IsNullOrWhiteSpace(Model.RejectReason))
+            {
+                <div class="mt-1">@Model.RejectReason</div>
+            }
+            <div class="small mt-2">
+                @Loc["No inspection is performed. A finished quality order carrying a potential claim was raised so the damage reaches the supplier."]
+                @if (hasQo)
+                {
+                    <a asp-controller="QualityOrders" asp-action="Details" asp-route-id="@Model.QualityOrderId"
+                       class="alert-link ms-1">@Model.QualityOrderNo</a>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@if (draft && Perms.Can(Perm.Arrivals.Reject))
+{
+    <div class="modal fade" id="rejectContainerModal" tabindex="-1">
+        <div class="modal-dialog">
+            <form asp-action="Reject" asp-route-id="@Model.ArrivalId" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-x-octagon me-1"></i>@Loc["Reject container"]</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted">
+                        @Loc["Use this when the container arrived in a condition that makes inspection pointless. No QC inspection will be performed. A quality order is raised automatically, already finished and carrying a potential claim, so the damage can be sent to the supplier."]
+                    </p>
+                    <label class="form-label small mb-1">
+                        @Loc["Why is the container not accepted?"] <span class="text-danger">*</span>
+                    </label>
+                    @* Required AND minlength, but the server checks it again:
+                       a crafted POST ignores both, and this text is printed on
+                       the report the supplier receives. *@
+                    <textarea name="reason" rows="3" required minlength="10" maxlength="500"
+                              class="form-control"
+                              placeholder='@Loc["Describe the damage — this is printed on the report sent to the supplier."]'></textarea>
+                    <div class="form-check mt-3">
+                        <input class="form-check-input" type="checkbox" id="rejectAck" required />
+                        <label class="form-check-label small" for="rejectAck">
+                            @Loc["I understand the arrival becomes Rejected and can no longer be completed."]
+                        </label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-x-octagon me-1"></i>@Loc["Reject container"]
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+@if (Model.StatusCode == ArrivalStatus.Rejected && Perms.Can(Perm.Arrivals.CancelRejection))
+{
+    <div class="modal fade" id="cancelRejectionModal" tabindex="-1">
+        <div class="modal-dialog">
+            <form asp-action="CancelRejection" asp-route-id="@Model.ArrivalId" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Undo rejection"]</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted">
+                        @Loc["Returns the arrival to Draft and cancels its claim order. Use this when a container was refused by mistake."]
+                    </p>
+                    <label class="form-label small mb-1">@Loc["Reason"] <span class="text-danger">*</span></label>
+                    <textarea name="reason" rows="2" required minlength="5" maxlength="500" class="form-control"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-warning">@Loc["Undo rejection"]</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
 <div class="tab-pane fade" id="tab-documents">
     @{
         var arrivalDocsVm = new SharbatlyQMS.Web.ViewModels.DocumentListVm
@@ -871,7 +1016,32 @@
             Categories = new[] { "Invoice", "PackingList", "Certificate", "ClaimDocument", "TemperatureLog", "Other" }
         };
     }
-    <partial name="_DocumentList" model="arrivalDocsVm" />
+    @* Side-by-side list and viewer, the same shape as the quality order's
+       documents dialog. Without a [data-preview-host] the preview buttons in
+       the grid would click and do nothing, which is worse than not offering
+       them. *@
+    <div class="row g-3" data-preview-host>
+        <div class="col-xl-7">
+            <partial name="_DocumentList" model="arrivalDocsVm" />
+        </div>
+        <div class="col-xl-5">
+            <div class="card h-100">
+                <div class="card-header py-2 d-flex align-items-center gap-2 small bg-transparent">
+                    <i class="bi bi-eye text-muted"></i>
+                    <span class="fw-semibold text-truncate" data-preview-title>@Loc["Preview"]</span>
+                </div>
+                <div class="card-body p-0 position-relative" style="min-height:60vh">
+                    <div class="position-absolute top-0 start-0 w-100 h-100 d-flex
+                                align-items-center justify-content-center text-muted small px-4 text-center"
+                         data-preview-status>
+                        @Loc["Select a file to preview it here. PDF and text files open in place; anything else downloads."]
+                    </div>
+                    <iframe class="w-100 h-100 border-0 d-none"
+                            title="@Loc["Document preview"]" data-preview-frame></iframe>
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
 
 </div>

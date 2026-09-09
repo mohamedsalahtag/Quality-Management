@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Services
+﻿@using SharbatlyQMS.Web.Services
 @using SharbatlyQMS.Web.ViewModels
 @model ImageGalleryVm
 @{
@@ -11,8 +11,14 @@
 @if (Model.Editable)
 {
     <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-cloud-upload me-1"></i>Upload images</div>
+        <div class="card-header"><i class="bi bi-cloud-upload me-1"></i>@Loc["Upload images"]</div>
         <div class="card-body">
+            @if (!string.IsNullOrWhiteSpace(Model.Notice))
+            {
+                <div class="alert alert-info py-2 px-3 small mb-3">
+                    <i class="bi bi-info-circle me-1"></i>@Model.Notice
+                </div>
+            }
             <form asp-controller="Images" asp-action="Upload" method="post" enctype="multipart/form-data" class="ig-upload-form">
                 @Html.AntiForgeryToken()
                 <input type="hidden" name="ownerType" value="@Model.OwnerType" />
@@ -22,7 +28,7 @@
                     @if (Model.Categories.Length > 0)
                     {
                         <div class="col-md-4">
-                            <label class="form-label mb-1">Category</label>
+                            <label class="form-label mb-1">@Loc["Category"]</label>
                             <select name="category" class="form-select" required>
                                 @foreach (var cat in Model.Categories)
                                 {
@@ -31,12 +37,12 @@
                             </select>
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label mb-1">Files</label>
+                            <label class="form-label mb-1">@Loc["Files"]</label>
                             <input type="file" name="files" class="form-control" multiple accept="image/*" required />
                         </div>
                         <div class="col-md-2">
                             <button type="submit" class="btn btn-primary w-100">
-                                <i class="bi bi-cloud-upload me-1"></i>Upload
+                                <i class="bi bi-cloud-upload me-1"></i>@Loc["Upload"]
                             </button>
                         </div>
                     }
@@ -74,8 +80,8 @@
                                 </div>
                                 <div class="photo-dropzone" role="button" tabindex="0">
                                     <i class="bi bi-cloud-arrow-up fs-3 d-block mb-1 text-muted"></i>
-                                    <strong>Drop photos here</strong>
-                                    <div class="small text-muted mt-1">JPG / PNG / GIF / WEBP — max 10 MB each. Multiple files supported.</div>
+                                    <strong>@Loc["Drop photos here"]</strong>
+                                    <div class="small text-muted mt-1">@Loc["JPG / PNG / GIF / WEBP — max 10 MB each. Multiple files supported."]</div>
                                     <input type="file" name="files" multiple accept="image/*" />
                                 </div>
                             </div>
@@ -83,18 +89,18 @@
                         else
                         {
                             <div class="col-md-10">
-                                <label class="form-label mb-1">Files</label>
+                                <label class="form-label mb-1">@Loc["Files"]</label>
                                 <input type="file" name="files" class="form-control" multiple accept="image/*" required />
                             </div>
                             <div class="col-md-2">
                                 <button type="submit" class="btn btn-primary w-100">
-                                    <i class="bi bi-cloud-upload me-1"></i>Upload
+                                    <i class="bi bi-cloud-upload me-1"></i>@Loc["Upload"]
                                 </button>
                             </div>
                         }
                     }
                 </div>
-                <small class="text-muted d-block mt-1">JPG / PNG / GIF / WEBP. Max 10 MB each.</small>
+                <small class="text-muted d-block mt-1">@Loc["JPG / PNG / GIF / WEBP. Max 10 MB each."]</small>
             </form>
         </div>
     </div>

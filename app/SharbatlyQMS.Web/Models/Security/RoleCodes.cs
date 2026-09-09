@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.Models.Security;
+﻿namespace SharbatlyQMS.Web.Models.Security;
 
 /// <summary>
 /// The six roles that ship with the product, as they exist in
@@ -28,6 +28,20 @@ public static class RoleCodes
 
     public static bool IsBuiltIn(string? roleCode) =>
         roleCode != null && Array.Exists(BuiltIn, r => string.Equals(r, roleCode, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// A role code without the <see cref="Prefix"/> — "QcManager" -> "Manager".
+    /// For DISPLAY only: it is how a stored role value is turned into something
+    /// readable, and it deliberately also passes through the pre-overhaul names
+    /// still sitting in older rows (claim notes carry the role their author held
+    /// at the time). Never use it to decide access — that is what the permission
+    /// matrix is for, and SecurityMatrixTests enforces it.
+    /// </summary>
+    public static string BareRoleName(string? roleCode)
+    {
+        var s = (roleCode ?? "").Trim();
+        return s.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase) ? s[Prefix.Length..] : s;
+    }
 }
 
 /// <summary>

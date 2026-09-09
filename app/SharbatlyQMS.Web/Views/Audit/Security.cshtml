@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.Models
+﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.Services
 @model IReadOnlyList<SecurityEvent>
 @{
@@ -22,7 +22,7 @@
 </div>
 
 <ul class="nav nav-tabs mb-3">
-    <li class="nav-item"><a class="nav-link" asp-action="Index"><i class="bi bi-journal-text me-1"></i>Activity log</a></li>
+    <li class="nav-item"><a class="nav-link" asp-action="Index"><i class="bi bi-journal-text me-1"></i>@Loc["Activity log"]</a></li>
     <li class="nav-item"><a class="nav-link active" asp-action="Security"><i class="bi bi-shield-lock me-1"></i>Users &amp; security</a></li>
 </ul>
 
@@ -41,7 +41,7 @@
         <span class="filter-chips" data-filter-chips></span>
         @if (f.Any)
         {
-            <a asp-action="Security" class="btn btn-sm btn-link text-decoration-none">Clear all</a>
+            <a asp-action="Security" class="btn btn-sm btn-link text-decoration-none">@Loc["Clear all"]</a>
         }
     </div>
 
@@ -49,15 +49,15 @@
         <form method="get" class="p-3" data-filter-form>
             <div class="row g-2 align-items-end">
                 <div class="col-12 col-md-3">
-                    <label class="form-label small mb-1">Search</label>
+                    <label class="form-label small mb-1">@Loc["Search"]</label>
                     <input type="text" name="search" value="@f.Search" data-chip="Search"
                            class="form-control form-control-sm"
-                           placeholder="user, role, permission…" autocomplete="off" />
+                           placeholder='@Loc["user, role, permission…"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Changed by</label>
+                    <label class="form-label small mb-1">@Loc["Changed by"]</label>
                     <select name="actor" class="form-select form-select-sm" data-chip="Changed by">
-                        <option value="">Anyone</option>
+                        <option value="">@Loc["Anyone"]</option>
                         @foreach (var a in opts.Actors)
                         {
                             <option value="@a" selected="@Sel(a, f.Actor)">@a</option>
@@ -65,9 +65,9 @@
                     </select>
                 </div>
                 <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">About</label>
+                    <label class="form-label small mb-1">@Loc["About"]</label>
                     <select name="subjectKey" class="form-select form-select-sm" data-chip="About">
-                        <option value="">Any user or role</option>
+                        <option value="">@Loc["Any user or role"]</option>
                         @foreach (var sub in opts.Subjects)
                         {
                             var label = string.IsNullOrWhiteSpace(sub.SubjectName)
@@ -79,12 +79,12 @@
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">From</label>
+                    <label class="form-label small mb-1">@Loc["From"]</label>
                     <input type="date" name="from" value="@D(f.From)" data-chip="From"
                            class="form-control form-control-sm" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">To</label>
+                    <label class="form-label small mb-1">@Loc["To"]</label>
                     <input type="date" name="to" value="@D(f.To)" data-chip="To"
                            class="form-control form-control-sm" />
                 </div>
@@ -92,10 +92,10 @@
 
             <div class="row g-3 mt-1">
                 <div class="col-12 col-lg-8">
-                    <div class="small text-muted mb-1">Kind of change</div>
+                    <div class="small text-muted mb-1">@Loc["Kind of change"]</div>
                     @* A select rather than chips: these are mutually exclusive. *@
                     <select name="category" class="form-select form-select-sm" data-chip="Kind">
-                        <option value="">Everything</option>
+                        <option value="">@Loc["Everything"]</option>
                         @foreach (var c in opts.Categories)
                         {
                             <option value="@c" selected="@Sel(c, f.Category)">@SecurityCategories.Label(c)</option>
@@ -103,20 +103,20 @@
                     </select>
                 </div>
                 <div class="col-12 col-lg-4">
-                    <div class="small text-muted mb-1">Subject</div>
+                    <div class="small text-muted mb-1">@Loc["Subject"]</div>
                     <select name="subjectType" class="form-select form-select-sm" data-chip="Subject">
-                        <option value="">Users and roles</option>
-                        <option value="@PermissionSubjects.User" selected="@Sel(PermissionSubjects.User, f.SubjectType)">Users only</option>
-                        <option value="@PermissionSubjects.Role" selected="@Sel(PermissionSubjects.Role, f.SubjectType)">Roles only</option>
+                        <option value="">@Loc["Users and roles"]</option>
+                        <option value="@PermissionSubjects.User" selected="@Sel(PermissionSubjects.User, f.SubjectType)">@Loc["Users only"]</option>
+                        <option value="@PermissionSubjects.Role" selected="@Sel(PermissionSubjects.Role, f.SubjectType)">@Loc["Roles only"]</option>
                     </select>
                 </div>
             </div>
 
             <div class="d-flex gap-2 mt-3">
                 <button type="submit" class="btn btn-primary btn-sm" data-filter-apply>
-                    <i class="bi bi-funnel me-1"></i>Apply filters
+                    <i class="bi bi-funnel me-1"></i>@Loc["Apply filters"]
                 </button>
-                <a asp-action="Security" class="btn btn-outline-secondary btn-sm">Clear</a>
+                <a asp-action="Security" class="btn btn-outline-secondary btn-sm">@Loc["Clear"]</a>
             </div>
         </form>
     </div>
@@ -134,16 +134,16 @@
                 </span>
             }
         </small>
-        <small class="text-muted">Newest first</small>
+        <small class="text-muted">@Loc["Newest first"]</small>
     </div>
     <div class="table-responsive">
         <table class="table table-hover align-middle mb-0">
             <thead class="table-light">
                 <tr>
-                    <th style="width:10rem">When</th>
-                    <th style="width:10rem">Kind</th>
-                    <th>What happened</th>
-                    <th style="width:11rem">Changed by</th>
+                    <th style="width:10rem">@Loc["When"]</th>
+                    <th style="width:10rem">@Loc["Kind"]</th>
+                    <th>@Loc["What happened"]</th>
+                    <th style="width:11rem">@Loc["Changed by"]</th>
                 </tr>
             </thead>
             <tbody>
@@ -155,7 +155,7 @@
                         : "No user or security changes recorded yet.")
                     @if (f.Any)
                     {
-                        <a asp-action="Security" class="ms-1">Clear them</a>
+                        <a asp-action="Security" class="ms-1">@Loc["Clear them"]</a>
                     }
                 </td></tr>
             }
@@ -214,14 +214,14 @@
                                     @if (e.FromAuditLog)
                                     {
                                         <details class="mt-2">
-                                            <summary class="small text-muted">Technical detail</summary>
+                                            <summary class="small text-muted">@Loc["Technical detail"]</summary>
                                             <div class="row g-2 mt-1">
                                                 <div class="col-12 col-md-6">
-                                                    <div class="small text-muted">Before</div>
+                                                    <div class="small text-muted">@Loc["Before"]</div>
                                                     <pre class="audit-json">@(e.OldValuesJson ?? "(none)")</pre>
                                                 </div>
                                                 <div class="col-12 col-md-6">
-                                                    <div class="small text-muted">After</div>
+                                                    <div class="small text-muted">@Loc["After"]</div>
                                                     <pre class="audit-json">@(e.NewValuesJson ?? "(none)")</pre>
                                                 </div>
                                             </div>

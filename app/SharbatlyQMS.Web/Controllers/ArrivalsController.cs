@@ -18,12 +18,13 @@ public class ArrivalsController : Controller
     private readonly ISapClient _sap;
     private readonly IMaraService _mara;
     private readonly IContainerCacheService _cache;
+    private readonly IUserPermissions _me;
     private readonly ILogger<ArrivalsController> _logger;
 
     public ArrivalsController(IArrivalService arrivals, ISapClient sap, IMaraService mara,
-        IContainerCacheService cache, ILogger<ArrivalsController> logger)
+        IContainerCacheService cache, IUserPermissions me, ILogger<ArrivalsController> logger)
     {
-        _arrivals = arrivals; _sap = sap; _mara = mara; _cache = cache; _logger = logger;
+        _arrivals = arrivals; _sap = sap; _mara = mara; _cache = cache; _me = me; _logger = logger;
     }
 
     [HttpGet]
@@ -32,7 +33,8 @@ public class ArrivalsController : Controller
         string? container, string? bol, string? po,
         string? plant, string? poType, string? storageLoc, string? supplier,
         string? material, DateOnly? from, DateOnly? to,
-        int page = 1, int pageSize = 100)
+        DateOnly? arrFrom = null, DateOnly? arrTo = null,
+        int page = 1, int pageSize = 100, bool archived = false)
     {
         // Server-side paging: the pending cache holds thousands of triplets, so
         // rendering them all in one payload was the page's slowness. Only one
@@ -43,10 +45,13 @@ public class ArrivalsController : Controller
         // Operator plant-scope: if the user is restricted to a plant, force
         // the dropdown value to it (and the view replaces the dropdown with
         // a locked badge). Manager / SiteAdmin / etc. pass null and see all.
+        // archived=true swaps the whole page over to the archive: same filters,
+        // same pager, only containers that were filed away -- each with a
+        // Restore action instead of Create.
         var scope   = User.GetPlantScope();
-        var result  = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc, supplier, material, from, to, page, pageSize, scope);
+        var result  = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc, supplier, material, from, to, arrFrom, arrTo, page, pageSize, scope, archived);
         var status  = await _cache.GetPullStatusAsync();
-        var options = await _cache.GetPendingFilterOptionsAsync(scope);
+        var options = await _cache.GetPendingFilterOptionsAsync(scope, archived);
         ViewBag.Container         = container;
         ViewBag.Bol               = bol;
         ViewBag.Po                = po;
@@ -54,6 +59,8 @@ public class ArrivalsController : Controller
         ViewBag.Material          = material;
         ViewBag.From              = from;
         ViewBag.To                = to;
+        ViewBag.ArrFrom           = arrFrom;
+        ViewBag.ArrTo             = arrTo;
         ViewBag.Plant             = plant;
         ViewBag.PoType            = poType;
         ViewBag.StorageLoc        = storageLoc;
@@ -65,7 +72,106 @@ public class ArrivalsController : Controller
         ViewBag.Page              = result.Page;
         ViewBag.PageSize          = result.PageSize;
         ViewBag.TotalCount        = result.Total;
+        ViewBag.Archived          = archived;
+        ViewBag.ArchivedCount     = await _cache.CountArchivedTripletsAsync(scope);
         return View(result.Rows);
+    }
+
+    /// <summary>
+    /// Files stale pending containers away by arrival-date range. They stop showing
+    /// in Pending Containers (and in the dashboard's pending count) but are not
+    /// deleted -- the next SAP sweep would only re-insert them, and the archive
+    /// view can put any of them back. The range matches the "PO" date the grid
+    /// prints. A plant-scoped manager only ever archives their own plants'
+    /// containers; the service applies the same scope the list does.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Arrivals.Archive, Seed.ManagerOrAdmin, "Archive / restore pending containers")]
+    public async Task<IActionResult> ArchivePending(DateOnly? from, DateOnly? to)
+    {
+        if (from is null && to is null)
+        {
+            TempData["Error"] = "Give at least one date bound — archiving the whole list at once is never what you want.";
+            return RedirectToAction(nameof(Pending));
+        }
+        if (from is not null && to is not null && from > to)
+        {
+            TempData["Error"] = "The 'from' date is after the 'to' date.";
+            return RedirectToAction(nameof(Pending));
+        }
+
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        var n    = await _cache.ArchiveByArrivalDateRangeAsync(from, to, user, User.GetPlantScope());
+        _logger.LogInformation("{User} archived {Count} pending containers (arrival date {From}..{To})",
+            user, n, from, to);
+
+        TempData[n == 0 ? "Error" : "Success"] = n == 0
+            ? "No pending containers fall in that arrival-date range — nothing was archived."
+            : $"Archived {n} container{(n == 1 ? "" : "s")}. They are out of the pending list; open Archived to restore any of them.";
+        return RedirectToAction(nameof(Pending));
+    }
+
+    /// <summary>
+    /// Puts archived containers back in the pending list — the exact inverse of
+    /// <see cref="ArchivePending"/>, by the same arrival-date range, so an archive
+    /// that reached too far is undone in one action rather than row by row.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Arrivals.Archive, Seed.ManagerOrAdmin, "Archive / restore pending containers")]
+    public async Task<IActionResult> RestorePendingRange(DateOnly? from, DateOnly? to)
+    {
+        if (from is null && to is null)
+        {
+            TempData["Error"] = "Give at least one date bound to restore a range.";
+            return RedirectToAction(nameof(Pending), new { archived = true });
+        }
+        if (from is not null && to is not null && from > to)
+        {
+            TempData["Error"] = "The 'from' date is after the 'to' date.";
+            return RedirectToAction(nameof(Pending), new { archived = true });
+        }
+
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        var n    = await _cache.RestoreByArrivalDateRangeAsync(from, to, user, User.GetPlantScope());
+        _logger.LogInformation("{User} restored {Count} archived containers (arrival date {From}..{To})",
+            user, n, from, to);
+
+        TempData[n == 0 ? "Error" : "Success"] = n == 0
+            ? "No archived containers fall in that arrival-date range — nothing was restored."
+            : $"Restored {n} container{(n == 1 ? "" : "s")} to the pending list.";
+        return RedirectToAction(nameof(Pending), new { archived = true });
+    }
+
+    /// <summary>
+    /// Restores one archived container back into the pending list. Stays on the
+    /// archive view so the operator can keep working down the page.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Arrivals.Archive, Seed.ManagerOrAdmin, "Archive / restore pending containers")]
+    public async Task<IActionResult> RestorePending(string containerNo, string bolNo, string po)
+    {
+        if (string.IsNullOrWhiteSpace(containerNo) || string.IsNullOrWhiteSpace(po))
+        {
+            TempData["Error"] = "Container and PO are required.";
+            return RedirectToAction(nameof(Pending), new { archived = true });
+        }
+        bolNo = (bolNo ?? "").Trim();
+
+        // Same scope gate as the plant override: the container has to be one
+        // this user is allowed to see before they can move it anywhere.
+        var scope = User.GetPlantScope();
+        if (!scope.Unrestricted)
+        {
+            var plant = await _cache.GetEffectivePlantAsync(containerNo.Trim(), bolNo, po.Trim());
+            if (plant == null || !scope.Allows(plant)) return Forbid();
+        }
+
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        var n    = await _cache.SetArchivedAsync(containerNo.Trim(), bolNo, po.Trim(), archived: false, user);
+        TempData[n == 0 ? "Error" : "Success"] = n == 0
+            ? "Nothing was changed — that container is no longer in the archive."
+            : $"Container {containerNo} is back in the pending list.";
+        return RedirectToAction(nameof(Pending), new { archived = true });
     }
 
     /// <summary>Returns Forbid() when the user is plant-scoped and the arrival
@@ -414,10 +520,15 @@ public class ArrivalsController : Controller
     private async Task<Func<string, bool>> FieldEditableAsync(string status)
     {
         if (status == ArrivalStatus.Draft) return _ => true;
-        if (status != ArrivalStatus.Completed) return _ => false;
-        bool isAdmin = User.IsInRole(RoleCodes.Admin);
+        // Rejected behaves like Completed here: the inspection is over, but the
+        // shipment dates the claim report prints must still be correctable.
+        if (status != ArrivalStatus.Completed && status != ArrivalStatus.Rejected) return _ => false;
+        // Was IsInRole(QcAdmin): a role name compiled into the controller, so no
+        // administrator could see it on the Security screen or move it to
+        // another role. It is a permission now, seeded to the same audience.
+        bool canOverride = _me.Can(Perm.Arrivals.EditClosedFields);
         var policies = await _arrivals.GetArrivalFieldPoliciesAsync();
-        return key => isAdmin || (policies.TryGetValue(key, out var p) && p.EditableWhenClosed);
+        return key => canOverride || (policies.TryGetValue(key, out var p) && p.EditableWhenClosed);
     }
 
 
@@ -566,6 +677,52 @@ public class ArrivalsController : Controller
         var (ok, error) = await _arrivals.CompleteAsync(id, user);
         TempData[ok ? "Success" : "Error"] = ok
             ? "Arrival completed. You can now open a Quality Order."
+            : error;
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    /// <summary>
+    /// Refuses a container that arrived damaged. One click ends the inspection
+    /// and raises the claim order, because the claim window is short and a
+    /// two-step flow leaves containers sitting rejected with nothing filed.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Arrivals.Reject, Seed.SupervisorOrAbove, "Reject a container in bad condition")]
+    public async Task<IActionResult> Reject(long id, string? reason)
+    {
+        if (await EnsureCanReadArrivalAsync(id) is { } block) return block;
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+
+        var (ok, error, qoId) = await _arrivals.RejectAsync(id, reason ?? "", user);
+        if (!ok)
+        {
+            TempData["Error"] = error;
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
+        _logger.LogInformation("{User} rejected arrival {ArrivalId}; claim order {QoId} raised", user, id, qoId);
+        TempData["Success"] = "Container rejected. A finished quality order carrying a potential claim "
+                            + "was raised so the damage can go to the supplier.";
+        // Straight to the order: the next thing anyone does is attach photos and
+        // send it.
+        return RedirectToAction("Details", "QualityOrders", new { id = qoId });
+    }
+
+    /// <summary>
+    /// Undoes a rejection. Exists because nothing else can: a Closed quality
+    /// order cannot be cancelled or deleted anywhere else in the application,
+    /// so without this a mis-click would be permanent.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Arrivals.CancelRejection, Seed.ManagerOrAdmin, "Undo a container rejection")]
+    public async Task<IActionResult> CancelRejection(long id, string? reason)
+    {
+        if (await EnsureCanReadArrivalAsync(id) is { } block) return block;
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+
+        var (ok, error) = await _arrivals.CancelRejectionAsync(id, reason ?? "", user);
+        TempData[ok ? "Success" : "Error"] = ok
+            ? "Rejection undone. The arrival is back in Draft and its claim order is cancelled."
             : error;
         return RedirectToAction(nameof(Details), new { id });
     }

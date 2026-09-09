@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.Models;
+﻿namespace SharbatlyQMS.Web.Models;
 
 public class QualityOrder
 {
@@ -27,6 +27,25 @@ public class QualityOrder
     /// note, no report send. Enforced in ClaimManagementController, not just in
     /// the view — hiding a button leaves its POST endpoint reachable.</summary>
     public bool IsArchived => ArchivedAt.HasValue;
+
+    /// <summary>QC's claim assessment, chosen when the order is finished (M24):
+    /// true = Potential Claim, false = No Potential Claim, null = finished
+    /// before the question existed. This is the inspector's verdict, NOT the
+    /// claim decision — that stays on qms_claim.claim_status.</summary>
+    /// <summary>
+    /// This order exists because the container was REJECTED on arrival, not
+    /// because anything was inspected. It carries materials but no samples, is
+    /// Closed from the moment it is created, and its report prints the
+    /// rejection banner and the arrival's damage photos.
+    ///
+    /// Stored rather than derived from the arrival's current status: a printed
+    /// report has to look the same forever, and arrival status is mutable.
+    /// </summary>
+    public bool      ContainerRejected { get; set; }
+
+    public bool?     PotentialClaim   { get; set; }
+    public DateTime? PotentialClaimAt { get; set; }
+    public string?   PotentialClaimBy { get; set; }
 
     // Joined from qms_arrival so the QO list can show shipment identity.
     public string?  ContainerNo   { get; set; }
@@ -316,6 +335,13 @@ public class MaterialGroupSummary
     public string? Variety          { get; set; }
     public string? Grade            { get; set; }          // = MaterialClass
     public string? MajorCategory    { get; set; }
+    /// <summary>Tara weight of the group's materials, pre-rendered: one value
+    /// when they agree, otherwise every distinct value joined. Empty when no
+    /// material in the group has a recorded tara. Source is
+    /// qms_quality_order_material.tara_weight — captured per material (the
+    /// Material details card on the sample drawer), not per sample.</summary>
+    public string  TaraWeightText   { get; set; } = "";
+
     public int     SumSampleSize    { get; set; }          // Σ sample_size across all samples in group
     public decimal SumPoQuantity    { get; set; }          // Σ arrival_item.quantity across the group's materials (PO qty)
 

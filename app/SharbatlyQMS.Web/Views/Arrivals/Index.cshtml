@@ -2,7 +2,7 @@
 @using SharbatlyQMS.Web.ViewModels
 @model IReadOnlyList<Arrival>
 @{
-    ViewData["Title"] = "Arrivals";
+    ViewData["Title"] = Loc["Arrivals"];
     var f       = ViewBag.Filter as ArrivalListFilter ?? new ArrivalListFilter();
     var opts    = ViewBag.FilterOptions as ArrivalFilterOptions ?? new ArrivalFilterOptions();
     var status  = f.Status;
@@ -43,11 +43,11 @@
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3">
-    <h1 class="h3 mb-0"><i class="bi bi-box-arrow-in-down me-1"></i>Arrivals</h1>
+    <h1 class="h3 mb-0"><i class="bi bi-box-arrow-in-down me-1"></i>@Loc["Arrivals"]</h1>
     @if (canEdit)
     {
         <a asp-action="Search" class="btn btn-primary">
-            <i class="bi bi-search me-1"></i>New arrival from SAP
+            <i class="bi bi-search me-1"></i>@Loc["New arrival from SAP"]
         </a>
     }
 </div>
@@ -62,6 +62,7 @@
         ("",                       "btn-outline-secondary"),
         (ArrivalStatus.Draft,      "btn-outline-warning"),
         (ArrivalStatus.Completed,  "btn-outline-success"),
+        (ArrivalStatus.Rejected,   "btn-outline-danger"),
     };
     string ChipLabel(string v) => v.Length == 0 ? "All" : v;
     string ActiveClass(string v, string baseCss) =>
@@ -89,11 +90,11 @@
             </button>
             @if (f.Any)
             {
-                <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>Clear</a>
+                <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>@Loc["Clear"]</a>
             }
         </div>
         <div class="col-auto">
-            <div class="btn-group" role="group" aria-label="Filter by status">
+            <div class="btn-group" role="group" aria-label='@Loc["Filter by status"]'>
                 @foreach (var s in statuses)
                 {
                     <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)" style="min-width:6.5rem">@ChipLabel(s.Value)</button>
@@ -106,35 +107,35 @@
         <div class="card card-body mt-2 bg-body-tertiary">
             <div class="row g-2">
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Container</label>
+                    <label class="form-label small mb-1">@Loc["Container"]</label>
                     <input type="text" name="container" value="@f.Container" class="form-control form-control-sm"
-                           placeholder="any part" autocomplete="off" />
+                           placeholder='@Loc["any part"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">BOL</label>
+                    <label class="form-label small mb-1">@Loc["BOL"]</label>
                     <input type="text" name="bol" value="@f.Bol" class="form-control form-control-sm"
-                           placeholder="any part" autocomplete="off" />
+                           placeholder='@Loc["any part"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">PO</label>
+                    <label class="form-label small mb-1">@Loc["PO"]</label>
                     <input type="text" name="po" value="@f.Po" class="form-control form-control-sm"
-                           placeholder="EBELN" autocomplete="off" />
+                           placeholder='@Loc["EBELN"]' autocomplete="off" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Arrival no.</label>
+                    <label class="form-label small mb-1">@Loc["Arrival no."]</label>
                     <input type="text" name="arrivalNo" value="@f.ArrivalNo" class="form-control form-control-sm"
-                           placeholder="ARR-…" autocomplete="off" />
+                           placeholder='@Loc["ARR-…"]' autocomplete="off" />
                 </div>
                 <div class="col-12 col-md-4">
-                    <label class="form-label small mb-1">Material</label>
+                    <label class="form-label small mb-1">@Loc["Material"]</label>
                     <input type="text" name="material" value="@f.Material" class="form-control form-control-sm"
-                           placeholder="code or description" autocomplete="off" />
+                           placeholder='@Loc["code or description"]' autocomplete="off" />
                 </div>
 
                 <div class="col-12 col-md-4">
-                    <label class="form-label small mb-1">Supplier</label>
+                    <label class="form-label small mb-1">@Loc["Supplier"]</label>
                     <select name="supplier" class="form-select form-select-sm">
-                        <option value="">All suppliers</option>
+                        <option value="">@Loc["All suppliers"]</option>
                         @foreach (var sup in opts.Suppliers)
                         {
                             <option value="@sup" selected="@(string.Equals(sup, f.Supplier, StringComparison.OrdinalIgnoreCase))">@sup</option>
@@ -143,7 +144,7 @@
                 </div>
 
                 <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">Plant</label>
+                    <label class="form-label small mb-1">@Loc["Plant"]</label>
                     @if (plantScopeLocked != null)
                     {
                         @* Scoped operator: the server forces this plant anyway, so
@@ -158,7 +159,7 @@
                     else
                     {
                         <select name="plant" id="arr-plant-filter" data-plant-filter="arr" class="form-select form-select-sm">
-                            <option value="">All plants</option>
+                            <option value="">@Loc["All plants"]</option>
                             @foreach (var pl in opts.Plants)
                             {
                                 <option value="@pl" selected="@(string.Equals(pl, f.Plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
@@ -167,9 +168,9 @@
                     }
                 </div>
                 <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">Storage location</label>
+                    <label class="form-label small mb-1">@Loc["Storage location"]</label>
                     <select name="storageLoc" id="arr-storage-filter" data-storage-filter="arr" class="form-select form-select-sm">
-                        <option value="">All storage locations</option>
+                        <option value="">@Loc["All storage locations"]</option>
                         @foreach (var sl in opts.StorageLocations)
                         {
                             <option value="@sl.Code" data-plant="@sl.Plant"
@@ -181,9 +182,9 @@
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Created by</label>
+                    <label class="form-label small mb-1">@Loc["Created by"]</label>
                     <select name="createdBy" class="form-select form-select-sm">
-                        <option value="">Anyone</option>
+                        <option value="">@Loc["Anyone"]</option>
                         @foreach (var cb in opts.CreatedBy)
                         {
                             <option value="@cb" selected="@(string.Equals(cb, f.CreatedBy, StringComparison.OrdinalIgnoreCase))">@cb</option>
@@ -191,20 +192,20 @@
                     </select>
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Created from</label>
+                    <label class="form-label small mb-1">@Loc["Created from"]</label>
                     <input type="date" name="from" value="@D(f.From)" class="form-control form-control-sm" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">Created to</label>
+                    <label class="form-label small mb-1">@Loc["Created to"]</label>
                     <input type="date" name="to" value="@D(f.To)" class="form-control form-control-sm" />
                 </div>
             </div>
             <div class="mt-2 d-flex gap-2">
-                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>Apply filters</button>
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>@Loc["Apply filters"]</button>
                 @if (f.AnyPanelFilter)
                 {
                     <a asp-action="Index" asp-route-status="@status" asp-route-search="@search"
-                       class="btn btn-outline-secondary btn-sm">Reset these filters</a>
+                       class="btn btn-outline-secondary btn-sm">@Loc["Reset these filters"]</a>
                 }
             </div>
         </div>
@@ -221,25 +222,25 @@
                data-tablekit data-no-pager>
             <thead class="table-light">
                 <tr>
-                    <th data-sort>Arrival #</th>
-                    <th data-sort>Container</th>
-                    <th data-sort>BOL</th>
-                    <th data-sort>Plant</th>
-                    <th data-sort>Storage</th>
-                    <th data-sort>Type</th>
-                    <th data-sort>Vendor</th>
-                    <th data-sort>Created</th>
-                    <th data-sort>Created By</th>
-                    <th data-sort>Status</th>
-                    <th>Quality Order</th>
-                    <th class="text-end">View</th>
+                    <th data-sort>@Loc["Arrival #"]</th>
+                    <th data-sort>@Loc["Container"]</th>
+                    <th data-sort>@Loc["BOL"]</th>
+                    <th data-sort>@Loc["Plant"]</th>
+                    <th data-sort>@Loc["Storage"]</th>
+                    <th data-sort>@Loc["Type"]</th>
+                    <th data-sort>@Loc["Vendor"]</th>
+                    <th data-sort>@Loc["Created"]</th>
+                    <th data-sort>@Loc["Created By"]</th>
+                    <th data-sort>@Loc["Status"]</th>
+                    <th>@Loc["Quality Order"]</th>
+                    <th class="text-end">@Loc["View"]</th>
                 </tr>
             </thead>
             <tbody>
                 @if (!Model.Any())
                 {
                     <tr><td colspan="12" class="text-center text-muted py-4">
-                        No arrivals yet. Click <em>New arrival from SAP</em> to create the first one.
+                        No arrivals yet. Click <em>@Loc["New arrival from SAP"]</em> to create the first one.
                     </td></tr>
                 }
                 else
@@ -290,11 +291,9 @@
                             <td>@a.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
                             <td>@a.CreatedBy</td>
                             <td>
-                                @{ var (cls, label) = a.StatusCode switch {
-                                    "Draft"     => ("warning", "Draft"),
-                                    "Completed" => ("success", "Completed"),
-                                    "Cancelled" => ("secondary", "Cancelled"),
-                                    _           => ("secondary", a.StatusCode) }; }
+                                @* The shared helper, not a fourth private copy of
+                                   the same switch on raw string literals. *@
+                                @{ var (cls, label) = ArrivalStatus.Badge(a.StatusCode); }
                                 <span class="badge bg-@cls">@label</span>
                             </td>
                             <td>
@@ -303,7 +302,7 @@
                                     <a asp-controller="QualityOrders" asp-action="Details"
                                        asp-route-id="@a.QualityOrderId" class="btn btn-sm btn-outline-primary"
                                        title="@a.QualityOrderNo">
-                                        <i class="bi bi-clipboard-data me-1"></i>Open Quality Order
+                                        <i class="bi bi-clipboard-data me-1"></i>@Loc["Open Quality Order"]
                                     </a>
                                 }
                                 else if (a.StatusCode == ArrivalStatus.Completed && canEdit)
@@ -313,7 +312,7 @@
                                         @Html.AntiForgeryToken()
                                         <input type="hidden" name="arrivalId" value="@a.ArrivalId" />
                                         <button type="submit" class="btn btn-sm btn-success">
-                                            <i class="bi bi-plus-circle me-1"></i>Create Quality Order
+                                            <i class="bi bi-plus-circle me-1"></i>@Loc["Create Quality Order"]
                                         </button>
                                     </form>
                                 }
@@ -356,21 +355,21 @@
     {
         <div class="tk-pager d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 border-top">
             <div class="d-flex align-items-center gap-2 small text-muted">
-                <label class="mb-0">Show</label>
+                <label class="mb-0">@Loc["Show"]</label>
                 <select class="form-select form-select-sm" style="width:auto" data-pagesize-select>
                     @foreach (var n in new[] { 25, 50, 100 })
                     {
                         <option value="@n" selected="@(n == pageSize)">@n</option>
                     }
                 </select>
-                <span>per page</span>
+                <span>@Loc["per page"]</span>
             </div>
 
             <span class="text-muted small">Showing @firstRow&ndash;@lastRow of @totalCount</span>
 
             @if (pageCount > 1)
             {
-                <nav aria-label="Arrival pages">
+                <nav aria-label='@Loc["Arrival pages"]'>
                     <ul class="pagination pagination-sm mb-0">
                         @{
                             var pFrom = Math.Max(1, pageNo - 2);
@@ -378,7 +377,7 @@
                         }
                         <li class="page-item @(pageNo == 1 ? "disabled" : "")">
                             <a class="page-link" asp-action="Index"
-                               asp-all-route-data="pageRoute(pageNo - 1, pageSize)" aria-label="Previous">&laquo;</a>
+                               asp-all-route-data="pageRoute(pageNo - 1, pageSize)" aria-label='@Loc["Previous"]'>&laquo;</a>
                         </li>
                         @if (pFrom > 1)
                         {
@@ -408,7 +407,7 @@
                         }
                         <li class="page-item @(pageNo == pageCount ? "disabled" : "")">
                             <a class="page-link" asp-action="Index"
-                               asp-all-route-data="pageRoute(pageNo + 1, pageSize)" aria-label="Next">&raquo;</a>
+                               asp-all-route-data="pageRoute(pageNo + 1, pageSize)" aria-label='@Loc["Next"]'>&raquo;</a>
                         </li>
                     </ul>
                 </nav>
@@ -434,12 +433,12 @@
                         SAP snapshot, item rows, and image links.
                     </p>
                     <div class="alert alert-warning small mb-0">
-                        <i class="bi bi-exclamation-triangle me-1"></i>This cannot be undone.
+                        <i class="bi bi-exclamation-triangle me-1"></i>@Loc["This cannot be undone."]
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-                    <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>Delete permanently</button>
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-danger"><i class="bi bi-trash me-1"></i>@Loc["Delete permanently"]</button>
                 </div>
             </form>
         </div>

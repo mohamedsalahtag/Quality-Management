@@ -58,7 +58,11 @@ public class QoListFilter
 
     /// <summary>How many panel filters are active — shown as a badge on the toggle.</summary>
     public int PanelFilterCount =>
-        (string.IsNullOrWhiteSpace(Container)  ? 0 : 1)
+        // QoNo counts here too. It opens the panel via AnyPanelFilter, so
+        // leaving it out of the count produced an expanded panel with a "0"
+        // badge — the two must agree or the page looks like it filtered itself.
+        (string.IsNullOrWhiteSpace(QoNo)       ? 0 : 1)
+        + (string.IsNullOrWhiteSpace(Container)  ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Bol)        ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Po)         ? 0 : 1)
         + (string.IsNullOrWhiteSpace(ArrivalNo)  ? 0 : 1)
