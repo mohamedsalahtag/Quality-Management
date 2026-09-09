@@ -2087,17 +2087,45 @@ public class AdminController : Controller
         var brandingDir = Path.Combine(_env.WebRootPath, "branding");
         Directory.CreateDirectory(brandingDir);
 
-        // Remove any prior logo files so the fixed name + new extension can take
-        // over cleanly. (Extension can differ from upload to upload.)
-        foreach (var prior in Directory.GetFiles(brandingDir, "company-logo.*"))
-            try { System.IO.File.Delete(prior); } catch { /* best-effort */ }
-
-        var fileName = "company-logo" + ext;
+        // A NEW file name every time, rather than overwriting a fixed one.
+        //
+        // The logo is served out of wwwroot by the static-file middleware, which
+        // keeps a memory-mapped section open on a file it has served. Windows
+        // refuses to truncate or delete a file in that state, so the old code
+        // failed with "The requested operation cannot be performed on a file
+        // with a user-mapped section open" -- every upload after the current
+        // logo had been displayed once, which is to say every upload. Writing a
+        // file nobody has opened yet cannot collide, and the changing name also
+        // busts the browser cache that a fixed name would keep serving.
+        var fileName = $"company-logo-{DateTime.UtcNow:yyyyMMddHHmmssfff}{ext}";
         var fullPath = Path.Combine(brandingDir, fileName);
-        await using (var fs = System.IO.File.Create(fullPath))
+
+        try
+        {
+            await using var fs = System.IO.File.Create(fullPath);
             await logo.CopyToAsync(fs);
+        }
+        catch (IOException ex)
+        {
+            // Never a 500 for this: the administrator can act on a sentence,
+            // not on a stack trace behind a support reference.
+            _adminLog.LogError(ex, "Company logo upload failed writing {Path}", fullPath);
+            TempData["Error"] = "The logo could not be saved to disk. " +
+                                "Check free space and the service account's rights on the branding folder.";
+            return RedirectToAction(nameof(Settings), new { activeTab = "branding" });
+        }
 
         await _settings.SaveLogoFilenameAsync(fileName, GetCurrentUserId());
+
+        // Previous logos, best-effort and AFTER the new one is live: one still
+        // mapped by the middleware cannot be deleted until the service next
+        // restarts, and failing to tidy up is not a reason to fail the upload.
+        foreach (var prior in Directory.GetFiles(brandingDir, "company-logo*"))
+        {
+            if (string.Equals(Path.GetFileName(prior), fileName, StringComparison.OrdinalIgnoreCase)) continue;
+            try { System.IO.File.Delete(prior); } catch { /* still mapped, or in use */ }
+        }
+
         TempData["Success"] = "Company logo uploaded.";
         return RedirectToAction(nameof(Settings), new { activeTab = "branding" });
     }
@@ -2116,7 +2144,12 @@ public class AdminController : Controller
             if (string.Equals(safeName, cfg.LogoFilename, StringComparison.Ordinal))
             {
                 var fullPath = Path.Combine(_env.WebRootPath, "branding", safeName);
-                try { System.IO.File.Delete(fullPath); } catch { /* best-effort */ }
+                // Best-effort on purpose: a file the static-file middleware has
+                // served is memory-mapped and cannot be deleted until the
+                // service restarts. Clearing the setting below is what actually
+                // removes the logo from the application, so a failed delete
+                // leaves an orphaned file and nothing worse.
+                try { System.IO.File.Delete(fullPath); } catch { /* still mapped, or in use */ }
             }
             await _settings.SaveLogoFilenameAsync("", GetCurrentUserId());
         }
