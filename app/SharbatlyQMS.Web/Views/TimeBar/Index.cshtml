@@ -258,6 +258,22 @@
                     {
                         <span>@Loc["No containers match the filter."] <a asp-action="Index">@Loc["Clear"]</a></span>
                     }
+                    else if (cfg.StartDate.HasValue)
+                    {
+                        @* An empty page with no explanation reads as a broken one.
+                           When a floor is set it is almost always the reason, so
+                           say the date and point at the one field that changes it. *@
+                        <span>
+                            @Loc["Nothing has arrived on or after"]
+                            <strong>@cfg.StartDate.Value.ToString("yyyy-MM-dd")</strong>
+                            @Loc["yet. Containers appear here as they arrive."]
+                            @if (canConfigure)
+                            {
+                                <a asp-controller="Admin" asp-action="Settings" asp-fragment="alerts"
+                                   class="ms-1">@Loc["Move the start date back"]</a>
+                            }
+                        </span>
+                    }
                     else
                     {
                         <span>@Loc["No containers yet."]</span>
