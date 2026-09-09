@@ -30,6 +30,23 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
     private static NotifyRecipientInput NoScope(int userId) =>
         new(userId, Array.Empty<string>(), Array.Empty<string>());
 
+    /// <summary>
+    /// The recipient list AS IT STANDS, scope included.
+    ///
+    /// This suite runs against the live database, so every test that touches
+    /// the notification list has to put back exactly what it found. Capturing
+    /// only the user ids and restoring them with NoScope silently cleared every
+    /// recipient's plant and procurement selections -- and because an empty
+    /// scope means "everything", the result was not an obvious blank screen but
+    /// fifty people quietly being mailed about every plant. Restore the whole
+    /// row or do not restore at all.
+    /// </summary>
+    private static async Task<NotifyRecipientInput[]> CaptureAsync(IQoFinishNotifier notifier) =>
+        (await notifier.ListCandidatesAsync())
+            .Where(p => p.Selected)
+            .Select(p => new NotifyRecipientInput(p.UserId, p.Plants.ToArray(), p.PoTypes.ToArray()))
+            .ToArray();
+
     [Fact]
     public async Task Candidates_flag_who_can_actually_be_mailed()
     {
@@ -51,7 +68,7 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         using var scope = Scope();
         var notifier = scope.ServiceProvider.GetRequiredService<IQoFinishNotifier>();
 
-        var before = (await notifier.ListCandidatesAsync()).Where(p => p.Selected).Select(p => p.UserId).ToArray();
+        var before = await CaptureAsync(notifier);
         try
         {
             var pick = (await notifier.ListCandidatesAsync())
@@ -69,7 +86,7 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         }
         finally
         {
-            await notifier.SaveRecipientsAsync(before.Select(NoScope), "test-restore");
+            await notifier.SaveRecipientsAsync(before, "test-restore");
         }
     }
 
@@ -79,7 +96,7 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         using var scope = Scope();
         var notifier = scope.ServiceProvider.GetRequiredService<IQoFinishNotifier>();
 
-        var before = (await notifier.ListCandidatesAsync()).Where(p => p.Selected).Select(p => p.UserId).ToArray();
+        var before = await CaptureAsync(notifier);
         try
         {
             var options = await notifier.GetScopeOptionsAsync();
@@ -118,7 +135,7 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         }
         finally
         {
-            await notifier.SaveRecipientsAsync(before.Select(NoScope), "test-restore");
+            await notifier.SaveRecipientsAsync(before, "test-restore");
         }
     }
 
@@ -224,7 +241,7 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         using var scope = Scope();
         var notifier = scope.ServiceProvider.GetRequiredService<IQoFinishNotifier>();
 
-        var before = (await notifier.ListCandidatesAsync()).Where(p => p.Selected).Select(p => p.UserId).ToArray();
+        var before = await CaptureAsync(notifier);
         try
         {
             await notifier.SaveRecipientsAsync(Array.Empty<NotifyRecipientInput>(), "test");
@@ -234,7 +251,7 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         }
         finally
         {
-            await notifier.SaveRecipientsAsync(before.Select(NoScope), "test-restore");
+            await notifier.SaveRecipientsAsync(before, "test-restore");
         }
     }
 
@@ -246,5 +263,47 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         // Finishing already succeeded by the time this runs, so nothing here may
         // surface as an error.
         Assert.Equal(0, await notifier.NotifyFinishedAsync(long.MaxValue, "test"));
+    }
+
+    /// <summary>
+    /// The regression that cost every recipient their plant and procurement
+    /// selections on production: capture the list, put it back, and the scope
+    /// must survive. It did not, because the capture kept only the user ids and
+    /// the restore wrote an empty scope -- which does not read as "blank", it
+    /// reads as "notify me about everything".
+    /// </summary>
+    [Fact]
+    public async Task Capturing_and_restoring_the_list_keeps_each_persons_scope()
+    {
+        using var scope = Scope();
+        var notifier = scope.ServiceProvider.GetRequiredService<IQoFinishNotifier>();
+
+        var before = await CaptureAsync(notifier);
+        try
+        {
+            var options = await notifier.GetScopeOptionsAsync();
+            var pick = (await notifier.ListCandidatesAsync())
+                .Where(p => p.CanBeMailed).Take(2).Select(p => p.UserId).ToArray();
+            if (pick.Length == 0 || options.Plants.Count == 0) return;
+
+            var plant = options.Plants[0].Code;
+            await notifier.SaveRecipientsAsync(
+                pick.Select(id => new NotifyRecipientInput(id, new[] { plant }, Array.Empty<string>())),
+                "test");
+
+            // Round-trip through the same pair of calls every test uses.
+            var captured = await CaptureAsync(notifier);
+            await notifier.SaveRecipientsAsync(Array.Empty<NotifyRecipientInput>(), "test");
+            await notifier.SaveRecipientsAsync(captured, "test");
+
+            var after = await CaptureAsync(notifier);
+            Assert.Equal(pick.Length, after.Length);
+            Assert.All(after, r =>
+            {
+                Assert.Single(r.Plants);
+                Assert.Equal(plant, r.Plants[0]);
+            });
+        }
+        finally { await notifier.SaveRecipientsAsync(before, "test-restore"); }
     }
 }

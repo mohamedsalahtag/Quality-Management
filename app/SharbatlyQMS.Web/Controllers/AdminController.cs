@@ -1884,7 +1884,22 @@ public class AdminController : Controller
             Request.Form[$"poTypes_{id}"].Where(v => !string.IsNullOrWhiteSpace(v)).Select(v => v!).ToArray()
         )).ToList();
 
+        // Audited with the BEFORE state, because this list is replaced wholesale
+        // and there is no other record of it. When the plant and procurement
+        // scopes were lost there was nothing anywhere to restore them from, and
+        // fifty people silently started receiving every plant's notifications.
+        var previous = (await _notifier.ListCandidatesAsync())
+            .Where(p => p.Selected)
+            .Select(p => new { p.UserId, p.Username, Plants = p.Plants, PoTypes = p.PoTypes })
+            .ToList();
+
         await _notifier.SaveRecipientsAsync(recipients, User.FindFirstValue(ClaimTypes.Name) ?? "unknown");
+
+        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated,
+            new { section = "QO notifications", recipients = previous },
+            new { section = "QO notifications",
+                  recipients = recipients.Select(r => new { r.UserId, Plants = r.Plants, PoTypes = r.PoTypes }) });
+
         TempData["Success"] = ids.Length == 0
             ? "Nobody will be emailed when a quality order is finished."
             : $"{ids.Length} recipient(s) will be emailed when a quality order is finished.";
