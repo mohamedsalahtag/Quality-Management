@@ -78,7 +78,11 @@
     @* theme-pack stylesheet -- MUST be the LAST stylesheet so it can override Bootstrap variables. *@
     <link rel="stylesheet" href="~/css/theme-pack.css" asp-append-version="true" />
 </head>
-<body>
+@* Who the remembered list filters belong to. They live in localStorage, which
+   is shared by everyone using this browser profile, so on a shared workstation
+   the next person to sign in would otherwise inherit the last person's filters
+   and see a list that had filtered itself. *@
+<body data-current-user="@(User?.Identity?.Name ?? "")">
     @if (User?.Identity?.IsAuthenticated == true)
     {
     <header>

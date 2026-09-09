@@ -41,6 +41,8 @@ public class ReportsController : Controller
     // Hard cap on rows in a single flat-defects Excel export to bound memory.
     private const int MaxExportRows = 250_000;
 
+    private readonly ILabelService _labels;
+
     public ReportsController(IQualityOrderService qos, IArrivalService arrivals,
         IImageService images, ISettingsService settings, IMaraService mara,
         IVendorService vendors, IEmailService email,
@@ -48,7 +50,7 @@ public class ReportsController : Controller
         IReportBuilderExporter reportBuilder,
         IConfiguration config, IWebHostEnvironment env, ILogger<ReportsController> log,
         IDbService db, ICodeDescriptionDirectory codes, IDocumentService docs,
-        IUserPermissions me)
+        IUserPermissions me, ILabelService labels)
     {
         _qos = qos; _arrivals = arrivals; _images = images;
         _settings = settings; _mara = mara;
@@ -56,7 +58,7 @@ public class ReportsController : Controller
         _pivot = pivot; _perspectives = perspectives;
         _reportBuilder = reportBuilder;
         _config = config; _env = env; _log = log;
-        _db = db; _codes = codes; _docs = docs; _me = me;
+        _db = db; _codes = codes; _docs = docs; _me = me; _labels = labels;
     }
 
     /// <summary>
@@ -640,6 +642,11 @@ public class ReportsController : Controller
 
         var smtp = await _settings.GetSmtpConfigAsync();
         if (!string.IsNullOrWhiteSpace(smtp.SiteName)) data.SiteName = smtp.SiteName;
+
+        // Renameable captions, the same as on screen. Filed under their own
+        // screen key so the label list groups the report separately from
+        // whichever page happened to trigger the render.
+        data.Localiser = text => _labels.Text(text, Services.Pdf.ReportLabels.ScreenKey);
 
         return data;
     }

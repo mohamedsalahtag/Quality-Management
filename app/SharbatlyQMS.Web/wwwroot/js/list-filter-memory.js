@@ -10,14 +10,66 @@
 // (otherwise they'd look like a filter: a phantom "1" badge + a panel that
 // re-opens every visit). Empty params are dropped too, keeping the URL clean.
 (function () {
-    var KEY_PREFIX  = 'qms.listfilter.';
+    // The key carries the signed-in user. localStorage belongs to the BROWSER
+    // PROFILE, not to the account: on a shared workstation the previous user's
+    // filters were restored for whoever signed in next, and the list looked as
+    // though it had filtered itself. Nothing ever crossed the network -- but it
+    // did cross users, which is the same surprise.
+    // Resolved lazily: the script is loaded from a Scripts section, but a
+    // future caller putting it in <head> would find no document.body here.
+    var KEY_PREFIX = null;
+    function keyPrefix() {
+        if (KEY_PREFIX === null) {
+            var u = ((document.body && document.body.getAttribute('data-current-user')) || '').toLowerCase();
+            KEY_PREFIX = 'qms.listfilter.' + (u ? u + '.' : '');
+        }
+        return KEY_PREFIX;
+    }
+
+    // A filter is a working state, not a preference. Restoring the one from
+    // last week ambushes the user with a short list and no explanation, so a
+    // remembered filter expires after a shift.
+    var MAX_AGE_MS = 12 * 60 * 60 * 1000;
     // sessionStorage marker set just before an automatic restore, read once on
     // the resulting load so the banner can say why the list is filtered.
     var FLAG_PREFIX = 'qms.listfilter.restored.';
 
-    function get(k) { try { return window.localStorage.getItem(k); } catch (_) { return null; } }
-    function set(k, v) { try { window.localStorage.setItem(k, v); } catch (_) { /* private mode / quota */ } }
+    function raw(k) { try { return window.localStorage.getItem(k); } catch (_) { return null; } }
     function del(k) { try { window.localStorage.removeItem(k); } catch (_) { } }
+
+    // Stored as {q, t}. A bare string is an entry written before this change:
+    // it has no age and no owner, so it is discarded rather than honoured.
+    function get(k) {
+        var v = raw(k);
+        if (!v) return null;
+        try {
+            var o = JSON.parse(v);
+            if (!o || typeof o.q !== 'string' || typeof o.t !== 'number') { del(k); return null; }
+            if (Date.now() - o.t > MAX_AGE_MS) { del(k); return null; }
+            return o.q;
+        } catch (_) { del(k); return null; }
+    }
+
+    function set(k, v) {
+        try { window.localStorage.setItem(k, JSON.stringify({ q: v, t: Date.now() })); }
+        catch (_) { /* private mode / quota */ }
+    }
+
+    // Anything saved under the old un-scoped prefix, or by a different user on
+    // this machine, is cleared on sight -- it can only produce the surprise
+    // this change exists to stop.
+    function forgetForeignEntries() {
+        try {
+            var doomed = [];
+            for (var i = 0; i < window.localStorage.length; i++) {
+                var k = window.localStorage.key(i);
+                if (k && k.indexOf('qms.listfilter.') === 0 &&
+                    k.indexOf('qms.listfilter.restored.') !== 0 &&
+                    k.indexOf(keyPrefix()) !== 0) doomed.push(k);
+            }
+            for (var j = 0; j < doomed.length; j++) window.localStorage.removeItem(doomed[j]);
+        } catch (_) { }
+    }
 
     // Keep only meaningful, user-chosen params: drop empties and any param whose
     // name matches a data-filter-ignore field (server-forced values).
@@ -33,9 +85,10 @@
     }
 
     function init() {
+        forgetForeignEntries();
         var host = document.querySelector('[data-filter-memory]');
         if (!host) return;
-        var pageKey = KEY_PREFIX + host.getAttribute('data-filter-memory');
+        var pageKey = keyPrefix() + host.getAttribute('data-filter-memory');
 
         var ignore = Array.prototype.map
             .call(document.querySelectorAll('[data-filter-ignore]'), function (el) { return el.getAttribute('name'); })
@@ -94,7 +147,7 @@
         icon.className = 'bi bi-funnel-fill';
 
         var text = document.createElement('span');
-        text.textContent = 'Showing the filters you last used on this screen.';
+        text.textContent = 'This list is showing the filters YOU last used on this screen — not a filter anyone else set.';
 
         var link = document.createElement('a');
         link.className = 'btn btn-sm btn-outline-secondary py-0';

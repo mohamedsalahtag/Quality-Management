@@ -38,8 +38,17 @@ public static class QualityReportPdfSoft
     private const string MinorHead = "#b08d3e"; // soft muted amber — Minor header
     private const string White     = "#ffffff";
 
+    /// <summary>
+    /// The printed text for a caption. Short on purpose: it appears at every
+    /// caption in the file, and a longer name would push these already-dense
+    /// table definitions over the line width.
+    /// </summary>
+    private static string L(string english) => ReportLabels.T(english);
+
     public static byte[] Build(QualityReportData d)
     {
+        // Installed for the whole render, including the image appendix.
+        using var _ = ReportLabels.Use(d.Localiser);
         var doc = Document.Create(container =>
         {
             container.Page(page => RenderMainPage(page, d));
@@ -73,16 +82,16 @@ public static class QualityReportPdfSoft
             col.Item().AlignRight().Column(rc =>
             {
                 rc.Spacing(1);
-                rc.Item().Text(t => { t.Span("Date  ").FontColor(Muted); t.Span(date).SemiBold(); });
-                rc.Item().Text(t => { t.Span("QC No.  ").FontColor(Muted); t.Span(V(d.QualityOrder.QualityOrderNo)).SemiBold(); });
+                rc.Item().Text(t => { t.Span(L("Date") + "  ").FontColor(Muted); t.Span(date).SemiBold(); });
+                rc.Item().Text(t => { t.Span(L("QC No.") + "  ").FontColor(Muted); t.Span(V(d.QualityOrder.QualityOrderNo)).SemiBold(); });
                 if (!string.IsNullOrWhiteSpace(d.CreatedByName))
                     rc.Item().Text(t =>
                     {
-                        t.Span("Created by  ").FontColor(Muted);
+                        t.Span(L("Created by") + "  ").FontColor(Muted);
                         t.Span(V(d.CreatedByName)).SemiBold();
                         if (!string.IsNullOrWhiteSpace(d.CreatedByBranch))
                         {
-                            t.Span("     Branch  ").FontColor(Muted);
+                            t.Span("     " + L("Branch") + "  ").FontColor(Muted);
                             t.Span(V(d.CreatedByBranch)).SemiBold();
                         }
                     });
@@ -95,13 +104,13 @@ public static class QualityReportPdfSoft
                 col.Item().Element(c => RenderRejectionBanner(c, d));
 
             // 3. Shipment Details
-            Band(col.Item(), "Shipment Details");
+            Band(col.Item(), L("Shipment Details"));
             RenderShipmentDetails(col, d);
 
             // 4. Materials
             if (d.Materials.Count > 0)
             {
-                Band(col.Item(), "Materials");
+                Band(col.Item(), L("Materials"));
                 RenderMaterialsTable(col.Item(), d);
             }
 
@@ -110,8 +119,8 @@ public static class QualityReportPdfSoft
             //    heading with nothing under it.
             if (d.GroupSummaries.Count > 0)
             {
-                PartBand(col.Item(), 1, 2, "Summary",
-                    "Results rolled up per material group — the overall picture.", Accent);
+                PartBand(col.Item(), 1, 2, L("Summary"),
+                    L("Results rolled up per material group — the overall picture."), Accent);
                 foreach (var g in d.GroupSummaries)
                     col.Item().Element(Card).Element(c => RenderGroupSummary(c, g));
             }
@@ -127,8 +136,8 @@ public static class QualityReportPdfSoft
                 // past; two differently coloured bars sit right next to each
                 // other and still read as two different things.
                 PartBand(col.Item(), d.GroupSummaries.Count > 0 ? 2 : 1,
-                                     d.GroupSummaries.Count > 0 ? 2 : 1, "Sample Details",
-                    "Every sample and every reading, material by material.", DetailHead);
+                                     d.GroupSummaries.Count > 0 ? 2 : 1, L("Sample Details"),
+                    L("Every sample and every reading, material by material."), DetailHead);
                 foreach (var grp in d.Samples.GroupBy(s => s.Sample.QoMaterialId))
                 {
                     var first   = grp.First();
@@ -175,7 +184,7 @@ public static class QualityReportPdfSoft
                 r.RelativeItem().PaddingHorizontal(8).AlignMiddle().Column(c =>
                 {
                     c.Item().AlignCenter().Text(V(d.CompanyName)).Bold().FontSize(10.5f).FontColor(Ink);
-                    c.Item().AlignCenter().Text("Quality Control Report").FontSize(9).FontColor(Accent);
+                    c.Item().AlignCenter().Text(L("Quality Control Report")).FontSize(9).FontColor(Accent);
                 });
                 r.ConstantItem(72).AlignRight().AlignMiddle().Text(t =>
                 {
@@ -199,16 +208,16 @@ public static class QualityReportPdfSoft
 
         var col1 = new List<(string, string)>
         {
-            ("Shipper",           V(d.Arrival.VendorName)),
-            ("Report Location",   V(d.Arrival.Plant)),
-            ("Bill of Lading No.",V(d.Arrival.BolNo)),
-            ("Container",         V(d.Arrival.ContainerNo)),
-            ("Purch.Doc.",        V(d.Arrival.Ebeln)),
-            ("Procurement Type",  V(d.ProcurementType)),
-            ("Country Of Origin", V(Countries.Display(s?.LoadingCountry))),
-            ("Loading Port",      V(s?.LoadingPort)),
-            ("Port Of Arrival",   V(s?.ArrivalPlace)),
-            ("Vessel Name",       V(s?.VesselName)),
+            (L("Shipper"),           V(d.Arrival.VendorName)),
+            (L("Report Location"),   V(d.Arrival.Plant)),
+            (L("Bill of Lading No."),V(d.Arrival.BolNo)),
+            (L("Container"),         V(d.Arrival.ContainerNo)),
+            (L("Purch.Doc."),        V(d.Arrival.Ebeln)),
+            (L("Procurement Type"),  V(d.ProcurementType)),
+            (L("Country Of Origin"), V(Countries.Display(s?.LoadingCountry))),
+            (L("Loading Port"),      V(s?.LoadingPort)),
+            (L("Port Of Arrival"),   V(s?.ArrivalPlace)),
+            (L("Vessel Name"),       V(s?.VesselName)),
         };
         // Middle column is the shipment TIMELINE, in the order the events
         // actually happen: loading -> discharge -> pullout -> receive ->
@@ -219,16 +228,16 @@ public static class QualityReportPdfSoft
         // Claims page and the QC summary panel use the same sequence.
         var col2 = new List<(string, string)>
         {
-            ("Loading Date",      Dt(s?.SailingDate)),
-            ("Discharge Date",    Dt(s?.DischargeDate)),
-            ("Pullout Date",      Dt(s?.PullOutDate)),
+            (L("Loading Date"),      Dt(s?.SailingDate)),
+            (L("Discharge Date"),    Dt(s?.DischargeDate)),
+            (L("Pullout Date"),      Dt(s?.PullOutDate)),
             // Receive Date is an internal goods-receipt date; the supplier's
             // copy omits it. Removed from the list rather than blanked so the
             // column closes up instead of printing an orphaned label.
-            ("Receive Date",      Dt(s?.ReceiveDate)),
-            ("Unloading Date",    Dt(s?.UnloadingDate)),
-            ("Inspection Date",   Dt(d.InspectionDate)),
-            ("Transit Days",      s?.TransitDays?.ToString() ?? "—"),
+            (L("Receive Date"),      Dt(s?.ReceiveDate)),
+            (L("Unloading Date"),    Dt(s?.UnloadingDate)),
+            (L("Inspection Date"),   Dt(d.InspectionDate)),
+            (L("Transit Days"),      s?.TransitDays?.ToString() ?? "—"),
             ($"Time Bar ({basisLabel})", (TimeBarDays(basisDate, d.QualityOrder.ClosedAt ?? d.GeneratedAt) ?? "—") + " days"),
         };
         if (d.SupplierCopy)
@@ -236,15 +245,15 @@ public static class QualityReportPdfSoft
 
         var col3 = new List<(string, string)>
         {
-            ("Logger Serial",                      V(cl?.DataLoggerSerial)),
-            ("Seal No",                            V(JoinLines(cl?.SealNo))),
-            ("Temperature",                        cl?.LoggerTemperature?.ToString() ?? "—"),
-            ("Pulp Temperature",                   V(JoinTemps(cl))),
-            ("Joint Survey",                       YN(s?.JointSurvey)),
-            ("Seal Intact?",                       YN(cl?.SealIntact)),
-            ("External damage to container",       YN(cl?.ExternalDamageExists)),
-            ("Visual cargo condition acceptable",  YN(cl?.VisualCargoAcceptable)),
-            ("Logger active & data available",     YN(cl?.LoggerActiveDataAvailable)),
+            (L("Logger Serial"),                      V(cl?.DataLoggerSerial)),
+            (L("Seal No"),                            V(JoinLines(cl?.SealNo))),
+            (L("Temperature"),                        cl?.LoggerTemperature?.ToString() ?? "—"),
+            (L("Pulp Temperature"),                   V(JoinTemps(cl))),
+            (L("Joint Survey"),                       YN(s?.JointSurvey)),
+            (L("Seal Intact?"),                       YN(cl?.SealIntact)),
+            (L("External damage to container"),       YN(cl?.ExternalDamageExists)),
+            (L("Visual cargo condition acceptable"),  YN(cl?.VisualCargoAcceptable)),
+            (L("Logger active & data available"),     YN(cl?.LoggerActiveDataAvailable)),
         };
         ThreeColumns(col.Item(), col1, col2, col3);
 
@@ -253,7 +262,7 @@ public static class QualityReportPdfSoft
         if (d.CustomFields.Count > 0)
         {
             var list = d.CustomFields.OrderBy(f => f.SortOrder).ThenBy(f => f.FieldName).ToList();
-            col.Item().Text("Additional Fields").Bold().FontSize(8).FontColor(Accent);
+            col.Item().Text(L("Additional Fields")).Bold().FontSize(8).FontColor(Accent);
             PairGrid(col.Item(), list.Select(f => (f.FieldName, CustomVal(d, f))).ToList(), 3);
         }
     }
@@ -287,8 +296,8 @@ public static class QualityReportPdfSoft
             t.Header(h =>
             {
                 foreach (var (label, right) in new[] {
-                    ("Material", false), ("Material description", false), ("Origin", false),
-                    ("Material Group", false), ("Quantity", true), ("Unit", false) })
+                    (L("Material"), false), (L("Material description"), false), (L("Origin"), false),
+                    (L("Material Group"), false), (L("Quantity"), true), (L("Unit"), false) })
                 {
                     var cell = Cell(h.Cell(), head: true);
                     (right ? cell.AlignRight() : cell).Text(label).SemiBold().FontColor(Ink);
@@ -326,15 +335,15 @@ public static class QualityReportPdfSoft
             });
 
             ThreeColumns(gc.Item(),
-                new() { ("Product", V(g.MajorCategory)), ("Brand", V(g.Brand)), ("Variety", V(g.Variety)), ("Grade", V(g.Grade)) },
-                new() { ("Material Group", V(g.MaterialGroup)), ("Count of Materials", g.MaterialCount.ToString()), ("Samples", $"{g.SampleCount} Cartons") },
-                new() { ("Sample Size", $"{g.SumSampleSize} {V(g.SampleUnit)}"), ("PO Quantity", Fmt.Dec2(g.SumPoQuantity)),
-                        ("Tara Weight", string.IsNullOrEmpty(g.TaraWeightText) ? "—" : $"{g.TaraWeightText} kg") });
+                new() { (L("Product"), V(g.MajorCategory)), (L("Brand"), V(g.Brand)), (L("Variety"), V(g.Variety)), (L("Grade"), V(g.Grade)) },
+                new() { (L("Material Group"), V(g.MaterialGroup)), (L("Count of Materials"), g.MaterialCount.ToString()), (L("Samples"), $"{g.SampleCount} Cartons") },
+                new() { (L("Sample Size"), $"{g.SumSampleSize} {V(g.SampleUnit)}"), (L("PO Quantity"), Fmt.Dec2(g.SumPoQuantity)),
+                        (L("Tara Weight"), string.IsNullOrEmpty(g.TaraWeightText) ? "—" : $"{g.TaraWeightText} kg") });
 
             var readings = SummaryReadingFilter.VisibleSummaryReadings(g.Readings);
             if (readings.Count > 0)
             {
-                gc.Item().Text("Readings").Bold().FontSize(7.5f).FontColor(Accent);
+                gc.Item().Text(L("Readings")).Bold().FontSize(7.5f).FontColor(Accent);
                 PairGrid(gc.Item(), readings.Select(r =>
                     (string.IsNullOrWhiteSpace(r.Unit) ? V(r.Name) : $"{V(r.Name)} ({r.Unit})",
                      string.IsNullOrWhiteSpace(r.DisplayValue) ? "—" : r.DisplayValue)).ToList(), 3);
@@ -362,11 +371,11 @@ public static class QualityReportPdfSoft
             // packs always show it; a banana material whose cartons disagree
             // does not, because one number would misrepresent the inspection.
             if (MaterialSampleSizeRule.ShowAtMaterialLevel(m?.MaterialGroup, sampleSizes))
-                headerCells.Add(("Sample Size", SampleSizeText(m, sampleSizes, unit)));
-            headerCells.Add(("Size", Dash(m?.MaterialSize)));
+                headerCells.Add((L("Sample Size"), SampleSizeText(m, sampleSizes, unit)));
+            headerCells.Add((L("Size"), Dash(m?.MaterialSize)));
             // Tara is recorded once per material (Material details card), so it
             // belongs on the material card rather than on each sample.
-            headerCells.Add(("Tara Weight", m?.TaraWeight is > 0 ? $"{Fmt.Dec2(m.TaraWeight)} kg" : "—"));
+            headerCells.Add((L("Tara Weight"), m?.TaraWeight is > 0 ? $"{Fmt.Dec2(m.TaraWeight)} kg" : "—"));
             foreach (var hv in materialHeaderValues.OrderBy(h => h.SortOrder).ThenBy(h => h.FieldName))
             {
                 if (SummaryReadingFilter.IsHiddenReportField(hv.FieldName)) continue;
@@ -377,7 +386,7 @@ public static class QualityReportPdfSoft
             var rightHeader = headerCells.Where((_, i) => i % 2 == 1).ToList();
 
             ThreeColumns(mc.Item(),
-                new() { ("Product", Dash(m?.MajorCategory)), ("Brand", Dash(m?.Brand)), ("Variety", Dash(m?.Variety)), ("Grade", Dash(m?.MaterialClass)), ("Material Group", Dash(m?.MaterialGroup)) },
+                new() { (L("Product"), Dash(m?.MajorCategory)), (L("Brand"), Dash(m?.Brand)), (L("Variety"), Dash(m?.Variety)), (L("Grade"), Dash(m?.MaterialClass)), (L("Material Group"), Dash(m?.MaterialGroup)) },
                 leftHeader, rightHeader);
         });
 
@@ -422,7 +431,7 @@ public static class QualityReportPdfSoft
             var readings = s.Readings.Where(r => !SummaryReadingFilter.IsHiddenReportField(r.ReadingName)).ToList();
             if (readings.Count > 0)
             {
-                sccol.Item().Text("Sample Readings").Bold().FontSize(7.5f).FontColor(Accent);
+                sccol.Item().Text(L("Sample Readings")).Bold().FontSize(7.5f).FontColor(Accent);
                 PairGrid(sccol.Item(), readings.Select(FormatReadingPair).ToList(), 4);
             }
 
@@ -496,12 +505,12 @@ public static class QualityReportPdfSoft
         page.Content().PaddingTop(6).Column(col =>
         {
             col.Spacing(6);
-            Band(col.Item(), "Photo Appendix");
+            Band(col.Item(), L("Photo Appendix"));
 
             var arrivals = d.ArrivalImages.Where(i => i.InlineBytes is { Length: > 0 }).ToList();
             col.Item().Text(t =>
             {
-                t.Span("Arrival Photos").Bold().FontColor(Ink);
+                t.Span(L("Arrival Photos")).Bold().FontColor(Ink);
                 t.Span($"   ({arrivals.Count})").FontColor(Muted);
             });
             if (arrivals.Count > 0) PhotoTiles(col.Item(), d, arrivals);
@@ -593,7 +602,7 @@ public static class QualityReportPdfSoft
              if (!string.IsNullOrWhiteSpace(d.RejectionComment))
                  col.Item().PaddingTop(2).Text(d.RejectionComment).FontSize(8).FontColor(Ink);
 
-             col.Item().Text("No inspection was carried out: the container was refused on arrival.")
+             col.Item().Text(L("No inspection was carried out: the container was refused on arrival."))
                 .Italic().FontSize(7.5f).FontColor(Muted);
          });
 
@@ -717,15 +726,15 @@ public static class QualityReportPdfSoft
 
             var head = t.Cell().ColumnSpan(3).Background(headFill).Border(0.5f).BorderColor(Border)
                 .PaddingVertical(2).PaddingHorizontal(4)
-                .Text($"{V(s.CategoryName)} Defects").FontColor(headText);
+                .Text($"{V(s.CategoryName)} {L("Defects")}").FontColor(headText);
             if (isMajor) head.ExtraBold().FontSize(8.5f); else head.Bold().FontSize(8);
 
-            Cell(t.Cell(), head: true).Text("Defect").FontSize(7).FontColor(Muted);
+            Cell(t.Cell(), head: true).Text(L("Defect")).FontSize(7).FontColor(Muted);
             Cell(t.Cell(), head: true).AlignRight().Text(s.Unit).FontSize(7).FontColor(Muted);
             Cell(t.Cell(), head: true).AlignRight().Text("%").FontSize(7).FontColor(Muted);
 
             if (s.Rows.Count == 0)
-                Cell(t.Cell().ColumnSpan(3)).Text("No defects configured for this category.").Italic().FontSize(7).FontColor(Muted);
+                Cell(t.Cell().ColumnSpan(3)).Text(L("No defects configured for this category.")).Italic().FontSize(7).FontColor(Muted);
 
             int i = 0;
             foreach (var row in s.Rows)
@@ -736,7 +745,7 @@ public static class QualityReportPdfSoft
                 Cell(t.Cell(), fill: bg).AlignRight().Text(Fmt.Dec2(row.Percentage) + "%").FontColor(Ink);
             }
 
-            Cell(t.Cell(), head: true).Text("Total").Bold().FontColor(Ink);
+            Cell(t.Cell(), head: true).Text(L("Total")).Bold().FontColor(Ink);
             Cell(t.Cell(), head: true).AlignRight().Text(Fmt.Dec2(s.TotalPieces)).Bold().FontColor(Ink);
             Cell(t.Cell(), head: true).AlignRight().Text(Fmt.Dec2(s.TotalPct) + "%").Bold().FontColor(Ink);
         });

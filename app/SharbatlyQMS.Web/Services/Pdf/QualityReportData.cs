@@ -9,6 +9,17 @@ namespace SharbatlyQMS.Web.Services.Pdf;
 public class QualityReportData
 {
     /// <summary>
+    /// Turns a shipped English caption into the text an administrator chose on
+    /// Admin -> Labels. Null means print the English, which is what every test
+    /// and every code path that has no request context does.
+    ///
+    /// It lives on the data rather than being reached for inside the renderer
+    /// because the renderers are static: the request scope, and therefore the
+    /// label service, only exists at the point the report is BUILT.
+    /// </summary>
+    public Func<string, string>? Localiser { get; set; }
+
+    /// <summary>
     /// True only for the copy emailed to the SUPPLIER. Internal fields that the
     /// supplier has no business seeing are omitted from that copy; everything
     /// else is identical, so the download and the preview still show the

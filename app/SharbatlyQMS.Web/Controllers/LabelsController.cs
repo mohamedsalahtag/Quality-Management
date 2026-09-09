@@ -38,6 +38,13 @@ public class LabelsController : Controller
         // Flush before listing: discovery is written by a 60-second background
         // tick, and an administrator who has just visited a screen to find its
         // labels should not have to wait for that tick to see them.
+        // The PDF report's captions are registered here rather than waiting for
+        // somebody to generate a report: discovery works by rendering, and a
+        // report nobody has printed since the last deployment would contribute
+        // nothing to a screen that is supposed to list everything renameable.
+        foreach (var caption in Services.Pdf.ReportLabelCatalog.All)
+            _labels.Text(caption, Services.Pdf.ReportLabels.ScreenKey);
+
         await _labels.FlushAsync(ct);
 
         var all = await _labels.ListAsync(ct);
