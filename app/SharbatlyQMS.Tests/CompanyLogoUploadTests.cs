@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Models.Security;
@@ -74,7 +74,10 @@ public class CompanyLogoUploadTests : IClassFixture<QmsAppFactory>
 
         using var scope = _factory.Services.CreateScope();
         var settings = scope.ServiceProvider.GetRequiredService<ISettingsService>();
+        var env      = scope.ServiceProvider.GetRequiredService<
+                           Microsoft.AspNetCore.Hosting.IWebHostEnvironment>();
         var original = (await settings.GetBrandingConfigAsync()).LogoFilename;
+        var written  = new List<string>();
 
         try
         {
@@ -95,11 +98,21 @@ public class CompanyLogoUploadTests : IClassFixture<QmsAppFactory>
                 // stops a browser serving the old logo from cache.
                 if (first is not null) Assert.NotEqual(first, name);
                 first = name;
+                written.Add(name);
             }
         }
         finally
         {
             await settings.SaveLogoFilenameAsync(original ?? "", null);
+
+            // wwwroot is a DEPLOYED folder: anything left here is picked up by
+            // the next publish and shipped to the server. A one-pixel test logo
+            // reached production exactly once that way.
+            foreach (var name in written)
+            {
+                var path = Path.Combine(env.WebRootPath, "branding", name);
+                try { File.Delete(path); } catch { /* another run may hold it */ }
+            }
         }
     }
 
