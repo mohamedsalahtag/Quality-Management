@@ -225,10 +225,22 @@ public class ContainerCacheService : IContainerCacheService
             FROM   qms_sap_container_cache
             WHERE  {filterClause}
             GROUP BY container_no, bol_no, ebeln
-            ORDER BY MAX(doc_date) DESC, container_no, bol_no, ebeln
+            -- Newest ARRIVALS first. It used to order by doc_date -- the PO
+            -- date -- which the page no longer shows anywhere, so the list was
+            -- sorted by an invisible column and the newest containers were not
+            -- at the top. Nulls last: a container with no arrival date yet is
+            -- not the oldest, it is simply unknown.
+            ORDER BY CASE WHEN MAX(arrival_date) IS NULL THEN 1 ELSE 0 END,
+                     MAX(arrival_date) DESC,
+                     container_no, bol_no, ebeln
             OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
 
-            SELECT * FROM #page ORDER BY DocDate DESC, ContainerNo, BolNo, Ebeln;
+            -- Repeated verbatim: #page holds one page in no guaranteed order,
+            -- and re-reading it without an ORDER BY would hand the view its
+            -- rows in whatever order the engine finds them.
+            SELECT * FROM #page
+            ORDER BY CASE WHEN ArrivalDate IS NULL THEN 1 ELSE 0 END,
+                     ArrivalDate DESC, ContainerNo, BolNo, Ebeln;
 
             SELECT
                 cc.container_no   AS ContainerNo,

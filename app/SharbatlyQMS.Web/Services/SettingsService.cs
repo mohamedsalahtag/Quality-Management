@@ -442,7 +442,8 @@ public class SettingsService : ISettingsService
     {
         var c = await _db.GetConfigManyAsync(new[]
         {
-            SettingKeys.QoMailSubject, SettingKeys.QoMailBody, SettingKeys.QoMailCc
+            SettingKeys.QoMailSubject, SettingKeys.QoMailBody, SettingKeys.QoMailCc,
+            SettingKeys.QoNotifySubject
         });
         var cfg = new QoMailTemplate();
         var sub  = c.GetValueOrDefault(SettingKeys.QoMailSubject);
@@ -452,6 +453,8 @@ public class SettingsService : ISettingsService
         // Empty is a legitimate value here (no standing CC), so unlike Subject
         // and Body this one is not "keep the default when blank".
         cfg.Cc = c.GetValueOrDefault(SettingKeys.QoMailCc) ?? "";
+        // Blank is meaningful here too: it selects the automatic subject line.
+        cfg.NotifySubject = c.GetValueOrDefault(SettingKeys.QoNotifySubject) ?? "";
         return cfg;
     }
 
@@ -460,6 +463,7 @@ public class SettingsService : ISettingsService
         await _db.SetConfigAsync(SettingKeys.QoMailSubject, cfg.Subject ?? "", updatedBy);
         await _db.SetConfigAsync(SettingKeys.QoMailBody,    cfg.Body    ?? "", updatedBy);
         await _db.SetConfigAsync(SettingKeys.QoMailCc,      cfg.Cc      ?? "", updatedBy);
+        await _db.SetConfigAsync(SettingKeys.QoNotifySubject, cfg.NotifySubject ?? "", updatedBy);
     }
 
     // ---- Active Directory ----

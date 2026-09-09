@@ -324,8 +324,19 @@ public class QoFinishNotifier : IQoFinishNotifier
         var status = qo.PotentialClaim.HasValue
             ? $"Finished — {ClaimAssessment.Label(qo.PotentialClaim)}"
             : "Finished";
-        var subject = QcSubjectLine.Build(
-            qo.QualityOrderNo, status, arrival?.ContainerNo, arrival?.VendorName, arrival?.BolNo);
+        // An administrator's own wording wins, when they have set one on
+        // Parameters -> Mail Template. Blank keeps the automatic line, which is
+        // what every installation had before the subject was settable, and what
+        // a template cannot reproduce: it drops empty fields instead of leaving
+        // dangling separators and stops growing before a client truncates it.
+        var mail = await _settings.GetQoMailTemplateAsync();
+        var subject = QcSubjectLine.Render(
+            mail.NotifySubject, qo.QualityOrderNo, status,
+            arrival?.ContainerNo, arrival?.VendorName, arrival?.BolNo,
+            arrival?.Plant, arrival?.Ebeln);
+        if (string.IsNullOrWhiteSpace(subject))
+            subject = QcSubjectLine.Build(
+                qo.QualityOrderNo, status, arrival?.ContainerNo, arrival?.VendorName, arrival?.BolNo);
 
         var sb = new System.Text.StringBuilder();
         sb.Append($"<div style=\"background:{Wash};padding:16px 0;font-family:Segoe UI,Roboto,Arial,sans-serif\">");

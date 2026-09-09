@@ -1910,7 +1910,36 @@ public class AdminController : Controller
     public async Task<IActionResult> MailTemplate()
     {
         var cfg = await _settings.GetQoMailTemplateAsync();
+        // A worked example of the automatic notification subject, so the page
+        // can show what "leave it empty" actually sends rather than describing
+        // it. Built by the same code that builds the real one.
+        ViewBag.AutomaticSubjectExample = QcSubjectLine.Build(
+            "QO-2026-000956", "Finished — Potential Claim",
+            "MNBU3969264", "SQ FLORA B.V.", "065-49966700");
         return View(cfg);
+    }
+
+    /// <summary>
+    /// The subject of the INTERNAL finish notification. Separate action from
+    /// SaveMailTemplate so saving one mail's wording can never blank the
+    /// other's: they are two forms on one page, and a single action would bind
+    /// the fields the other form does not post to their defaults.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Parameters.MailTemplateEdit, Seed.ManagerOrAdmin, "Edit the Mail Template")]
+    public async Task<IActionResult> SaveNotifySubject(string? notifySubject)
+    {
+        var cfg = await _settings.GetQoMailTemplateAsync();
+        cfg.NotifySubject = (notifySubject ?? "").Trim();
+        await _settings.SaveQoMailTemplateAsync(cfg, GetCurrentUserId());
+
+        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null,
+            new { section = "QO notification subject", cfg.NotifySubject });
+
+        TempData["Success"] = cfg.NotifySubject.Length == 0
+            ? "The notification will use the automatic subject line."
+            : "Notification subject saved.";
+        return RedirectToAction(nameof(MailTemplate));
     }
 
     [HttpPost, ValidateAntiForgeryToken]

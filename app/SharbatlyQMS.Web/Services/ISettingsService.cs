@@ -177,6 +177,7 @@ public static class SettingKeys
     /// <summary>Standing CC list applied to every supplier report mail.
     /// Comma/semicolon separated.</summary>
     public const string QoMailCc      = "Mail.QualityReport.Cc";
+    public const string QoNotifySubject = "Mail.QoNotify.Subject";
     // Mail.QualityReport.Enabled was removed 2026-08-20. It gated a "Send report
     // to supplier" button on the QO Details page that no longer exists -- sending
     // happens from the Claims page -- so the switch controlled nothing a user
@@ -213,6 +214,20 @@ public class QoMailTemplate
         "Please find attached the Quality Control Report for Quality Order {QO_NO}\n" +
         "(Container {CONTAINER}, BOL {BOL}, PO {PO}).\n\n" +
         "Best regards,\nSharbatly Quality Team";
+
+    /// <summary>
+    /// Subject for the INTERNAL notification sent when a quality order is
+    /// finished -- a different mail from the supplier report above, with a
+    /// different audience.
+    ///
+    /// Blank means the standard automatic line, which is what every
+    /// installation had before this was settable: it drops empty fields rather
+    /// than leaving dangling separators, shortens a long supplier name, and
+    /// stops growing before a narrow mail client would truncate it. A template
+    /// cannot do any of that, so the automatic line stays the default and this
+    /// is the override for anyone who wants their own wording.
+    /// </summary>
+    public string NotifySubject { get; set; } = "";
 
     /// <summary>Addresses copied on EVERY supplier report mail, on top of
     /// whatever the sender types. Enforced server-side in

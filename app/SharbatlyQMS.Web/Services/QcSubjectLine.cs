@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.Services;
+﻿namespace SharbatlyQMS.Web.Services;
 
 /// <summary>
 /// One standard subject line for every Quality-Control e-mail, so a recipient
@@ -59,6 +59,63 @@ public static class QcSubjectLine
         Append(sb, Label("BOL", Clean(bol)));
 
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// The placeholders an administrator may use in a custom notification
+    /// subject, in the order the help text lists them.
+    /// </summary>
+    public static readonly (string Token, string Means)[] Tokens =
+    {
+        ("{QC_NO}",     "Short quality order number, e.g. 956"),
+        ("{QO_NO}",     "Full quality order number, e.g. QO-2026-000956"),
+        ("{STATUS}",    "Finished, or Finished — Potential Claim"),
+        ("{CONTAINER}", "Container number"),
+        ("{SUPPLIER}",  "Supplier / vendor name"),
+        ("{BOL}",       "Bill of lading number"),
+        ("{PLANT}",     "Plant code"),
+        ("{PO}",        "Purchasing document number"),
+    };
+
+    /// <summary>
+    /// Fills a subject template. Every value is cleaned exactly as the
+    /// automatic line cleans it -- control characters out, whitespace collapsed
+    /// -- because a newline reaching a mail header is a header-injection bug,
+    /// and this text is now typed by a person as well as read from SAP.
+    ///
+    /// A token with nothing behind it becomes empty rather than printing the
+    /// token, and the leftovers are tidied so a subject does not end in a
+    /// dangling separator. The result is capped at <see cref="MaxLength"/>.
+    /// </summary>
+    public static string Render(string template, string? qualityOrderNo, string? status = null,
+        string? container = null, string? vendor = null, string? bol = null,
+        string? plant = null, string? po = null)
+    {
+        if (string.IsNullOrWhiteSpace(template)) return "";
+
+        var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["{QC_NO}"]     = ShortQcNo(qualityOrderNo),
+            ["{QO_NO}"]     = Clean(qualityOrderNo),
+            ["{STATUS}"]    = Clean(status),
+            ["{CONTAINER}"] = Clean(container),
+            ["{SUPPLIER}"]  = Clean(vendor),
+            ["{BOL}"]       = Clean(bol),
+            ["{PLANT}"]     = Clean(plant),
+            ["{PO}"]        = Clean(po),
+        };
+
+        var text = Clean(template);
+        foreach (var (token, value) in values)
+            text = System.Text.RegularExpressions.Regex.Replace(
+                text, System.Text.RegularExpressions.Regex.Escape(token), value.Replace("$", "$$"),
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+        // An unfilled token leaves its separator behind: "QC 956 ·  · BOL X".
+        text = System.Text.RegularExpressions.Regex.Replace(text, @"(\s*[·|,-]\s*){2,}", Sep);
+        text = Clean(text).Trim(' ', '·', '|', ',', '-');
+
+        return text.Length <= MaxLength ? text : text[..(MaxLength - 1)].TrimEnd() + "…";
     }
 
     private static void Append(System.Text.StringBuilder sb, string part)

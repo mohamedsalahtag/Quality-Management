@@ -122,12 +122,20 @@
                 return av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' }) * mul;
             });
 
+            // Mark the column the table is ACTUALLY ordered by. A caret alone
+            // was too quiet: it changes shape but keeps its position and
+            // weight, so a reader glancing at a re-sorted list could not see
+            // which column had done it, and read the order as arbitrary.
             carets.forEach(function (c) {
                 c.className = 'tk-caret bi bi-arrow-down-up';
-                if (c.parentElement) c.parentElement.setAttribute('aria-sort', 'none');
+                if (c.parentElement) {
+                    c.parentElement.setAttribute('aria-sort', 'none');
+                    c.parentElement.classList.remove('tk-sorted');
+                }
             });
             caret.className = 'tk-caret bi ' + (state.dir === 'asc' ? 'bi-caret-up-fill' : 'bi-caret-down-fill');
             th.setAttribute('aria-sort', state.dir === 'asc' ? 'ascending' : 'descending');
+            th.classList.add('tk-sorted');
 
             rows.forEach(function (r) { tbody.appendChild(r); });
             state.page = 1;

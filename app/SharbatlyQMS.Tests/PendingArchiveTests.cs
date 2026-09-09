@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Services;
 using Xunit;
@@ -194,5 +194,48 @@ public class PendingArchiveTests : IClassFixture<QmsAppFactory>
             Assert.Null((await settings.GetContainerPollConfigAsync()).ArchiveArrivalsBefore);
         }
         finally { await settings.SaveContainerPollConfigAsync(original, null); }
+    }
+
+    /// <summary>
+    /// Newest arrivals at the top. The list used to be ordered by doc_date --
+    /// the PO date -- which was removed from the page, so it was sorted by a
+    /// column nobody could see and the newest containers were not first.
+    ///
+    /// Checked ACROSS a page boundary as well: an ORDER BY that sits on the
+    /// paging query but not on the read-back gives a correctly chosen page in
+    /// an arbitrary order, which looks right on page one and wrong on page two.
+    /// </summary>
+    [Fact]
+    public async Task Pending_shows_the_newest_arrivals_first()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var cache = Cache(scope);
+
+        DateTime? previous = null;
+        var seenNull = false;
+        var rows = 0;
+
+        for (var page = 1; page <= 2; page++)
+        {
+            var result = await cache.ListPendingAsync(page: page, pageSize: 100);
+            if (result.Rows.Count == 0) break;
+
+            foreach (var r in result.Rows)
+            {
+                rows++;
+                if (r.ArrivalDate is null) { seenNull = true; continue; }
+
+                // A dated container after an undated one would mean the unknown
+                // dates had been treated as the oldest rather than as unknown.
+                Assert.False(seenNull,
+                    $"{r.ContainerNo} has an arrival date but follows a container with none.");
+                if (previous is not null)
+                    Assert.True(r.ArrivalDate <= previous,
+                        $"{r.ContainerNo} arrived {r.ArrivalDate:yyyy-MM-dd}, after the row above it ({previous:yyyy-MM-dd}).");
+                previous = r.ArrivalDate;
+            }
+        }
+
+        _out.WriteLine($"checked {rows} pending container(s), newest {previous:yyyy-MM-dd}");
     }
 }

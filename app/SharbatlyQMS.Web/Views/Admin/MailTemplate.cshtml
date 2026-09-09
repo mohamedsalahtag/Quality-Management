@@ -27,7 +27,7 @@
 
 <div class="row g-3">
     <div class="col-lg-7">
-        <form asp-action="SaveMailTemplate" method="post" class="card h-100">
+        <form asp-action="SaveMailTemplate" method="post" class="card h-100" id="mail-template-form">
             @Html.AntiForgeryToken()
             <div class="card-body">
                 <div class="mb-3">
@@ -106,6 +106,59 @@
     </div>
 </div>
 
+@* ---- The internal finish notification. A separate mail from the supplier
+   report above: different recipients, different purpose, and its own subject.
+   Placed in its own card with its own heading so nobody edits one thinking
+   they are editing the other. ---- *@
+<div class="card mt-3">
+    <div class="card-header bg-primary text-white">
+        <i class="bi bi-bell me-1"></i>@Loc["Notification mail subject"]
+    </div>
+    <div class="card-body">
+        <p class="text-muted small">
+            @Loc["Sent to the people chosen on Parameters → Notifications when a quality order is finished. This is NOT the mail the supplier receives — that one is above."]
+        </p>
+
+        <form asp-action="SaveNotifySubject" method="post" class="row g-3">
+            @Html.AntiForgeryToken()
+            <div class="col-12">
+                <label class="form-label" for="n-subject">@Loc["Subject"]</label>
+                <input name="notifySubject" id="n-subject" class="form-control"
+                       value="@Model.NotifySubject" maxlength="150"
+                       placeholder="@ViewBag.AutomaticSubjectExample" />
+                <div class="form-text">
+                    @Loc["Leave it empty for the automatic subject, which is what is sent today:"]
+                    <code>@ViewBag.AutomaticSubjectExample</code>
+                </div>
+            </div>
+
+            <div class="col-12">
+                <div class="d-flex flex-wrap gap-1 align-items-center">
+                    <span class="small text-muted me-1">@Loc["Insert:"]</span>
+                    @foreach (var t in SharbatlyQMS.Web.Services.QcSubjectLine.Tokens)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary font-monospace py-0 px-1"
+                                data-notify-token="@t.Token" title="@t.Means">@t.Token</button>
+                    }
+                </div>
+            </div>
+
+            <div class="col-12">
+                <div class="alert alert-light border small mb-0">
+                    <i class="bi bi-info-circle me-1"></i>
+                    @Loc["A placeholder with nothing behind it is removed rather than printed, and the leftover separator goes with it. The subject is trimmed to 150 characters, because mail clients cut it off long before that."]
+                </div>
+            </div>
+
+            <div class="col-12 text-end">
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-save me-1"></i>@Loc["Save notification subject"]
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
 @section Scripts {
 <script>
     // Insert a placeholder at the caret of whichever template field was last
@@ -115,6 +168,23 @@
         document.querySelectorAll('[data-token-target]').forEach(function (el) {
             el.addEventListener('focus', function () { last = el; });
         });
+        // The notification subject has its own single field and its own
+        // buttons: sharing the inserter above would drop a token into whichever
+        // supplier-template field happened to be focused last.
+        document.querySelectorAll('[data-notify-token]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                const el = document.getElementById('n-subject');
+                if (!el) return;
+                const token = btn.getAttribute('data-notify-token');
+                const start = el.selectionStart ?? el.value.length;
+                const end   = el.selectionEnd   ?? el.value.length;
+                el.value = el.value.slice(0, start) + token + el.value.slice(end);
+                el.focus();
+                const caret = start + token.length;
+                el.setSelectionRange(caret, caret);
+            });
+        });
+
         document.querySelectorAll('[data-token]').forEach(function (btn) {
             btn.addEventListener('click', function () {
                 const token = btn.getAttribute('data-token');
