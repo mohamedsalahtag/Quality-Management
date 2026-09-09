@@ -87,7 +87,7 @@ public static class Screens
     };
 
     /// <summary>Screens whose nav entries live in the Reports dropdown.</summary>
-    public static readonly string[] ReportsGroup = { ReportsDataHub, ReportsBuilder };
+    public static readonly string[] ReportsGroup = { ReportsDataHub, ReportsBuilder, TimeBar };
 
     /// <summary>
     /// The screen an action permission belongs to: everything before its last

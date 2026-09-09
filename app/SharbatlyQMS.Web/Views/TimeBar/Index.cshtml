@@ -71,8 +71,8 @@
             @Loc["Earlier arrivals are left out of every number on this page."]
             @if (canConfigure)
             {
-                <a asp-controller="Admin" asp-action="Settings" asp-fragment="alerts"
-                   class="alert-link ms-1">@Loc["Change it"]</a>
+                <a asp-controller="Admin" asp-action="Settings" asp-route-activeTab="alerts"
+                   class="alert-link ms-1">@Loc["Change it in Site Configuration → Alerts → Time Bar thresholds"]</a>
             }
         </div>
     </div>
@@ -269,7 +269,7 @@
                             @Loc["yet. Containers appear here as they arrive."]
                             @if (canConfigure)
                             {
-                                <a asp-controller="Admin" asp-action="Settings" asp-fragment="alerts"
+                                <a asp-controller="Admin" asp-action="Settings" asp-route-activeTab="alerts"
                                    class="ms-1">@Loc["Move the start date back"]</a>
                             }
                         </span>

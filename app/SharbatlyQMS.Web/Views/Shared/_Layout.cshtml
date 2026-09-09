@@ -137,7 +137,7 @@
                         {
                             @* Data hub + Report builder combined under one "Reports" menu. *@
                             <li class="nav-item dropdown">
-                                <a class="nav-link dropdown-toggle @(NavOn("Reports") ? "active" : "")" aria-current="@(NavOn("Reports") ? "page" : null)" href="#" data-bs-toggle="dropdown">
+                                <a class="nav-link dropdown-toggle @(NavOn("Reports") || NavOn("TimeBar") ? "active" : "")" aria-current="@(NavOn("Reports") || NavOn("TimeBar") ? "page" : null)" href="#" data-bs-toggle="dropdown">
                                     <i class="bi bi-bar-chart me-1"></i>@Loc["Reports"]
                                 </a>
                                 <ul class="dropdown-menu">
@@ -145,6 +145,8 @@
                                     { <li><a class="dropdown-item @(ActOn("FlatDefects") ? "active" : "")" asp-controller="Reports" asp-action="FlatDefects"><i class="bi bi-grid-3x3-gap me-1"></i>@Loc["Data hub"]</a></li> }
                                     @if (Perms.CanView(Screens.ReportsBuilder))
                                     { <li><a class="dropdown-item @(ActOn("ReportBuilder") ? "active" : "")" asp-controller="Reports" asp-action="ReportBuilder"><i class="bi bi-table me-1"></i>@Loc["Report builder"]</a></li> }
+                                    @if (Perms.CanView(Screens.TimeBar))
+                                    { <li><a class="dropdown-item @(NavOn("TimeBar") ? "active" : "")" asp-controller="TimeBar" asp-action="Index"><i class="bi bi-hourglass-split me-1"></i>@Loc["Time Bar"]</a></li> }
                                 </ul>
                             </li>
                         }
@@ -172,17 +174,6 @@
                         }
                         @if (canSeeAdmin)
                         {
-                        @if (Perms.CanView(Screens.TimeBar))
-                        {
-                            @* A records list, not a configuration screen, so it
-                               sits at the top level next to Claims. *@
-                            <li class="nav-item">
-                                <a class="nav-link @(NavOn("TimeBar") ? "active" : "")"
-                                   asp-controller="TimeBar" asp-action="Index">
-                                    <i class="bi bi-hourglass-split me-1"></i>@Loc["Time Bar"]
-                                </a>
-                            </li>
-                        }
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle @(adminOn ? "active" : "")" aria-current="@(adminOn ? "page" : null)" href="#" data-bs-toggle="dropdown">
                                     <i class="bi bi-gear me-1"></i>@Loc["Admin"]

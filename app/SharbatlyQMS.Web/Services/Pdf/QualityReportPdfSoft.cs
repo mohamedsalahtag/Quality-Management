@@ -29,6 +29,11 @@ public static class QualityReportPdfSoft
     // whitespace, no new hues.
     private const string CardBg    = "#fbfcfe"; // very light alternating row tint
     private const string Border    = "#c9d4e0"; // soft hairline borders
+    // The two part headings. Sample Details is deliberately a different hue
+    // from everything else in the report so the eye lands on the boundary
+    // without reading a word -- the same slate blue for both made the two
+    // halves of the document look like one continuous run.
+    private const string DetailHead = "#4e7a63"; // muted green — Sample Details bar
     private const string MajorHead = "#b76e79"; // soft muted rose — Major header
     private const string MinorHead = "#b08d3e"; // soft muted amber — Minor header
     private const string White     = "#ffffff";
@@ -106,11 +111,9 @@ public static class QualityReportPdfSoft
             if (d.GroupSummaries.Count > 0)
             {
                 PartBand(col.Item(), 1, 2, "Summary",
-                    "Results rolled up per material group — the overall picture.");
+                    "Results rolled up per material group — the overall picture.", Accent);
                 foreach (var g in d.GroupSummaries)
                     col.Item().Element(Card).Element(c => RenderGroupSummary(c, g));
-                if (d.Samples.Count > 0)
-                    col.Item().Element(c => PartEnd(c, "End of summary — sample details follow"));
             }
 
             // 6. Sample Details (per material, then its samples).
@@ -119,19 +122,13 @@ public static class QualityReportPdfSoft
             //    rather than an extra few points of blank space.
             if (d.Samples.Count > 0)
             {
-                // A rule, a tint and a heading were not enough: two readers in a
-                // row could not tell where the summary stopped and the per-sample
-                // detail began. Nothing separates two parts of a printed document
-                // as unambiguously as a page edge, so the detail starts on a fresh
-                // page whenever there is a summary to separate it from. When there
-                // is no summary there is nothing to confuse it with, and the break
-                // would only cost a sheet of paper.
-                if (d.GroupSummaries.Count > 0)
-                    col.Item().PageBreak();
-
+                // Told apart by COLOUR, not by a page break. A page edge worked
+                // but wasted a sheet and left a gap the reader had to scroll
+                // past; two differently coloured bars sit right next to each
+                // other and still read as two different things.
                 PartBand(col.Item(), d.GroupSummaries.Count > 0 ? 2 : 1,
                                      d.GroupSummaries.Count > 0 ? 2 : 1, "Sample Details",
-                    "Every sample and every reading, material by material.");
+                    "Every sample and every reading, material by material.", DetailHead);
                 foreach (var grp in d.Samples.GroupBy(s => s.Sample.QoMaterialId))
                 {
                     var first   = grp.First();
@@ -624,10 +621,11 @@ public static class QualityReportPdfSoft
     /// and the eye slid straight past the boundary. A solid reversed bar with a
     /// line saying what the part contains stops it.
     /// </summary>
-    private static void PartBand(IContainer c, int part, int ofParts, string title, string caption) =>
-        c.PaddingTop(14).Column(col =>
+    private static void PartBand(IContainer c, int part, int ofParts, string title, string caption,
+                                 string fill) =>
+        c.PaddingTop(10).Column(col =>
         {
-            col.Item().Background(Accent).PaddingVertical(6).PaddingHorizontal(8).Row(r =>
+            col.Item().Background(fill).PaddingVertical(6).PaddingHorizontal(8).Row(r =>
             {
                 r.RelativeItem().Text(title.ToUpperInvariant())
                     .Bold().FontSize(12).FontColor("#ffffff");
@@ -637,22 +635,9 @@ public static class QualityReportPdfSoft
                 r.ConstantItem(70).AlignRight().Text($"PART {part} OF {ofParts}")
                     .SemiBold().FontSize(7.5f).FontColor("#dbe6f2");
             });
-            col.Item().Background(BandBg).BorderBottom(1.4f).BorderColor(Accent)
+            col.Item().Background(BandBg).BorderBottom(1.4f).BorderColor(fill)
                .PaddingVertical(2.5f).PaddingHorizontal(8)
                .Text(caption).Italic().FontSize(7).FontColor(Muted);
-        });
-
-    /// <summary>
-    /// Closes a part off. A heading tells you something has STARTED; on a long
-    /// summary that runs over a page the reader also needs to be told it has
-    /// FINISHED, or the first sample card reads as more summary.
-    /// </summary>
-    private static void PartEnd(IContainer c, string text) =>
-        c.PaddingTop(6).Column(col =>
-        {
-            col.Item().Height(0.8f).Background(Border);
-            col.Item().PaddingTop(2).AlignRight()
-               .Text(text).Italic().FontSize(6.5f).FontColor(Muted);
         });
 
     /// <summary>

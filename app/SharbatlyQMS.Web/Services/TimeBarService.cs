@@ -96,33 +96,21 @@ public class TimeBarService : ITimeBarService
     private const string EffPlantExpr = "COALESCE(cc.eff_plant, a.plant)";
 
     /// <summary>
-    /// The spine and its joins. One row per CONTAINER, whether or not an arrival
-    /// or a quality order exists.
+    /// The spine and its joins. One row per CONTAINER, whether or not an
+    /// arrival or a quality order exists.
+    ///
+    /// Everything is pre-aggregated in CTEs and joined on plain equality. The
+    /// first version used OUTER APPLY ... TOP 1 with ISNULL() on the arrival's
+    /// join columns, which is correct but unindexable: a wrapped column cannot
+    /// seek, so every one of ~5,400 container keys drove a scan of the whole
+    /// arrivals table. Doing the ISNULL once inside the CTE and picking the
+    /// latest row with ROW_NUMBER costs one pass instead.
     /// </summary>
     private const string FromClause = @"
-        FROM (
-            -- Every container key, from BOTH sides. The cache alone is not
-            -- enough: an arrival created through /Arrivals/Search has no cache
-            -- row, and starting from the cache would silently drop it.
-            --
-            -- ISNULL on the arrival side is load-bearing. The cache columns are
-            -- NOT NULL and store '' for a BOL-less shipment, while the arrival
-            -- columns are nullable -- without it a NULL-BOL arrival becomes a
-            -- SECOND key for a container that already has a cache row and the
-            -- container is listed twice. UNION (not UNION ALL) then guarantees
-            -- one row per container.
-            SELECT container_no, bol_no, ebeln
-            FROM   qms_sap_container_cache
-            GROUP  BY container_no, bol_no, ebeln
-            UNION
-            SELECT ISNULL(container_no, ''), ISNULL(bol_no, ''), ISNULL(ebeln, '')
-            FROM   qms_arrival
-            WHERE  status_code <> 'Cancelled'
-        ) k
-        LEFT JOIN (
-            -- Aggregated BEFORE the join: the cache grain is one row per PO
-            -- line, so joining it raw and grouping afterwards multiplies every
-            -- container by its line count.
+        WITH cc AS (
+            -- The cache grain is one row per PO LINE, so it is collapsed to one
+            -- row per container BEFORE anything joins to it; joining it raw and
+            -- grouping afterwards multiplies every container by its line count.
             SELECT container_no, bol_no, ebeln,
                    MAX(arrival_date)      AS arrival_date,
                    MAX(receive_date)      AS receive_date,
@@ -135,25 +123,78 @@ public class TimeBarService : ITimeBarService
                    COALESCE(MAX(override_plant), MAX(plant)) AS eff_plant
             FROM   qms_sap_container_cache
             GROUP  BY container_no, bol_no, ebeln
-        ) cc ON cc.container_no = k.container_no
-            AND cc.bol_no       = k.bol_no
-            AND cc.ebeln        = k.ebeln
-        OUTER APPLY (
-            SELECT TOP 1 a2.arrival_id, a2.arrival_no, a2.status_code, a2.plant
-            FROM   qms_arrival a2
-            WHERE  ISNULL(a2.container_no, '') = k.container_no
-              AND  ISNULL(a2.bol_no,       '') = k.bol_no
-              AND  ISNULL(a2.ebeln,        '') = k.ebeln
-              AND  a2.status_code <> 'Cancelled'
-            ORDER  BY a2.arrival_id DESC
-        ) a
-        LEFT JOIN qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id
-        OUTER APPLY (
-            SELECT TOP 1 quality_order_id, quality_order_no, status_code, closed_at, archived_at
+        ),
+        arr AS (
+            -- ISNULL is load-bearing. The cache columns are NOT NULL and store
+            -- '' for a BOL-less shipment while the arrival columns are nullable;
+            -- without it a NULL-BOL arrival becomes a SECOND key for a container
+            -- that already has a cache row, and the container is listed twice.
+            SELECT ISNULL(container_no, '') AS cn,
+                   ISNULL(bol_no,       '') AS bn,
+                   ISNULL(ebeln,        '') AS pn,
+                   arrival_id, arrival_no, status_code, plant,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY ISNULL(container_no, ''), ISNULL(bol_no, ''), ISNULL(ebeln, '')
+                       ORDER BY arrival_id DESC) AS rn
+            FROM   qms_arrival
+            WHERE  status_code <> 'Cancelled'
+        ),
+        qorder AS (
+            SELECT arrival_id, quality_order_id, quality_order_no,
+                   status_code, closed_at, archived_at,
+                   ROW_NUMBER() OVER (PARTITION BY arrival_id ORDER BY quality_order_id DESC) AS rn
             FROM   qms_quality_order
-            WHERE  arrival_id = a.arrival_id AND status_code <> 'Cancelled'
-            ORDER  BY quality_order_id DESC
-        ) qo";
+            WHERE  status_code <> 'Cancelled'
+        ),
+        k AS (
+            -- Every container key, from BOTH sides. The cache alone is not
+            -- enough: an arrival created through /Arrivals/Search has no cache
+            -- row, and starting from the cache would silently drop it. UNION
+            -- (not UNION ALL) guarantees one row per container.
+            SELECT container_no, bol_no, ebeln FROM cc
+            UNION
+            SELECT cn, bn, pn FROM arr
+        )
+        SELECT
+               k.container_no                       AS ContainerNo,
+               k.bol_no                             AS BolNo,
+               k.ebeln                              AS Ebeln,
+               cc.sto                               AS Sto,
+               cc.vendor_name                       AS VendorName,
+               " + EffPlantExpr + @"                AS Plant,
+               cc.po_type                           AS PoType,
+               (" + StartExpr + @")                 AS ArrivalDate,
+               CASE WHEN (" + StartExpr + @") IS NULL THEN NULL
+                    WHEN @Basis = 'PortArrival' AND cc.port_arrival_date IS NOT NULL THEN 'Port'
+                    WHEN @Basis <> 'PortArrival' AND cc.arrival_date IS NOT NULL THEN 'Receipt'
+                    WHEN ss.arrival_date IS NOT NULL THEN 'Snapshot'
+                    ELSE 'Other' END                AS ArrivalSource,
+               a.arrival_id                         AS ArrivalId,
+               a.arrival_no                         AS ArrivalNo,
+               qo.quality_order_id                  AS QualityOrderId,
+               qo.quality_order_no                  AS QualityOrderNo,
+               qo.closed_at                         AS ClosedAt,
+               (" + StageExpr + @")                 AS Stage,
+               (" + StatusExpr + @")                AS StatusCode,
+               (" + ElapsedExpr + @")               AS ElapsedDays,
+               CASE WHEN qo.closed_at IS NULL THEN 1 ELSE 0 END AS IsRunning,
+               CASE WHEN (" + StartExpr + @") IS NOT NULL
+                     AND DATEDIFF(DAY, (" + StartExpr + @"), (" + EndExpr + @")) < 0
+                    THEN 1 ELSE 0 END               AS IsBackwards,
+               CASE WHEN cc.container_no IS NULL THEN 1 ELSE 0 END AS NotInCache,
+               CASE WHEN cc.archived_at IS NOT NULL OR qo.archived_at IS NOT NULL
+                    THEN 1 ELSE 0 END               AS IsArchived
+        INTO   #tb
+        FROM   k
+        LEFT JOIN cc ON cc.container_no = k.container_no
+                    AND cc.bol_no       = k.bol_no
+                    AND cc.ebeln        = k.ebeln
+        LEFT JOIN arr a ON a.cn = k.container_no
+                       AND a.bn = k.bol_no
+                       AND a.pn = k.ebeln
+                       AND a.rn = 1
+        LEFT JOIN qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id
+        LEFT JOIN qorder qo ON qo.arrival_id = a.arrival_id AND qo.rn = 1";
 
     private static string WhereClause => $@"
         WHERE (@sUnrestricted = 1 OR {EffPlantExpr} IN @sPlants)
@@ -172,11 +213,11 @@ public class TimeBarService : ITimeBarService
           AND (@PoType    IS NULL OR cc.po_type = @PoType)
           AND (@Stage     IS NULL OR ({StageExpr}) = @Stage)
           AND (@Status    IS NULL OR ({StatusExpr}) = @Status)
-          -- The go-live floor. Applied to the count, the summary, the average
-          -- and the page alike, because a page whose header disagreed with its
-          -- own rows would be worse than no page. A container with no arrival
-          -- date is dropped too: it cannot be shown to have arrived after the
-          -- floor, and it has no clock to measure.
+          -- The go-live floor. Applied to the count, the summary, the median and
+          -- the page alike, because a page whose header disagreed with its own
+          -- rows would be worse than no page. A container with no arrival date
+          -- is dropped too: it cannot be shown to have arrived after the floor,
+          -- and it has no clock to measure.
           AND (@CutOff    IS NULL OR (({StartExpr}) IS NOT NULL AND ({StartExpr}) >= @CutOff))
           AND (@From      IS NULL OR ({StartExpr}) >= @From)
           AND (@To        IS NULL OR ({StartExpr}) <= @To)
@@ -184,6 +225,18 @@ public class TimeBarService : ITimeBarService
           AND (@MinDays   IS NULL OR ({ElapsedExpr}) >= @MinDays)
           AND (@OverOnly  = 0 OR (({ElapsedExpr}) IS NOT NULL AND ({ElapsedExpr}) > @WarnDays))";
 
+    /// <summary>
+    /// One round trip: the filtered set is materialised into a temp table once,
+    /// then counted, summarised and paged from there.
+    ///
+    /// It used to run the whole join tree four times over -- once each for the
+    /// total, the summary, the median and the page -- recomputing the same
+    /// clock expressions on every pass. On ~5,400 containers that made the page
+    /// take seconds to open.
+    ///
+    /// No id list ever crosses the wire: every filter is a scalar, so the
+    /// 2100-parameter limit that has broken this application twice cannot apply.
+    /// </summary>
     public async Task<TimeBarPage> ListAsync(TimeBarFilter f, PlantScope scope,
         TimeBarConfig cfg, CancellationToken ct = default)
     {
@@ -225,63 +278,41 @@ public class TimeBarService : ITimeBarService
 
         using var c = Open();
         using var grid = await c.QueryMultipleAsync(new CommandDefinition($@"
+            -- 0) build the filtered set ONCE
+            {FromClause} {WhereClause};
+
             -- 1) total matching containers (drives the pager)
-            SELECT COUNT(*) {FromClause} {WhereClause};
+            SELECT COUNT(*) FROM #tb;
 
             -- 2) the headline totals, over the WHOLE filtered set rather than
             --    the visible page -- a summary of one page would be misleading.
-            SELECT COUNT(*)                                                        AS Containers,
-                   SUM(CASE WHEN a.arrival_id IS NULL THEN 1 ELSE 0 END)           AS Pending,
-                   SUM(CASE WHEN qo.closed_at IS NULL THEN 1 ELSE 0 END)           AS Running,
-                   SUM(CASE WHEN ({ElapsedExpr}) > @WarnDays THEN 1 ELSE 0 END)    AS OverThreshold
-            {FromClause} {WhereClause};
+            SELECT COUNT(*)                                                  AS Containers,
+                   SUM(CASE WHEN ArrivalId IS NULL THEN 1 ELSE 0 END)        AS Pending,
+                   SUM(CASE WHEN ClosedAt  IS NULL THEN 1 ELSE 0 END)        AS Running,
+                   SUM(CASE WHEN ElapsedDays > @WarnDays THEN 1 ELSE 0 END)  AS OverThreshold
+            FROM   #tb;
 
             -- 3) median elapsed among SETTLED rows. Median, not mean: one
             --    container stuck for 90 days would drag an average to a number
             --    no individual container is anywhere near.
-            SELECT DISTINCT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(({ElapsedExpr}) AS FLOAT))
-                   OVER ()                                                          AS MedianSettled
-            {FromClause} {WhereClause} AND qo.closed_at IS NOT NULL AND ({StartExpr}) IS NOT NULL;
+            SELECT DISTINCT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(ElapsedDays AS FLOAT))
+                   OVER ()                                                   AS MedianSettled
+            FROM   #tb
+            WHERE  ClosedAt IS NOT NULL AND ArrivalDate IS NOT NULL;
 
-            -- 4) the page
-            SELECT k.container_no                       AS ContainerNo,
-                   k.bol_no                             AS BolNo,
-                   k.ebeln                              AS Ebeln,
-                   cc.sto                               AS Sto,
-                   cc.vendor_name                       AS VendorName,
-                   {EffPlantExpr}                       AS Plant,
-                   cc.po_type                           AS PoType,
-                   ({StartExpr})                        AS ArrivalDate,
-                   CASE WHEN ({StartExpr}) IS NULL THEN NULL
-                        WHEN @Basis = 'PortArrival' AND cc.port_arrival_date IS NOT NULL THEN 'Port'
-                        WHEN @Basis <> 'PortArrival' AND cc.arrival_date IS NOT NULL THEN 'Receipt'
-                        WHEN ss.arrival_date IS NOT NULL THEN 'Snapshot'
-                        ELSE 'Other' END                AS ArrivalSource,
-                   a.arrival_id                         AS ArrivalId,
-                   a.arrival_no                         AS ArrivalNo,
-                   qo.quality_order_id                  AS QualityOrderId,
-                   qo.quality_order_no                  AS QualityOrderNo,
-                   qo.closed_at                         AS ClosedAt,
-                   ({StageExpr})                        AS Stage,
-                   ({StatusExpr})                       AS StatusCode,
-                   ({ElapsedExpr})                      AS ElapsedDays,
-                   CASE WHEN qo.closed_at IS NULL THEN 1 ELSE 0 END AS IsRunning,
-                   CASE WHEN ({StartExpr}) IS NOT NULL
-                         AND DATEDIFF(DAY, ({StartExpr}), ({EndExpr})) < 0
-                        THEN 1 ELSE 0 END               AS IsBackwards,
-                   CASE WHEN cc.container_no IS NULL THEN 1 ELSE 0 END AS NotInCache,
-                   CASE WHEN cc.archived_at IS NOT NULL OR qo.archived_at IS NOT NULL
-                        THEN 1 ELSE 0 END               AS IsArchived
-            {FromClause} {WhereClause}
-            -- Worst first: the longest clock at the top, unknown dates last, and
-            -- among equals the ones still running -- those are still growing.
-            -- The container triplet closes the sort because without a total order
-            -- OFFSET/FETCH can place a tied row on two pages, or on none.
-            ORDER BY CASE WHEN ({ElapsedExpr}) IS NULL THEN 1 ELSE 0 END,
-                     ({ElapsedExpr}) DESC,
-                     CASE WHEN qo.closed_at IS NULL THEN 0 ELSE 1 END,
-                     k.container_no, k.bol_no, k.ebeln
-            OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;",
+            -- 4) the page. Worst first: the longest clock at the top, unknown
+            --    dates last, and among equals the ones still running -- those
+            --    are still growing. The container triplet closes the sort
+            --    because without a total order OFFSET/FETCH can place a tied
+            --    row on two pages, or on none.
+            SELECT * FROM #tb
+            ORDER BY CASE WHEN ElapsedDays IS NULL THEN 1 ELSE 0 END,
+                     ElapsedDays DESC,
+                     IsRunning DESC,
+                     ContainerNo, BolNo, Ebeln
+            OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY;
+
+            DROP TABLE #tb;",
             p, commandTimeout: 120, cancellationToken: ct));
 
         var total   = await grid.ReadFirstAsync<int>();
@@ -291,6 +322,7 @@ public class TimeBarService : ITimeBarService
 
         totals.MedianSettled = median.HasValue ? (int)Math.Round(median.Value) : null;
         return new TimeBarPage(rows, total, page, pageSize, totals);
+
     }
 
     public async Task<TimeBarFilterOptions> GetFilterOptionsAsync(PlantScope scope, CancellationToken ct = default)
