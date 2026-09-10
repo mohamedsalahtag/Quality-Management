@@ -64,7 +64,7 @@ public class QualityOrderService : IQualityOrderService
     // that fans the header rows out and would list a multi-line QO several
     // times (ListAsync has no DISTINCT). Storage location is denormalised onto
     // qms_arrival by M13 precisely so this stays a plain equality test.
-    private const string QoListWhere = @"
+    private static readonly string QoListWhere = @"
         WHERE  (@status IS NULL OR qo.status_code = @status)
           AND  (@plant  IS NULL OR a.plant        = @plant)
           -- Per-user plant scope: unrestricted users pass @sUnrestricted = 1;
@@ -85,6 +85,8 @@ public class QualityOrderService : IQualityOrderService
                     WHERE  m2.quality_order_id = qo.quality_order_id
                       AND (m2.material_no   LIKE '%' + @material + '%'
                         OR m2.material_desc LIKE '%' + @material + '%')))
+          -- Major / sub-major from the material master, so the same choice
+          -- filters the same way here as on Arrivals and Pending." + MaterialCategoryFilter.Sql("qms_quality_order_material", "mcat", "mcat.quality_order_id = qo.quality_order_id") + @"
           AND  (@search IS NULL OR
                 qo.quality_order_no LIKE '%' + @search + '%' OR
                 a.container_no      LIKE '%' + @search + '%' OR
@@ -127,6 +129,8 @@ public class QualityOrderService : IQualityOrderService
             arrivalNo  = Trim(f.ArrivalNo),
             storageLoc = Trim(f.StorageLoc),
             material   = Trim(f.Material),
+            matMajor    = Trim(f.MatMajor),
+            matSubMajor = Trim(f.MatSubMajor),
             supplier   = Trim(f.Supplier),
             openedBy   = Trim(f.OpenedBy),
             fromUtc,

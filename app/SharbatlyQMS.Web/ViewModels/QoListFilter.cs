@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.ViewModels;
+﻿namespace SharbatlyQMS.Web.ViewModels;
 
 /// <summary>
 /// Every filter the Quality Orders list accepts, bound straight from the query
@@ -29,6 +29,11 @@ public class QoListFilter
     public string? Plant      { get; set; }
     public string? StorageLoc { get; set; }
     public string? Material   { get; set; }
+    /// <summary>Material master major category, e.g. Apples or Bananas.</summary>
+    public string? MatMajor    { get; set; }
+    /// <summary>Sub-major under that major, e.g. a variety group.</summary>
+    public string? MatSubMajor { get; set; }
+
     public string? Supplier   { get; set; }
     public string? OpenedBy   { get; set; }
     /// <summary>QO created date, inclusive, as the user's LOCAL date. The
@@ -52,6 +57,8 @@ public class QoListFilter
         || !string.IsNullOrWhiteSpace(Plant)
         || !string.IsNullOrWhiteSpace(StorageLoc)
         || !string.IsNullOrWhiteSpace(Material)
+        || !string.IsNullOrWhiteSpace(MatMajor)
+        || !string.IsNullOrWhiteSpace(MatSubMajor)
         || !string.IsNullOrWhiteSpace(Supplier)
         || !string.IsNullOrWhiteSpace(OpenedBy)
         || From.HasValue || To.HasValue;
@@ -69,6 +76,8 @@ public class QoListFilter
         + (string.IsNullOrWhiteSpace(Plant)      ? 0 : 1)
         + (string.IsNullOrWhiteSpace(StorageLoc) ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Material)   ? 0 : 1)
+        + (string.IsNullOrWhiteSpace(MatMajor)    ? 0 : 1)
+        + (string.IsNullOrWhiteSpace(MatSubMajor) ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Supplier)   ? 0 : 1)
         + (string.IsNullOrWhiteSpace(OpenedBy)   ? 0 : 1)
         + (From.HasValue ? 1 : 0)

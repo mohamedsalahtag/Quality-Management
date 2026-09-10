@@ -211,6 +211,19 @@ public class TimeBarService : ITimeBarService
           AND (@Supplier  IS NULL OR cc.vendor_name LIKE @Supplier OR cc.vendor_no LIKE @Supplier)
           AND (@Plant     IS NULL OR {EffPlantExpr} = @Plant)
           AND (@PoType    IS NULL OR cc.po_type = @PoType)
+          -- Material master categories. The cache is aggregated to one row per
+          -- container before this point, so the test has to go back to the raw
+          -- lines: a container counts as, say, Apples if ANY of its lines is.
+          AND (@matMajor IS NULL AND @matSubMajor IS NULL OR EXISTS (
+                    SELECT 1
+                    FROM   qms_sap_container_cache cl
+                    JOIN   qms_sap_material_cache  mc ON mc.material_no = cl.material_no
+                    WHERE  cl.container_no = k.container_no
+                      AND  cl.bol_no       = k.bol_no
+                      AND  cl.ebeln        = k.ebeln
+                      AND (@matMajor    IS NULL OR
+                           COALESCE(NULLIF(mc.major_category_desc,''), NULLIF(mc.major_category,'')) = @matMajor)
+                      AND (@matSubMajor IS NULL OR mc.sub_major_category = @matSubMajor)))
           AND (@Stage     IS NULL OR ({StageExpr}) = @Stage)
           AND (@Status    IS NULL OR ({StatusExpr}) = @Status)
           -- The go-live floor. Applied to the count, the summary, the median and
@@ -263,6 +276,8 @@ public class TimeBarService : ITimeBarService
             Supplier  = Wrap(f.Supplier),
             Plant     = Exact(f.Plant),
             PoType    = Exact(f.PoType),
+            matMajor    = Exact(f.MatMajor),
+            matSubMajor = Exact(f.MatSubMajor),
             Stage     = Exact(f.Stage),
             Status    = Exact(f.Status),
             From      = f.From?.ToDateTime(TimeOnly.MinValue),

@@ -70,6 +70,8 @@ builder.Services.AddScoped<IImageService, ImageService>();
 // because documents are stored outside wwwroot and served only via an authenticated action.
 builder.Services.AddScoped<IDocumentService, DocumentService>();
 builder.Services.AddScoped<IMaraService, MaraService>();
+// The material master category tree behind the major / sub-major filters.
+builder.Services.AddScoped<IMaterialTaxonomyService, MaterialTaxonomyService>();
 builder.Services.AddScoped<IVendorService, VendorService>();
 builder.Services.AddScoped<ICatalogCache, CatalogCache>();
 // M10: SAP code -> friendly name lookup (plants, storage locations, PO types).

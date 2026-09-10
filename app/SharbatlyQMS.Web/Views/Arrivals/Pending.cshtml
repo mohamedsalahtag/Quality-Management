@@ -60,6 +60,10 @@
         Add("po", po);
         Add("supplier", supplier);
         Add("material", material);
+        // Carried through the pager, or clicking page 2 would silently widen
+        // the filter back to every material.
+        Add("matMajor", ViewBag.MatMajor as string);
+        Add("matSubMajor", ViewBag.MatSubMajor as string);
         Add("from", Dstr(fromDate));
         Add("to", Dstr(toDate));
         Add("arrFrom", Dstr(arrFromDate));
@@ -259,6 +263,8 @@
                placeholder='@Loc["code or description"]' title="Material number or description — any part of it"
                autocomplete="off" />
     </div>
+    <partial name="_MaterialCategoryFilter"
+             model="@((ViewBag.MatMajor as string, ViewBag.MatSubMajor as string))" />
     <div class="col-md-2">
         <label class="form-label small mb-1">@Loc["Plant"]</label>
         @if (plantScopeLocked != null)

@@ -97,6 +97,8 @@ public class ArrivalService : IArrivalService
             storageLoc = Trim(f.StorageLoc),
             createdBy  = Trim(f.CreatedBy),
             material   = Trim(f.Material),
+            matMajor    = Trim(f.MatMajor),
+            matSubMajor = Trim(f.MatSubMajor),
             supplier   = Trim(f.Supplier),
             fromUtc,
             toUtc,
@@ -126,7 +128,7 @@ public class ArrivalService : IArrivalService
     /// Shared by the count and the page query so the pager can never disagree
     /// with the rows it is counting.
     /// </summary>
-    private const string ArrivalWhere = @"(@status     IS NULL OR a.status_code     = @status)
+    private static readonly string ArrivalWhere = @"(@status     IS NULL OR a.status_code     = @status)
               AND  (@plant      IS NULL OR a.plant           = @plant)
               AND  (@sUnrestricted = 1 OR a.plant IN @sPlants)
               AND  (@container  IS NULL OR a.container_no     LIKE '%' + @container + '%')
@@ -143,6 +145,10 @@ public class ArrivalService : IArrivalService
                         WHERE  ai.arrival_id = a.arrival_id
                           AND (ai.material_no   LIKE '%' + @material + '%'
                             OR ai.material_desc LIKE '%' + @material + '%')))
+              -- Major / sub-major come from the material master rather than the
+              -- copy on the arrival line: the line stores a major and no
+              -- sub-major, and a filter that answered differently on different
+              -- screens would be worse than not offering one." + MaterialCategoryFilter.Sql("qms_arrival_item", "aim", "aim.arrival_id = a.arrival_id") + @"
               AND  (@search IS NULL
                     OR a.arrival_no   LIKE '%' + @search + '%'
                     OR a.container_no LIKE '%' + @search + '%'

@@ -34,6 +34,7 @@ public class ArrivalsController : Controller
         string? plant, string? poType, string? storageLoc, string? supplier,
         string? material, DateOnly? from, DateOnly? to,
         DateOnly? arrFrom = null, DateOnly? arrTo = null,
+        string? matMajor = null, string? matSubMajor = null,
         int page = 1, int pageSize = 100, bool archived = false)
     {
         // Server-side paging: the pending cache holds thousands of triplets, so
@@ -49,13 +50,18 @@ public class ArrivalsController : Controller
         // same pager, only containers that were filed away -- each with a
         // Restore action instead of Create.
         var scope   = User.GetPlantScope();
-        var result  = await _cache.ListPendingAsync(container, bol, po, plant, poType, storageLoc, supplier, material, from, to, arrFrom, arrTo, page, pageSize, scope, archived);
+        var result  = await _cache.ListPendingAsync(
+            container, bol, po, plant, poType, storageLoc, supplier, material,
+            matMajor, matSubMajor, from, to, arrFrom, arrTo,
+            page, pageSize, scope, archived);
         var status  = await _cache.GetPullStatusAsync();
         var options = await _cache.GetPendingFilterOptionsAsync(scope, archived);
         ViewBag.Container         = container;
         ViewBag.Bol               = bol;
         ViewBag.Po                = po;
         ViewBag.Supplier          = supplier;
+        ViewBag.MatMajor          = matMajor;
+        ViewBag.MatSubMajor       = matSubMajor;
         ViewBag.Material          = material;
         ViewBag.From              = from;
         ViewBag.To                = to;

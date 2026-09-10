@@ -186,6 +186,7 @@
                     <input type="text" name="material" value="@f.Material" class="form-control form-control-sm"
                            placeholder='@Loc["code or description"]' autocomplete="off" />
                 </div>
+                <partial name="_MaterialCategoryFilter" model="@((f.MatMajor, f.MatSubMajor))" />
 
                 <div class="col-12 col-md-4">
                     <label class="form-label small mb-1">@Loc["Supplier"]</label>

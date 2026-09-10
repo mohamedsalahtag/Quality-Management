@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.ViewModels;
+﻿namespace SharbatlyQMS.Web.ViewModels;
 
 /// <summary>
 /// Every filter the Arrivals list accepts, bound straight from the query string.
@@ -19,6 +19,11 @@ public class ArrivalListFilter
     public string? Po         { get; set; }
     public string? ArrivalNo  { get; set; }
     public string? Material   { get; set; }
+    /// <summary>Material master major category, e.g. Apples or Bananas.</summary>
+    public string? MatMajor    { get; set; }
+    /// <summary>Sub-major under that major, e.g. a variety group.</summary>
+    public string? MatSubMajor { get; set; }
+
     public string? Supplier   { get; set; }
     public string? Plant      { get; set; }
     public string? StorageLoc { get; set; }
@@ -50,6 +55,8 @@ public class ArrivalListFilter
         || !string.IsNullOrWhiteSpace(Po)
         || !string.IsNullOrWhiteSpace(ArrivalNo)
         || !string.IsNullOrWhiteSpace(Material)
+        || !string.IsNullOrWhiteSpace(MatMajor)
+        || !string.IsNullOrWhiteSpace(MatSubMajor)
         || !string.IsNullOrWhiteSpace(Supplier)
         || !string.IsNullOrWhiteSpace(Plant)
         || !string.IsNullOrWhiteSpace(StorageLoc)
@@ -63,6 +70,8 @@ public class ArrivalListFilter
         + (string.IsNullOrWhiteSpace(Po)         ? 0 : 1)
         + (string.IsNullOrWhiteSpace(ArrivalNo)  ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Material)   ? 0 : 1)
+        + (string.IsNullOrWhiteSpace(MatMajor)    ? 0 : 1)
+        + (string.IsNullOrWhiteSpace(MatSubMajor) ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Supplier)   ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Plant)      ? 0 : 1)
         + (string.IsNullOrWhiteSpace(StorageLoc) ? 0 : 1)

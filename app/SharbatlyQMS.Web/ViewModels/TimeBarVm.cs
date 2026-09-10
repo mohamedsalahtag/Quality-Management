@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Models;
+﻿using SharbatlyQMS.Web.Models;
 
 namespace SharbatlyQMS.Web.ViewModels;
 
@@ -18,6 +18,10 @@ public class TimeBarFilter
     public string? Status   { get; set; }
     public string? Plant    { get; set; }
     public string? PoType   { get; set; }
+    /// <summary>Material master major category, e.g. Apples.</summary>
+    public string? MatMajor    { get; set; }
+    /// <summary>Sub-major under that major.</summary>
+    public string? MatSubMajor { get; set; }
     public string? Supplier { get; set; }
     public string? Container{ get; set; }
     public string? Bol      { get; set; }
@@ -48,6 +52,7 @@ public class TimeBarFilter
         || !string.IsNullOrWhiteSpace(PoType)|| !string.IsNullOrWhiteSpace(Supplier)
         || !string.IsNullOrWhiteSpace(Container) || !string.IsNullOrWhiteSpace(Bol)
         || !string.IsNullOrWhiteSpace(Po)    || From.HasValue || To.HasValue
+        || !string.IsNullOrWhiteSpace(MatMajor) || !string.IsNullOrWhiteSpace(MatSubMajor)
         || OverOnly || NoCacheOnly || MinDays.HasValue;
 }
 

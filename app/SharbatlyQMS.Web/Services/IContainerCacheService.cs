@@ -36,6 +36,7 @@ public interface IContainerCacheService
         string? container = null, string? bol = null, string? po = null,
         string? plant = null, string? poType = null, string? storageLoc = null,
         string? supplier = null, string? material = null,
+        string? matMajor = null, string? matSubMajor = null,
         DateOnly? from = null, DateOnly? to = null,
         DateOnly? arrFrom = null, DateOnly? arrTo = null,
         int page = 1, int pageSize = 100,

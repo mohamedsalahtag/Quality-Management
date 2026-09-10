@@ -32,6 +32,7 @@
         Add("search", f.Search);      Add("stage", f.Stage);       Add("status", f.Status);
         Add("plant", f.Plant);        Add("poType", f.PoType);     Add("supplier", f.Supplier);
         Add("container", f.Container);Add("bol", f.Bol);           Add("po", f.Po);
+        Add("matMajor", f.MatMajor); Add("matSubMajor", f.MatSubMajor);
         Add("from", Dstr(f.From));    Add("to", Dstr(f.To));
         if (f.OverOnly)        d["overOnly"] = "true";
         if (f.NoCacheOnly)     d["noCacheOnly"] = "true";
@@ -248,6 +249,7 @@ else if (cfg.StartDate.HasValue)
                     <label class="form-label small mb-1">@Loc["Supplier"]</label>
                     <input type="text" name="supplier" value="@f.Supplier" class="form-control form-control-sm" autocomplete="off" />
                 </div>
+                <partial name="_MaterialCategoryFilter" model="@((f.MatMajor, f.MatSubMajor))" />
                 @* Chip state has to survive a filter submit, or using one control
                    would silently clear the other. *@
                 @if (f.OverOnly)        { <input type="hidden" name="overOnly" value="true" /> }

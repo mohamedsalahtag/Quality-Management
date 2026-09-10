@@ -1,0 +1,67 @@
+@using SharbatlyQMS.Web.Services
+@inject IMaterialTaxonomyService Taxonomy
+@model (string? Major, string? SubMajor)
+@{
+    // One partial for every list screen, so the two pickers behave identically
+    // wherever they appear and a page cannot drift into offering a different
+    // set of categories from its neighbour.
+    var majors = await Taxonomy.GetAsync();
+    var current = majors.FirstOrDefault(m =>
+        string.Equals(m.Name, Model.Major, StringComparison.OrdinalIgnoreCase));
+
+    // Sub-majors for every major, so the second picker can narrow itself in the
+    // browser without a round trip. Rendered as data-* rather than JSON in a
+    // script block: Razor encodes attribute values, so nothing here can escape
+    // into markup.
+}
+
+<div class="col-6 col-md-3 col-xl-2">
+    <label class="form-label mb-1 small" for="mat-major">@Loc["Material major"]</label>
+    <select name="matMajor" id="mat-major" class="form-select form-select-sm" data-mat-major>
+        <option value="">@Loc["Any"]</option>
+        @foreach (var m in majors)
+        {
+            <option value="@m.Name" selected="@(string.Equals(m.Name, Model.Major, StringComparison.OrdinalIgnoreCase))"
+                    data-subs="@string.Join("|", m.SubMajors)">@m.Name</option>
+        }
+    </select>
+</div>
+
+<div class="col-6 col-md-3 col-xl-2">
+    <label class="form-label mb-1 small" for="mat-submajor">@Loc["Material sub-major"]</label>
+    <select name="matSubMajor" id="mat-submajor" class="form-select form-select-sm" data-mat-submajor>
+        <option value="">@Loc["Any"]</option>
+        @* Only the chosen major's sub-majors are rendered; picking a different
+           major rewrites the list client-side from its data-subs attribute. *@
+        @foreach (var sub in (current?.SubMajors ?? new List<string>()))
+        {
+            <option value="@sub" selected="@(string.Equals(sub, Model.SubMajor, StringComparison.OrdinalIgnoreCase))">@sub</option>
+        }
+    </select>
+</div>
+
+<script>
+(function () {
+    var major = document.querySelector('[data-mat-major]');
+    var sub   = document.querySelector('[data-mat-submajor]');
+    if (!major || !sub || major.dataset.wired) return;
+    major.dataset.wired = '1';
+
+    major.addEventListener('change', function () {
+        // The previous major's sub-major cannot survive the change: it would
+        // filter to a combination that matches nothing and read as an empty
+        // list rather than a contradictory filter.
+        var opt  = major.options[major.selectedIndex];
+        var subs = (opt && opt.getAttribute('data-subs') || '').split('|').filter(Boolean);
+        sub.innerHTML = '';
+        var any = document.createElement('option');
+        any.value = ''; any.textContent = @Html.Raw(Json.Serialize(Loc["Any"].ToString()));
+        sub.appendChild(any);
+        subs.forEach(function (s) {
+            var o = document.createElement('option');
+            o.value = s; o.textContent = s;
+            sub.appendChild(o);
+        });
+    });
+})();
+</script>

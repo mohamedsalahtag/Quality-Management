@@ -92,6 +92,7 @@ public class ContainerCacheService : IContainerCacheService
         string? container = null, string? bol = null, string? po = null,
         string? plant = null, string? poType = null, string? storageLoc = null,
         string? supplier = null, string? material = null,
+        string? matMajor = null, string? matSubMajor = null,
         DateOnly? from = null, DateOnly? to = null,
         DateOnly? arrFrom = null, DateOnly? arrTo = null,
         int page = 1, int pageSize = 100,
@@ -148,7 +149,17 @@ public class ContainerCacheService : IContainerCacheService
             AND (@To         IS NULL OR doc_date    <= @To)
             AND (@ArrFrom    IS NULL OR arrival_date >= @ArrFrom)
             AND (@ArrTo      IS NULL OR arrival_date <= @ArrTo)
-            AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)";
+            AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)
+            -- Material master categories. The outer column is qualified with the
+            -- TABLE NAME because the master carries a material_no of its own:
+            -- unqualified, the correlation would bind to the inner table and the
+            -- predicate would be trivially true for every row.
+            AND (@matMajor IS NULL AND @matSubMajor IS NULL OR EXISTS (
+                    SELECT 1 FROM qms_sap_material_cache mc
+                    WHERE  mc.material_no = qms_sap_container_cache.material_no
+                      AND (@matMajor    IS NULL OR
+                           COALESCE(NULLIF(mc.major_category_desc,''), NULLIF(mc.major_category,'')) = @matMajor)
+                      AND (@matSubMajor IS NULL OR mc.sub_major_category = @matSubMajor)))";
 
         // SQL LIKE wildcards: empty input -> NULL (match everything);
         // populated input -> '%value%' contains-match (operators usually
@@ -167,6 +178,8 @@ public class ContainerCacheService : IContainerCacheService
             Po         = Wrap(po),
             Supplier   = Wrap(supplier),
             Material   = Wrap(material),
+            matMajor    = Exact(matMajor),
+            matSubMajor = Exact(matSubMajor),
             Plant      = Exact(plant),
             PoType     = Exact(poType),
             StorageLoc = Exact(storageLoc),
