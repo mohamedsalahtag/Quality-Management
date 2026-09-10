@@ -58,6 +58,21 @@ public static class QualityReportPdfSoft
             if (anySampleImgs || anyArrivalImgs)
                 container.Page(page => RenderImagesPage(page, d));
         });
+        // The engine now re-encodes every photo, so say what quality to use
+        // rather than inheriting a default: these are defect close-ups that a
+        // supplier zooms into, and this is the only compression step left in
+        // the chain now that the images are no longer embedded verbatim.
+        doc.WithSettings(new DocumentSettings
+        {
+            // 600 DPI against a 96pt tile keeps each photo at roughly the
+            // 600x800 it was embedded at before, so nothing a supplier zooms
+            // into is lost; the file still comes out smaller than the verbatim
+            // version it replaces. Lower settings were measurably softer: 216
+            // DPI took the report to 1.4 MB but each photo down to ~288px,
+            // which is not enough for a defect close-up.
+            ImageCompressionQuality = ImageCompressionQuality.High,
+            ImageRasterDpi          = 600
+        });
         return doc.GeneratePdf();
     }
 
@@ -560,8 +575,20 @@ public static class QualityReportPdfSoft
                         {
                             if (img.InlineBytes is { Length: > 0 })
                             {
-                                if (cover) b.Image(img.InlineBytes).UseOriginalImage().FitUnproportionally();
-                                else       b.AlignCenter().AlignMiddle().Image(img.InlineBytes).UseOriginalImage().FitArea();
+                                // NOT UseOriginalImage(). That embedded our JPEG bytes
+                                // verbatim, which left the document carrying two
+                                // encoders' output: the image dictionaries are
+                                // written by the PDF engine and described our
+                                // streams as already-RGB (/ColorTransform 0) when
+                                // they were YCbCr. Lenient viewers auto-detect and
+                                // render correctly; a strict one honours the
+                                // dictionary and paints the photo black.
+                                //
+                                // Letting the engine encode as well as describe
+                                // makes the two agree, and takes this report from
+                                // 7.2 MB to about 2 MB as a side effect.
+                                if (cover) b.Image(img.InlineBytes).FitUnproportionally();
+                                else       b.AlignCenter().AlignMiddle().Image(img.InlineBytes).FitArea();
                             }
                             else b.AlignCenter().AlignMiddle().Text("(missing)").FontSize(6).FontColor(Muted);
                         }

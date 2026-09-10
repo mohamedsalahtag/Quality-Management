@@ -103,6 +103,14 @@ public class DashboardVm
     public IReadOnlyList<string> PlantOptions { get; set; } = Array.Empty<string>();
     /// <summary>Received vs QC-created, one row per plant, over the period.</summary>
     public List<PlantCommitmentRow> Commitment { get; set; } = new();
+
+    /// <summary>
+    /// Calendar days in the chosen period, inclusive of both ends. Drives the
+    /// daily average: a rate is only comparable between periods if it is
+    /// divided by the days those periods actually cover, and "today" is 1 day
+    /// while "this month" may be 30.
+    /// </summary>
+    public int PeriodDays { get; set; } = 1;
     /// <summary>The same comparison over time, for the trend chart: one point
     /// per day (short periods) or per week (long ones).</summary>
     public List<CommitmentPoint> CommitmentTrend { get; set; } = new();
@@ -203,8 +211,15 @@ public class PlantCommitmentRow
     /// </summary>
     public int    QosCatchUp { get; set; }
 
-    /// <summary>The rest of the period's orders: this period's own arrivals.</summary>
+    /// <summary>The rest of the period's orders: this period's own arrivals.
+    /// Equal to <see cref="Committed"/> by construction -- both count orders
+    /// OPENED in the period against arrivals received in it.</summary>
     public int    QosOnNewArrivals => Math.Max(0, QosCreated - QosCatchUp);
+
+    /// <summary>Orders opened per day over the period. Null when the period is
+    /// somehow zero days, rather than dividing by zero.</summary>
+    public double? DailyAverage(int periodDays) =>
+        periodDays <= 0 ? null : (double)QosCreated / periodDays;
 
     /// <summary>Containers received in the period still waiting for a quality
     /// order. Cannot go negative now that both halves are the same cohort.</summary>

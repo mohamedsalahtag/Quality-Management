@@ -51,8 +51,14 @@ public class DashboardService : IDashboardService
         var thresholds = await _settings.GetAlertConfigAsync();
         var agg = await LoadAggregatesAsync(filter, scope, thresholds);
 
+        // Inclusive of both ends: 1 September to 9 September is nine days of
+        // work, not eight.
+        var (pFrom, pTo) = filter.Resolve();
+        var periodDays   = Math.Max(1, (int)(pTo.Date - pFrom.Date).TotalDays + 1);
+
         return new DashboardVm
         {
+            PeriodDays         = periodDays,
             Filter             = filter,
             PlantOptions       = agg.PlantOptions,
             Commitment         = agg.Commitment,
@@ -383,55 +389,53 @@ public class DashboardService : IDashboardService
             ) g
             ORDER  BY AvgDefectPct DESC;
 
-            -- 11) Received vs committed, per plant, over the period.
+            -- 11) Received vs inspected, per plant, over the period.
             --
-            --     Received  = arrivals created in the period (containers taken in).
-            --     Committed = HOW MANY OF THOSE now have a quality order.
-            --     QosCreated= quality orders raised in the period from ANY
-            --                 arrival date -- the team's throughput, split into
-            --                 the part worked on this period's own arrivals and
-            --                 the part catching up on earlier ones.
+            --     Received        = arrivals created in the period.
+            --     PeriodInspected = quality orders opened in the period against
+            --                       THOSE arrivals.
+            --     BacklogInspected= quality orders opened in the period against
+            --                       arrivals from BEFORE it.
+            --     Total           = PeriodInspected + BacklogInspected, exactly.
             --
-            --     Committed used to be QosCreated, which compared two different
-            --     sets of containers: on 2026-09-03 Dammam took in 3 and raised
-            --     13 orders, 10 of them against the previous day's arrivals, and
-            --     the portlet reported ""3 received, 13 committed, 433% covered"".
-            --     Coverage is only meaningful when both halves describe the same
-            --     cohort, so Committed is now a property of the received set and
-            --     throughput has a column of its own.
+            --     That identity is the point. PeriodInspected used to be how
+            --     many of this period's arrivals have an order NOW, counted by
+            --     EXISTS -- a different question, and it did not reconcile: for
+            --     1-9 September the portlet showed 141 taken into QC beside 192
+            --     opened of which 64 were catching up, and 192 - 64 = 128, not
+            --     141. The 13 were arrivals whose order was opened outside the
+            --     window (mostly the following day), counted by one column and
+            --     not the other. Both halves are now about orders opened IN the
+            --     period, so the columns add up whatever the window.
             --
-            --     FULL JOIN, not an inner one: a plant that raised orders today
+            --     Coverage stays a property of the received cohort:
+            --     PeriodInspected / Received.
+            --
+            --     FULL JOIN, not an inner one: a plant that opened orders today
             --     but took nothing in must still appear, or the portlet would
             --     hide the very catching-up it exists to show.
-            SELECT COALESCE(r.plant, q.plant) AS Plant,
-                   ISNULL(r.Received, 0)      AS Received,
-                   ISNULL(r.Committed, 0)     AS Committed,
-                   ISNULL(q.Cnt, 0)           AS QosCreated,
-                   ISNULL(q.CatchUp, 0)       AS QosCatchUp
+            SELECT COALESCE(r.plant, q.plant)  AS Plant,
+                   ISNULL(r.Received, 0)       AS Received,
+                   ISNULL(q.OnPeriod, 0)       AS Committed,
+                   ISNULL(q.Cnt, 0)            AS QosCreated,
+                   ISNULL(q.CatchUp, 0)        AS QosCatchUp
             FROM (
-                SELECT x.plant,
-                       COUNT(*)      AS Received,
-                       SUM(x.hasQo)  AS Committed
-                FROM (
-                    SELECT a.plant,
-                           CASE WHEN EXISTS (SELECT 1 FROM qms_quality_order qq
-                                             WHERE qq.arrival_id = a.arrival_id)
-                                THEN 1 ELSE 0 END AS hasQo
-                    FROM   qms_arrival a
-                    WHERE  a.created_at >= @fromUtc AND a.created_at < @toUtcEx
-                      AND  {plantWhere}
-                ) x
-                GROUP BY x.plant
+                SELECT a.plant, COUNT(*) AS Received
+                FROM   qms_arrival a
+                WHERE  a.created_at >= @fromUtc AND a.created_at < @toUtcEx
+                  AND  {plantWhere}
+                GROUP  BY a.plant
             ) r
             FULL OUTER JOIN (
                 -- Split by WHEN THE CONTAINER CAME IN, not when the order was
-                -- raised. Most of a day's orders are usually against earlier
+                -- opened. Most of a day's orders are usually against earlier
                 -- arrivals, and a single total hid that: the portlet showed 13
                 -- orders beside 3 arrivals with nothing to say the other 10 were
                 -- the team catching up on a backlog.
                 SELECT a.plant,
                        COUNT(*) AS Cnt,
-                       SUM(CASE WHEN a.created_at < @fromUtc THEN 1 ELSE 0 END) AS CatchUp
+                       SUM(CASE WHEN a.created_at <  @fromUtc THEN 1 ELSE 0 END) AS CatchUp,
+                       SUM(CASE WHEN a.created_at >= @fromUtc THEN 1 ELSE 0 END) AS OnPeriod
                 FROM   qms_quality_order qo
                 JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
                 WHERE  qo.created_at >= @fromUtc AND qo.created_at < @toUtcEx AND {plantWhere}

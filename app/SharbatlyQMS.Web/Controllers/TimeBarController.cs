@@ -61,6 +61,92 @@ public class TimeBarController : Controller
     }
 
     /// <summary>
+    /// The whole filtered list as a workbook -- every page, not the one on
+    /// screen, because an export of page 1 of 18 is a trap.
+    ///
+    /// Paged through rather than fetched in one query: the list method clamps
+    /// its page size deliberately, and this respects that instead of opening a
+    /// second, unbounded path into the same data. Capped so a filter that
+    /// matches everything cannot build a workbook nobody can open.
+    /// </summary>
+    [RequireScreen(Screens.TimeBar, Seed.AdminOnly, "Open the Time Bar page")]
+    public async Task<IActionResult> Excel([FromQuery] TimeBarFilter filter, CancellationToken ct)
+    {
+        const int MaxRows = 20000;
+        filter ??= new TimeBarFilter();
+        filter.PageSize = 100;
+
+        var scope = User.GetPlantScope();
+        var cfg   = await _settings.GetTimeBarConfigAsync();
+
+        var rows = new List<TimeBarRow>();
+        for (var page = 1; rows.Count < MaxRows; page++)
+        {
+            filter.Page = page;
+            var result = await _timeBar.ListAsync(filter, scope, cfg, ct);
+            if (result.Rows.Count == 0) break;
+            rows.AddRange(result.Rows);
+            if (rows.Count >= result.Total) break;
+        }
+
+        using var wb = new ClosedXML.Excel.XLWorkbook();
+        var ws = wb.Worksheets.Add("Inspection Time Bar");
+
+        var headers = new[]
+        {
+            "Container", "BOL", "PO", "STO", "Supplier", "Plant", "PO type",
+            "Arrival date", "Arrival source", "Arrival no", "Quality order",
+            "Stage", "Status", "Days elapsed", "Still running", "Closed at",
+            "Not in SAP cache", "Archived"
+        };
+        for (var i = 0; i < headers.Length; i++)
+        {
+            ws.Cell(1, i + 1).Value = headers[i];
+            ws.Cell(1, i + 1).Style.Font.Bold = true;
+        }
+
+        var r = 2;
+        foreach (var row in rows)
+        {
+            ws.Cell(r,  1).Value = row.ContainerNo;
+            ws.Cell(r,  2).Value = row.BolNo;
+            ws.Cell(r,  3).Value = row.Ebeln;
+            ws.Cell(r,  4).Value = row.Sto;
+            ws.Cell(r,  5).Value = row.VendorName;
+            ws.Cell(r,  6).Value = row.Plant;
+            ws.Cell(r,  7).Value = row.PoType;
+            if (row.ArrivalDate.HasValue) ws.Cell(r, 8).Value = row.ArrivalDate.Value;
+            ws.Cell(r,  9).Value = row.ArrivalSource;
+            ws.Cell(r, 10).Value = row.ArrivalNo;
+            ws.Cell(r, 11).Value = row.QualityOrderNo;
+            ws.Cell(r, 12).Value = row.Stage;
+            ws.Cell(r, 13).Value = row.StatusCode;
+            // Left EMPTY, not zero, when there is no clock: a container with no
+            // arrival date has an unknown elapsed time, and a zero would be
+            // averaged and charted as if it were instant.
+            if (row.ElapsedDays.HasValue) ws.Cell(r, 14).Value = row.ElapsedDays.Value;
+            ws.Cell(r, 15).Value = row.IsRunning ? "Yes" : "No";
+            if (row.ClosedAt.HasValue) ws.Cell(r, 16).Value = row.ClosedAt.Value.ToLocalTime();
+            ws.Cell(r, 17).Value = row.NotInCache ? "Yes" : "No";
+            ws.Cell(r, 18).Value = row.IsArchived ? "Yes" : "No";
+            r++;
+        }
+
+        ws.Cell(r + 1, 1).Value = cfg.StartDate.HasValue
+            ? $"Containers that arrived on or after {cfg.StartDate:yyyy-MM-dd}. Green up to {cfg.GoodDays} day(s), red above {cfg.WarnDays}."
+            : $"All containers. Green up to {cfg.GoodDays} day(s), red above {cfg.WarnDays}.";
+        if (rows.Count >= MaxRows)
+            ws.Cell(r + 2, 1).Value = $"Truncated at {MaxRows:N0} rows - narrow the filter for the rest.";
+        ws.Columns().AdjustToContents();
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        return File(ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"inspection-time-bar-{DateTime.Now:yyyyMMdd-HHmm}.xlsx");
+    }
+
+    /// <summary>
     /// Sets the page's own start date without a trip to Site Configuration.
     ///
     /// It lives here because this is where the question is asked. The date was

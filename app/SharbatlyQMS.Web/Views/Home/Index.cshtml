@@ -210,39 +210,42 @@
             <i class="bi bi-truck me-1"></i>Received vs Committed to QC
             <span class="badge bg-light text-dark border ms-1">@periodLabel</span>
         </span>
-        <span class="text-muted small">
-            @totalReceived @Loc["arrived"] &middot; @totalCommitted @Loc["taken into QC"]
-            @if (totalCoverage.HasValue)
-            {
-                <span class="ms-1 fw-semibold @(totalCoverage >= 100 ? "text-success" : (totalCoverage >= 80 ? "text-warning" : "text-danger"))">
-                    @totalCoverage.Value.ToString("0.#")% @Loc["covered"]
-                </span>
-            }
-            <span class="ms-2">
-                &middot; @totalQosMade @Loc["QC orders opened"]
+        <span class="d-flex align-items-center gap-2 flex-wrap">
+            <span class="text-muted small">
+                @totalReceived @Loc["received"] &middot; @totalCommitted @Loc["inspected"]
+                @if (totalCoverage.HasValue)
+                {
+                    <span class="ms-1 fw-semibold @(totalCoverage >= 100 ? "text-success" : (totalCoverage >= 80 ? "text-warning" : "text-danger"))">
+                        @totalCoverage.Value.ToString("0.#")%
+                    </span>
+                }
+                <span class="ms-2">&middot; @totalQosMade @Loc["total inspected"]</span>
                 @if (totalCatchUp > 0)
                 {
-                    <text>(@totalCatchUp @Loc["catching up on earlier arrivals"])</text>
+                    <span class="ms-1">(@totalCatchUp @Loc["backlog"])</span>
                 }
             </span>
+            <a class="btn btn-sm btn-outline-success py-0 px-2"
+               asp-action="CommitmentExcel" asp-all-route-data="Slice(f.Period, f.Plant)"
+               title="@Loc["Export this table to Excel"]">
+                <i class="bi bi-file-earmark-excel"></i>
+            </a>
         </span>
-    </div>
     <div class="card-body pt-0">
-        @* The distinction this portlet lives or dies by. "Received 3, QC orders
-           raised 13" looked impossible until it said which containers each
-           number is about: coverage follows the containers received in the
-           period, while the orders raised include catching up on earlier
-           arrivals. *@
-        @* An abstract definition of each column did not land. A worked example
-           does: it shows in one line why the last column can exceed the first,
-           which is the thing that looks wrong until it is explained. *@
-        <div class="alert alert-light border small py-2 mb-3">
-            <i class="bi bi-info-circle me-1"></i>
-            @Loc["The first four columns are all about the containers that ARRIVED in this period. The last two count QC orders OPENED in the period, whichever day their container arrived — which is why the total can be larger."]
-            <div class="text-muted mt-1">
-                @Loc["Example: 3 arrived and 1 of them is in QC (2 still waiting, 33% covered) — while the team opened 13 orders, 10 of them catching up on containers that arrived earlier. Nothing is wrong: coverage tracks this period's arrivals, output tracks the work done in it."]
+        @* Folded away. The explanation earns its place the first time someone
+           asks why the last columns exceed the first, and takes up half the
+           portlet every day after that. *@
+        <details class="small mb-2">
+            <summary class="text-muted" style="cursor:pointer">
+                @Loc["What do these columns count?"]
+            </summary>
+            <div class="mt-2 ps-3 border-start">
+                @Loc["The first four columns are about the containers RECEIVED in this period. The last three count inspections OPENED in the period, whichever day their container arrived — which is why the total can be larger."]
+                <div class="text-muted mt-1">
+                    @Loc["Total Inspected = Period Inspection + Backlog Inspected, always. Example: 3 received and 1 inspected (2 pending, 33% coverage), while the team opened 13 inspections — 10 of them clearing containers that arrived earlier."]
+                </div>
             </div>
-        </div>
+        </details>
         <div class="row g-3">
             <div class="col-lg-6">
                 <div class="table-responsive">
@@ -251,22 +254,25 @@
                             <tr>
                                 <th>@Loc["Plant"]</th>
                                 <th class="text-end" title='@Loc["Containers that arrived in this period."]'>
-                                    @Loc["Arrived"]
+                                    @Loc["Received"]
                                 </th>
-                                <th class="text-end" title='@Loc["How many of those arrived containers now have a QC order."]'>
-                                    @Loc["Taken into QC"]
+                                <th class="text-end" title='@Loc["Inspections opened in this period against containers received in it."]'>
+                                    @Loc["Period Inspection"]
                                 </th>
-                                <th class="text-end" title='@Loc["Arrived, but still has no QC order. Arrived minus Taken into QC."]'>
-                                    @Loc["Still waiting"]
+                                <th class="text-end" title='@Loc["Received minus Period Inspection: arrived but not yet inspected."]'>
+                                    @Loc["Pending Inspection"]
                                 </th>
-                                <th class="text-end" title='@Loc["Taken into QC as a share of Arrived."]'>
-                                    @Loc["Covered"]
+                                <th class="text-end" title='@Loc["Period Inspection as a share of Received."]'>
+                                    @Loc["Coverage"]
                                 </th>
-                                <th class="text-end border-start" title='@Loc["Every QC order opened in this period, whatever date its container arrived. A measure of the work done, not of coverage."]'>
-                                    @Loc["QC orders opened"]
+                                <th class="text-end border-start" title='@Loc["Of the inspections opened, how many were on containers that arrived BEFORE this period."]'>
+                                    @Loc["Backlog Inspected"]
                                 </th>
-                                <th class="text-end" title='@Loc["Of those orders, how many were on containers that arrived BEFORE this period - the backlog the team worked through."]'>
-                                    @Loc["...catching up"]
+                                <th class="text-end" title='@Loc["Every inspection opened in this period. Equals Period Inspection plus Backlog Inspected."]'>
+                                    @Loc["Total Inspected"]
+                                </th>
+                                <th class="text-end" title='@Loc["Total Inspected divided by the days in the period."]'>
+                                    @Loc["Daily Average"]
                                 </th>
                             </tr>
                         </thead>
@@ -308,11 +314,6 @@
                                         }
                                     </td>
                                     <td class="text-end border-start">
-                                        <a asp-controller="QualityOrders" asp-action="Index"
-                                           asp-all-route-data="Drill(row.Plant, null, true)"
-                                           class="text-decoration-none">@row.QosCreated</a>
-                                    </td>
-                                    <td class="text-end">
                                         @if (row.QosCatchUp > 0)
                                         {
                                             <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle"
@@ -325,11 +326,19 @@
                                             <span class="text-muted">&mdash;</span>
                                         }
                                     </td>
+                                    <td class="text-end fw-semibold">
+                                        <a asp-controller="QualityOrders" asp-action="Index"
+                                           asp-all-route-data="Drill(row.Plant, null, true)"
+                                           class="text-decoration-none">@row.QosCreated</a>
+                                    </td>
+                                    <td class="text-end text-muted">
+                                        @(row.DailyAverage(Model.PeriodDays)?.ToString("0.#") ?? "—")
+                                    </td>
                                 </tr>
                             }
                             @if (Model.Commitment.Count == 0)
                             {
-                                <tr><td colspan="7" class="text-center text-muted small py-3">
+                                <tr><td colspan="8" class="text-center text-muted small py-3">
                                     @Loc["Nothing arrived and no QC orders were opened in this period."]
                                 </td></tr>
                             }
@@ -358,8 +367,11 @@
                                             <span class="text-muted">&mdash;</span>
                                         }
                                     </td>
-                                    <td class="text-end border-start">@totalQosMade</td>
-                                    <td class="text-end">@(totalCatchUp > 0 ? totalCatchUp.ToString() : "—")</td>
+                                    <td class="text-end border-start">@(totalCatchUp > 0 ? totalCatchUp.ToString() : "—")</td>
+                                    <td class="text-end">@totalQosMade</td>
+                                    <td class="text-end">
+                                        @((Model.PeriodDays > 0 ? (double)totalQosMade / Model.PeriodDays : 0).ToString("0.#"))
+                                    </td>
                                 </tr>
                             </tfoot>
                         }

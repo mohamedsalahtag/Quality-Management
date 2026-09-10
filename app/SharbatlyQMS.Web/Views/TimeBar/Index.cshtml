@@ -56,8 +56,16 @@
             @Loc["Days from a container's arrival to the moment QC finished. Optimum is"] @cfg.GoodDays @Loc["day(s)."]
         </small>
     </h1>
-    <span class="text-muted small">
-        <i class="bi bi-clock-history me-1"></i>@Loc["As of"] @asOf.ToString("yyyy-MM-dd HH:mm")
+    <span class="d-flex align-items-center gap-2">
+        <span class="text-muted small">
+            <i class="bi bi-clock-history me-1"></i>@Loc["As of"] @asOf.ToString("yyyy-MM-dd HH:mm")
+        </span>
+        @* Exports the WHOLE filtered list, not the page on screen. *@
+        <a class="btn btn-sm btn-outline-success" asp-action="Excel"
+           asp-all-route-data="Route(new { })"
+           title="@Loc["Export every matching row to Excel"]">
+            <i class="bi bi-file-earmark-excel me-1"></i>@Loc["Excel"]
+        </a>
     </span>
 </div>
 
