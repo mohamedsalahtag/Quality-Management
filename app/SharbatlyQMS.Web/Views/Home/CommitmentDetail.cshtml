@@ -1,0 +1,113 @@
+@using SharbatlyQMS.Web.ViewModels
+@model IReadOnlyList<CommitmentDetailRow>
+@{
+    var bucket   = ViewBag.Bucket as string ?? CommitmentBuckets.Received;
+    var caption  = CommitmentBuckets.Caption(bucket);
+    var explain  = CommitmentBuckets.Explain(bucket);
+    var plant    = ViewBag.DetailPlant as string;
+    var filter   = ViewBag.Filter as DashboardFilter ?? new DashboardFilter();
+    var from     = ViewBag.PeriodFrom as DateTime? ?? DateTime.Today;
+    var to       = ViewBag.PeriodTo   as DateTime? ?? DateTime.Today;
+    ViewData["Title"] = caption;
+
+    // Back to the dashboard on the same slice the reader came from.
+    var back = new Dictionary<string, string> { ["period"] = filter.Period ?? "" };
+    if (!string.IsNullOrWhiteSpace(filter.Plant)) back["plant"] = filter.Plant!;
+    if (filter.From.HasValue) back["from"] = filter.From.Value.ToString("yyyy-MM-dd");
+    if (filter.To.HasValue)   back["to"]   = filter.To.Value.ToString("yyyy-MM-dd");
+}
+
+<div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+    <h1 class="h4 mb-0">
+        @caption
+        <span class="badge bg-secondary ms-1">@Model.Count</span>
+        @if (!string.IsNullOrWhiteSpace(plant))
+        {
+            <span class="badge bg-light text-dark border ms-1">@Codes.PlantDisplay(plant)</span>
+        }
+    </h1>
+    <div class="d-flex gap-2">
+        <a class="btn btn-sm btn-outline-secondary" asp-action="Index" asp-all-route-data="back">
+            <i class="bi bi-arrow-left me-1"></i>@Loc["Back to dashboard"]
+        </a>
+        <a class="btn btn-sm btn-outline-success" asp-action="CommitmentExcel" asp-all-route-data="back">
+            <i class="bi bi-file-earmark-excel me-1"></i>@Loc["Excel"]
+        </a>
+    </div>
+</div>
+
+<p class="text-muted small">
+    @explain
+    <span class="ms-1">@from.ToString("yyyy-MM-dd") &ndash; @to.ToString("yyyy-MM-dd")</span>
+</p>
+
+<div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle mb-0" data-tablekit data-page-size="50">
+            <thead class="table-light">
+                <tr>
+                    <th data-sort>@Loc["Plant"]</th>
+                    <th data-sort>@Loc["Arrival"]</th>
+                    <th data-sort>@Loc["Container"]</th>
+                    <th data-sort>@Loc["BOL"]</th>
+                    <th data-sort>@Loc["PO"]</th>
+                    <th data-sort>@Loc["Supplier"]</th>
+                    <th data-sort>@Loc["Received on"]</th>
+                    <th data-sort>@Loc["Inspection"]</th>
+                    <th data-sort>@Loc["Opened on"]</th>
+                    <th data-sort="num" class="text-end">@Loc["Days"]</th>
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Count == 0)
+            {
+                <tr><td colspan="10" class="text-center text-muted py-4">
+                    @Loc["Nothing in this group for the chosen period."]
+                </td></tr>
+            }
+            else
+            {
+                foreach (var r in Model)
+                {
+                    <tr>
+                        <td>@Codes.PlantDisplay(r.Plant)</td>
+                        <td>
+                            <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@r.ArrivalId"
+                               class="text-decoration-none">@r.ArrivalNo</a>
+                        </td>
+                        <td class="font-monospace small">@r.ContainerNo</td>
+                        <td class="small">@r.BolNo</td>
+                        <td class="small">@r.Ebeln</td>
+                        <td class="small">@r.VendorName</td>
+                        <td class="small">@r.ArrivalCreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                        <td>
+                            @if (r.QualityOrderId.HasValue)
+                            {
+                                <a asp-controller="QualityOrders" asp-action="Details" asp-route-id="@r.QualityOrderId"
+                                   class="text-decoration-none">@r.QualityOrderNo</a>
+                            }
+                            else
+                            {
+                                @* The whole point of the pending group: say so
+                                   rather than leaving a blank that reads as
+                                   missing data. *@
+                                <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                                    @Loc["Not inspected"]
+                                </span>
+                            }
+                        </td>
+                        <td class="small">
+                            @(r.QoCreatedAt?.ToLocalTime().ToString("yyyy-MM-dd") ?? "—")
+                        </td>
+                        <td class="text-end">@(r.DaysToInspection?.ToString() ?? "—")</td>
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@section Scripts {
+    <script src="~/js/tablekit.js" asp-append-version="true"></script>
+}

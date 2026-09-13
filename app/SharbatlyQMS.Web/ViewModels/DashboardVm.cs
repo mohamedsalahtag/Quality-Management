@@ -292,3 +292,71 @@ public class TopDefectRow
     /// i.e. its own contribution to the headline rate, so the rows add up to it.</summary>
     public decimal PctOfInspected { get; set; }
 }
+
+/// <summary>
+/// The five ways to slice the Received vs Inspected portlet. The names are the
+/// column captions, because a user who clicks a number and lands on a page
+/// should see the word they clicked.
+/// </summary>
+public static class CommitmentBuckets
+{
+    public const string Received          = "received";
+    public const string PeriodInspection  = "period";
+    public const string PendingInspection = "pending";
+    public const string BacklogInspected  = "backlog";
+    public const string TotalInspected    = "total";
+
+    /// <summary>Caption, and the sheet name in the workbook.</summary>
+    public static string Caption(string bucket) => bucket switch
+    {
+        PeriodInspection  => "Period Inspection",
+        PendingInspection => "Pending Inspection",
+        BacklogInspected  => "Backlog Inspected",
+        TotalInspected    => "Total Inspected",
+        _                 => "Received"
+    };
+
+    /// <summary>What the rows in that bucket actually are, said plainly.</summary>
+    public static string Explain(string bucket) => bucket switch
+    {
+        PeriodInspection  => "Containers received in this period that were inspected in it.",
+        PendingInspection => "Containers received in this period with no inspection opened in it.",
+        BacklogInspected  => "Inspections opened in this period on containers received BEFORE it.",
+        TotalInspected    => "Every inspection opened in this period, whenever its container arrived.",
+        _                 => "Containers received in this period."
+    };
+
+    public static readonly string[] All =
+        { Received, PeriodInspection, PendingInspection, BacklogInspected, TotalInspected };
+
+    public static bool IsValid(string? b) =>
+        !string.IsNullOrWhiteSpace(b) && All.Contains(b, StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>
+/// One container (and its inspection, where there is one) behind a number on
+/// the Received vs Inspected portlet. The same rows feed the drill-through page
+/// and the workbook, so what is exported is what was on screen.
+/// </summary>
+public class CommitmentDetailRow
+{
+    public string    Plant           { get; set; } = "";
+    public long      ArrivalId       { get; set; }
+    public string?   ArrivalNo       { get; set; }
+    public string?   ContainerNo     { get; set; }
+    public string?   BolNo           { get; set; }
+    public string?   Ebeln           { get; set; }
+    public string?   VendorName      { get; set; }
+    public string?   ArrivalStatus   { get; set; }
+    public DateTime  ArrivalCreatedAt{ get; set; }
+    public long?     QualityOrderId  { get; set; }
+    public string?   QualityOrderNo  { get; set; }
+    public string?   QoStatus        { get; set; }
+    public DateTime? QoCreatedAt     { get; set; }
+    public DateTime? QoClosedAt      { get; set; }
+
+    /// <summary>Days from the container being received to its inspection being
+    /// opened. Null while nothing has been opened.</summary>
+    public int? DaysToInspection =>
+        QoCreatedAt.HasValue ? Math.Max(0, (int)(QoCreatedAt.Value.Date - ArrivalCreatedAt.Date).TotalDays) : null;
+}

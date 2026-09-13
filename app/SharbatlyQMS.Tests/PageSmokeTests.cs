@@ -44,6 +44,16 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         "/?period=30d",
         "/?period=90d",
         "/?period=custom&from=2026-08-01&to=2026-08-31",
+        // Every drill-through off the Received vs Inspected portlet. Each one
+        // is a different predicate and a different join shape, so a broken
+        // bucket shows up here rather than under somebody's mouse.
+        "/Home/CommitmentDetail?bucket=received&period=30d",
+        "/Home/CommitmentDetail?bucket=period&period=30d",
+        "/Home/CommitmentDetail?bucket=pending&period=30d",
+        "/Home/CommitmentDetail?bucket=backlog&period=30d",
+        "/Home/CommitmentDetail?bucket=total&period=30d",
+        "/Home/CommitmentDetail?bucket=nonsense&period=30d",
+        "/Home/CommitmentExcel?period=7d",
         "/?period=30d&plant=1010",
         "/Arrivals",
         "/Arrivals/Pending",          // container picker, reads the SAP cache

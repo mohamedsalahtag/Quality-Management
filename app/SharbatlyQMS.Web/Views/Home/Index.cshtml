@@ -80,6 +80,20 @@
     var totalQosMade   = Model.Commitment.Sum(x => x.QosCreated);
     var totalOutstanding = Model.Commitment.Sum(x => x.Outstanding);
     var totalCatchUp   = Model.Commitment.Sum(x => x.QosCatchUp);
+
+    // Clicking a number has to land on exactly the rows it counted, so the link
+    // carries the same period the portlet was drawn with rather than the
+    // defaults the detail page would otherwise resolve.
+    Func<string, string?, Dictionary<string, string>> Bucket = (bucket, rowPlant) =>
+    {
+        var d = new Dictionary<string, string> { ["bucket"] = bucket };
+        if (!string.IsNullOrWhiteSpace(f.Period)) d["period"] = f.Period!;
+        if (!string.IsNullOrWhiteSpace(f.Plant))  d["plant"]  = f.Plant!;
+        if (f.From.HasValue) d["from"] = f.From.Value.ToString("yyyy-MM-dd");
+        if (f.To.HasValue)   d["to"]   = f.To.Value.ToString("yyyy-MM-dd");
+        if (!string.IsNullOrWhiteSpace(rowPlant)) d["detailPlant"] = rowPlant!;
+        return d;
+    };
     decimal? totalCoverage = totalReceived == 0
         ? null : Math.Round(totalCommitted * 100m / totalReceived, 1);
     var rate = Model.DefectRate;
@@ -287,19 +301,27 @@
                                         </a>
                                     </td>
                                     <td class="text-end">
-                                        <a asp-controller="Arrivals" asp-action="Index"
-                                           asp-all-route-data="Drill(row.Plant, null, true)"
+                                        <a asp-action="CommitmentDetail"
+                                           asp-all-route-data="Bucket(CommitmentBuckets.Received, row.Plant)"
                                            class="text-decoration-none">@row.Received</a>
                                     </td>
                                     <td class="text-end">
-                                        @* Opens the ARRIVALS received in the period, which is
-                                           the set this number is a property of. *@
-                                        <a asp-controller="Arrivals" asp-action="Index"
-                                           asp-all-route-data="Drill(row.Plant, null, true)"
+                                        <a asp-action="CommitmentDetail"
+                                           asp-all-route-data="Bucket(CommitmentBuckets.PeriodInspection, row.Plant)"
                                            class="text-decoration-none">@row.Committed</a>
                                     </td>
                                     <td class="text-end @(row.Outstanding > 0 ? "text-danger fw-semibold" : "text-muted")">
-                                        @row.Outstanding
+                                        @if (row.Outstanding > 0)
+                                        {
+                                            <a asp-action="CommitmentDetail"
+                                               asp-all-route-data="Bucket(CommitmentBuckets.PendingInspection, row.Plant)"
+                                               class="text-reset text-decoration-none border-bottom border-danger-subtle"
+                                               title="@Loc["Show the containers still waiting"]">@row.Outstanding</a>
+                                        }
+                                        else
+                                        {
+                                            @row.Outstanding
+                                        }
                                     </td>
                                     <td class="text-end">
                                         @if (row.CoveragePct.HasValue)
@@ -316,10 +338,12 @@
                                     <td class="text-end border-start">
                                         @if (row.QosCatchUp > 0)
                                         {
-                                            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle"
-                                                  title="@row.QosOnNewArrivals on this period's arrivals, @row.QosCatchUp on earlier ones">
+                                            <a asp-action="CommitmentDetail"
+                                               asp-all-route-data="Bucket(CommitmentBuckets.BacklogInspected, row.Plant)"
+                                               class="badge bg-info-subtle text-info-emphasis border border-info-subtle text-decoration-none"
+                                               title="@row.QosOnNewArrivals on this period's arrivals, @row.QosCatchUp on earlier ones">
                                                 @row.QosCatchUp
-                                            </span>
+                                            </a>
                                         }
                                         else
                                         {
@@ -327,8 +351,8 @@
                                         }
                                     </td>
                                     <td class="text-end fw-semibold">
-                                        <a asp-controller="QualityOrders" asp-action="Index"
-                                           asp-all-route-data="Drill(row.Plant, null, true)"
+                                        <a asp-action="CommitmentDetail"
+                                           asp-all-route-data="Bucket(CommitmentBuckets.TotalInspected, row.Plant)"
                                            class="text-decoration-none">@row.QosCreated</a>
                                     </td>
                                     <td class="text-end text-muted">

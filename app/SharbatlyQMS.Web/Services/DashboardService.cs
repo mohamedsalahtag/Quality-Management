@@ -582,4 +582,103 @@ public class DashboardService : IDashboardService
         public List<CommitmentPoint>       CommitmentTrend  { get; set; } = new();
         public IReadOnlyList<string>       PlantOptions     { get; set; } = Array.Empty<string>();
     }
+
+    /// <summary>
+    /// One bucket of the Received vs Inspected portlet, row by row.
+    ///
+    /// The five predicates are written out rather than composed, because each
+    /// answers a different question and a clever shared expression would be
+    /// read wrong the first time somebody changed one of them. They mirror the
+    /// portlet's own SQL exactly:
+    ///
+    ///   received  arrivals created in the period
+    ///   period    ... that also have an inspection opened in the period
+    ///   pending   ... that do not
+    ///   backlog   inspections opened in the period on EARLIER arrivals
+    ///   total     inspections opened in the period, whenever the container came
+    ///
+    /// No arrival in this database has ever carried more than one quality
+    /// order, so counting containers and counting inspections give the same
+    /// answer and both of the portlet's identities hold:
+    ///   Received = Period + Pending, and Total = Period + Backlog.
+    /// </summary>
+    public async Task<IReadOnlyList<CommitmentDetailRow>> GetCommitmentDetailAsync(
+        DashboardFilter filter, PlantScope scope, string bucket, string? plant,
+        CancellationToken ct = default)
+    {
+        filter ??= new DashboardFilter();
+        scope  ??= PlantScope.All;
+        if (!CommitmentBuckets.IsValid(bucket)) bucket = CommitmentBuckets.Received;
+
+        // A plant the caller does not hold is dropped, not refused -- the same
+        // way the dashboard itself degrades a shared link -- but it can only
+        // ever NARROW, never widen: the scope predicate below is separate.
+        if (!string.IsNullOrWhiteSpace(plant) && !scope.Allows(plant)) plant = null;
+        if (!string.IsNullOrWhiteSpace(filter.Plant) && !scope.Allows(filter.Plant)) filter.Plant = null;
+        plant ??= filter.Plant;
+
+        var (fromLocal, toLocal) = filter.Resolve();
+        var fromUtc = DateTime.SpecifyKind(fromLocal, DateTimeKind.Local).ToUniversalTime();
+        var toUtcEx = DateTime.SpecifyKind(toLocal.AddDays(1), DateTimeKind.Local).ToUniversalTime();
+
+        const string openedInPeriod =
+            "EXISTS (SELECT 1 FROM qms_quality_order q2 WHERE q2.arrival_id = a.arrival_id " +
+            "AND q2.created_at >= @fromUtc AND q2.created_at < @toUtcEx)";
+
+        // Which rows, and which date window applies to which table.
+        var where = bucket.ToLowerInvariant() switch
+        {
+            CommitmentBuckets.PeriodInspection =>
+                $"a.created_at >= @fromUtc AND a.created_at < @toUtcEx AND {openedInPeriod}",
+            CommitmentBuckets.PendingInspection =>
+                $"a.created_at >= @fromUtc AND a.created_at < @toUtcEx AND NOT {openedInPeriod}",
+            CommitmentBuckets.BacklogInspected =>
+                "qo.created_at >= @fromUtc AND qo.created_at < @toUtcEx AND a.created_at < @fromUtc",
+            CommitmentBuckets.TotalInspected =>
+                "qo.created_at >= @fromUtc AND qo.created_at < @toUtcEx",
+            _ => "a.created_at >= @fromUtc AND a.created_at < @toUtcEx"
+        };
+
+        // The two inspection buckets are ABOUT the order, so they inner-join it;
+        // the container buckets must still list a container with no order at
+        // all, which is the whole point of the pending one.
+        var join = bucket.ToLowerInvariant() is CommitmentBuckets.BacklogInspected
+                                             or CommitmentBuckets.TotalInspected
+            ? "JOIN"
+            : "LEFT JOIN";
+
+        var sql = $@"
+            SELECT  a.plant                    AS Plant,
+                    a.arrival_id               AS ArrivalId,
+                    a.arrival_no               AS ArrivalNo,
+                    a.container_no             AS ContainerNo,
+                    a.bol_no                   AS BolNo,
+                    a.ebeln                    AS Ebeln,
+                    a.vendor_name              AS VendorName,
+                    a.status_code              AS ArrivalStatus,
+                    a.created_at               AS ArrivalCreatedAt,
+                    qo.quality_order_id        AS QualityOrderId,
+                    qo.quality_order_no        AS QualityOrderNo,
+                    qo.status_code             AS QoStatus,
+                    qo.created_at              AS QoCreatedAt,
+                    qo.closed_at               AS QoClosedAt
+            FROM    qms_arrival a
+            {join}  qms_quality_order qo ON qo.arrival_id = a.arrival_id
+            WHERE   {where}
+              AND   (@plant IS NULL OR a.plant = @plant)
+              AND   (@sUnrestricted = 1 OR a.plant IN @sPlants)
+            ORDER BY a.plant, a.created_at DESC, a.arrival_no";
+
+        using var c = new SqlConnection(_cs);
+        var rows = await c.QueryAsync<CommitmentDetailRow>(new CommandDefinition(sql, new
+        {
+            fromUtc,
+            toUtcEx,
+            plant = string.IsNullOrWhiteSpace(plant) ? null : plant.Trim(),
+            sUnrestricted = scope.Unrestricted,
+            sPlants       = scope.QueryPlants
+        }, commandTimeout: 120, cancellationToken: ct));
+
+        return rows.ToList();
+    }
 }

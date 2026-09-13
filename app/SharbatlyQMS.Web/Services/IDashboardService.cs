@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Models;
+﻿using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Services;
@@ -17,5 +17,17 @@ public interface IDashboardService
     /// the plants they hold. The filter can narrow the scope, never widen it.
     /// </summary>
     Task<DashboardVm> GetSummaryAsync(DashboardFilter filter, PlantScope scope,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// The containers behind one number on the Received vs Inspected portlet.
+    ///
+    /// Driven by the same period, plant scope and definitions as the portlet
+    /// itself, so a drill-through can never disagree with the figure that was
+    /// clicked. <paramref name="plant"/> narrows to a single row of the table;
+    /// null returns every plant in scope.
+    /// </summary>
+    Task<IReadOnlyList<CommitmentDetailRow>> GetCommitmentDetailAsync(
+        DashboardFilter filter, PlantScope scope, string bucket, string? plant,
         CancellationToken ct = default);
 }

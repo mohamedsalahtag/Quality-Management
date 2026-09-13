@@ -40,6 +40,31 @@ public class HomeController : Controller
     }
 
     /// <summary>
+    /// The containers behind one number on the Received vs Inspected portlet.
+    /// Reached by clicking the number itself, so the page has to answer with
+    /// exactly the rows that were counted -- it shares the portlet's query for
+    /// that reason rather than approximating it with list-page filters.
+    /// </summary>
+    [RequireScreen(Screens.Dashboard, Seed.Everyone, "Open the dashboard")]
+    public async Task<IActionResult> CommitmentDetail([FromQuery] DashboardFilter filter,
+        string bucket, string? detailPlant, CancellationToken ct)
+    {
+        filter ??= new DashboardFilter();
+        if (!CommitmentBuckets.IsValid(bucket)) bucket = CommitmentBuckets.Received;
+
+        var scope = User.GetPlantScope();
+        var rows  = await _dashboard.GetCommitmentDetailAsync(filter, scope, bucket, detailPlant, ct);
+
+        var (pf, pt) = filter.Resolve();
+        ViewBag.Bucket      = bucket;
+        ViewBag.DetailPlant = detailPlant;
+        ViewBag.Filter      = filter;
+        ViewBag.PeriodFrom  = pf;
+        ViewBag.PeriodTo    = pt;
+        return View(rows);
+    }
+
+    /// <summary>
     /// The Received vs Inspected table as a workbook, for the same period and
     /// plant scope the dashboard is showing. Small by nature -- one row per
     /// plant -- so it is built in memory rather than streamed.
@@ -102,7 +127,22 @@ public class HomeController : Controller
         // is a month later.
         var (pf, pt) = (filter ?? new DashboardFilter()).Resolve();
         ws.Cell(r + 2, 1).Value = $"Period {pf:yyyy-MM-dd} to {pt:yyyy-MM-dd} ({vm.PeriodDays} day(s))";
-        ws.Columns().AdjustToContents();
+        // Bounded to the columns actually used. ws.Columns() with no arguments
+        // covers all 16,384 of them, and auto-fitting that many takes tens of
+        // seconds whatever is in the sheet.
+        ws.Columns(1, headers.Length).AdjustToContents();
+
+        // One sheet per column, carrying the containers behind the number
+        // rather than the number alone. Same query the drill-through page uses,
+        // so a sheet's row count equals the figure on the summary sheet.
+        var scope = User.GetPlantScope();
+        foreach (var bucket in CommitmentBuckets.All)
+        {
+            var rows = await _dashboard.GetCommitmentDetailAsync(
+                filter ?? new DashboardFilter(), scope, bucket, null, ct);
+            WriteDetailSheet(wb, CommitmentBuckets.Caption(bucket),
+                             CommitmentBuckets.Explain(bucket), rows);
+        }
 
         using var ms = new MemoryStream();
         wb.SaveAs(ms);
@@ -127,5 +167,59 @@ public class HomeController : Controller
     {
         Response.StatusCode = code ?? 500;
         return View("HttpError", code ?? 500);
+    }
+
+    /// <summary>
+    /// One detail sheet. Dates are written as dates rather than text so the
+    /// reader can sort and subtract them; an absent inspection leaves its cells
+    /// EMPTY rather than filled with a dash, because a dash in a date column
+    /// makes the whole column text and Excel then sorts 10 before 9.
+    /// </summary>
+    private static void WriteDetailSheet(ClosedXML.Excel.XLWorkbook wb, string name,
+        string explanation, IReadOnlyList<CommitmentDetailRow> rows)
+    {
+        var ws = wb.Worksheets.Add(name);
+
+        ws.Cell(1, 1).Value = explanation;
+        ws.Cell(1, 1).Style.Font.Italic = true;
+
+        var headers = new[]
+        {
+            "Plant", "Arrival", "Container", "BOL", "PO", "Supplier",
+            "Arrival status", "Received on", "Inspection", "Inspection status",
+            "Opened on", "Finished on", "Days to inspection"
+        };
+        for (var i = 0; i < headers.Length; i++)
+        {
+            ws.Cell(2, i + 1).Value = headers[i];
+            ws.Cell(2, i + 1).Style.Font.Bold = true;
+        }
+
+        var r = 3;
+        foreach (var row in rows)
+        {
+            ws.Cell(r,  1).Value = row.Plant;
+            ws.Cell(r,  2).Value = row.ArrivalNo;
+            ws.Cell(r,  3).Value = row.ContainerNo;
+            ws.Cell(r,  4).Value = row.BolNo;
+            ws.Cell(r,  5).Value = row.Ebeln;
+            ws.Cell(r,  6).Value = row.VendorName;
+            ws.Cell(r,  7).Value = row.ArrivalStatus;
+            ws.Cell(r,  8).Value = row.ArrivalCreatedAt.ToLocalTime();
+            ws.Cell(r,  9).Value = row.QualityOrderNo;
+            ws.Cell(r, 10).Value = row.QoStatus;
+            if (row.QoCreatedAt.HasValue) ws.Cell(r, 11).Value = row.QoCreatedAt.Value.ToLocalTime();
+            if (row.QoClosedAt.HasValue)  ws.Cell(r, 12).Value = row.QoClosedAt.Value.ToLocalTime();
+            if (row.DaysToInspection.HasValue) ws.Cell(r, 13).Value = row.DaysToInspection.Value;
+            r++;
+        }
+
+        ws.Range(2, 1, 2, headers.Length).SetAutoFilter();
+        ws.SheetView.FreezeRows(2);
+
+        // Bounded to the columns in use. ws.Columns() with no arguments covers
+        // all 16,384 of them, and auto-fitting that many is pure waste on a
+        // sheet thirteen columns wide.
+        ws.Columns(1, headers.Length).AdjustToContents();
     }
 }
