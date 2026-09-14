@@ -903,6 +903,7 @@ public class AdminController : Controller
                    d.defect_category DefectCategory,
                    d.is_active IsActive, d.sort_order SortOrder,
                    d.material_group MaterialGroup, d.value_type ValueType,
+                   d.tolerance Tolerance,
                    CAST(CASE WHEN EXISTS (SELECT 1 FROM qms_sample_defect sd WHERE sd.defect_id = d.defect_id)
                              THEN 1 ELSE 0 END AS BIT) IsInUse
             FROM   qms_defect_catalog d
@@ -921,8 +922,23 @@ public class AdminController : Controller
     [RequirePermission(Perm.Parameters.DefectCatalogEdit, Seed.ManagerOrAdmin, "Edit the Defect Catalog")]
     public async Task<IActionResult> SaveDefect(int defectId, string materialGroup, string defectCode,
         string defectName, string defectCategory, string valueType,
-        bool isActive, int sortOrder)
+        bool isActive, int sortOrder, decimal? tolerance = null)
     {
+        // One decimal place, decided here rather than left to the column: the
+        // database would round it silently, and an administrator who typed
+        // 2.55 should see what was actually kept rather than discover it later
+        // on a report. Blank stays blank -- NULL means no tolerance agreed,
+        // which is a different statement from zero.
+        if (tolerance.HasValue)
+        {
+            if (tolerance < 0)
+            {
+                TempData["Error"] = "Tolerance cannot be negative.";
+                return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
+            }
+            tolerance = Math.Round(tolerance.Value, 1, MidpointRounding.AwayFromZero);
+        }
+
         if (string.IsNullOrWhiteSpace(materialGroup))
         {
             TempData["Error"] = "Material group is required.";
@@ -945,11 +961,11 @@ public class AdminController : Controller
             await c.ExecuteAsync(@"
                 INSERT INTO qms_defect_catalog
                     (material_group, defect_code, defect_name, defect_category, value_type,
-                     is_active, sort_order)
+                     is_active, sort_order, tolerance)
                 VALUES
                     (@materialGroup, @defectCode, @defectName, @defectCategory, @valueType,
-                     @isActive, @sortOrder)",
-                new { materialGroup, defectCode, defectName, defectCategory, valueType, isActive, sortOrder });
+                     @isActive, @sortOrder, @tolerance)",
+                new { materialGroup, defectCode, defectName, defectCategory, valueType, isActive, sortOrder, tolerance });
             TempData["Success"] = $"Defect '{defectName}' added to {materialGroup}.";
         }
         else
@@ -958,14 +974,14 @@ public class AdminController : Controller
                 UPDATE qms_defect_catalog SET
                   material_group=@materialGroup, defect_code=@defectCode, defect_name=@defectName,
                   defect_category=@defectCategory, value_type=@valueType,
-                  is_active=@isActive, sort_order=@sortOrder
+                  is_active=@isActive, sort_order=@sortOrder, tolerance=@tolerance
                 WHERE defect_id=@defectId",
-                new { defectId, materialGroup, defectCode, defectName, defectCategory, valueType, isActive, sortOrder });
+                new { defectId, materialGroup, defectCode, defectName, defectCategory, valueType, isActive, sortOrder, tolerance });
             TempData["Success"] = "Defect updated.";
         }
         await AuditAdminAsync(EntityTypes.DefectCatalog, defectId <= 0 ? 0 : defectId,
             defectId <= 0 ? ActionCodes.Created : ActionCodes.Updated,
-            null, new { materialGroup, defectCode, defectName, defectCategory, valueType, isActive, sortOrder });
+            null, new { materialGroup, defectCode, defectName, defectCategory, valueType, isActive, sortOrder, tolerance });
         _catalogCache.Invalidate();
         return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
     }

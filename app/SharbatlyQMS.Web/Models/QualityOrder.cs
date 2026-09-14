@@ -217,6 +217,16 @@ public class DefectCatalogEntry
     public string MaterialGroup  { get; set; } = "";
     /// <summary>Number = integer steps only; Decimal = allow fractional values on the sample form.</summary>
     public string ValueType      { get; set; } = "Number";
+    /// <summary>
+    /// The level at or below which this defect is accepted for its material
+    /// group, to one decimal place.
+    ///
+    /// NULL is not zero: NULL means no tolerance has been agreed, while 0.0
+    /// means any occurrence at all fails. The catalog screen shows the two
+    /// differently, so do not collapse one into the other.
+    /// </summary>
+    public decimal? Tolerance    { get; set; }
+
     /// <summary>True when at least one sample defect references this catalog row -- delete is then blocked.</summary>
     public bool   IsInUse        { get; set; }
 }

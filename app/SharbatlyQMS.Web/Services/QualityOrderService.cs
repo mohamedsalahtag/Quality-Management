@@ -1163,7 +1163,8 @@ public class QualityOrderService : IQualityOrderService
             SELECT defect_id DefectId, defect_code DefectCode, defect_name DefectName,
                    defect_category DefectCategory,
                    is_active IsActive, sort_order SortOrder,
-                   material_group MaterialGroup, value_type ValueType
+                   material_group MaterialGroup, value_type ValueType,
+                   tolerance Tolerance
             FROM   qms_defect_catalog WHERE is_active = 1
             ORDER  BY material_group, sort_order, defect_name");
         return rows.ToList();
@@ -1182,7 +1183,8 @@ public class QualityOrderService : IQualityOrderService
             SELECT defect_id DefectId, defect_code DefectCode, defect_name DefectName,
                    defect_category DefectCategory,
                    is_active IsActive, sort_order SortOrder,
-                   material_group MaterialGroup, value_type ValueType
+                   material_group MaterialGroup, value_type ValueType,
+                   tolerance Tolerance
             FROM   qms_defect_catalog
             WHERE  is_active = 1 AND material_group = @materialGroup
             ORDER  BY sort_order, defect_name", new { materialGroup });
@@ -1608,7 +1610,8 @@ public class QualityOrderService : IQualityOrderService
                        defect_category AS DefectCategory,
                        is_active      AS IsActive,
                        sort_order     AS SortOrder,
-                       material_group AS MaterialGroup
+                       material_group AS MaterialGroup,
+                       tolerance      AS Tolerance
                 FROM   qms_defect_catalog
                 WHERE  is_active = 1 AND material_group IN @groups
                 ORDER  BY material_group, sort_order, defect_name",
