@@ -31,6 +31,19 @@
                 <a asp-action="DefectCatalog" class="btn btn-sm btn-outline-secondary">@Loc["Clear"]</a>
             }
         </form>
+        @* Export and re-upload, for maintaining tolerances in bulk. Exports
+           what the filter above is showing, so working on one material group
+           does not mean downloading all seven hundred rows. *@
+        <a class="btn btn-outline-success"
+           asp-action="DefectCatalogExcel" asp-route-materialGroup="@filterGroup"
+           title="@Loc["Export these defects to Excel"]">
+            <i class="bi bi-file-earmark-excel me-1"></i>@Loc["Export"]
+        </a>
+        <button type="button" class="btn btn-outline-primary"
+                data-bs-toggle="modal" data-bs-target="#importModal"
+                title="@Loc["Upload the exported file after editing its tolerances"]">
+            <i class="bi bi-upload me-1"></i>@Loc["Import tolerances"]
+        </button>
         <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#defectModal" data-mode="create"
                 data-default-group="@(filterGroup ?? "")">
             <i class="bi bi-plus-circle me-1"></i>Add defect
@@ -74,7 +87,7 @@
                         <td class="text-end">
                             @if (d.Tolerance.HasValue)
                             {
-                                <span>@d.Tolerance.Value.ToString("0.0")</span>
+                                <span>@d.Tolerance.Value.ToString(DefectTolerance.Format)</span>
                             }
                             else
                             {
@@ -91,7 +104,7 @@
                                     data-cat="@d.DefectCategory" data-vtype="@d.ValueType"
                                     data-active="@d.IsActive.ToString().ToLower()"
                                     data-sort="@d.SortOrder"
-                                    data-tol="@(d.Tolerance?.ToString("0.0", System.Globalization.CultureInfo.InvariantCulture))"
+                                    data-tol="@(d.Tolerance?.ToString(DefectTolerance.Format, System.Globalization.CultureInfo.InvariantCulture))"
                                     title="Edit">
                                 <i class="bi bi-pencil"></i>
                             </button>
@@ -170,10 +183,10 @@
                             @foreach (var v in valueTypes) { <option>@v</option> }
                         </select></div>
                     <div class="col-md-6"><label class="form-label" for="d-tol">@Loc["Tolerance"]</label>
-                        <input name="tolerance" id="d-tol" type="number" step="0.1" min="0"
+                        <input name="tolerance" id="d-tol" type="number" step="0.01" min="0"
                                class="form-control" inputmode="decimal" />
                         <small class="text-muted">
-                            @Loc["One decimal place. Leave empty when no tolerance has been agreed — that is not the same as 0."]
+                            @Loc["Two decimal places. Leave empty when no tolerance has been agreed — that is not the same as 0."]
                         </small></div>
                     <div class="col-12"><div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" name="isActive" id="d-active" value="true" checked />
@@ -184,6 +197,46 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
                 <button type="submit" class="btn btn-primary">@Loc["Save"]</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@* ---- Import tolerances ------------------------------------------------
+   Deliberately narrow: the workbook carries every column so a row can be
+   recognised, but only the Tolerance is read back. An import that also
+   rewrote codes, names or categories would turn one careless sort in Excel
+   into seven hundred renamed defects with no undo. ---- *@
+<div class="modal fade" id="importModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form asp-action="DefectCatalogImport" method="post" enctype="multipart/form-data" class="modal-content">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="materialGroup" value="@filterGroup" />
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-upload me-1"></i>@Loc["Import tolerances"]</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">
+                    @Loc["Export the catalog, fill in the Tolerance column, and upload the same file here."]
+                </p>
+                <div class="mb-3">
+                    <label class="form-label" for="imp-file">@Loc["Excel file (.xlsx)"]</label>
+                    <input type="file" name="file" id="imp-file" accept=".xlsx"
+                           class="form-control" required />
+                </div>
+                <ul class="small text-muted mb-0 ps-3">
+                    <li>@Loc["Only the Tolerance column is read. Everything else is ignored, so a stray edit cannot rename a defect."]</li>
+                    <li>@Loc["Rows are matched on Defect ID, so sorting or filtering the sheet is safe."]</li>
+                    <li>@Loc["An empty Tolerance clears it, which means no tolerance agreed — not zero."]</li>
+                    <li>@Loc["If any row cannot be read, nothing at all is imported."]</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="submit" class="btn btn-primary">
+                    <i class="bi bi-upload me-1"></i>@Loc["Import"]
+                </button>
             </div>
         </form>
     </div>

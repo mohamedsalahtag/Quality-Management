@@ -205,6 +205,22 @@ public class SampleDefect
     public string   DisplaySection    { get; set; } = "Minor"; // joined from material_group_defect
 }
 
+/// <summary>
+/// How a defect tolerance is held and shown.
+///
+/// One place, because the scale is asserted in four: the column type, the
+/// rounding on save, the number input's step, and the format the grid and the
+/// workbook print. When they disagree the value that comes back is not the
+/// value that was typed, and nobody notices until a supplier quotes it back.
+/// </summary>
+public static class DefectTolerance
+{
+    public const int    Decimals = 2;
+    public const string Format   = "0.00";
+    /// <summary>Step for the number input, matching <see cref="Decimals"/>.</summary>
+    public const string Step     = "0.01";
+}
+
 public class DefectCatalogEntry
 {
     public int    DefectId       { get; set; }
@@ -219,7 +235,7 @@ public class DefectCatalogEntry
     public string ValueType      { get; set; } = "Number";
     /// <summary>
     /// The level at or below which this defect is accepted for its material
-    /// group, to one decimal place.
+    /// group, to two decimal places.
     ///
     /// NULL is not zero: NULL means no tolerance has been agreed, while 0.0
     /// means any occurrence at all fails. The catalog screen shows the two

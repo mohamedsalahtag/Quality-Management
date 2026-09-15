@@ -918,15 +918,266 @@ public class AdminController : Controller
         return View(rows.ToList());
     }
 
+    // ===================================================================
+    // Defect catalog round trip: export to Excel, maintain the tolerances
+    // there, upload the same file back.
+    //
+    // Only the TOLERANCE is written back. The other columns are exported so
+    // the sheet is readable and so a row can be identified by eye, but an
+    // import that also rewrote codes, names, categories or the active flag
+    // would turn a spreadsheet edit into a schema-shaped weapon: one careless
+    // sort or fill-down, and 700 defects change identity with no undo. If the
+    // other columns should become editable this way, that is a deliberate
+    // decision to take separately.
+    // ===================================================================
+
+    /// <summary>Column order of the workbook. The import reads by HEADER NAME,
+    /// not by position, so a user who hides or moves a column still gets a
+    /// file that uploads.</summary>
+    private static readonly string[] CatalogSheetHeaders =
+    {
+        "Defect ID", "Material group", "Code", "Name", "Category",
+        "Value type", "Sort order", "Active", "Tolerance"
+    };
+
+    private const string CatalogSheetName = "Defect catalog";
+
+    [RequireScreen(Screens.DefectCatalog, Seed.ManagerOrAdmin, "Open the Defect Catalog")]
+    public async Task<IActionResult> DefectCatalogExcel(string? materialGroup = null)
+    {
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        var rows = (await c.QueryAsync<DefectCatalogEntry>(@"
+            SELECT d.defect_id DefectId, d.defect_code DefectCode, d.defect_name DefectName,
+                   d.defect_category DefectCategory,
+                   d.is_active IsActive, d.sort_order SortOrder,
+                   d.material_group MaterialGroup, d.value_type ValueType,
+                   d.tolerance Tolerance
+            FROM   qms_defect_catalog d
+            WHERE  (@materialGroup IS NULL OR d.material_group = @materialGroup)
+            ORDER  BY d.material_group, d.sort_order, d.defect_name",
+            new { materialGroup })).ToList();
+
+        using var wb = new ClosedXML.Excel.XLWorkbook();
+        var ws = wb.Worksheets.Add(CatalogSheetName);
+
+        for (var i = 0; i < CatalogSheetHeaders.Length; i++)
+        {
+            ws.Cell(1, i + 1).Value = CatalogSheetHeaders[i];
+            ws.Cell(1, i + 1).Style.Font.Bold = true;
+        }
+
+        var r = 2;
+        foreach (var d in rows)
+        {
+            ws.Cell(r, 1).Value = d.DefectId;
+            ws.Cell(r, 2).Value = d.MaterialGroup;
+            ws.Cell(r, 3).Value = d.DefectCode;
+            ws.Cell(r, 4).Value = d.DefectName;
+            ws.Cell(r, 5).Value = d.DefectCategory;
+            ws.Cell(r, 6).Value = d.ValueType;
+            ws.Cell(r, 7).Value = d.SortOrder;
+            ws.Cell(r, 8).Value = d.IsActive ? "Yes" : "No";
+            // Left EMPTY when unset, never 0: blank means no tolerance agreed,
+            // and the import reads it back the same way. Writing a dash here
+            // would make the column text and lose that distinction.
+            if (d.Tolerance.HasValue) ws.Cell(r, 9).Value = d.Tolerance.Value;
+            r++;
+        }
+
+        ws.Column(9).Style.NumberFormat.Format = DefectTolerance.Format;
+
+        // Everything except the tolerance is reference data on the way back in,
+        // so lock it: a protected sheet makes the one editable column obvious
+        // and stops a stray edit that the import would silently ignore.
+        ws.Range(1, 1, Math.Max(1, r - 1), CatalogSheetHeaders.Length).Style.Protection.SetLocked(true);
+        if (r > 2) ws.Range(2, 9, r - 1, 9).Style.Protection.SetLocked(false);
+        ws.Protect();
+
+        ws.Range(1, 1, 1, CatalogSheetHeaders.Length).SetAutoFilter();
+        ws.SheetView.FreezeRows(1);
+        ws.Columns(1, CatalogSheetHeaders.Length).AdjustToContents();
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        var name = string.IsNullOrWhiteSpace(materialGroup) ? "all-groups" : materialGroup;
+        return File(ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"defect-catalog-{name}-{DateTime.Now:yyyyMMdd-HHmm}.xlsx");
+    }
+
+    /// <summary>
+    /// Reads tolerances back out of the exported workbook.
+    ///
+    /// Everything is validated before ANYTHING is written: a file with one bad
+    /// cell applies nothing rather than half of itself, because a partial
+    /// import across hundreds of defects cannot be reasoned about afterwards.
+    /// Rows whose tolerance is unchanged are left alone, so re-uploading the
+    /// same file twice is a no-op rather than 700 pointless writes.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequestFormLimits(MultipartBodyLengthLimit = 10 * 1024 * 1024)]
+    [RequirePermission(Perm.Parameters.DefectCatalogEdit, Seed.ManagerOrAdmin, "Edit the Defect Catalog")]
+    public async Task<IActionResult> DefectCatalogImport(IFormFile? file, string? materialGroup = null)
+    {
+        if (file == null || file.Length == 0)
+        {
+            TempData["Error"] = "No file was chosen.";
+            return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
+        }
+        if (!Path.GetExtension(file.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            TempData["Error"] = "Upload the .xlsx file that Export produced.";
+            return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
+        }
+
+        var parsed  = new List<(int DefectId, decimal? Tolerance)>();
+        var errors  = new List<string>();
+
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var wb = new ClosedXML.Excel.XLWorkbook(stream);
+            var ws = wb.Worksheets.FirstOrDefault(w => w.Name == CatalogSheetName)
+                     ?? wb.Worksheets.First();
+
+            // By header name rather than position: a hidden or reordered column
+            // is a normal thing to do to a spreadsheet and should not corrupt
+            // the import.
+            var header = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            var headerRow = ws.FirstRowUsed();
+            if (headerRow == null)
+            {
+                TempData["Error"] = "That sheet is empty.";
+                return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
+            }
+            foreach (var cell in headerRow.CellsUsed())
+                header[cell.GetString().Trim()] = cell.Address.ColumnNumber;
+
+            foreach (var needed in new[] { "Defect ID", "Tolerance" })
+                if (!header.ContainsKey(needed))
+                {
+                    TempData["Error"] = $"The sheet has no '{needed}' column. Upload the file that Export produced.";
+                    return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
+                }
+
+            var idCol  = header["Defect ID"];
+            var tolCol = header["Tolerance"];
+
+            foreach (var row in ws.RowsUsed().Skip(1))
+            {
+                var excelRow = row.RowNumber();
+                var idCell   = row.Cell(idCol);
+                if (idCell.IsEmpty()) continue;                 // spacer row
+
+                if (!idCell.TryGetValue<int>(out var defectId) || defectId <= 0)
+                {
+                    errors.Add($"Row {excelRow}: '{idCell.GetString()}' is not a defect id.");
+                    continue;
+                }
+
+                var tolCell = row.Cell(tolCol);
+                if (tolCell.IsEmpty() || string.IsNullOrWhiteSpace(tolCell.GetString()))
+                {
+                    // Cleared on purpose: back to "no tolerance agreed".
+                    parsed.Add((defectId, null));
+                    continue;
+                }
+
+                if (!tolCell.TryGetValue<decimal>(out var tol))
+                {
+                    errors.Add($"Row {excelRow}: '{tolCell.GetString()}' is not a number.");
+                    continue;
+                }
+                if (tol < 0)
+                {
+                    errors.Add($"Row {excelRow}: tolerance cannot be negative.");
+                    continue;
+                }
+                if (tol > 9999999)
+                {
+                    errors.Add($"Row {excelRow}: {tol} is too large for a tolerance.");
+                    continue;
+                }
+                parsed.Add((defectId, Math.Round(tol, DefectTolerance.Decimals, MidpointRounding.AwayFromZero)));
+            }
+        }
+        catch (Exception ex)
+        {
+            _adminLog.LogWarning(ex, "Defect catalog import could not read {File}", file.FileName);
+            TempData["Error"] = "That file could not be read as an Excel workbook.";
+            return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
+        }
+
+        if (errors.Count > 0)
+        {
+            // Nothing is written. Naming the first few rows is enough to find
+            // the problem; the full list would be a wall of text in a toast.
+            TempData["Error"] = $"Nothing was imported - {errors.Count} row(s) could not be read. " +
+                                string.Join(" ", errors.Take(5)) +
+                                (errors.Count > 5 ? $" (+{errors.Count - 5} more)" : "");
+            return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
+        }
+        if (parsed.Count == 0)
+        {
+            TempData["Error"] = "That sheet had no rows to import.";
+            return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
+        }
+
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+        await c.OpenAsync();
+
+        // Only rows that EXIST and whose value actually differs. An id that is
+        // not in the catalog is reported rather than silently dropped -- it
+        // usually means the wrong file.
+        var known = (await c.QueryAsync<(int DefectId, decimal? Tolerance)>(
+            "SELECT defect_id, tolerance FROM qms_defect_catalog"))
+            .ToDictionary(x => x.DefectId, x => x.Tolerance);
+
+        var unknown = parsed.Where(p => !known.ContainsKey(p.DefectId)).Select(p => p.DefectId).ToList();
+        var changed = parsed.Where(p => known.TryGetValue(p.DefectId, out var cur) && cur != p.Tolerance).ToList();
+
+        using var tx = c.BeginTransaction();
+        foreach (var row in changed)
+            await c.ExecuteAsync(
+                "UPDATE qms_defect_catalog SET tolerance = @Tolerance WHERE defect_id = @DefectId",
+                new { row.DefectId, row.Tolerance }, tx);
+        tx.Commit();
+
+        await AuditAdminAsync(EntityTypes.DefectCatalog, 0, ActionCodes.Updated, null,
+            new
+            {
+                action = "Tolerance import",
+                file = file.FileName,
+                rowsInFile = parsed.Count,
+                updated = changed.Count,
+                unchanged = parsed.Count - changed.Count - unknown.Count,
+                unknownIds = unknown.Count
+            });
+        _catalogCache.Invalidate();
+
+        var message = $"{changed.Count} tolerance(s) updated from {parsed.Count} row(s).";
+        if (unknown.Count > 0)
+            message += $" {unknown.Count} row(s) referenced defects that are not in the catalog and were skipped.";
+        TempData[changed.Count == 0 && unknown.Count == 0 ? "Error" : "Success"] =
+            changed.Count == 0 && unknown.Count == 0
+                ? "Nothing changed - every tolerance in the file already matched the catalog."
+                : message;
+
+        return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
+    }
+
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Parameters.DefectCatalogEdit, Seed.ManagerOrAdmin, "Edit the Defect Catalog")]
     public async Task<IActionResult> SaveDefect(int defectId, string materialGroup, string defectCode,
         string defectName, string defectCategory, string valueType,
         bool isActive, int sortOrder, decimal? tolerance = null)
     {
-        // One decimal place, decided here rather than left to the column: the
+        // Two decimal places, decided here rather than left to the column: the
         // database would round it silently, and an administrator who typed
-        // 2.55 should see what was actually kept rather than discover it later
+        // 2.555 should see what was actually kept rather than discover it later
         // on a report. Blank stays blank -- NULL means no tolerance agreed,
         // which is a different statement from zero.
         if (tolerance.HasValue)
@@ -936,7 +1187,7 @@ public class AdminController : Controller
                 TempData["Error"] = "Tolerance cannot be negative.";
                 return RedirectToAction(nameof(DefectCatalog), new { materialGroup });
             }
-            tolerance = Math.Round(tolerance.Value, 1, MidpointRounding.AwayFromZero);
+            tolerance = Math.Round(tolerance.Value, DefectTolerance.Decimals, MidpointRounding.AwayFromZero);
         }
 
         if (string.IsNullOrWhiteSpace(materialGroup))
