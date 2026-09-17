@@ -34,11 +34,9 @@ public static class QualityReportPdfSoft
     // without reading a word -- the same slate blue for both made the two
     // halves of the document look like one continuous run.
     private const string DetailHead = "#4e7a63"; // muted green — Sample Details bar
-    // Over tolerance. A true red, not the muted rose used for the Major
-    // header: this one has to be unmistakable against both the white and the
-    // striped row backgrounds, and it is the only place in the report that
-    // carries a verdict rather than a value.
-    private const string Breach    = "#c0392b";
+    // Over tolerance. Shared with the on-screen summary so the two surfaces
+    // cannot disagree about whether a defect passed.
+    private const string Breach    = SummaryReadingFilter.BreachColor;
     private const string MajorHead = "#b76e79"; // soft muted rose — Major header
     private const string MinorHead = "#b08d3e"; // soft muted amber — Minor header
     private const string White     = "#ffffff";

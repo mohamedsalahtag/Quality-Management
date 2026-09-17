@@ -1,4 +1,7 @@
+﻿using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Models;
+using SharbatlyQMS.Web.Services;
 using Xunit;
 using Xunit.Abstractions;
 
@@ -14,10 +17,17 @@ namespace SharbatlyQMS.Tests;
 /// not found would print red at 0% against 0.00, and a report where most lines
 /// are red says nothing at all.
 /// </summary>
-public class ToleranceBreachTests
+[Collection("workflow")]
+public class ToleranceBreachTests : IClassFixture<QmsAppFactory>
 {
     private readonly ITestOutputHelper _out;
-    public ToleranceBreachTests(ITestOutputHelper output) => _out = output;
+    private QmsAppFactory Factory { get; }
+
+    public ToleranceBreachTests(QmsAppFactory factory, ITestOutputHelper output)
+    {
+        Factory = factory;
+        _out = output;
+    }
 
     private static DefectAggRow Row(decimal value, decimal pct, decimal? tolerance) =>
         new() { Name = "Bruising", SumValue = value, Percentage = pct, Tolerance = tolerance };
@@ -70,5 +80,70 @@ public class ToleranceBreachTests
 
         Assert.Equal(3.25m, row.Tolerance);
         Assert.True(row.ExceedsTolerance);
+    }
+
+    /// <summary>
+    /// The SUMMARY has to judge a defect the same way the sample detail does.
+    /// It is built by a different method, from a different aggregation, so the
+    /// tolerance reaching it is a separate piece of wiring that can be
+    /// forgotten on its own -- and a defect that looked acceptable in the
+    /// summary while being red three pages later is worse than no colour.
+    ///
+    /// The test SETS a tolerance rather than hoping one exists. Nobody has
+    /// filled these in on production yet, so a test that skipped when it found
+    /// none would pass today and keep passing if the wiring were removed.
+    /// </summary>
+    [Fact]
+    public async Task The_group_summary_carries_the_tolerance_too()
+    {
+        using var scope = Factory.Services.CreateScope();
+        var qos    = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
+        var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
+        var cfg    = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(cfg.GetConnectionString("Default"));
+        await c.OpenAsync();
+
+        // A finished order, the defects its summary actually reports on, and
+        // one of those defects to put a tolerance against.
+        var rows = await claims.ListClosedQosAsync(new SharbatlyQMS.Web.ViewModels.ClaimListFilter(),
+                                                   SharbatlyQMS.Web.Models.PlantScope.All, "test");
+        foreach (var r in rows.Take(25))
+        {
+            var materials = await qos.GetMaterialsAsync(r.QualityOrderId);
+            var before    = await qos.BuildGroupSummariesAsync(r.QualityOrderId, materials);
+            var group     = before.FirstOrDefault(g => g.DefectSections.Any(sec => sec.Rows.Count > 0));
+            if (group is null) continue;
+
+            var target = group.DefectSections.SelectMany(sec => sec.Rows).First();
+            var kept   = await Dapper.SqlMapper.ExecuteScalarAsync<decimal?>(c,
+                "SELECT tolerance FROM qms_defect_catalog WHERE defect_id = @id", new { id = target.DefectId });
+            try
+            {
+                await Dapper.SqlMapper.ExecuteAsync(c,
+                    "UPDATE qms_defect_catalog SET tolerance = @t WHERE defect_id = @id",
+                    new { t = 1.25m, id = target.DefectId });
+
+                var after = await qos.BuildGroupSummariesAsync(r.QualityOrderId, materials);
+                var row = after.SelectMany(g => g.DefectSections).SelectMany(sec => sec.Rows)
+                               .First(x => x.DefectId == target.DefectId);
+
+                _out.WriteLine($"QO {r.QualityOrderId}, defect '{row.Name}': " +
+                               $"{row.Percentage:0.00}% against a 1.25 tolerance -> " +
+                               (row.ExceedsTolerance ? "RED" : "normal"));
+
+                Assert.Equal(1.25m, row.Tolerance);
+                // And the verdict follows the same rule the report applies.
+                Assert.Equal(row.SumValue > 0 && row.Percentage >= 1.25m, row.ExceedsTolerance);
+            }
+            finally
+            {
+                await Dapper.SqlMapper.ExecuteAsync(c,
+                    "UPDATE qms_defect_catalog SET tolerance = @t WHERE defect_id = @id",
+                    new { t = kept, id = target.DefectId });
+            }
+            return;
+        }
+        _out.WriteLine("No finished order with summarised defects to test against.");
     }
 }

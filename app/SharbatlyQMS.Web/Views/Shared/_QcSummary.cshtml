@@ -97,10 +97,20 @@ else
                                     {
                                         foreach (var dr in sec.Rows)
                                         {
-                                            <tr>
+                                            @* A defect that has reached or passed its catalog
+                                               tolerance is red across the whole line, the same
+                                               rule and the same colour the printed report uses --
+                                               a defect must not look acceptable on one and not
+                                               on the other. The breach colour overrides the
+                                               category colour on the percentage: the verdict
+                                               matters more than which category it sits in. *@
+                                            var over = dr.ExceedsTolerance;
+                                            var pctCol = over ? SummaryReadingFilter.BreachColor : col;
+                                            <tr style="@(over ? "color:" + SummaryReadingFilter.BreachColor : "")"
+                                                title="@(over ? $"At or above the {Fmt.Dec2(dr.Tolerance ?? 0)} tolerance set in the Defect Catalog" : null)">
                                                 <td>@dr.Name</td>
                                                 <td class="text-end">@Fmt.Dec2(dr.SumValue)</td>
-                                                <td class="text-end fw-semibold" style="color:@col">@Fmt.Dec2(dr.Percentage)%</td>
+                                                <td class="text-end fw-semibold" style="color:@pctCol">@Fmt.Dec2(dr.Percentage)%</td>
                                             </tr>
                                         }
                                         <tr class="qcs-total">

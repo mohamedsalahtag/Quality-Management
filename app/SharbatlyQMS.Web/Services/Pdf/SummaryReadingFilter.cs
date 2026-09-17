@@ -55,6 +55,18 @@ public static class SummaryReadingFilter
 
     /// <summary>A defect category's colour, darkened until it is legible on a white
     /// background (mirrors the report). Falls back to a neutral grey.</summary>
+    /// <summary>
+    /// The colour a defect takes once it has reached or passed its tolerance.
+    ///
+    /// Defined here rather than twice, because the printed report and the
+    /// on-screen summary show the same verdict about the same number: if the
+    /// two ever drifted apart, a defect would look acceptable on one and not
+    /// on the other, and nobody would know which to believe. A true red, not
+    /// the muted rose the Major header uses -- it has to be unmistakable on
+    /// white and on a striped row alike.
+    /// </summary>
+    public const string BreachColor = "#c0392b";
+
     public static string ReadableOnWhite(string? hex)
     {
         if (string.IsNullOrWhiteSpace(hex) || !IsHex(hex)) return "#495057";
