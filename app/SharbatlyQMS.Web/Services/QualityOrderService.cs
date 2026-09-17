@@ -45,6 +45,9 @@ public class QualityOrderService : IQualityOrderService
                qo.potential_claim   PotentialClaim,
                qo.potential_claim_at PotentialClaimAt,
                qo.potential_claim_by PotentialClaimBy,
+               qo.reinspection_of   ReinspectionOf,
+               qo.superseded_at     SupersededAt,
+               qo.superseded_by     SupersededBy,
                a.container_no       ContainerNo,
                a.bol_no             BolNo,
                a.ebeln              Ebeln,
@@ -80,6 +83,12 @@ public class QualityOrderService : IQualityOrderService
           AND  (@openedBy   IS NULL OR qo.opened_by       = @openedBy)
           AND  (@fromUtc    IS NULL OR qo.created_at     >= @fromUtc)
           AND  (@toUtc      IS NULL OR qo.created_at      < @toUtc)
+          -- One side of a reinspection, or both. 'originals' are the
+          -- inspections that were redone; 'reinspections' are the orders that
+          -- redid them.
+          AND  (@reinspection IS NULL
+                OR (@reinspection = 'originals'     AND qo.superseded_at   IS NOT NULL)
+                OR (@reinspection = 'reinspections' AND qo.reinspection_of IS NOT NULL))
           AND  (@material   IS NULL OR EXISTS (
                     SELECT 1 FROM qms_quality_order_material m2
                     WHERE  m2.quality_order_id = qo.quality_order_id
@@ -133,6 +142,7 @@ public class QualityOrderService : IQualityOrderService
             matSubMajor = Trim(f.MatSubMajor),
             supplier   = Trim(f.Supplier),
             openedBy   = Trim(f.OpenedBy),
+            reinspection = Trim(f.Reinspection),
             fromUtc,
             toUtc
         };
@@ -330,7 +340,10 @@ public class QualityOrderService : IQualityOrderService
     {
         using var c = Open();
         return await c.QuerySingleOrDefaultAsync<QualityOrder>(
-            QoSelect + " WHERE qo.arrival_id = @arrivalId AND qo.status_code <> 'Cancelled'", new { arrivalId });
+            // QuerySingleOrDefault: the superseded filter is what keeps this
+            // to one row now that a container can carry two orders.
+            QoSelect + " WHERE qo.arrival_id = @arrivalId AND qo.status_code <> 'Cancelled'" +
+                       " AND qo.superseded_at IS NULL", new { arrivalId });
     }
 
     public async Task<IReadOnlyList<QualityOrderMaterial>> GetMaterialsAsync(long qualityOrderId)
@@ -398,7 +411,11 @@ public class QualityOrderService : IQualityOrderService
             throw new InvalidOperationException($"Arrival must be Completed (currently {arrival.Status}).");
 
         var existing = await c.QuerySingleOrDefaultAsync<long?>(
-            "SELECT quality_order_id FROM qms_quality_order WHERE arrival_id=@arrivalId AND status_code <> 'Cancelled'",
+            // "Active" now means not cancelled AND not superseded, matching
+            // UX_qms_quality_order_active_per_arrival. A superseded order is
+            // history: it must not block the container being inspected again.
+            "SELECT quality_order_id FROM qms_quality_order " +
+            "WHERE arrival_id=@arrivalId AND status_code <> 'Cancelled' AND superseded_at IS NULL",
             new { arrivalId }, tx);
         if (existing.HasValue)
             throw new InvalidOperationException($"Arrival already has an active Quality Order (#{existing.Value}).");
@@ -479,6 +496,38 @@ public class QualityOrderService : IQualityOrderService
     }
     // Cancel (V31): widened to also accept Submitted -- an aborted submit can
     // be cancelled outright without a Supervisor having to first cancel-submit.
+    public async Task<QualityOrder?> GetReinspectionOfAsync(long originalQoId)
+    {
+        using var c = Open();
+        return await c.QuerySingleOrDefaultAsync<QualityOrder>(
+            QoSelect + " WHERE qo.reinspection_of = @originalQoId", new { originalQoId });
+    }
+
+    /// <summary>
+    /// Owns the transaction; <see cref="ReinspectionOrder"/> does the work, the
+    /// same split ArrivalService.RejectAsync uses with
+    /// <see cref="RejectionOrder"/>. Everything commits together or not at all:
+    /// a new order without the supersede, or a supersede without the order,
+    /// would each leave the container in a state no screen can describe.
+    /// </summary>
+    public async Task<(long QoId, string QoNo)> ReinspectAsync(long originalQoId, string reason, string user)
+    {
+        using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+        try
+        {
+            var result = await ReinspectionOrder.CreateAsync(c, tx, _audit, originalQoId, reason, user);
+            tx.Commit();
+            return result;
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
     public Task<(bool ok, string? error)> CancelAsync(long qoId, string user, string? reason) => Transition(qoId, user, reason, "Cancelled",new[] { "Initial", "Open", "Submitted" });
 
     /// <summary>Audit-readable form of the finish-time claim assessment.</summary>

@@ -149,6 +149,12 @@ public class ClaimService : IClaimService
                      (@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
                   OR (@archived = 1 AND qo.archived_at IS NOT NULL)
                    )
+              -- A superseded order has been reinspected: its verdict no longer
+              -- speaks for the container, and leaving it here would put the
+              -- same container in the worklist twice with two different
+              -- answers. It keeps its claim row, its notes and its report, and
+              -- the archive view still shows it.
+              AND  (@archived = 1 OR qo.superseded_at IS NULL)
               AND  (@pendingFilter = 0 OR cl.claim_id IS NULL)
               AND  (@statusFilter IS NULL OR cl.claim_status = @statusFilter)
               -- M24 QC assessment, independent of the claim status above.

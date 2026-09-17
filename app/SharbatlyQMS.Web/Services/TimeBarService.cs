@@ -140,11 +140,16 @@ public class TimeBarService : ITimeBarService
             WHERE  status_code <> 'Cancelled'
         ),
         qorder AS (
+            -- Reinspections are excluded, so this page keeps following the
+            -- ORIGINAL inspection. Left in, ROW_NUMBER's DESC would pick the
+            -- reinspection: a container inspected on time would have its clock
+            -- restart weeks later, turn from green to over-threshold, and lose
+            -- the finish date it was actually judged on.
             SELECT arrival_id, quality_order_id, quality_order_no,
                    status_code, closed_at, archived_at,
                    ROW_NUMBER() OVER (PARTITION BY arrival_id ORDER BY quality_order_id DESC) AS rn
             FROM   qms_quality_order
-            WHERE  status_code <> 'Cancelled'
+            WHERE  status_code <> 'Cancelled' AND reinspection_of IS NULL
         ),
         k AS (
             -- Every container key, from BOTH sides. The cache alone is not

@@ -43,6 +43,29 @@ public class QualityReportData
     /// <summary>The refusal reason, printed verbatim -- it is the claim.</summary>
     public string?              RejectionComment     { get; set; }
 
+    /// <summary>
+    /// This report is a REINSPECTION: the container was inspected before and
+    /// the first result was judged unsound.
+    ///
+    /// Printed on the page because both copies exist and both circulate. A
+    /// reader holding one of them cannot otherwise tell which inspection they
+    /// have, and two reports on one container with different numbers reads as
+    /// an error rather than a decision.
+    /// </summary>
+    public bool                 IsReinspection       { get; set; }
+    /// <summary>The order this one re-does, and when it was finished.</summary>
+    public string?              ReinspectionOfNo     { get; set; }
+    public DateTime?            ReinspectionOfDate   { get; set; }
+
+    /// <summary>
+    /// This report has BEEN superseded by a later inspection. It still prints
+    /// in full -- the record is kept -- but it says so.
+    /// </summary>
+    public bool                 IsSuperseded         { get; set; }
+    /// <summary>The reinspection that replaced it.</summary>
+    public string?              SupersededByNo       { get; set; }
+    public DateTime?            SupersededOn         { get; set; }
+
     public QualityOrder         QualityOrder    { get; set; } = new();
     public Arrival              Arrival         { get; set; } = new();
     public ShipmentSnapshot?    Shipment        { get; set; }

@@ -59,6 +59,14 @@ public static class ClaimStatus
     public const string ClaimRequestApproved = "ClaimRequestApproved";
     public const string HoldClaim            = "HoldClaim";
 
+    /// <summary>
+    /// An administrator judged the inspection unsound and had the container
+    /// inspected again. Recorded against the ORIGINAL order's claim, so the
+    /// worklist says why the container came back instead of the row simply
+    /// disappearing when the original is superseded.
+    /// </summary>
+    public const string Reinspection         = "Reinspection";
+
     // There is deliberately NO "Archived" status. Archiving is a flag on the
     // quality order (qms_quality_order.archived_at, M20), not a claim decision
     // -- an order carrying a real decision can be archived without losing it,
@@ -74,6 +82,7 @@ public static class ClaimStatus
         PassedQC             => "Passed QC",
         ClaimRequestApproved => "Claim Notification Reviewed",
         HoldClaim            => "Hold Notification",
+        Reinspection         => "Sent for Reinspection",
         Pending              => "Pending",
         null or ""           => "Pending",
         _                    => s
@@ -90,6 +99,7 @@ public static class ClaimStatus
         PassedQC             => "Passed QC",
         ClaimRequestApproved => "Reviewed",
         HoldClaim            => "Hold",
+        Reinspection         => "Reinspection",
         Pending              => "Pending",
         null or ""           => "Pending",
         _                    => s
@@ -104,6 +114,9 @@ public static class ClaimStatus
         ClaimRequest         => "bg-danger text-white",
         ClaimRequestApproved => "bg-dark text-white",
         HoldClaim            => "bg-warning text-dark",
+        // Its own colour: this is not a claim verdict at all, it says the
+        // inspection behind the verdict is being redone.
+        Reinspection         => "bg-info text-dark",
         PassedQC             => "bg-success text-white",
         _                    => "bg-secondary text-white"
     };

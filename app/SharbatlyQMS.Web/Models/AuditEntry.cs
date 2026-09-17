@@ -1,4 +1,4 @@
-namespace SharbatlyQMS.Web.Models;
+﻿namespace SharbatlyQMS.Web.Models;
 
 /// <summary>
 /// One immutable row in qms_audit_log. Append-only -- never updated, never
@@ -214,6 +214,10 @@ public static class ActionCodes
     public const string CancelSubmit       = "CancelSubmit";    // V31: supervisor reverts Submitted -> Open
     public const string Closed             = "Closed";          // UI-labelled "Finished"
     public const string Reopened           = "Reopened";
+    /// <summary>An administrator judged a finished inspection unsound and had
+    /// the container inspected again. Written against the ORIGINAL order; the
+    /// reinspection itself is audited as Created.</summary>
+    public const string Reinspected  = "Reinspected";
     public const string Cancelled          = "Cancelled";
 
     // Claim transitions

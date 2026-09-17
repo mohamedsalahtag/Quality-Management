@@ -453,6 +453,23 @@ public class ReportsController : Controller
 
         // A rejection order: no inspection happened, so the report leads with
         // why the container was refused.
+        // Which of the container's inspections this report is. Both copies
+        // circulate, so each has to name the other.
+        data.IsReinspection = qo.IsReinspection;
+        data.IsSuperseded   = qo.IsSuperseded;
+        data.SupersededOn   = qo.SupersededAt;
+        if (qo.IsReinspection)
+        {
+            var original = await _qos.GetAsync(qo.ReinspectionOf!.Value);
+            data.ReinspectionOfNo   = original?.QualityOrderNo;
+            data.ReinspectionOfDate = original?.ClosedAt;
+        }
+        else if (qo.IsSuperseded)
+        {
+            var repeat = await _qos.GetReinspectionOfAsync(qo.QualityOrderId);
+            data.SupersededByNo = repeat?.QualityOrderNo;
+        }
+
         data.IsContainerRejection = qo.ContainerRejected;
         data.RejectionHeader      = reportCfg.RejectedContainerHeader;
         data.RejectionComment     = data.Arrival.RejectReason;

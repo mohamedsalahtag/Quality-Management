@@ -102,6 +102,12 @@
     Active("Plant",       f.Plant);
     Active("Storage",     f.StorageLoc);
     Active("Opened by",   f.OpenedBy);
+    Active("Reinspection", f.Reinspection switch
+    {
+        "originals"     => "reinspected originals",
+        "reinspections" => "reinspections",
+        _               => null
+    });
     Active("From",        D(f.From));
     Active("To",          D(f.To));
 }
@@ -271,6 +277,21 @@
                     <label class="form-label small mb-1">@Loc["Created to"]</label>
                     <input type="date" name="to" value="@D(f.To)" class="form-control form-control-sm" />
                 </div>
+                @* The badges in the status cell mark these rows, but finding a
+                   handful of them by eye in a list hundreds long is the whole
+                   difficulty -- so they are filterable too. *@
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["Reinspection"]</label>
+                    <select name="reinspection" class="form-select form-select-sm">
+                        <option value="">@Loc["All orders"]</option>
+                        <option value="originals" selected="@(f.Reinspection == "originals")">
+                            @Loc["Reinspected originals"]
+                        </option>
+                        <option value="reinspections" selected="@(f.Reinspection == "reinspections")">
+                            @Loc["Reinspections"]
+                        </option>
+                    </select>
+                </div>
             </div>
             <div class="mt-2 d-flex gap-2">
                 <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>@Loc["Apply filters"]</button>
@@ -386,7 +407,27 @@
                                     </div>
                                 }
                             </td>
-                            <td><span class="badge bg-@cls">@label</span></td>
+                            <td>
+                            <span class="badge bg-@cls">@label</span>
+                            @* Beside the status rather than in a column of its
+                               own: it qualifies the status ("finished, but
+                               redone"), and a new column would mean touching
+                               the hardcoded colspan on the empty-state row. *@
+                            @if (q.IsSuperseded)
+                            {
+                                <span class="badge bg-secondary ms-1"
+                                      title="@Loc["This inspection was redone. The reinspection carries the verdict."]">
+                                    @Loc["Reinspected"]
+                                </span>
+                            }
+                            else if (q.IsReinspection)
+                            {
+                                <span class="badge bg-info text-dark ms-1"
+                                      title="@Loc["A second inspection of a container whose first result was judged unsound."]">
+                                    @Loc["Reinspection"]
+                                </span>
+                            }
+                        </td>
                             <td>@q.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
                             <td>@q.OpenedBy</td>
                             <td class="text-end text-nowrap">

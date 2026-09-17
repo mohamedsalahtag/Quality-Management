@@ -138,6 +138,22 @@ public class QualityOrdersController : Controller
         ViewBag.SampleReadings      = sampleReadings;
         ViewBag.HeaderComplete      = headerComplete;
         ViewBag.Editable            = editable;
+        // The sibling order, for the banners. Two small reads rather than
+        // widening the shared projection: only this page needs them, and
+        // QoSelect is on the hot path of every quality-order list.
+        if (qo.IsReinspection)
+        {
+            var original = await _qos.GetAsync(qo.ReinspectionOf!.Value);
+            ViewBag.OriginalQoId = original?.QualityOrderId;
+            ViewBag.OriginalQoNo = original?.QualityOrderNo;
+        }
+        else if (qo.IsSuperseded)
+        {
+            var repeat = await _qos.GetReinspectionOfAsync(qo.QualityOrderId);
+            ViewBag.ReinspectionQoId = repeat?.QualityOrderId;
+            ViewBag.ReinspectionQoNo = repeat?.QualityOrderNo;
+        }
+
         return View(qo);
     }
 
@@ -585,6 +601,37 @@ public class QualityOrdersController : Controller
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
         return await TransitionAsync(id, (qos, user, r) => qos.ReopenAsync(id, user, r), reason);
+    }
+
+    /// <summary>
+    /// Raises a reinspection: a NEW quality order for the same container,
+    /// superseding this one. The original is kept, stays Closed and stays
+    /// printable; what it gives up is its place in the operational numbers and
+    /// on the Claims worklist.
+    ///
+    /// Administrator only, because it overrides a finished inspection and
+    /// rewrites a claim standing. Every condition the button is hidden on is
+    /// re-checked inside the service transaction -- a hidden button leaves its
+    /// POST endpoint reachable.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Qo.Reinspect, Seed.AdminOnly, "Raise a reinspection")]
+    public async Task<IActionResult> Reinspect(long id, string? reason)
+    {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        try
+        {
+            var (newId, newNo) = await _qos.ReinspectAsync(id, reason ?? "", user);
+            TempData["Success"] = $"Reinspection {newNo} raised. The original order is kept and stays printable.";
+            return RedirectToAction(nameof(Details), new { id = newId });
+        }
+        catch (InvalidOperationException ex)
+        {
+            TempData["Error"] = ex.Message;
+            return RedirectToAction(nameof(Details), new { id });
+        }
     }
 
     [HttpPost, ValidateAntiForgeryToken]

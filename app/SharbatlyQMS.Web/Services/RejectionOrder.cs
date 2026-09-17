@@ -1,4 +1,4 @@
-using Dapper;
+﻿using Dapper;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Models;
 
@@ -36,7 +36,8 @@ public static class RejectionOrder
         // Cancelled order can exist on a Draft arrival after an admin cancel,
         // and two concurrent rejections must not both win.
         var existing = await c.QuerySingleOrDefaultAsync<long?>(
-            "SELECT quality_order_id FROM qms_quality_order WHERE arrival_id=@arrivalId AND status_code <> 'Cancelled'",
+            "SELECT quality_order_id FROM qms_quality_order " +
+            "WHERE arrival_id=@arrivalId AND status_code <> 'Cancelled' AND superseded_at IS NULL",
             new { arrivalId }, tx);
         if (existing.HasValue)
             throw new InvalidOperationException(
@@ -119,7 +120,8 @@ public static class RejectionOrder
         var qo = await c.QuerySingleOrDefaultAsync<(long Id, string No)?>(
             @"SELECT quality_order_id, quality_order_no
               FROM   qms_quality_order
-              WHERE  arrival_id = @arrivalId AND container_rejected = 1 AND status_code = 'Closed'",
+              WHERE  arrival_id = @arrivalId AND container_rejected = 1 AND status_code = 'Closed'
+             AND    superseded_at IS NULL",
             new { arrivalId }, tx);
         if (qo is null) return 0;
 

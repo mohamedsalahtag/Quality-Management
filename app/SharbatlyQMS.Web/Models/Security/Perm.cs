@@ -59,6 +59,7 @@ public static class Perm
         public const string Reopen         = Screens.QoDetails + ".Reopen";
         public const string Cancel         = Screens.QoDetails + ".Cancel";
         public const string Delete         = Screens.QoDetails + ".Delete";
+        public const string Reinspect      = Screens.QoDetails + ".Reinspect";
         public const string EditMaterial   = Screens.QoDetails + ".EditMaterial";
         public const string OverrideSize   = Screens.QoDetails + ".OverrideSize";
         public const string EditSample     = Screens.QoDetails + ".EditSample";

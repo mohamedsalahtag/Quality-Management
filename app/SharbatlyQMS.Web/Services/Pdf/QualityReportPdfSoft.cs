@@ -121,6 +121,12 @@ public static class QualityReportPdfSoft
             if (d.IsContainerRejection)
                 col.Item().Element(c => RenderRejectionBanner(c, d));
 
+            // 2c. Which inspection this is. Both copies circulate, so a reader
+            //     holding one of them has to be able to tell without the other
+            //     in front of them.
+            if (d.IsReinspection || d.IsSuperseded)
+                col.Item().Element(c => RenderReinspectionBanner(c, d));
+
             // 3. Shipment Details
             Band(col.Item(), L("Shipment Details"));
             RenderShipmentDetails(col, d);
@@ -607,6 +613,66 @@ public static class QualityReportPdfSoft
             if (rem != 0) for (int i = rem; i < cols; i++) t.Cell().Text("");
         });
     }
+
+    /// <summary>
+    /// The banner that says which of a container's two inspections this is.
+    ///
+    /// Slate, not the rejection banner's rose and not the over-tolerance red:
+    /// this is a statement about which document you are holding, not a verdict
+    /// on the fruit, and borrowing either of those colours would make it read
+    /// as one.
+    /// </summary>
+    private static void RenderReinspectionBanner(IContainer c, QualityReportData d) =>
+        c.PaddingTop(4).Background("#eef2f6").Border(0.8f).BorderColor(Accent)
+         .BorderLeft(3).PaddingVertical(5).PaddingHorizontal(8).Column(col =>
+         {
+             col.Spacing(2);
+
+             if (d.IsReinspection)
+             {
+                 col.Item().Text(L("REINSPECTION").ToUpperInvariant())
+                    .Bold().FontSize(9).FontColor(Accent);
+                 col.Item().Text(t =>
+                 {
+                     t.Span(L("This container was inspected before. That inspection was judged unsound and the container was inspected again; this report is the second inspection and carries the result that stands."))
+                      .FontSize(7.5f).FontColor(Ink);
+                 });
+                 if (!string.IsNullOrWhiteSpace(d.ReinspectionOfNo))
+                     col.Item().Text(t =>
+                     {
+                         t.Span(L("Replaces") + "  ").FontSize(7).FontColor(Muted);
+                         t.Span(V(d.ReinspectionOfNo)).FontSize(7).SemiBold().FontColor(Ink);
+                         if (d.ReinspectionOfDate.HasValue)
+                         {
+                             t.Span("  " + L("finished") + "  ").FontSize(7).FontColor(Muted);
+                             t.Span(d.ReinspectionOfDate.Value.ToLocalTime().ToString("dd/MM/yyyy"))
+                              .FontSize(7).FontColor(Ink);
+                         }
+                     });
+             }
+             else
+             {
+                 col.Item().Text(L("SUPERSEDED BY A REINSPECTION").ToUpperInvariant())
+                    .Bold().FontSize(9).FontColor(Accent);
+                 col.Item().Text(t =>
+                 {
+                     t.Span(L("This inspection was judged unsound and the container was inspected again. The report is kept in full, but the reinspection carries the result that stands."))
+                      .FontSize(7.5f).FontColor(Ink);
+                 });
+                 if (!string.IsNullOrWhiteSpace(d.SupersededByNo))
+                     col.Item().Text(t =>
+                     {
+                         t.Span(L("Replaced by") + "  ").FontSize(7).FontColor(Muted);
+                         t.Span(V(d.SupersededByNo)).FontSize(7).SemiBold().FontColor(Ink);
+                         if (d.SupersededOn.HasValue)
+                         {
+                             t.Span("  " + L("on") + "  ").FontSize(7).FontColor(Muted);
+                             t.Span(d.SupersededOn.Value.ToLocalTime().ToString("dd/MM/yyyy"))
+                              .FontSize(7).FontColor(Ink);
+                         }
+                     });
+             }
+         });
 
     /// <summary>
     /// The banner on a container-rejection report. Reuses the existing muted

@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Models;
+﻿using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Models.Reports;
 using SharbatlyQMS.Web.ViewModels;
 
@@ -54,6 +54,18 @@ public interface IQualityOrderService
     /// UPDATE as the status. Null leaves any existing value untouched.</summary>
     Task<(bool ok, string? error)> CloseAsync(long qualityOrderId, string user, string? reason, bool bypassNoSamples = false, bool? potentialClaim = null);
     Task<(bool ok, string? error)> ReopenAsync(long qualityOrderId, string user, string? reason);
+
+    /// <summary>
+    /// Raises a reinspection of a finished order: a new quality order for the
+    /// same container, with the original superseded and the decision recorded
+    /// as a claim decision. Throws <see cref="InvalidOperationException"/> with
+    /// a message fit to show the user when any guard refuses.
+    /// Returns the new order's id and number.
+    /// </summary>
+    Task<(long QoId, string QoNo)> ReinspectAsync(long originalQoId, string reason, string user);
+
+    /// <summary>The reinspection raised against this order, if there is one.</summary>
+    Task<QualityOrder?> GetReinspectionOfAsync(long originalQoId);
     Task<(bool ok, string? error)> CancelAsync(long qualityOrderId, string user, string? reason);
 
     Task SaveOverrideAsync(long qoMaterialId, string newSize, string? reason, string user);

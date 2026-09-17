@@ -45,6 +45,17 @@ public class QoListFilter
     /// exclusive next-midnight bound).</summary>
     public DateTime? To       { get; set; }
 
+    /// <summary>
+    /// Narrows the list to one side of a reinspection: "originals" are the
+    /// inspections that were redone, "reinspections" are the orders that redid
+    /// them. Empty means both, plus every ordinary order.
+    ///
+    /// The badges in the status cell already mark these rows, but a list a few
+    /// hundred orders long is the wrong place to look for the handful that came
+    /// back -- which is the question anyone asking about reinspections has.
+    /// </summary>
+    public string? Reinspection { get; set; }
+
     /// <summary>True when any panel filter is set — the view uses this to open
     /// the panel on load so a bookmarked or shared URL doesn't look like an
     /// unexplained short list.</summary>
@@ -61,6 +72,7 @@ public class QoListFilter
         || !string.IsNullOrWhiteSpace(MatSubMajor)
         || !string.IsNullOrWhiteSpace(Supplier)
         || !string.IsNullOrWhiteSpace(OpenedBy)
+        || !string.IsNullOrWhiteSpace(Reinspection)
         || From.HasValue || To.HasValue;
 
     /// <summary>How many panel filters are active — shown as a badge on the toggle.</summary>
@@ -80,6 +92,7 @@ public class QoListFilter
         + (string.IsNullOrWhiteSpace(MatSubMajor) ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Supplier)   ? 0 : 1)
         + (string.IsNullOrWhiteSpace(OpenedBy)   ? 0 : 1)
+        + (string.IsNullOrWhiteSpace(Reinspection) ? 0 : 1)
         + (From.HasValue ? 1 : 0)
         + (To.HasValue   ? 1 : 0);
 

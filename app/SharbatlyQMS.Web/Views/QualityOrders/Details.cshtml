@@ -145,6 +145,16 @@
                 <i class="bi bi-arrow-clockwise me-1"></i>@Loc["Reopen"]
             </button>
         }
+        @* Reinspection: a NEW order for the same container, superseding this
+           one. Offered on the same conditions as Reopen plus the ones only a
+           reinspection cares about -- all of them re-checked in the service,
+           because hiding a button leaves its POST endpoint reachable. *@
+        @if (Model.CanBeReinspected && Perms.Can(Perm.Qo.Reinspect))
+        {
+            <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#reinspectModal">
+                <i class="bi bi-arrow-repeat me-1"></i>@Loc["Reinspect"]
+            </button>
+        }
         @if (!isClaimContext)
         {
             <button type="button" class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#reportPreviewModal">
@@ -173,6 +183,53 @@
            (standalone QO and claim context) share the same wiring. *@
     </div>
 </div>
+
+@* ---- Reinspection: say which of the two orders this is before anything
+       else on the page, because the reader's next question is always
+       "is this the one that counts?" ---- *@
+@if (Model.IsReinspection)
+{
+    <div class="alert alert-info d-flex align-items-start" role="alert">
+        <i class="bi bi-arrow-repeat me-2 mt-1"></i>
+        <div>
+            <strong>@Loc["This is a reinspection"]</strong>
+            <div class="small mt-1">
+                @Loc["The container was inspected before and the result was judged unsound, so it is being inspected again. This order carries the verdict that counts."]
+            </div>
+            @if (ViewBag.OriginalQoNo is string origNo)
+            {
+                <div class="small mt-2">
+                    <a asp-action="Details" asp-route-id="@ViewBag.OriginalQoId" class="alert-link">
+                        @Loc["Open the original,"] @origNo
+                    </a>
+                </div>
+            }
+        </div>
+    </div>
+}
+@if (Model.IsSuperseded)
+{
+    <div class="alert alert-secondary d-flex align-items-start" role="alert">
+        <i class="bi bi-archive me-2 mt-1"></i>
+        <div>
+            <strong>@Loc["This inspection has been superseded"]</strong>
+            <div class="small mt-1">
+                @Loc["It was reinspected on"]
+                @(Model.SupersededAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm"))
+                @Loc["by"] @Model.SupersededBy.
+                @Loc["It is kept in full and still prints, but the reinspection now speaks for this container."]
+            </div>
+            @if (ViewBag.ReinspectionQoNo is string reNo)
+            {
+                <div class="small mt-2">
+                    <a asp-action="Details" asp-route-id="@ViewBag.ReinspectionQoId" class="alert-link">
+                        @Loc["Open the reinspection,"] @reNo
+                    </a>
+                </div>
+            }
+        </div>
+    </div>
+}
 
 @* ---- Container rejected: say so before anything else on the page, because
        every empty section below follows from it. ---- *@
@@ -838,6 +895,38 @@
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
                 <button type="submit" class="btn btn-warning"><i class="bi bi-arrow-clockwise me-1"></i>@Loc["Reopen"]</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+@* Deliberately heavier wording than the Reopen dialog: reopening puts an
+   order back in play, this one ends it and rewrites a claim standing. *@
+<div class="modal fade" id="reinspectModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form asp-action="Reinspect" asp-route-id="@Model.QualityOrderId" method="post" class="modal-content">
+            @Html.AntiForgeryToken()
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-arrow-repeat me-1"></i>@Loc["Reinspect this container"]</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small">
+                    @Loc["A new quality order is raised for the same container, starting empty. This order is kept in full and still prints, but it stops speaking for the container."]
+                </p>
+                <ul class="small text-muted ps-3">
+                    <li>@Loc["The decision is recorded as a claim decision, so the Claims list shows why the container came back."]</li>
+                    <li>@Loc["A container is reinspected once. This cannot be undone from the application."]</li>
+                    <li>@Loc["Dashboard and Inspection Time Bar figures keep following this original order."]</li>
+                </ul>
+                <label class="form-label">@Loc["Why is this being reinspected? (required)"]</label>
+                <textarea name="reason" class="form-control" rows="3" required minlength="5"></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="submit" class="btn btn-danger">
+                    <i class="bi bi-arrow-repeat me-1"></i>@Loc["Raise reinspection"]
+                </button>
             </div>
         </form>
     </div>

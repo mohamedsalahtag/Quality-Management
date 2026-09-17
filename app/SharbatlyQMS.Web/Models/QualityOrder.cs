@@ -28,6 +28,43 @@ public class QualityOrder
     /// the view — hiding a button leaves its POST endpoint reachable.</summary>
     public bool IsArchived => ArchivedAt.HasValue;
 
+    /// <summary>
+    /// The finished order this one re-does, when an administrator judged the
+    /// first inspection unsound. Null on an ordinary order.
+    /// </summary>
+    public long?     ReinspectionOf { get; set; }
+
+    /// <summary>
+    /// Set on the ORIGINAL when it is reinspected. The status stays Closed --
+    /// it WAS finished, and rewriting that would falsify the record and break
+    /// the status-history chain. Superseding is a separate fact recorded
+    /// alongside the status, not a rewrite of it.
+    ///
+    /// A superseded order keeps its number, its samples and its report; what it
+    /// loses is its place in the live numbers and on the Claims worklist, where
+    /// the reinspection now speaks for the container.
+    /// </summary>
+    public DateTime? SupersededAt  { get; set; }
+    public string?   SupersededBy  { get; set; }
+
+    /// <summary>This order re-does an earlier one.</summary>
+    public bool IsReinspection => ReinspectionOf.HasValue;
+
+    /// <summary>This order has been re-done by a later one.</summary>
+    public bool IsSuperseded   => SupersededAt.HasValue;
+
+    /// <summary>
+    /// Whether a reinspection may be raised against this order. The view hides
+    /// the button on this, and the service re-checks every clause inside its
+    /// transaction -- a hidden button leaves its POST endpoint reachable.
+    ///
+    /// A rejected container is excluded for the same reason it cannot be
+    /// reopened: nothing was inspected, so there is nothing to inspect again.
+    /// </summary>
+    public bool CanBeReinspected =>
+        StatusCode == QualityOrderStatus.Closed
+        && !ContainerRejected && !IsReinspection && !IsSuperseded && !IsArchived;
+
     /// <summary>QC's claim assessment, chosen when the order is finished (M24):
     /// true = Potential Claim, false = No Potential Claim, null = finished
     /// before the question existed. This is the inspector's verdict, NOT the
