@@ -404,6 +404,22 @@ public class DefectAggRow
     public string  Category   { get; set; } = "Minor";    // raw catalog category
     public decimal SumValue   { get; set; }
     public decimal Percentage { get; set; }                // SumValue / SumSampleSize × 100 (0 if denom=0)
+
+    /// <summary>The tolerance agreed for this defect in the catalog, or null
+    /// when none has been. Copied onto the row so the renderer can judge it
+    /// without carrying the whole catalog around.</summary>
+    public decimal? Tolerance { get; set; }
+
+    /// <summary>
+    /// True when this defect has reached or passed its agreed tolerance.
+    ///
+    /// Requires the defect to have actually OCCURRED. A tolerance of zero says
+    /// "any occurrence fails", and without this guard every defect that was
+    /// looked for and not found -- the great majority of rows on a report --
+    /// would be flagged at 0% against a 0.00 tolerance.
+    /// </summary>
+    public bool ExceedsTolerance =>
+        Tolerance.HasValue && SumValue > 0 && Percentage >= Tolerance.Value;
 }
 
 // One defect category's section within a grouped summary / sample card.

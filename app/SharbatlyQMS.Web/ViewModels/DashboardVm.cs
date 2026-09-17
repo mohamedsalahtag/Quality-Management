@@ -348,7 +348,13 @@ public class CommitmentDetailRow
     public string?   Ebeln           { get; set; }
     public string?   VendorName      { get; set; }
     public string?   ArrivalStatus   { get; set; }
+    /// <summary>When the container ARRIVED, per SAP. Falls back to the record
+    /// creation date only for an arrival SAP has never seen.</summary>
     public DateTime  ArrivalCreatedAt{ get; set; }
+    /// <summary>When the arrival record was created in this application --
+    /// on average 3.7 days after the container actually arrived, so the two
+    /// are shown separately rather than one standing in for the other.</summary>
+    public DateTime  RecordCreatedAt { get; set; }
     public long?     QualityOrderId  { get; set; }
     public string?   QualityOrderNo  { get; set; }
     public string?   QoStatus        { get; set; }

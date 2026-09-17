@@ -469,7 +469,7 @@
                     <i class="bi bi-hourglass-split text-danger me-1"></i>@Loc["Stale Arrivals"]
                 </div>
                 <div class="fs-2 fw-semibold lh-1 @(Model.Counts.StaleArrivals > 0 ? "text-danger" : "")">@Model.Counts.StaleArrivals</div>
-                <div class="text-muted small mt-1">Draft &gt; @Model.Thresholds.StaleArrivalDays day(s)</div>
+                <div class="text-muted small mt-1">@Loc["Arrived over"] @Model.Thresholds.StaleArrivalDays @Loc["day(s) ago, still Draft"]</div>
             </div>
         </div>
         </a>

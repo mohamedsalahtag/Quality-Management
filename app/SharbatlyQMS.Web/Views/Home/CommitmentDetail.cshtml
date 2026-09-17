@@ -1,4 +1,4 @@
-@using SharbatlyQMS.Web.ViewModels
+﻿@using SharbatlyQMS.Web.ViewModels
 @model IReadOnlyList<CommitmentDetailRow>
 @{
     var bucket   = ViewBag.Bucket as string ?? CommitmentBuckets.Received;
@@ -52,7 +52,8 @@
                     <th data-sort>@Loc["BOL"]</th>
                     <th data-sort>@Loc["PO"]</th>
                     <th data-sort>@Loc["Supplier"]</th>
-                    <th data-sort>@Loc["Received on"]</th>
+                    <th data-sort>@Loc["Arrived (SAP)"]</th>
+                    <th data-sort>@Loc["Record created"]</th>
                     <th data-sort>@Loc["Inspection"]</th>
                     <th data-sort>@Loc["Opened on"]</th>
                     <th data-sort="num" class="text-end">@Loc["Days"]</th>
@@ -61,7 +62,7 @@
             <tbody>
             @if (Model.Count == 0)
             {
-                <tr><td colspan="10" class="text-center text-muted py-4">
+                <tr><td colspan="11" class="text-center text-muted py-4">
                     @Loc["Nothing in this group for the chosen period."]
                 </td></tr>
             }
@@ -79,7 +80,11 @@
                         <td class="small">@r.BolNo</td>
                         <td class="small">@r.Ebeln</td>
                         <td class="small">@r.VendorName</td>
-                        <td class="small">@r.ArrivalCreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                        <td class="small">@r.ArrivalCreatedAt.ToString("yyyy-MM-dd")</td>
+                        @* Shown beside it because they are routinely days apart,
+                           and a reader checking a figure against SAP needs to
+                           see which one the period used. *@
+                        <td class="small text-muted">@r.RecordCreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
                         <td>
                             @if (r.QualityOrderId.HasValue)
                             {

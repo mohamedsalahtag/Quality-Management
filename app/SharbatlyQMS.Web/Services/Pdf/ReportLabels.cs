@@ -83,7 +83,7 @@ public static class ReportLabelCatalog
         "Defect",
         "Defects",
         "Discharge Date",
-        "Every sample and every reading, material by material.",
+        "Every sample and every reading, material by material. A defect shown in red has reached or passed the tolerance set for it.",
         "External damage to container",
         "Grade",
         "Inspection Date",

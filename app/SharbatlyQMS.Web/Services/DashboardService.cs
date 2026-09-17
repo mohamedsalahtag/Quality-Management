@@ -131,6 +131,34 @@ public class DashboardService : IDashboardService
         const string plantWhere =
             "(@plant IS NULL OR a.plant = @plant) AND (@sUnrestricted = 1 OR a.plant IN @sPlants)";
 
+        // WHEN THE CONTAINER ARRIVED, as SAP states it -- not when somebody
+        // got round to creating the arrival record in this application.
+        //
+        // The two are not close. Measured across 2,174 arrivals: the record is
+        // created on average 3.7 days after the SAP arrival date and as much as
+        // 34 days after, and 260 of them (12%) fall in a DIFFERENT MONTH. A
+        // dashboard keyed on created_at therefore disagrees with SAP for one
+        // container in eight, and over-counts September by 26% (939 against
+        // 743).
+        //
+        // qms_shipment_snapshot carries SAP's date, frozen per arrival, and
+        // every arrival has one (2,174 of 2,174, exactly one row each, so the
+        // join cannot fan out). It agrees with the live SAP cache for 2,163 of
+        // them; the handful that differ are arrivals SAP corrected after the
+        // snapshot was taken. The fallback to created_at exists only for an
+        // arrival raised through /Arrivals/Search that SAP has never seen.
+        const string arrivalJoin =
+            "LEFT JOIN qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id";
+        const string arrivalDate =
+            "COALESCE(ss.arrival_date, CAST(a.created_at AS DATE))";
+        // ...compared against LOCAL dates. arrival_date is a SQL DATE holding a
+        // local business date while created_at is UTC, so the two need
+        // different bounds -- comparing a local date against a UTC datetime is
+        // how a container arriving late in the day lands in yesterday.
+        const string arrivalInPeriod =
+            "COALESCE(ss.arrival_date, CAST(a.created_at AS DATE)) >= @fromDate AND " +
+            "COALESCE(ss.arrival_date, CAST(a.created_at AS DATE)) <  @toDateEx";
+
         // Single QueryMultiple = one round trip with many result sets.
         // Keeps SAP-cache + arrivals + QOs + defects under one connection
         // so the dashboard paints fast even on a busy DB.
@@ -161,9 +189,13 @@ public class DashboardService : IDashboardService
             -- 4) Composite counts. Stale / aged / pending are ""as of now"" by
             --    design; only CompletedInPeriod follows the selected range.
             SELECT
-                (SELECT COUNT(*) FROM qms_arrival a
+                -- How long ago the CONTAINER ARRIVED, not how long ago the
+                -- record was typed. A container that landed ten days ago and
+                -- was only written up yesterday is the stale one; measured
+                -- from created_at it looked brand new.
+                (SELECT COUNT(*) FROM qms_arrival a {arrivalJoin}
                   WHERE a.status_code = 'Draft'
-                    AND a.created_at < DATEADD(day, -@stale, SYSUTCDATETIME())
+                    AND {arrivalDate} < CAST(DATEADD(day, -@stale, SYSUTCDATETIME()) AS DATE)
                     AND {plantWhere})                                                AS StaleArrivals,
                 (SELECT COUNT(*) FROM qms_quality_order qo
                   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
@@ -281,8 +313,9 @@ public class DashboardService : IDashboardService
 
             -- 8) Throughput vs QC pace over the period: arrivals received vs QOs closed
             SELECT b.Bucket AS WeekStart,
-                   (SELECT COUNT(*) FROM qms_arrival a
-                     WHERE DATEADD({bucket}, DATEDIFF({bucket}, 0, a.created_at), 0) = b.Bucket
+                   (SELECT COUNT(*) FROM qms_arrival a {arrivalJoin}
+                     WHERE DATEADD({bucket}, DATEDIFF({bucket}, 0, {arrivalDate}), 0) = b.Bucket
+                       AND {arrivalInPeriod}
                        AND {plantWhere})                                        AS ArrivalsRecv,
                    (SELECT COUNT(*) FROM qms_quality_order qo
                      JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
@@ -295,8 +328,9 @@ public class DashboardService : IDashboardService
                 -- its neighbours have data.
                 SELECT DISTINCT DATEADD({bucket}, DATEDIFF({bucket}, 0, d.dt), 0) AS Bucket
                 FROM (
-                    SELECT a.created_at AS dt FROM qms_arrival a
-                     WHERE a.created_at >= @fromUtc AND a.created_at < @toUtcEx AND {plantWhere}
+                    SELECT CAST({arrivalDate} AS DATETIME2) AS dt
+                      FROM qms_arrival a {arrivalJoin}
+                     WHERE {arrivalInPeriod} AND {plantWhere}
                     UNION ALL
                     SELECT qo.closed_at FROM qms_quality_order qo
                      JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
@@ -421,8 +455,8 @@ public class DashboardService : IDashboardService
                    ISNULL(q.CatchUp, 0)        AS QosCatchUp
             FROM (
                 SELECT a.plant, COUNT(*) AS Received
-                FROM   qms_arrival a
-                WHERE  a.created_at >= @fromUtc AND a.created_at < @toUtcEx
+                FROM   qms_arrival a {arrivalJoin}
+                WHERE  {arrivalInPeriod}
                   AND  {plantWhere}
                 GROUP  BY a.plant
             ) r
@@ -434,10 +468,11 @@ public class DashboardService : IDashboardService
                 -- the team catching up on a backlog.
                 SELECT a.plant,
                        COUNT(*) AS Cnt,
-                       SUM(CASE WHEN a.created_at <  @fromUtc THEN 1 ELSE 0 END) AS CatchUp,
-                       SUM(CASE WHEN a.created_at >= @fromUtc THEN 1 ELSE 0 END) AS OnPeriod
+                       SUM(CASE WHEN {arrivalDate} <  @fromDate THEN 1 ELSE 0 END) AS CatchUp,
+                       SUM(CASE WHEN {arrivalDate} >= @fromDate THEN 1 ELSE 0 END) AS OnPeriod
                 FROM   qms_quality_order qo
                 JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
+                {arrivalJoin}
                 WHERE  qo.created_at >= @fromUtc AND qo.created_at < @toUtcEx AND {plantWhere}
                 GROUP  BY a.plant
             ) q ON q.plant = r.plant
@@ -445,16 +480,16 @@ public class DashboardService : IDashboardService
 
             -- 12) The same comparison bucketed over time, for the trend chart.
             SELECT b.Bucket AS Bucket,
-                   (SELECT COUNT(*) FROM qms_arrival a
-                     WHERE DATEADD({bucket}, DATEDIFF({bucket}, 0, a.created_at), 0) = b.Bucket
-                       AND a.created_at >= @fromUtc AND a.created_at < @toUtcEx
+                   (SELECT COUNT(*) FROM qms_arrival a {arrivalJoin}
+                     WHERE DATEADD({bucket}, DATEDIFF({bucket}, 0, {arrivalDate}), 0) = b.Bucket
+                       AND {arrivalInPeriod}
                        AND {plantWhere})                                        AS Received,
                    -- Of the containers received IN THIS BUCKET, how many have an
                    -- order. Same cohort as Received, so the two bars are
                    -- comparable at every point on the axis.
-                   (SELECT COUNT(*) FROM qms_arrival a
-                     WHERE DATEADD({bucket}, DATEDIFF({bucket}, 0, a.created_at), 0) = b.Bucket
-                       AND a.created_at >= @fromUtc AND a.created_at < @toUtcEx
+                   (SELECT COUNT(*) FROM qms_arrival a {arrivalJoin}
+                     WHERE DATEADD({bucket}, DATEDIFF({bucket}, 0, {arrivalDate}), 0) = b.Bucket
+                       AND {arrivalInPeriod}
                        AND EXISTS (SELECT 1 FROM qms_quality_order qq
                                    WHERE qq.arrival_id = a.arrival_id)
                        AND {plantWhere})                                        AS Committed,
@@ -466,8 +501,9 @@ public class DashboardService : IDashboardService
             FROM (
                 SELECT DISTINCT DATEADD({bucket}, DATEDIFF({bucket}, 0, d.dt), 0) AS Bucket
                 FROM (
-                    SELECT a.created_at AS dt FROM qms_arrival a
-                     WHERE a.created_at >= @fromUtc AND a.created_at < @toUtcEx AND {plantWhere}
+                    SELECT CAST({arrivalDate} AS DATETIME2) AS dt
+                      FROM qms_arrival a {arrivalJoin}
+                     WHERE {arrivalInPeriod} AND {plantWhere}
                     UNION ALL
                     SELECT qo.created_at FROM qms_quality_order qo
                      JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
@@ -492,6 +528,8 @@ public class DashboardService : IDashboardService
             plant         = string.IsNullOrWhiteSpace(filter.Plant) ? null : filter.Plant!.Trim(),
             fromUtc,
             toUtcEx,
+            fromDate  = fromLocal.Date,
+            toDateEx  = toLocal.Date.AddDays(1),
             sUnrestricted = scope.Unrestricted,
             sPlants       = scope.QueryPlants
         });
@@ -625,18 +663,24 @@ public class DashboardService : IDashboardService
             "EXISTS (SELECT 1 FROM qms_quality_order q2 WHERE q2.arrival_id = a.arrival_id " +
             "AND q2.created_at >= @fromUtc AND q2.created_at < @toUtcEx)";
 
+        // The same arrival date the portlet counts on -- SAP's, not the moment
+        // the record was typed. The drill-through exists to answer with the
+        // rows behind a number, so it has to agree on what "arrived" means.
+        const string arrivalDate = "COALESCE(ss.arrival_date, CAST(a.created_at AS DATE))";
+        var arrivedInPeriod = $"{arrivalDate} >= @fromDate AND {arrivalDate} < @toDateEx";
+
         // Which rows, and which date window applies to which table.
         var where = bucket.ToLowerInvariant() switch
         {
             CommitmentBuckets.PeriodInspection =>
-                $"a.created_at >= @fromUtc AND a.created_at < @toUtcEx AND {openedInPeriod}",
+                $"{arrivedInPeriod} AND {openedInPeriod}",
             CommitmentBuckets.PendingInspection =>
-                $"a.created_at >= @fromUtc AND a.created_at < @toUtcEx AND NOT {openedInPeriod}",
+                $"{arrivedInPeriod} AND NOT {openedInPeriod}",
             CommitmentBuckets.BacklogInspected =>
-                "qo.created_at >= @fromUtc AND qo.created_at < @toUtcEx AND a.created_at < @fromUtc",
+                $"qo.created_at >= @fromUtc AND qo.created_at < @toUtcEx AND {arrivalDate} < @fromDate",
             CommitmentBuckets.TotalInspected =>
                 "qo.created_at >= @fromUtc AND qo.created_at < @toUtcEx",
-            _ => "a.created_at >= @fromUtc AND a.created_at < @toUtcEx"
+            _ => arrivedInPeriod
         };
 
         // The two inspection buckets are ABOUT the order, so they inner-join it;
@@ -656,24 +700,28 @@ public class DashboardService : IDashboardService
                     a.ebeln                    AS Ebeln,
                     a.vendor_name              AS VendorName,
                     a.status_code              AS ArrivalStatus,
-                    a.created_at               AS ArrivalCreatedAt,
+                    CAST(COALESCE(ss.arrival_date, CAST(a.created_at AS DATE)) AS DATETIME2) AS ArrivalCreatedAt,
+                    a.created_at               AS RecordCreatedAt,
                     qo.quality_order_id        AS QualityOrderId,
                     qo.quality_order_no        AS QualityOrderNo,
                     qo.status_code             AS QoStatus,
                     qo.created_at              AS QoCreatedAt,
                     qo.closed_at               AS QoClosedAt
             FROM    qms_arrival a
+            LEFT    JOIN qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id
             {join}  qms_quality_order qo ON qo.arrival_id = a.arrival_id
             WHERE   {where}
               AND   (@plant IS NULL OR a.plant = @plant)
               AND   (@sUnrestricted = 1 OR a.plant IN @sPlants)
-            ORDER BY a.plant, a.created_at DESC, a.arrival_no";
+            ORDER BY a.plant, COALESCE(ss.arrival_date, CAST(a.created_at AS DATE)) DESC, a.arrival_no";
 
         using var c = new SqlConnection(_cs);
         var rows = await c.QueryAsync<CommitmentDetailRow>(new CommandDefinition(sql, new
         {
             fromUtc,
             toUtcEx,
+            fromDate = fromLocal.Date,
+            toDateEx = toLocal.Date.AddDays(1),
             plant = string.IsNullOrWhiteSpace(plant) ? null : plant.Trim(),
             sUnrestricted = scope.Unrestricted,
             sPlants       = scope.QueryPlants

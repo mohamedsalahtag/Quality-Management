@@ -1759,7 +1759,8 @@ public class QualityOrderService : IQualityOrderService
                     Name       = d.DefectName,
                     Category   = d.DefectCategory,
                     SumValue   = sumVal,
-                    Percentage = pct
+                    Percentage = pct,
+                    Tolerance  = d.Tolerance
                 };
                 if (!sectionsByCat.TryGetValue(d.DefectCategory, out var sec))
                 {

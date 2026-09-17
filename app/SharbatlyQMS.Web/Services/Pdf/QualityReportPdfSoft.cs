@@ -34,6 +34,11 @@ public static class QualityReportPdfSoft
     // without reading a word -- the same slate blue for both made the two
     // halves of the document look like one continuous run.
     private const string DetailHead = "#4e7a63"; // muted green — Sample Details bar
+    // Over tolerance. A true red, not the muted rose used for the Major
+    // header: this one has to be unmistakable against both the white and the
+    // striped row backgrounds, and it is the only place in the report that
+    // carries a verdict rather than a value.
+    private const string Breach    = "#c0392b";
     private const string MajorHead = "#b76e79"; // soft muted rose — Major header
     private const string MinorHead = "#b08d3e"; // soft muted amber — Minor header
     private const string White     = "#ffffff";
@@ -152,7 +157,8 @@ public static class QualityReportPdfSoft
                 // other and still read as two different things.
                 PartBand(col.Item(), d.GroupSummaries.Count > 0 ? 2 : 1,
                                      d.GroupSummaries.Count > 0 ? 2 : 1, L("Sample Details"),
-                    L("Every sample and every reading, material by material."), DetailHead);
+                    L("Every sample and every reading, material by material. A defect shown in red has reached or passed the tolerance set for it."),
+                    DetailHead);
                 foreach (var grp in d.Samples.GroupBy(s => s.Sample.QoMaterialId))
                 {
                     var first   = grp.First();
@@ -491,7 +497,8 @@ public static class QualityReportPdfSoft
             Add(entry.DefectCategory, new DefectAggRow
             {
                 DefectId = entry.DefectId, Code = entry.DefectCode, Name = entry.DefectName,
-                Category = entry.DefectCategory, SumValue = val, Percentage = pct
+                Category = entry.DefectCategory, SumValue = val, Percentage = pct,
+                Tolerance = entry.Tolerance
             });
         }
         var catalogIds = catalog.Select(c => c.DefectId).ToHashSet();
@@ -767,9 +774,14 @@ public static class QualityReportPdfSoft
             foreach (var row in s.Rows)
             {
                 var bg = (i++ % 2 == 1) ? Stripe : White;
-                Cell(t.Cell(), fill: bg).Text(V(row.Name)).FontColor(Ink);
-                Cell(t.Cell(), fill: bg).AlignRight().Text(Fmt.Dec2(row.SumValue)).FontColor(Ink);
-                Cell(t.Cell(), fill: bg).AlignRight().Text(Fmt.Dec2(row.Percentage) + "%").FontColor(Ink);
+                // A defect that has reached or passed the tolerance agreed for
+                // it in the catalog is printed in red -- name, count and
+                // percentage together, because a lone red number reads as a
+                // typo while a whole red line reads as a verdict.
+                var ink = row.ExceedsTolerance ? Breach : Ink;
+                Cell(t.Cell(), fill: bg).Text(V(row.Name)).FontColor(ink);
+                Cell(t.Cell(), fill: bg).AlignRight().Text(Fmt.Dec2(row.SumValue)).FontColor(ink);
+                Cell(t.Cell(), fill: bg).AlignRight().Text(Fmt.Dec2(row.Percentage) + "%").FontColor(ink);
             }
 
             Cell(t.Cell(), head: true).Text(L("Total")).Bold().FontColor(Ink);

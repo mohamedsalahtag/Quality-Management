@@ -101,8 +101,14 @@ public class ReportRenderingTests : IClassFixture<QmsAppFactory>
             "SELECT TOP 1 quality_order_id FROM qms_quality_order WHERE arrival_id = @a ORDER BY quality_order_id DESC",
             new { a = row.ArrivalId });
 
+        // The role travels on the REQUEST, not through TestAuthHandler.Role.
+        // That static is shared by every collection running in parallel, so a
+        // neighbouring test can flip it between the assignment and the call --
+        // which is exactly how this test failed once in a full run and passed
+        // on its own.
         var client = _factory.CreateClient();
-        TestAuthHandler.Role = SharbatlyQMS.Web.Models.Security.RoleCodes.Admin;
+        client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader,
+                                         SharbatlyQMS.Web.Models.Security.RoleCodes.Admin);
         var res = await client.GetAsync($"/Reports/QualityOrderPdfPreview/{qoId}");
         Assert.Equal(System.Net.HttpStatusCode.OK, res.StatusCode);
 

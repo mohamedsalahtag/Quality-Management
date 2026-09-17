@@ -186,7 +186,8 @@ public class HomeController : Controller
         var headers = new[]
         {
             "Plant", "Arrival", "Container", "BOL", "PO", "Supplier",
-            "Arrival status", "Received on", "Inspection", "Inspection status",
+            "Arrival status", "Arrived (SAP)", "Record created",
+            "Inspection", "Inspection status",
             "Opened on", "Finished on", "Days to inspection"
         };
         for (var i = 0; i < headers.Length; i++)
@@ -205,12 +206,16 @@ public class HomeController : Controller
             ws.Cell(r,  5).Value = row.Ebeln;
             ws.Cell(r,  6).Value = row.VendorName;
             ws.Cell(r,  7).Value = row.ArrivalStatus;
-            ws.Cell(r,  8).Value = row.ArrivalCreatedAt.ToLocalTime();
-            ws.Cell(r,  9).Value = row.QualityOrderNo;
-            ws.Cell(r, 10).Value = row.QoStatus;
-            if (row.QoCreatedAt.HasValue) ws.Cell(r, 11).Value = row.QoCreatedAt.Value.ToLocalTime();
-            if (row.QoClosedAt.HasValue)  ws.Cell(r, 12).Value = row.QoClosedAt.Value.ToLocalTime();
-            if (row.DaysToInspection.HasValue) ws.Cell(r, 13).Value = row.DaysToInspection.Value;
+            // Already a local business date from SAP -- NOT converted, or a
+            // date-only value would shift a day backwards on the way through
+            // ToLocalTime.
+            ws.Cell(r,  8).Value = row.ArrivalCreatedAt;
+            ws.Cell(r,  9).Value = row.RecordCreatedAt.ToLocalTime();
+            ws.Cell(r, 10).Value = row.QualityOrderNo;
+            ws.Cell(r, 11).Value = row.QoStatus;
+            if (row.QoCreatedAt.HasValue) ws.Cell(r, 12).Value = row.QoCreatedAt.Value.ToLocalTime();
+            if (row.QoClosedAt.HasValue)  ws.Cell(r, 13).Value = row.QoClosedAt.Value.ToLocalTime();
+            if (row.DaysToInspection.HasValue) ws.Cell(r, 14).Value = row.DaysToInspection.Value;
             r++;
         }
 
