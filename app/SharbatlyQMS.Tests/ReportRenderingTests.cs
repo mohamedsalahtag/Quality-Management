@@ -138,8 +138,8 @@ public class ReportRenderingTests : IClassFixture<QmsAppFactory>
     {
         using var scope = _factory.Services.CreateScope();
         var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
-        var rows   = await claims.ListClosedQosAsync(new SharbatlyQMS.Web.ViewModels.ClaimListFilter(),
-                                                     PlantScope.All, "test");
+        var rows   = (await claims.ListClosedQosAsync(new SharbatlyQMS.Web.ViewModels.ClaimListFilter(),
+                                                     PlantScope.All, "test")).Rows;
         var qoId   = rows.Where(r => r.StatusCode == QualityOrderStatus.Closed)
                          .Select(r => r.QualityOrderId).FirstOrDefault();
         if (qoId == 0) return;

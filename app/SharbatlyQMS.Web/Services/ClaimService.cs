@@ -52,9 +52,14 @@ public class ClaimService : IClaimService
                 OR (@archived = 1 AND qo.archived_at IS NOT NULL)
                  )";
 
-    public async Task<IReadOnlyList<ClaimListRow>> ListClosedQosAsync(
+    public async Task<ClaimPage> ListClosedQosAsync(
         ClaimListFilter f, PlantScope scope, string currentUser)
     {
+        // Clamped to the sizes the pager offers, so a hand-edited query string
+        // cannot ask for the whole worklist back -- which is what this page
+        // used to do by default.
+        var pageSize = f.PageSize is 25 or 50 or 100 ? f.PageSize : 50;
+        var page     = f.Page < 1 ? 1 : f.Page;
         // Status is multi-valued, and one of its values is not a value at all:
         // Pending means a Closed QO with NO row in qms_claim yet, which is a
         // test on cl.claim_id rather than on cl.claim_status.
@@ -144,7 +149,12 @@ public class ClaimService : IClaimService
                     AS t(v))             AS LastActivityAt,
                    cl.decided_at         AS DecidedAt,
                    ISNULL(nc.note_count,   0) AS NoteCount,
-                   ISNULL(uc.unread_count, 0) AS UnreadCount
+                   ISNULL(uc.unread_count, 0) AS UnreadCount,
+                   -- The pager's total, as a window over the whole matching set
+                   -- rather than a second statement repeating this query's
+                   -- WHERE. The filters live inline below, so a separate count
+                   -- would be a copy of them -- and a copy is what drifts.
+                   COUNT(*) OVER () AS TotalCount
             FROM   qms_quality_order qo
             LEFT   JOIN qms_arrival  a  ON a.arrival_id = qo.arrival_id
             LEFT   JOIN qms_shipment_snapshot sh ON sh.arrival_id = qo.arrival_id
@@ -249,11 +259,14 @@ public class ClaimService : IClaimService
                 -- SQL Server 2016 has no GREATEST, hence the one-row VALUES.
                 (SELECT MAX(v) FROM (VALUES (cl.last_changed_at), (qo.closed_at),
                                             (qo.opened_at), (qo.created_at)) AS t(v)) DESC,
-                qo.quality_order_id DESC";
+                qo.quality_order_id DESC
+            OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY";
 
         using var c = Open();
         var rows = await c.QueryAsync<ClaimListRow>(sql, new
         {
+            offset = (page - 1) * pageSize,
+            pageSize,
             statusAny     = pickedStatuses.Count > 0,
             wantPending,
             realStatuses = FilterValues.ForIn(realStatuses), realStatusAny = realStatuses.Count > 0,
@@ -277,7 +290,9 @@ public class ClaimService : IClaimService
             toUtc,
             currentUser
         });
-        return rows.ToList();
+        var list = rows.ToList();
+        // COUNT(*) OVER () rides on every row; an empty page means an empty set.
+        return new ClaimPage(list, list.Count > 0 ? list[0].TotalCount : 0, page, pageSize);
     }
 
     /// <summary>Dropdown sources for the Claims filter panel. Restricted to

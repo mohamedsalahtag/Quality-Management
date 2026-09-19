@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Models;
@@ -29,7 +29,7 @@ public class SupplierMailAttachmentTests : IClassFixture<QmsAppFactory>
         using var scope = _factory.Services.CreateScope();
         var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
         var qos    = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
-        var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+        var rows   = (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Rows;
         foreach (var r in rows.Take(30))
         {
             var qo = await qos.GetAsync(r.QualityOrderId);
@@ -100,7 +100,9 @@ public class SupplierMailAttachmentTests : IClassFixture<QmsAppFactory>
                 .Select(d => d.DocumentId).ToHashSet();
 
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
-            foreach (var r in (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Take(40))
+            foreach (var r in (await claims.ListClosedQosAsync(
+                                 new ClaimListFilter { PageSize = 100 },
+                                 PlantScope.All, "test")).Rows.Take(40))
             {
                 if (r.QualityOrderId == qo.QualityOrderId) continue;
                 var other = await qos.GetAsync(r.QualityOrderId);

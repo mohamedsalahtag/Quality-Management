@@ -320,13 +320,13 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
             var qos    = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
 
-            var before = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+            var before = (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Rows;
             _out.WriteLine($"rows for this container before: {before.Count(r => r.ArrivalId == arrivalId)}");
 
             var (newId, _) = await qos.ReinspectAsync(
                 qoId, "Should not vanish from the claims list.", "test");
 
-            var after = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+            var after = (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Rows;
 
             // The original has gone -- one container never sits there twice.
             Assert.DoesNotContain(after, r => r.QualityOrderId == qoId);
@@ -340,8 +340,8 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
             Assert.NotEqual(QualityOrderStatus.Closed, rows[0].StatusCode);
 
             // And it is not masquerading as untouched work.
-            var pending = await claims.ListClosedQosAsync(
-                new ClaimListFilter { Status = new List<string> { ClaimStatus.Pending } }, PlantScope.All, "test");
+            var pending = (await claims.ListClosedQosAsync(
+                new ClaimListFilter { Status = new List<string> { ClaimStatus.Pending } }, PlantScope.All, "test")).Rows;
             Assert.DoesNotContain(pending, r => r.ArrivalId == arrivalId);
         }
         finally { await CleanupAsync(arrivalId); }
@@ -403,8 +403,12 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
             var qos = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
             var (newId, _) = await qos.ReinspectAsync(qoId, "Filter must find both sides.", "test");
 
+            // PageSize 100: the seeded pair has to be ON the page for these
+            // assertions to mean anything, and the list is paged now.
             async Task<IReadOnlyList<QualityOrder>> List(string? which) =>
-                await qos.ListAsync(new QoListFilter { Reinspection = which }, PlantScope.All);
+                (await qos.ListAsync(
+                    new QoListFilter { Reinspection = which, PageSize = 100 },
+                    PlantScope.All)).Rows;
 
             var originals     = await List("originals");
             var reinspections = await List("reinspections");

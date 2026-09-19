@@ -192,8 +192,8 @@ public class ReportLabelTests : IClassFixture<QmsAppFactory>
         using var scope = _factory.Services.CreateScope();
         var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
         var qos    = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
-        var rows   = await claims.ListClosedQosAsync(
-            new Web.ViewModels.ClaimListFilter(), Web.Models.PlantScope.All, "test");
+        var rows   = (await claims.ListClosedQosAsync(
+            new Web.ViewModels.ClaimListFilter(), Web.Models.PlantScope.All, "test")).Rows;
 
         long? id = null;
         foreach (var r in rows.Take(20))

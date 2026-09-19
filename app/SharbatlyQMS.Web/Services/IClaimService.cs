@@ -1,4 +1,4 @@
-using SharbatlyQMS.Web.Models;
+﻿using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Services;
@@ -13,7 +13,7 @@ public interface IClaimService
     /// plants. `currentUser` drives the per-row UnreadCount calculation (notes
     /// posted by someone else since the user last opened that claim's Details).
     /// </summary>
-    Task<IReadOnlyList<ClaimListRow>> ListClosedQosAsync(
+    Task<ClaimPage> ListClosedQosAsync(
         ClaimListFilter filter, PlantScope scope, string currentUser);
 
     /// <summary>Dropdown sources for the Claims filter panel, plant-scoped and

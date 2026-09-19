@@ -227,7 +227,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         {
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
             var qos    = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
-            var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+            var rows   = (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Rows;
             // An in-progress reinspection can head this list; it has no samples,
             // so the loop skips it, but be explicit rather than lucky.
             foreach (var r in rows.Where(r => r.StatusCode == QualityOrderStatus.Closed).Take(25))
@@ -260,7 +260,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         using (var scope = _factory.Services.CreateScope())
         {
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
-            var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+            var rows   = (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Rows;
             qoId = rows.Where(r => r.StatusCode == QualityOrderStatus.Closed)
                        .Select(r => r.QualityOrderId).FirstOrDefault();
         }
@@ -292,7 +292,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         using (var scope = _factory.Services.CreateScope())
         {
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
-            var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+            var rows   = (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Rows;
             qoId = rows.Where(r => r.StatusCode == QualityOrderStatus.Closed)
                        .Select(r => r.QualityOrderId).FirstOrDefault();
         }
@@ -327,7 +327,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         {
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
             var qos    = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
-            var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+            var rows   = (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Rows;
             foreach (var r in rows.Take(25))
             {
                 var samples = await qos.ListSamplesAsync(r.QualityOrderId);

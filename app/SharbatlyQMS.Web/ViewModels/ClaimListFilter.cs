@@ -58,6 +58,12 @@ public class ClaimListFilter
     /// next-midnight bound by the service).</summary>
     public DateTime? To       { get; set; }
 
+    // Server-side paging. This list shipped every closed order AND a hidden
+    // detail row for each one -- ~3,450 table rows and 10.7 MB of HTML on
+    // every load, the heaviest page in the application.
+    public int Page     { get; set; } = 1;
+    public int PageSize { get; set; } = 50;
+
     /// <summary>True when any panel filter is set — the view uses this to open
     /// the panel on load so a bookmarked or shared URL doesn't look like an
     /// unexplained short list.</summary>
@@ -102,3 +108,8 @@ public class ClaimFilterOptions
     /// actually touched a claim appear.</summary>
     public IReadOnlyList<string>         ClaimOwners      { get; init; } = Array.Empty<string>();
 }
+
+/// <summary>One page of the Claims worklist, plus the total so the pager can
+/// say how many there are without fetching them.</summary>
+public sealed record ClaimPage(
+    IReadOnlyList<Models.ClaimListRow> Rows, int Total, int Page, int PageSize);

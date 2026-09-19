@@ -14,6 +14,41 @@
     var panelOpen = f.AnyPanelFilter;
     string D(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
 
+    // Server-side paging. This list rendered every closed order plus a hidden
+    // detail row for each -- the heaviest page in the application.
+    var totalCount = ViewBag.TotalCount as int? ?? Model.Count;
+    var pageNo     = ViewBag.PageNo    as int? ?? 1;
+    var pageSize   = ViewBag.PageSize  as int? ?? 50;
+    var pageCount  = (int)Math.Ceiling(totalCount / (double)Math.Max(1, pageSize));
+    var firstRow   = totalCount == 0 ? 0 : ((pageNo - 1) * pageSize) + 1;
+    var lastRow    = Math.Min(pageNo * pageSize, totalCount);
+
+    // A query STRING, not asp-all-route-data: that is a Dictionary and cannot
+    // repeat a key, so the multi-select filters would collapse to one value
+    // each on page 2 -- widening the list without anyone touching a control.
+    string PageQuery(int pg, int size)
+    {
+        var q = new List<string>();
+        void Add(string k, string? v)
+        {
+            if (!string.IsNullOrWhiteSpace(v))
+                q.Add($"{Uri.EscapeDataString(k)}={Uri.EscapeDataString(v!)}");
+        }
+        void AddMany(string k, IEnumerable<string> vs) { foreach (var v in vs) Add(k, v); }
+
+        AddMany("status", f.Status);        Add("potential", f.Potential);
+        Add("search", f.Search);            Add("container", f.Container);
+        Add("bol", f.Bol);                  Add("po", f.Po);
+        Add("arrivalNo", f.ArrivalNo);      Add("material", f.Material);
+        AddMany("supplier", f.Supplier);    AddMany("plant", f.Plant);
+        AddMany("storageLoc", f.StorageLoc);
+        AddMany("closedBy", f.ClosedBy);    AddMany("claimOwner", f.ClaimOwner);
+        Add("from", D(f.From));             Add("to", D(f.To));
+        q.Add($"page={pg}");
+        q.Add($"pageSize={size}");
+        return "?" + string.Join("&", q);
+    }
+
     // Fast filter chips: All + Pending + the real claim statuses. Each button
     // is its own submit so picking a chip posts the form (preserving the
     // search text and every panel field) without an extra click.
@@ -514,9 +549,72 @@
             </tbody>
         </table>
     </div>
+
+    @* ---- Server-side pager ----
+       The controller ships one page at a time. Links carry every active filter
+       so paging never widens the view. Mirrors /Arrivals. ---- *@
+    @if (totalCount > 0)
+    {
+        <div class="tk-pager d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 border-top">
+            <div class="d-flex align-items-center gap-2 small text-muted">
+                <label class="mb-0">@Loc["Show"]</label>
+                <select class="form-select form-select-sm" style="width:auto" data-pagesize-select>
+                    @foreach (var n in new[] { 25, 50, 100 })
+                    {
+                        <option value="@n" selected="@(n == pageSize)">@n</option>
+                    }
+                </select>
+                <span>@Loc["per page"]</span>
+            </div>
+
+            <span class="text-muted small">Showing @firstRow&ndash;@lastRow of @totalCount</span>
+
+            @if (pageCount > 1)
+            {
+                <nav aria-label='@Loc["Claim pages"]'>
+                    <ul class="pagination pagination-sm mb-0">
+                        @{
+                            var pFrom = Math.Max(1, pageNo - 2);
+                            var pTo   = Math.Min(pageCount, pageNo + 2);
+                        }
+                        <li class="page-item @(pageNo == 1 ? "disabled" : "")">
+                            <a class="page-link" href="@PageQuery(pageNo - 1, pageSize)" aria-label='@Loc["Previous"]'>&laquo;</a>
+                        </li>
+                        @if (pFrom > 1)
+                        {
+                            <li class="page-item"><a class="page-link" href="@PageQuery(1, pageSize)">1</a></li>
+                            @if (pFrom > 2)
+                            {
+                                <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                            }
+                        }
+                        @for (var pp = pFrom; pp <= pTo; pp++)
+                        {
+                            <li class="page-item @(pp == pageNo ? "active" : "")">
+                                <a class="page-link" href="@PageQuery(pp, pageSize)">@pp</a>
+                            </li>
+                        }
+                        @if (pTo < pageCount)
+                        {
+                            @if (pTo < pageCount - 1)
+                            {
+                                <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                            }
+                            <li class="page-item"><a class="page-link" href="@PageQuery(pageCount, pageSize)">@pageCount</a></li>
+                        }
+                        <li class="page-item @(pageNo == pageCount ? "disabled" : "")">
+                            <a class="page-link" href="@PageQuery(pageNo + 1, pageSize)" aria-label='@Loc["Next"]'>&raquo;</a>
+                        </li>
+                    </ul>
+                </nav>
+            }
+        </div>
+    }
 </div>
 
 
 @section Scripts {
     <script src="~/js/list-filter-memory.js" asp-append-version="true"></script>
+    @* Wires the "rows per page" select; page links are plain <a> reloads. *@
+    <script src="~/js/list-pager.js" asp-append-version="true"></script>
 }

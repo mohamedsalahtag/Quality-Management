@@ -68,13 +68,18 @@ public class ClaimManagementController : Controller
         // view renders a locked badge + hidden input to match).
         var user    = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var scope   = User.GetPlantScope();
-        var rows    = await _claims.ListClosedQosAsync(filter, scope, user);
+        var page    = await _claims.ListClosedQosAsync(filter, scope, user);
         var options = await _claims.GetClaimFilterOptionsAsync(scope, filter.Archived);
         ViewBag.Filter           = filter;
         ViewBag.FilterOptions    = options;
         ViewBag.PlantScopeLocked = User.SinglePlantOrNull();
+        // The pager reads these; the model stays the rows so the table markup
+        // below is unchanged.
+        ViewBag.TotalCount       = page.Total;
+        ViewBag.PageNo           = page.Page;
+        ViewBag.PageSize         = page.PageSize;
         // Both actions render the Claims list; the tab strip reads Filter.Archived.
-        return View("Index", rows);
+        return View("Index", page.Rows);
     }
 
     /// <summary>

@@ -220,6 +220,14 @@ public static class ClaimAssessment
 /// <summary>Row shape for the Claim Management list page.</summary>
 public class ClaimListRow
 {
+    /// <summary>
+    /// The size of the whole matching set, not of this page — COUNT(*) OVER ()
+    /// repeats it on every row. Carried on the row rather than counted by a
+    /// second query because the list's filters live inline in that query, and a
+    /// separate count would be a copy of them that could drift.
+    /// </summary>
+    public int       TotalCount     { get; set; }
+
     public long      QualityOrderId { get; set; }
     public string    QualityOrderNo { get; set; } = "";
     public long      ArrivalId      { get; set; }

@@ -96,10 +96,12 @@ public class MaterialCategoryFilterTests : IClassFixture<QmsAppFactory>
         _out.WriteLine($"arrivals       {aOne.Total} of {aAll.Total}");
         Assert.True(aOne.Total <= aAll.Total);
 
-        var qAll = await qos.ListAsync(new QoListFilter(), PlantScope.All);
-        var qOne = await qos.ListAsync(new QoListFilter { MatMajor = major }, PlantScope.All);
-        _out.WriteLine($"quality orders {qOne.Count} of {qAll.Count}");
-        Assert.True(qOne.Count <= qAll.Count);
+        var qAll = (await qos.ListAsync(new QoListFilter(), PlantScope.All)).Total;
+        var qOne = (await qos.ListAsync(new QoListFilter { MatMajor = major }, PlantScope.All)).Total;
+        // Totals, not page sizes: the list is paged now, so comparing page
+        // counts would compare 50 with 50 and prove nothing.
+        _out.WriteLine($"quality orders {qOne} of {qAll}");
+        Assert.True(qOne <= qAll);
 
         var pAll = await cache.ListPendingAsync(pageSize: 50);
         var pOne = await cache.ListPendingAsync(matMajor: major, pageSize: 50);

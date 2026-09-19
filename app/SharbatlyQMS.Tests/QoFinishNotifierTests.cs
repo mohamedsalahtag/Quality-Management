@@ -146,7 +146,7 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         var notifier = scope.ServiceProvider.GetRequiredService<IQoFinishNotifier>();
         var claims   = scope.ServiceProvider.GetRequiredService<IClaimService>();
 
-        var rows = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+        var rows = (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Rows;
         var qoId = rows.Where(r => r.StatusCode == QualityOrderStatus.Closed)
                        .Select(r => r.QualityOrderId).FirstOrDefault();
         if (qoId == 0) return;
@@ -187,7 +187,7 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
 
         // A finished order that actually recorded defects, so "full summary"
         // means something -- an order with none would pass a weaker assertion.
-        var rows = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+        var rows = (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Rows;
         long pick = 0;
         // An in-progress reinspection can head this list; it has no samples,
         // so the loop skips it, but be explicit rather than lucky.
@@ -218,7 +218,7 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         var claims   = scope.ServiceProvider.GetRequiredService<IClaimService>();
         var qos      = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
 
-        var rows = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+        var rows = (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Rows;
         long pick = 0; string? comment = null;
         foreach (var r in rows.Take(40))
         {

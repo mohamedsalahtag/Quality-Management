@@ -40,15 +40,20 @@ public class QualityOrdersController : Controller
         // whatever the panel's plant dropdown posted (the view renders a locked
         // badge + hidden input to match).
         var scope   = User.GetPlantScope();
-        var rows    = await _qos.ListAsync(filter, scope);
+        var page    = await _qos.ListAsync(filter, scope);
         var options = await _qos.GetQoFilterOptionsAsync(scope);
         ViewBag.Filter           = filter;
         ViewBag.FilterOptions    = options;
+        // The pager reads these; the model stays the rows themselves so the
+        // table markup below is unchanged.
+        ViewBag.TotalCount       = page.Total;
+        ViewBag.PageNo           = page.Page;
+        ViewBag.PageSize         = page.PageSize;
         // Lock the plant dropdown to a badge only when the user has exactly one
         // plant; multi-plant users still pick among their own via the options,
         // which are already limited to their scope above.
         ViewBag.PlantScopeLocked = User.SinglePlantOrNull();
-        return View(rows);
+        return View(page.Rows);
     }
 
     /// <summary>Forbid() when the user is plant-scoped and the QO belongs to a

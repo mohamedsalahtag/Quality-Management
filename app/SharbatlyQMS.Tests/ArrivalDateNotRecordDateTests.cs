@@ -1,4 +1,4 @@
-using Microsoft.Extensions.Configuration;
+﻿using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services;
@@ -166,7 +166,7 @@ public class ArrivalDateNotRecordDateTests : IClassFixture<QmsAppFactory>
         await c.OpenAsync();
 
         // Claims list.
-        var claimRows = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+        var claimRows = (await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test")).Rows;
         var seen = 0;
         foreach (var r in claimRows.Take(15))
         {

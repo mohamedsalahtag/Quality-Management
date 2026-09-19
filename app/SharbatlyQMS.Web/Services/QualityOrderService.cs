@@ -115,9 +115,15 @@ public class QualityOrderService : IQualityOrderService
 
     /// <param name="plantScope">Forced plant for plant-restricted operators.
     /// When set it overrides whatever the user picked in the filter panel.</param>
-    public async Task<IReadOnlyList<QualityOrder>> ListAsync(QoListFilter f, PlantScope scope)
+    public async Task<QoPage> ListAsync(QoListFilter f, PlantScope scope)
     {
         using var c = Open();
+
+        // Clamped to the sizes the pager offers, so a hand-edited query string
+        // cannot ask for the whole table back -- which is exactly what this
+        // page used to do by default.
+        var pageSize = f.PageSize is 25 or 50 or 100 ? f.PageSize : 50;
+        var page     = f.Page < 1 ? 1 : f.Page;
 
         static string? Trim(string? s) => string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
@@ -160,15 +166,28 @@ public class QualityOrderService : IQualityOrderService
             matSubMajor = Trim(f.MatSubMajor),
             reinspection = Trim(f.Reinspection),
             fromUtc,
-            toUtc
+            toUtc,
+            offset = (page - 1) * pageSize,
+            pageSize
         };
-        // Two result sets in one round trip (same pattern as the Pending
-        // Containers list): the QO headers, then every material line for those
-        // same QOs, stitched in memory so the list can show a materials "quick
-        // peek" hover without an N+1 query per row.
-        using var grid = await c.QueryMultipleAsync(
-            QoSelect + QoListWhere + @"
-            ORDER BY qo.created_at DESC;
+        // quality_order_id breaks ties on created_at so a row can never sit on
+        // two pages, or on none, when several orders share a timestamp.
+        const string pageOrder = @"
+            ORDER BY qo.created_at DESC, qo.quality_order_id DESC
+            OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY";
+
+        // Three result sets in one round trip: the total for the pager, the
+        // page of QO headers, then the material lines for THOSE headers only.
+        //
+        // The material lines repeat the paged subquery rather than filtering on
+        // the whole result set -- before paging this pulled all ~7,000 lines to
+        // build a hover tooltip nobody had hovered yet.
+        using var grid = await c.QueryMultipleAsync(@"
+            SELECT COUNT(*)
+            FROM   qms_quality_order qo
+            LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id"
+            + QoListWhere + @";
+        " + QoSelect + QoListWhere + pageOrder + @";
 
             SELECT m.quality_order_id QualityOrderId,
                    m.material_no      MaterialNo,
@@ -181,9 +200,10 @@ public class QualityOrderService : IQualityOrderService
                        SELECT qo.quality_order_id
                        FROM   qms_quality_order qo
                        LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id"
-                       + QoListWhere + @")
+                       + QoListWhere + pageOrder + @")
             ORDER BY m.quality_order_id, m.qo_material_id;", p);
 
+        var total = await grid.ReadFirstAsync<int>();
         var rows  = (await grid.ReadAsync<QualityOrder>()).ToList();
         var lines = (await grid.ReadAsync<QoMaterialLine>()).ToList();
 
@@ -193,7 +213,7 @@ public class QualityOrderService : IQualityOrderService
             r.MaterialLines = byQo[r.QualityOrderId].ToList();
             r.LineCount     = r.MaterialLines.Count;
         }
-        return rows;
+        return new QoPage(rows, total, page, pageSize);
     }
 
     /// <summary>

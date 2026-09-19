@@ -59,6 +59,13 @@ public class QoListFilter
     /// </summary>
     public string? Reinspection { get; set; }
 
+    // Server-side paging. The list used to ship every order and let the
+    // browser page it, which meant rendering ~2,000 rows into 6.6 MB of HTML
+    // on every load. Only one page crosses the wire now. Mirrors
+    // ArrivalListFilter, whose page was already the fast one.
+    public int Page     { get; set; } = 1;
+    public int PageSize { get; set; } = 50;
+
     /// <summary>True when any panel filter is set — the view uses this to open
     /// the panel on load so a bookmarked or shared URL doesn't look like an
     /// unexplained short list.</summary>
@@ -93,6 +100,11 @@ public class QoListFilter
                        || !string.IsNullOrWhiteSpace(Search)
                        || Status.Count > 0;
 }
+
+/// <summary>One page of the Quality Orders list, plus the total so the pager
+/// can say how many there are without fetching them.</summary>
+public sealed record QoPage(
+    IReadOnlyList<Models.QualityOrder> Rows, int Total, int Page, int PageSize);
 
 /// <summary>Dropdown sources for the Quality Orders filter panel. Drawn from
 /// quality orders that actually exist, so no option can return an empty list.</summary>

@@ -8,7 +8,10 @@ public interface IQualityOrderService
 {
     /// <param name="plantScope">Forced plant for plant-restricted operators;
     /// overrides whatever the filter carries.</param>
-    Task<IReadOnlyList<QualityOrder>> ListAsync(QoListFilter filter, PlantScope scope);
+    /// <summary>One page of quality orders, newest first, with the total for
+    /// the pager. Paged on the SERVER: the whole list is ~2,000 rows and
+    /// rendering all of them was the page's slowness.</summary>
+    Task<QoPage> ListAsync(QoListFilter filter, PlantScope scope);
 
     /// <summary>Dropdown sources (plants, plant+storage pairs, openers) for the
     /// Quality Orders filter panel, restricted to the caller's plant scope.</summary>

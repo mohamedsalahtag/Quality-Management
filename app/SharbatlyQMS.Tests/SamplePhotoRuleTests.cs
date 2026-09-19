@@ -1,4 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
+﻿using Microsoft.Extensions.DependencyInjection;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services;
 using Xunit;
@@ -112,7 +112,7 @@ public class SamplePhotoRuleLiveTests : IClassFixture<QmsAppFactory>
 
         // Known at the time of writing to have samples without photos.
         var qo = (await qos.ListAsync(new SharbatlyQMS.Web.ViewModels.QoListFilter { QoNo = "QO-2026-000684" },
-                                      PlantScope.All)).FirstOrDefault();
+                                      PlantScope.All)).Rows.FirstOrDefault();
         if (qo == null) return;
 
         var samples   = await qos.ListSamplesAsync(qo.QualityOrderId);
