@@ -150,14 +150,21 @@ public class DashboardService : IDashboardService
         const string arrivalJoin =
             "LEFT JOIN qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id";
 
-        // A reinspection is a SECOND order on a container that was already
-        // inspected. It is real work, but it is not a second container, and
-        // every figure on this dashboard is about containers: counting it would
-        // put Coverage above 100%, hide a genuinely un-inspected container
-        // inside the Max(0, ...) clamp on Outstanding, and plot two order-bars
-        // against one arrival-bar. The original is what the operational numbers
-        // follow; the reinspection is found on the Quality Orders list.
-        const string notAReinspection = "qo.reinspection_of IS NULL";
+        // One order per container -- the LIVE one. A reinspection is a second
+        // order on a container that was already inspected: real work, but not a
+        // second container, and every figure on this dashboard is about
+        // containers. Counting both would put Coverage above 100%, hide a
+        // genuinely un-inspected container inside the Max(0, ...) clamp on
+        // Outstanding, and plot two order-bars against one arrival-bar.
+        //
+        // superseded_at IS NULL rather than reinspection_of IS NULL: it is
+        // exactly the filter on UX_qms_quality_order_active_per_arrival, so it
+        // picks the live order by the same definition the database uses. When a
+        // container is reinspected the first result is discarded, so the figures
+        // follow the REINSPECTION -- which means the container goes back to
+        // pending inspection until that second inspection closes, and is then
+        // attributed to the period it actually finished in.
+        const string liveOrderOnly = "qo.superseded_at IS NULL";
         const string arrivalDate =
             "COALESCE(ss.arrival_date, CAST(a.created_at AS DATE))";
         // ...compared against LOCAL dates. arrival_date is a SQL DATE holding a
@@ -255,6 +262,10 @@ public class DashboardService : IDashboardService
                 JOIN   qms_arrival       a  ON a.arrival_id = qo.arrival_id
                 LEFT JOIN qms_sample_defect sd ON sd.sample_id = s.sample_id
                 WHERE  qo.status_code = 'Closed'
+                  -- Only the inspection that stands: a reinspected container
+                  -- would otherwise contribute BOTH sets of readings, double
+                  -- counted and including the ones judged unsound.
+                  AND  qo.superseded_at IS NULL
                   AND  qo.closed_at >= @fromUtc AND qo.closed_at < @toUtcEx
                   AND  s.is_deleted = 0
                   AND  s.sample_size > 0
@@ -276,6 +287,7 @@ public class DashboardService : IDashboardService
             JOIN   qms_quality_order  qo ON qo.quality_order_id = s.quality_order_id
             JOIN   qms_arrival        a  ON a.arrival_id = qo.arrival_id
             WHERE  qo.status_code = 'Closed'
+              AND  qo.superseded_at IS NULL
               AND  qo.closed_at >= @fromUtc AND qo.closed_at < @toUtcEx
               AND  s.is_deleted = 0
               AND  sd.defect_value > 0
@@ -330,7 +342,7 @@ public class DashboardService : IDashboardService
                      JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
                      WHERE qo.status_code = 'Closed'
                        AND DATEADD({bucket}, DATEDIFF({bucket}, 0, qo.closed_at), 0) = b.Bucket
-                       AND {notAReinspection}
+                       AND {liveOrderOnly}
                        AND {plantWhere})                                        AS QosClosed
             FROM (
                 -- The buckets actually spanned by the period, taken from the two
@@ -390,6 +402,7 @@ public class DashboardService : IDashboardService
                     JOIN   qms_arrival a2 ON a2.arrival_id = qo2.arrival_id
                     JOIN   qms_quality_order_material qm2 ON qm2.qo_material_id = s2.qo_material_id
                     WHERE  qo2.status_code = 'Closed'
+                      AND  qo2.superseded_at IS NULL
                       AND  qo2.closed_at >= @fromUtc AND qo2.closed_at < @toUtcEx
                       AND  s2.is_deleted = 0 AND sd2.defect_value > 0
                       AND  qm2.material_group = g.MaterialGroup
@@ -423,6 +436,7 @@ public class DashboardService : IDashboardService
                     JOIN   qms_quality_order_material  qom ON qom.qo_material_id = s.qo_material_id
                     LEFT JOIN qms_sample_defect        sd ON sd.sample_id = s.sample_id
                     WHERE  qo.status_code = 'Closed'
+                      AND  qo.superseded_at IS NULL
                       AND  qo.closed_at >= @fromUtc AND qo.closed_at < @toUtcEx
                       AND  s.is_deleted = 0 AND s.sample_size > 0
                       AND  qom.material_group IS NOT NULL
@@ -484,7 +498,7 @@ public class DashboardService : IDashboardService
                 JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
                 {arrivalJoin}
                 WHERE  qo.created_at >= @fromUtc AND qo.created_at < @toUtcEx AND {plantWhere}
-                  AND  {notAReinspection}
+                  AND  {liveOrderOnly}
                 GROUP  BY a.plant
             ) q ON q.plant = r.plant
             ORDER BY Plant;
@@ -508,7 +522,7 @@ public class DashboardService : IDashboardService
                      JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
                      WHERE DATEADD({bucket}, DATEDIFF({bucket}, 0, qo.created_at), 0) = b.Bucket
                        AND qo.created_at >= @fromUtc AND qo.created_at < @toUtcEx
-                       AND {notAReinspection}
+                       AND {liveOrderOnly}
                        AND {plantWhere})                                        AS QosCreated
             FROM (
                 SELECT DISTINCT DATEADD({bucket}, DATEDIFF({bucket}, 0, d.dt), 0) AS Bucket
@@ -649,9 +663,14 @@ public class DashboardService : IDashboardService
     ///
     /// A container can now carry a second order when an administrator has it
     /// reinspected, so "an order" and "a container" are no longer the same
-    /// thing. Reinspections are excluded here and in the portlet alike, which
-    /// keeps both identities true:
+    /// thing. Here and in the portlet alike, only the LIVE order counts --
+    /// superseded ones are filtered out -- which keeps both identities true:
     ///   Received = Period + Pending, and Total = Period + Backlog.
+    ///
+    /// The live order is the reinspection once one exists, so a reinspected
+    /// container leaves Period for Pending until the second inspection closes.
+    /// That is deliberate: the first result was discarded, so the container is
+    /// genuinely awaiting an inspection again.
     /// </summary>
     public async Task<IReadOnlyList<CommitmentDetailRow>> GetCommitmentDetailAsync(
         DashboardFilter filter, PlantScope scope, string bucket, string? plant,
@@ -674,17 +693,17 @@ public class DashboardService : IDashboardService
 
         const string openedInPeriod =
             "EXISTS (SELECT 1 FROM qms_quality_order q2 WHERE q2.arrival_id = a.arrival_id " +
-            "AND q2.reinspection_of IS NULL " +
+            "AND q2.superseded_at IS NULL " +
             "AND q2.created_at >= @fromUtc AND q2.created_at < @toUtcEx)";
 
         // The same arrival date the portlet counts on -- SAP's, not the moment
         // the record was typed. The drill-through exists to answer with the
         // rows behind a number, so it has to agree on what "arrived" means.
         const string arrivalDate = "COALESCE(ss.arrival_date, CAST(a.created_at AS DATE))";
-        // Same exclusion as the portlet. Without it the LEFT JOIN below fans a
+        // Same filter as the portlet. Without it the LEFT JOIN below fans a
         // reinspected container into two rows and the sheet stops matching the
         // number it was opened from.
-        const string notAReinspection = "qo.reinspection_of IS NULL";
+        const string liveOrderOnly = "qo.superseded_at IS NULL";
         var arrivedInPeriod = $"{arrivalDate} >= @fromDate AND {arrivalDate} < @toDateEx";
 
         // Which rows, and which date window applies to which table.
@@ -728,7 +747,7 @@ public class DashboardService : IDashboardService
             FROM    qms_arrival a
             LEFT    JOIN qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id
             {join}  qms_quality_order qo ON qo.arrival_id = a.arrival_id
-                    AND {notAReinspection}
+                    AND {liveOrderOnly}
             WHERE   {where}
               AND   (@plant IS NULL OR a.plant = @plant)
               AND   (@sUnrestricted = 1 OR a.plant IN @sPlants)

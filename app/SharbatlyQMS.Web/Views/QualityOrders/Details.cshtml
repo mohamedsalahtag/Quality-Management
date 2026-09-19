@@ -26,6 +26,12 @@
     // blocks throughout this view.
     var isClaimContext = (bool?)ViewBag.IsClaimContext ?? false;
     if (isClaimContext) { editable = false; canEdit = false; canSupervise = false; canManage = false; }
+    // A superseded order is a reference copy: readable and printable, nothing
+    // more. Collapsing the same four gates is what makes that true across the
+    // whole page rather than button by button -- and QualityOrderService
+    // .Transition refuses every one of them again anyway, because a hidden
+    // button leaves its POST endpoint reachable.
+    if (Model.IsFrozen) { editable = false; canEdit = false; canSupervise = false; canManage = false; }
     // Grouped summary (claim context only) — the exact rollup the QC report prints.
     var groupSummaries = ViewBag.GroupSummaries as IReadOnlyList<MaterialGroupSummary>
                          ?? new List<MaterialGroupSummary>();
@@ -915,9 +921,10 @@
                     @Loc["A new quality order is raised for the same container, starting empty. This order is kept in full and still prints, but it stops speaking for the container."]
                 </p>
                 <ul class="small text-muted ps-3">
-                    <li>@Loc["The decision is recorded as a claim decision, so the Claims list shows why the container came back."]</li>
+                    <li>@Loc["The claim and its whole conversation move to the reinspection, which becomes the order that speaks for this container."]</li>
                     <li>@Loc["A container is reinspected once. This cannot be undone from the application."]</li>
-                    <li>@Loc["Dashboard and Inspection Time Bar figures keep following this original order."]</li>
+                    <li>@Loc["This order is frozen: it stays readable and printable as a reference, but it cannot be reopened, changed, or sent to a supplier."]</li>
+                    <li>@Loc["Dashboard and Inspection Time Bar figures follow the reinspection. The container returns to pending inspection until the reinspection is finished, and its inspection clock restarts."]</li>
                 </ul>
                 <label class="form-label">@Loc["Why is this being reinspected? (required)"]</label>
                 <textarea name="reason" class="form-control" rows="3" required minlength="5"></textarea>

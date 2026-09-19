@@ -43,6 +43,16 @@ public class Arrival
     public long?    QualityOrderId      { get; set; }
     public string?  QualityOrderNo      { get; set; }
     public string?  QualityOrderStatus  { get; set; }
+
+    /// <summary>
+    /// The inspection the live one replaced, when this container was
+    /// reinspected. Null for the ordinary container. Carried so the screen can
+    /// offer the first inspection as a reference rather than dropping it: the
+    /// live order is the only one this page links to, and before this the
+    /// original simply vanished from Arrivals.
+    /// </summary>
+    public long?    PreviousQualityOrderId { get; set; }
+    public string?  PreviousQualityOrderNo { get; set; }
 }
 
 public class ArrivalItem

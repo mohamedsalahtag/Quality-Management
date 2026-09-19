@@ -228,7 +228,9 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
             var qos    = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
             var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
-            foreach (var r in rows.Take(25))
+            // An in-progress reinspection can head this list; it has no samples,
+            // so the loop skips it, but be explicit rather than lucky.
+            foreach (var r in rows.Where(r => r.StatusCode == QualityOrderStatus.Closed).Take(25))
             {
                 var samples = await qos.ListSamplesAsync(r.QualityOrderId);
                 if (samples.Count > 0) { chosen = r.QualityOrderId; break; }
@@ -259,7 +261,8 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         {
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
             var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
-            qoId = rows.Select(r => r.QualityOrderId).FirstOrDefault();
+            qoId = rows.Where(r => r.StatusCode == QualityOrderStatus.Closed)
+                       .Select(r => r.QualityOrderId).FirstOrDefault();
         }
         if (qoId == 0) return;   // no quality orders to render
 
@@ -290,7 +293,8 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         {
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
             var rows   = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
-            qoId = rows.Select(r => r.QualityOrderId).FirstOrDefault();
+            qoId = rows.Where(r => r.StatusCode == QualityOrderStatus.Closed)
+                       .Select(r => r.QualityOrderId).FirstOrDefault();
         }
         if (qoId == 0) return;   // no quality orders to render
 

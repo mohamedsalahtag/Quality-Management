@@ -68,8 +68,13 @@ public class QualityOrderService : IQualityOrderService
     // times (ListAsync has no DISTINCT). Storage location is denormalised onto
     // qms_arrival by M13 precisely so this stays a plain equality test.
     private static readonly string QoListWhere = @"
-        WHERE  (@status IS NULL OR qo.status_code = @status)
-          AND  (@plant  IS NULL OR a.plant        = @plant)
+        -- Multi-select filters follow the plant-scope convention already used
+        -- below: an any-flag plus an IN list, never a nullable scalar. Dapper
+        -- renders an empty list as IN (SELECT 1 WHERE 1=0) -- valid SQL that
+        -- matches nothing -- so the flag is what actually turns the filter off,
+        -- and the list is only consulted when the user picked something.
+        WHERE  (@statusAny = 0 OR qo.status_code IN @statuses)
+          AND  (@plantAny  = 0 OR a.plant        IN @plants)
           -- Per-user plant scope: unrestricted users pass @sUnrestricted = 1;
           -- everyone else is limited to their assigned plants (empty = nothing).
           AND  (@sUnrestricted = 1 OR a.plant IN @sPlants)
@@ -78,17 +83,20 @@ public class QualityOrderService : IQualityOrderService
           AND  (@po         IS NULL OR a.ebeln           LIKE '%' + @po        + '%')
           AND  (@qoNo       IS NULL OR qo.quality_order_no LIKE '%' + @qoNo + '%')
           AND  (@arrivalNo  IS NULL OR a.arrival_no      LIKE '%' + @arrivalNo + '%')
-          AND  (@storageLoc IS NULL OR a.storage_location = @storageLoc)
-          AND  (@supplier   IS NULL OR a.vendor_name      = @supplier)
-          AND  (@openedBy   IS NULL OR qo.opened_by       = @openedBy)
+          AND  (@storageLocAny = 0 OR a.storage_location IN @storageLocs)
+          AND  (@supplierAny   = 0 OR a.vendor_name      IN @suppliers)
+          AND  (@openedByAny   = 0 OR qo.opened_by       IN @openedBys)
           AND  (@fromUtc    IS NULL OR qo.created_at     >= @fromUtc)
           AND  (@toUtc      IS NULL OR qo.created_at      < @toUtc)
-          -- One side of a reinspection, or both. 'originals' are the
-          -- inspections that were redone; 'reinspections' are the orders that
-          -- redid them.
-          AND  (@reinspection IS NULL
+          -- The reinspection dominates: by DEFAULT this list shows the
+          -- inspection that stands, so a container search returns one order
+          -- rather than two and the discarded one is not sitting beside it as
+          -- an equal. The superseded original is a reference document, reached
+          -- on purpose through 'originals' or from the reinspection's banner.
+          AND  ((@reinspection IS NULL             AND qo.superseded_at   IS NULL)
                 OR (@reinspection = 'originals'     AND qo.superseded_at   IS NOT NULL)
-                OR (@reinspection = 'reinspections' AND qo.reinspection_of IS NOT NULL))
+                OR (@reinspection = 'reinspections' AND qo.reinspection_of IS NOT NULL)
+                OR (@reinspection = 'all'))
           AND  (@material   IS NULL OR EXISTS (
                     SELECT 1 FROM qms_quality_order_material m2
                     WHERE  m2.quality_order_id = qo.quality_order_id
@@ -124,11 +132,22 @@ public class QualityOrderService : IQualityOrderService
             ? DateTime.SpecifyKind(f.To.Value.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime()
             : null;
 
+        // Cleaned for the any-flags, sentinel-wrapped for the IN clauses --
+        // see FilterValues for why those are two different things.
+        var statuses    = FilterValues.Many(f.Status);
+        var plants      = FilterValues.Many(f.Plant);
+        var storageLocs = FilterValues.Many(f.StorageLoc);
+        var suppliers   = FilterValues.Many(f.Supplier);
+        var openedBys   = FilterValues.Many(f.OpenedBy);
+
         var p = new
         {
-            status     = Trim(f.Status),
+            statuses    = FilterValues.ForIn(statuses),    statusAny     = statuses.Count    > 0,
+            plants      = FilterValues.ForIn(plants),      plantAny      = plants.Count      > 0,
+            storageLocs = FilterValues.ForIn(storageLocs), storageLocAny = storageLocs.Count > 0,
+            suppliers   = FilterValues.ForIn(suppliers),   supplierAny   = suppliers.Count   > 0,
+            openedBys   = FilterValues.ForIn(openedBys),   openedByAny   = openedBys.Count   > 0,
             search     = Trim(f.Search),
-            plant      = Trim(f.Plant),
             sUnrestricted = scope.Unrestricted,
             sPlants       = scope.QueryPlants,
             container  = Trim(f.Container),
@@ -136,12 +155,9 @@ public class QualityOrderService : IQualityOrderService
             po         = Trim(f.Po),
             qoNo       = Trim(f.QoNo),
             arrivalNo  = Trim(f.ArrivalNo),
-            storageLoc = Trim(f.StorageLoc),
             material   = Trim(f.Material),
             matMajor    = Trim(f.MatMajor),
             matSubMajor = Trim(f.MatSubMajor),
-            supplier   = Trim(f.Supplier),
-            openedBy   = Trim(f.OpenedBy),
             reinspection = Trim(f.Reinspection),
             fromUtc,
             toUtc
@@ -214,12 +230,29 @@ public class QualityOrderService : IQualityOrderService
         var stillDeletable = await c.ExecuteScalarAsync<int>(@"
             SELECT COUNT(*) FROM qms_quality_order WITH (UPDLOCK, HOLDLOCK)
             WHERE  quality_order_id = @qualityOrderId
-              AND  status_code IN ('Initial','Open')",
+              AND  status_code IN ('Initial','Open')
+              -- A reinspection is Initial or Open for its whole life, so it
+              -- would otherwise be deletable throughout -- and it HOLDS the
+              -- container's claim, moved off the original when it was raised.
+              -- QoCascade deletes claims by quality_order_id, so this would
+              -- take the whole thread, its notes and every read marker with it
+              -- and leave the original superseded with nothing replacing it.
+              AND  reinspection_of IS NULL",
             new { qualityOrderId }, tx);
         if (stillDeletable == 0)
         {
             tx.Rollback();
-            return (false, "The quality order changed status just now — reload the page and try again.");
+            // Separate the two reasons: one is a race worth retrying, the other
+            // never will be, and telling them apart saves a pointless reload.
+            var isReinspection = await c.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM qms_quality_order " +
+                "WHERE quality_order_id = @qualityOrderId AND reinspection_of IS NOT NULL",
+                new { qualityOrderId });
+            return isReinspection > 0
+                ? (false, "This order is a reinspection. Deleting it would destroy the container's " +
+                          "claim conversation and leave the original superseded with nothing to " +
+                          "replace it.")
+                : (false, "The quality order changed status just now — reload the page and try again.");
         }
 
         var docPaths = await QoCascade.CollectDocumentPathsAsync(c, tx, qoIds);
@@ -539,10 +572,29 @@ public class QualityOrderService : IQualityOrderService
         using var c = Open();
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
-        var current = await c.QuerySingleOrDefaultAsync<string?>(
-            "SELECT status_code FROM qms_quality_order WHERE quality_order_id=@qoId",
+        // superseded_at rides along in the same SELECT because this method is
+        // the choke point for EVERY status change -- Open, Submit, Cancel-submit,
+        // Finish, Reopen, Cancel. One test here freezes a superseded order
+        // against all of them.
+        //
+        // Reopen is the one that actually bites: it accepts any Closed order, so
+        // without this a superseded original could be reopened straight back
+        // into Open, giving the container two editable inspections.
+        // UX_qms_quality_order_active_per_arrival does not catch it, because a
+        // superseded row sits outside that filtered index.
+        //
+        // Sample and material edits need nothing: they are already gated on
+        // Initial / Open, and a superseded original is Closed.
+        var state = await c.QuerySingleOrDefaultAsync<FrozenCheck>(
+            "SELECT status_code StatusCode, superseded_at SupersededAt " +
+            "FROM qms_quality_order WHERE quality_order_id=@qoId",
             new { qoId }, tx);
-        if (current == null) return (false, "Quality Order not found.");
+        if (state == null) return (false, "Quality Order not found.");
+        if (state.SupersededAt.HasValue)
+            return (false, "This inspection was superseded by a reinspection. It is kept as a " +
+                           "reference copy and cannot be changed — work on the reinspection instead.");
+
+        var current = state.StatusCode;
         if (!fromStatuses.Contains(current))
             return (false, $"Cannot transition from {current} to {toStatus}.");
 
@@ -2315,5 +2367,19 @@ public class QualityOrderService : IQualityOrderService
     {
         var i = r.GetOrdinal(name);
         return r.IsDBNull(i) ? null : (short?)r.GetInt16(i);
+    }
+
+    /// <summary>
+    /// The two columns <see cref="Transition"/> needs before it will move an
+    /// order, read together so the freeze costs no extra round trip.
+    ///
+    /// A class with settable properties, not a record struct: Dapper maps a
+    /// nullable value type by position rather than by name, which silently
+    /// produced a null result the last time this shape was written as one.
+    /// </summary>
+    private sealed class FrozenCheck
+    {
+        public string    StatusCode   { get; set; } = "";
+        public DateTime? SupersededAt { get; set; }
     }
 }

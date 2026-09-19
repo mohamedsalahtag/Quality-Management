@@ -31,7 +31,10 @@ public class ArrivalsController : Controller
     [RequireScreen(Screens.ArrivalsPending, Seed.OperatorOrAbove, "Open Pending Containers")]
     public async Task<IActionResult> Pending(
         string? container, string? bol, string? po,
-        string? plant, string? poType, string? storageLoc, string? supplier,
+        // Multi-valued: repeated query-string keys (?plant=A&plant=B) bind to
+        // these, which is what the checkbox dropdowns on the page submit.
+        List<string>? plant, List<string>? poType, List<string>? storageLoc,
+        string? supplier,
         string? material, DateOnly? from, DateOnly? to,
         DateOnly? arrFrom = null, DateOnly? arrTo = null,
         string? matMajor = null, string? matSubMajor = null,
@@ -67,9 +70,9 @@ public class ArrivalsController : Controller
         ViewBag.To                = to;
         ViewBag.ArrFrom           = arrFrom;
         ViewBag.ArrTo             = arrTo;
-        ViewBag.Plant             = plant;
-        ViewBag.PoType            = poType;
-        ViewBag.StorageLoc        = storageLoc;
+        ViewBag.Plant             = plant      ?? new List<string>();
+        ViewBag.PoType            = poType     ?? new List<string>();
+        ViewBag.StorageLoc        = storageLoc ?? new List<string>();
         ViewBag.PullStatus        = status;
         ViewBag.PlantOptions      = options.Plants;
         ViewBag.PoTypeOptions     = options.PoTypes;
@@ -146,6 +149,47 @@ public class ArrivalsController : Controller
             ? "No archived containers fall in that arrival-date range — nothing was restored."
             : $"Restored {n} container{(n == 1 ? "" : "s")} to the pending list.";
         return RedirectToAction(nameof(Pending), new { archived = true });
+    }
+
+    /// <summary>
+    /// Archives ONE container out of the pending list.
+    ///
+    /// The date-range archive answers "clear everything before we went live";
+    /// this answers the much commoner "this one container is never going to be
+    /// inspected" — a cancelled shipment, a duplicate SAP row — which a range
+    /// cannot express without sweeping up its neighbours.
+    ///
+    /// The exact inverse of <see cref="RestorePending"/>, sharing its scope gate
+    /// and its per-container SetArchivedAsync.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Arrivals.Archive, Seed.ManagerOrAdmin, "Archive / restore pending containers")]
+    public async Task<IActionResult> ArchivePendingOne(string containerNo, string bolNo, string po)
+    {
+        if (string.IsNullOrWhiteSpace(containerNo) || string.IsNullOrWhiteSpace(po))
+        {
+            TempData["Error"] = "Container and PO are required.";
+            return RedirectToAction(nameof(Pending));
+        }
+        bolNo = (bolNo ?? "").Trim();
+
+        // Same scope gate as the restore: the container has to be one this user
+        // is allowed to see before they can move it anywhere.
+        var scope = User.GetPlantScope();
+        if (!scope.Unrestricted)
+        {
+            var plant = await _cache.GetEffectivePlantAsync(containerNo.Trim(), bolNo, po.Trim());
+            if (plant == null || !scope.Allows(plant)) return Forbid();
+        }
+
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        var n    = await _cache.SetArchivedAsync(containerNo.Trim(), bolNo, po.Trim(), archived: true, user);
+        _logger.LogInformation("{User} archived container {Container} (PO {Po})", user, containerNo, po);
+
+        TempData[n == 0 ? "Error" : "Success"] = n == 0
+            ? "Nothing was changed — that container is no longer in the pending list."
+            : $"Container {containerNo} is archived. Open Archived to restore it.";
+        return RedirectToAction(nameof(Pending));
     }
 
     /// <summary>

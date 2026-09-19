@@ -108,7 +108,9 @@ public class ToleranceBreachTests : IClassFixture<QmsAppFactory>
         // one of those defects to put a tolerance against.
         var rows = await claims.ListClosedQosAsync(new SharbatlyQMS.Web.ViewModels.ClaimListFilter(),
                                                    SharbatlyQMS.Web.Models.PlantScope.All, "test");
-        foreach (var r in rows.Take(25))
+        // An in-progress reinspection can head this list; it has no samples,
+        // so the loop skips it, but be explicit rather than lucky.
+        foreach (var r in rows.Where(r => r.StatusCode == QualityOrderStatus.Closed).Take(25))
         {
             var materials = await qos.GetMaterialsAsync(r.QualityOrderId);
             var before    = await qos.BuildGroupSummariesAsync(r.QualityOrderId, materials);

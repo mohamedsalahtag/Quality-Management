@@ -26,47 +26,28 @@
         (ClaimStatus.ClaimRequest,          ClaimStatus.Label(ClaimStatus.ClaimRequest),         "btn-outline-danger"),
         (ClaimStatus.ClaimRequestApproved,  ClaimStatus.Label(ClaimStatus.ClaimRequestApproved), "btn-outline-dark"),
         (ClaimStatus.HoldClaim,             ClaimStatus.Label(ClaimStatus.HoldClaim),            "btn-outline-warning"),
+        (ClaimStatus.Reinspection,          ClaimStatus.ShortLabel(ClaimStatus.Reinspection),   "btn-outline-info"),
         (ClaimStatus.PassedQC,              ClaimStatus.Label(ClaimStatus.PassedQC),            "btn-outline-success"),
     };
-    string ActiveClass(string v, string baseCss) =>
-        (status ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
+    bool ChipOn(string v) => status.Contains(v, StringComparer.OrdinalIgnoreCase);
 
     // M24: QC's assessment at finish time. A second, independent chip row --
     // "what QC saw" ANDed with "what the claim team decided" is exactly the
     // question the claim desk asks ("show me Pending orders QC flagged").
     var potential = f.Potential;
 
-    @* Chips are LINKS, not submit buttons. As buttons they shared a field name
-       with a hidden "carry the other chip row" input, so the browser submitted
-       e.g. potential="" AND potential="Yes"; the model binder joined those to
-       ",Yes", which matched no bucket and silently disabled the filter. A link
-       carries the whole current filter with exactly one value per key, needs no
-       JavaScript, and makes "All" reset reliably. Trade-off: text typed into the
-       search box but not yet submitted is not carried by a chip click. *@
-    Dictionary<string, string> ChipRoute(string key, string? value)
-    {
-        var d = new Dictionary<string, string>();
-        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) d[k] = v!; }
-        Add("status", status);
-        Add("potential", potential);
-        Add("search", search);
-        Add("container", f.Container);
-        Add("bol", f.Bol);
-        Add("po", f.Po);
-        Add("arrivalNo", f.ArrivalNo);
-        Add("plant", f.Plant);
-        Add("storageLoc", f.StorageLoc);
-        Add("material", f.Material);
-        Add("supplier", f.Supplier);
-        Add("closedBy", f.ClosedBy);
-        Add("claimOwner", f.ClaimOwner);
-        if (f.From.HasValue) d["from"] = D(f.From);
-        if (f.To.HasValue)   d["to"]   = D(f.To);
-        // "All" is the absence of the key, so the URL stays clean and the
-        // filter-memory script doesn't remember an empty value.
-        if (string.IsNullOrEmpty(value)) d.Remove(key); else d[key] = value;
-        return d;
-    }
+    @* Both chip rows are real form controls now -- status a set of checkboxes,
+       assessment a set of radios -- so picking one submits this form like any
+       other field.
+
+       They were LINKS for a while, because as buttons they shared a field name
+       with a hidden "carry the other row" input and the browser submitted e.g.
+       potential="" AND potential="Yes", which the binder joined to ",Yes" and
+       silently matched no bucket. Deleting the hidden inputs removes that
+       collision at the source, and costs nothing: a form control cannot
+       double-submit with a field that no longer exists. It also fixes the
+       link approach's own trade-off -- text typed into the search box but not
+       yet submitted is now carried, because it is in the same form. *@
     var chipAction = f.Archived ? "Archived" : "Index";
 
     var pChips = new (string Value, string Label, string Icon, string OutlineCss)[]
@@ -76,8 +57,6 @@
         (ClaimAssessment.NoClaim,   "No Potential Claim","bi-check-circle-fill",        "btn-outline-success"),
         (ClaimAssessment.Unset,     "Not classified",    "bi-dash-circle",              "btn-outline-secondary"),
     };
-    string PActiveClass(string v, string baseCss) =>
-        (potential ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
 
     string Dt(DateTime? d)  => d?.ToLocalTime().ToString("yyyy-MM-dd") ?? "—";
     // Shipment dates are date-only with no zone, so Dt() leaves them alone.
@@ -170,6 +149,15 @@
                 <a asp-action="@(f.Archived ? "Archived" : "Index")" class="btn btn-outline-secondary"
                    title="Clear every filter" data-filter-clear>@Loc["Clear"]</a>
             }
+            <div class="dropdown" data-coltoggle-ui="claims-list">
+                <button type="button" class="btn btn-outline-secondary dropdown-toggle"
+                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                        title="Choose which columns to show. Your choice is remembered on this device.">
+                    <i class="bi bi-layout-three-columns me-1"></i>Columns<span class="badge bg-secondary ms-1 d-none"
+                         data-coltoggle-count title="Columns currently hidden"></span>
+                </button>
+                <div class="dropdown-menu dropdown-menu-end p-2" data-coltoggle-menu style="min-width: 13rem;"></div>
+            </div>
         </div>
         <div class="col-md-4">
             <input type="text" name="search" value="@search" class="form-control"
@@ -179,19 +167,27 @@
             <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label='@Loc["Filter by claim status"]'>
                 @foreach (var c in chips)
                 {
-                    var statusRoute = ChipRoute("status", c.Value);
-                    <a asp-action="@chipAction" asp-all-route-data="statusRoute"
-                       class="btn @ActiveClass(c.Value, c.OutlineCss)">@c.Label</a>
+                    if (c.Value.Length == 0)
+                    {
+                        @* "All" is the ABSENCE of any ticked status, not a value
+                           of its own -- a value would have to be filtered back
+                           out again in SQL. Unticking the rest is what it does,
+                           so it is a button that clears them. *@
+                        <button type="button"
+                                class="btn @(status.Count == 0 ? "btn-secondary active" : "btn-outline-secondary")"
+                                onclick="this.closest('form').querySelectorAll('input[name=status]').forEach(b =&gt; b.checked = false); this.closest('form').requestSubmit();">@c.Label</button>
+                    }
+                    else
+                    {
+                        <input type="checkbox" class="btn-check" name="status" value="@c.Value"
+                               id="claim-status-@c.Value" autocomplete="off" checked="@ChipOn(c.Value)"
+                               onchange="this.form.requestSubmit()" />
+                        <label class="btn @c.OutlineCss" for="claim-status-@c.Value">@c.Label</label>
+                    }
                 }
             </div>
         </div>
     </div>
-    @* The search box and the panel fields still submit the form, so both chip
-       selections ride along as hidden fields on THAT path. The chips themselves
-       are links (see ChipRoute) and never submit this form, so these can't be
-       sent twice. *@
-    <input type="hidden" name="status"    value="@status" />
-    <input type="hidden" name="potential" value="@potential" />
     <div class="row g-2 align-items-center mt-1">
         <div class="col-auto">
             <span class="text-muted small"><i class="bi bi-clipboard-check me-1"></i>@Loc["QC assessment"]</span>
@@ -200,15 +196,22 @@
             <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label='@Loc["Filter by QC claim assessment"]'>
                 @foreach (var c in pChips)
                 {
-                    var potentialRoute = ChipRoute("potential", c.Value);
-                    <a asp-action="@chipAction" asp-all-route-data="potentialRoute"
-                       class="btn @PActiveClass(c.Value, c.OutlineCss)">
+                    @* Radios, not checkboxes: the assessment is one verdict QC
+                       recorded at finish time, and "Potential Claim AND No
+                       Potential Claim" is not a question anyone can ask. "All"
+                       is the empty value, which the filter reads as unset. *@
+                    <input type="radio" class="btn-check" name="potential" value="@c.Value"
+                           id="claim-potential-@(string.IsNullOrEmpty(c.Value) ? "all" : c.Value)"
+                           autocomplete="off" checked="@((potential ?? "") == c.Value)"
+                           onchange="this.form.requestSubmit()" />
+                    <label class="btn @c.OutlineCss"
+                           for="claim-potential-@(string.IsNullOrEmpty(c.Value) ? "all" : c.Value)">
                         @if (!string.IsNullOrEmpty(c.Icon))
                         {
                             <i class="bi @c.Icon me-1"></i>
                         }
                         @c.Label
-                    </a>
+                    </label>
                 }
             </div>
         </div>
@@ -243,75 +246,52 @@
                            placeholder='@Loc["code or description"]' autocomplete="off" />
                 </div>
 
-                <div class="col-12 col-md-4">
-                    <label class="form-label small mb-1">@Loc["Supplier"]</label>
-                    <select name="supplier" class="form-select form-select-sm">
-                        <option value="">@Loc["All suppliers"]</option>
-                        @foreach (var sup in opts.Suppliers)
-                        {
-                            <option value="@sup" selected="@(string.Equals(sup, f.Supplier, StringComparison.OrdinalIgnoreCase))">@sup</option>
-                        }
-                    </select>
-                </div>
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "supplier", Label = Loc["Supplier"], AllLabel = Loc["All suppliers"],
+                    ColumnCss = "col-12 col-md-4", Selected = f.Supplier,
+                    Options = opts.Suppliers.Select(x => new MultiSelectOption(x, x)).ToList() })" />
 
-                <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">@Loc["Plant"]</label>
-                    @if (plantScopeLocked != null)
-                    {
-                        @* Scoped operator: the server forces this plant anyway, so
-                           show why instead of a dropdown that can't take effect. *@
+                @if (plantScopeLocked != null)
+                {
+                    @* Scoped operator: the server forces this plant anyway, so
+                       show why instead of a control that cannot take effect. *@
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">@Loc["Plant"]</label>
                         <div class="form-control form-control-sm bg-light d-flex align-items-center"
                              title="Your account is restricted to this plant.">
                             <i class="bi bi-lock-fill text-muted me-1"></i>
                             <span class="small">@Codes.PlantLabel(plantScopeLocked)</span>
                         </div>
-                        <input type="hidden" id="claim-plant-filter" data-plant-filter="claim" data-filter-ignore name="plant" value="@plantScopeLocked" />
-                    }
-                    else
-                    {
-                        <select name="plant" id="claim-plant-filter" data-plant-filter="claim" class="form-select form-select-sm">
-                            <option value="">@Loc["All plants"]</option>
-                            @foreach (var pl in opts.Plants)
-                            {
-                                <option value="@pl" selected="@(string.Equals(pl, f.Plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
-                            }
-                        </select>
-                    }
-                </div>
-                <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">@Loc["Storage location"]</label>
-                    <select name="storageLoc" id="claim-storage-filter" data-storage-filter="claim" class="form-select form-select-sm">
-                        <option value="">@Loc["All storage locations"]</option>
-                        @foreach (var sl in opts.StorageLocations)
-                        {
-                            <option value="@sl.Code" data-plant="@sl.Plant"
-                                    selected="@(string.Equals(sl.Code, f.StorageLoc, StringComparison.OrdinalIgnoreCase)
-                                                && (string.IsNullOrEmpty(f.Plant) || string.Equals(sl.Plant, f.Plant, StringComparison.OrdinalIgnoreCase)))">
-                                @Codes.StorageLocationLabel(sl.Plant, sl.Code)
-                            </option>
-                        }
-                    </select>
-                </div>
-                <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">@Loc["Closed by"]</label>
-                    <select name="closedBy" class="form-select form-select-sm">
-                        <option value="">@Loc["Anyone"]</option>
-                        @foreach (var cb in opts.ClosedBy)
-                        {
-                            <option value="@cb" selected="@(string.Equals(cb, f.ClosedBy, StringComparison.OrdinalIgnoreCase))">@cb</option>
-                        }
-                    </select>
-                </div>
-                <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">@Loc["Claim owner"]</label>
-                    <select name="claimOwner" class="form-select form-select-sm">
-                        <option value="">@Loc["Anyone"]</option>
-                        @foreach (var co in opts.ClaimOwners)
-                        {
-                            <option value="@co" selected="@(string.Equals(co, f.ClaimOwner, StringComparison.OrdinalIgnoreCase))">@co</option>
-                        }
-                    </select>
-                </div>
+                        <input type="hidden" data-filter-ignore name="plant" value="@plantScopeLocked" />
+                    </div>
+                }
+                else
+                {
+                    <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                        Name = "plant", Label = Loc["Plant"], AllLabel = Loc["All plants"],
+                        ColumnCss = "col-6 col-md-3", Selected = f.Plant,
+                        Options = opts.Plants.Select(x => new MultiSelectOption(x, Codes.PlantLabel(x))).ToList() })" />
+                }
+                @* Storage codes repeat across plants, so each option carries its
+                   plant in the label. The old control narrowed this list to the
+                   picked plant with JS; with both sides multi-select there is no
+                   single plant to key on, and the labelled list is what keeps
+                   the choice unambiguous. *@
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "storageLoc", Label = Loc["Storage location"],
+                    AllLabel = Loc["All storage locations"],
+                    ColumnCss = "col-6 col-md-3", Selected = f.StorageLoc,
+                    Options = opts.StorageLocations
+                        .Select(sl => new MultiSelectOption(sl.Code, Codes.StorageLocationLabel(sl.Plant, sl.Code)))
+                        .DistinctBy(o => o.Value).ToList() })" />
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "closedBy", Label = Loc["Closed by"], AllLabel = Loc["Anyone"],
+                    ColumnCss = "col-6 col-md-2", Selected = f.ClosedBy,
+                    Options = opts.ClosedBy.Select(x => new MultiSelectOption(x, x)).ToList() })" />
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "claimOwner", Label = Loc["Claim owner"], AllLabel = Loc["Anyone"],
+                    ColumnCss = "col-6 col-md-2", Selected = f.ClaimOwner,
+                    Options = opts.ClaimOwners.Select(x => new MultiSelectOption(x, x)).ToList() })" />
                 @* Dates filter on the QO's closed_at -- when you are looking at a
                    claim, the date that matters is when the inspection finished. *@
                 <div class="col-6 col-md-2">
@@ -337,30 +317,38 @@
 
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0 qms-index-table">
+        @* data-col-key drives the Columns menu (columntoggle.js). Keys are
+           stable names, not positions, so the conditional Order Status column
+           below cannot shift what somebody chose to hide. data-col-off marks a
+           column hidden until the user asks for it -- a default, not a
+           permanent removal: both stay in the menu.
+
+           The expander, QO Number and Open are locked: one opens the row, one
+           identifies it, and one is how you act on it. *@
+        <table id="claims-list" class="table table-hover align-middle mb-0 qms-index-table" data-coltoggle>
             <thead class="table-light">
                 <tr>
-                    <th style="width:2rem" aria-label='@Loc["Shipment details"]'></th>
-                    <th>@Loc["QO Number"]</th>
-                    <th>@Loc["Arrival No"]</th>
-                    <th>@Loc["Container"]</th>
-                    <th>@Loc["BOL"]</th>
-                    <th>@Loc["PO"]</th>
-                    <th>@Loc["Supplier"]</th>
-                    <th class="text-center" title="Number of distinct products on the order — hover the count to list them">@Loc["Products"]</th>
+                    <th style="width:2rem" aria-label='@Loc["Shipment details"]' data-col-key="expand" data-col-lock></th>
+                    <th data-col-key="qono" data-col-lock>@Loc["QO Number"]</th>
+                    <th data-col-key="arrivalno" data-col-off>@Loc["Arrival No"]</th>
+                    <th data-col-key="container">@Loc["Container"]</th>
+                    <th data-col-key="bol">@Loc["BOL"]</th>
+                    <th data-col-key="po">@Loc["PO"]</th>
+                    <th data-col-key="supplier">@Loc["Supplier"]</th>
+                    <th class="text-center" data-col-key="products" title="Number of distinct products on the order — hover the count to list them">@Loc["Products"]</th>
                     @if (f.Archived)
                     {
                         @* The archive also holds orders that were never finished,
                            so their state is worth a column of its own. *@
-                        <th>@Loc["Order Status"]</th>
+                        <th data-col-key="orderstatus">@Loc["Order Status"]</th>
                     }
-                    <th>@Loc["Closed"]</th>
-                    <th>@Loc["Closed By"]</th>
-                    <th>@Loc["QC Assessment"]</th>
-                    <th>@Loc["Claim Status"]</th>
-                    <th>@Loc["Notes"]</th>
-                    <th>@Loc["Last activity"]</th>
-                    <th class="text-end">@Loc["Open"]</th>
+                    <th data-col-key="closed">@Loc["Closed"]</th>
+                    <th data-col-key="closedby">@Loc["Closed By"]</th>
+                    <th data-col-key="assessment">@Loc["QC Assessment"]</th>
+                    <th data-col-key="claimstatus">@Loc["Claim Status"]</th>
+                    <th data-col-key="notes" data-col-off>@Loc["Notes"]</th>
+                    <th data-col-key="lastactivity">@Loc["Last activity"]</th>
+                    <th class="text-end" data-col-key="open" data-col-lock>@Loc["Open"]</th>
                 </tr>
             </thead>
             <tbody>
@@ -376,8 +364,8 @@
                 {
                     foreach (var r in Model)
                     {
-                        var badge = ClaimStatus.BadgeCss(r.ClaimStatus);
-                        var label = ClaimStatus.Label(r.ClaimStatus);
+                        var badge = ClaimStatus.BadgeCssFor(r.ClaimStatus, r.StatusCode);
+                        var label = ClaimStatus.LabelFor(r.ClaimStatus, r.StatusCode);
                         var lastActivity = r.LastActivityAt ?? r.ClosedAt;
                         var rowCss = r.UnreadCount > 0 ? "has-unread" : "";
                         var detailId = $"claimDetail{r.QualityOrderId}";
@@ -443,7 +431,7 @@
                                     <i class="bi @ClaimAssessment.Icon(r.PotentialClaim) me-1"></i>@ClaimAssessment.ShortLabel(r.PotentialClaim)
                                 </span>
                             </td>
-                            <td><span class="badge @badge" title="@label">@ClaimStatus.ShortLabel(r.ClaimStatus)</span></td>
+                            <td><span class="badge @badge" title="@label">@ClaimStatus.ShortLabelFor(r.ClaimStatus, r.StatusCode)</span></td>
                             <td>
                                 @if (r.NoteCount > 0)
                                 {

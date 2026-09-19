@@ -24,7 +24,11 @@ public class ClaimListFilter
 
     // ---- Quick bar (always visible) ----
     /// <summary>"" = all, "Pending" = no claim row yet, otherwise a claim status code.</summary>
-    public string? Status     { get; set; }
+    /// <summary>Claim statuses to include. Multi-valued because the common
+    /// question is "what is still open?", which is Pending + Claim Notification
+    /// Request + Hold — three statuses a single-value chip could never express
+    /// at once. Empty means no status filter.</summary>
+    public List<string> Status { get; set; } = new();
     /// <summary>M24 QC assessment picked at finish: "" = any, "Yes" = Potential
     /// Claim, "No" = No Potential Claim, "Unset" = finished before the question
     /// existed. ANDs with <see cref="Status"/> — the two answer different
@@ -37,14 +41,14 @@ public class ClaimListFilter
     public string? Bol        { get; set; }
     public string? Po         { get; set; }
     public string? ArrivalNo  { get; set; }
-    public string? Plant      { get; set; }
-    public string? StorageLoc { get; set; }
+    public List<string> Plant      { get; set; } = new();
+    public List<string> StorageLoc { get; set; } = new();
     public string? Material   { get; set; }
-    public string? Supplier   { get; set; }
+    public List<string> Supplier { get; set; } = new();
     /// <summary>Who finished the Quality Order (qo.closed_by).</summary>
-    public string? ClosedBy   { get; set; }
+    public List<string> ClosedBy { get; set; } = new();
     /// <summary>Who last acted on the claim (qms_claim.last_changed_by).</summary>
-    public string? ClaimOwner { get; set; }
+    public List<string> ClaimOwner { get; set; } = new();
     /// <summary>QO closed date, inclusive, as the user's LOCAL date. The service
     /// converts to UTC before it reaches SQL — qo.closed_at is stored UTC but
     /// displayed local, so a naive comparison silently drops rows either side of
@@ -59,24 +63,27 @@ public class ClaimListFilter
     /// unexplained short list.</summary>
     public bool AnyPanelFilter => PanelFilterCount > 0;
 
-    /// <summary>How many panel filters are active — shown as a badge on the toggle.</summary>
+    /// <summary>How many panel filters are active — shown as a badge on the
+    /// toggle. A multi-select counts as ONE filter however many values it
+    /// holds: "Plant" is one thing the user narrowed by, and counting its
+    /// values would make the badge read like a row count.</summary>
     public int PanelFilterCount =>
           (string.IsNullOrWhiteSpace(Container)  ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Bol)        ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Po)         ? 0 : 1)
         + (string.IsNullOrWhiteSpace(ArrivalNo)  ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(Plant)      ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(StorageLoc) ? 0 : 1)
+        + (Plant.Count      == 0 ? 0 : 1)
+        + (StorageLoc.Count == 0 ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Material)   ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(Supplier)   ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(ClosedBy)   ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(ClaimOwner) ? 0 : 1)
+        + (Supplier.Count   == 0 ? 0 : 1)
+        + (ClosedBy.Count   == 0 ? 0 : 1)
+        + (ClaimOwner.Count == 0 ? 0 : 1)
         + (From.HasValue ? 1 : 0)
         + (To.HasValue   ? 1 : 0);
 
     public bool Any => AnyPanelFilter
                        || !string.IsNullOrWhiteSpace(Search)
-                       || !string.IsNullOrWhiteSpace(Status)
+                       || Status.Count > 0
                        || !string.IsNullOrWhiteSpace(Potential);
 }
 

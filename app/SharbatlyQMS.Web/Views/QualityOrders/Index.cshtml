@@ -14,28 +14,12 @@
     var panelOpen = f.AnyPanelFilter;
     string D(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
 
-    // A dropdown filter whose value is no longer among its options rendered as
-    // "All ..." — the filter still ran on the server and still counted toward
-    // the badge, so the page looked like it had filtered itself: panel open, a
-    // badge, a short list, and every control apparently empty. It happens
-    // whenever the options move out from under a remembered or bookmarked
-    // value: a supplier with no orders left in scope, a plant/storage pairing
-    // that does not exist, a user who has opened nothing recently.
-    //
-    // Orphans are now rendered as a real, selected option so the value is
-    // visible and can be cleared.
-    bool Orphan(string? value, IEnumerable<string> options) =>
-        !string.IsNullOrWhiteSpace(value)
-        && !options.Any(o => string.Equals(o, value, StringComparison.OrdinalIgnoreCase));
-    var orphanSupplier = Orphan(f.Supplier, opts.Suppliers);
-    var orphanPlant    = plantScopeLocked == null && Orphan(f.Plant, opts.Plants);
-    var orphanOpenedBy = Orphan(f.OpenedBy, opts.OpenedBy);
-    // Storage is matched as a (plant, code) pair, so mirror the option's own
-    // selected test rather than comparing the code alone.
-    var orphanStorage  = !string.IsNullOrWhiteSpace(f.StorageLoc)
-        && !opts.StorageLocations.Any(sl =>
-               string.Equals(sl.Code, f.StorageLoc, StringComparison.OrdinalIgnoreCase)
-               && (string.IsNullOrEmpty(f.Plant) || string.Equals(sl.Plant, f.Plant, StringComparison.OrdinalIgnoreCase)));
+    // Orphan values -- a remembered supplier with no orders left in scope, a
+    // storage location that no longer pairs with any plant -- are rendered by
+    // _MultiSelectFilter as real, ticked entries flagged "(no matching
+    // records)". Before that they vanished from their control while still
+    // filtering on the server, so the page looked like it had filtered itself:
+    // panel open, a badge, a short list, every control apparently empty.
 }
 
 <style>
@@ -80,8 +64,12 @@
         (QualityOrderStatus.Closed,     "btn-outline-success"),
     };
     string ChipLabel(string v) => v.Length == 0 ? "All" : QualityOrderStatus.DisplayName(v);
-    string ActiveClass(string v, string baseCss) =>
-        (status ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
+    // Chips are checkboxes now, so more than one status can be on at once --
+    // "everything still in flight" is Initial + Open + Submitted, which a
+    // single-value chip could never express. "All" is the ABSENCE of any ticked
+    // status rather than a value of its own, so it stays a plain link: giving it
+    // a value would mean filtering that value back out again in SQL.
+    bool ChipOn(string v) => status.Contains(v, StringComparer.OrdinalIgnoreCase);
 }
 @{
     // Every filter actually in force, named. Whatever put a filter there — a
@@ -90,7 +78,17 @@
     // from a badge and a short list.
     var activeFilters = new List<string>();
     void Active(string label, string? value) { if (!string.IsNullOrWhiteSpace(value)) activeFilters.Add($"{label}: {value}"); }
-    Active("Status",      string.IsNullOrEmpty(f.Status) ? null : QualityOrderStatus.DisplayName(f.Status));
+    // Multi-select values are joined rather than counted: "Plant: Jeddah,
+    // Riyadh" is the sentence a reader needs, and "Plant: 2" would send them
+    // back to the panel to find out which two.
+    void ActiveMany(string label, IEnumerable<string> values, Func<string, string>? display = null)
+    {
+        var listed = values.Where(v => !string.IsNullOrWhiteSpace(v))
+                           .Select(v => display == null ? v : display(v))
+                           .ToList();
+        if (listed.Count > 0) activeFilters.Add($"{label}: {string.Join(", ", listed)}");
+    }
+    ActiveMany("Status", f.Status, QualityOrderStatus.DisplayName);
     Active("Search",      f.Search);
     Active("QO number",   f.QoNo);
     Active("Container",   f.Container);
@@ -98,14 +96,17 @@
     Active("PO",          f.Po);
     Active("Arrival no",  f.ArrivalNo);
     Active("Material",    f.Material);
-    Active("Supplier",    f.Supplier);
-    Active("Plant",       f.Plant);
-    Active("Storage",     f.StorageLoc);
-    Active("Opened by",   f.OpenedBy);
+    ActiveMany("Supplier",  f.Supplier);
+    ActiveMany("Plant",     f.Plant, Codes.PlantLabel);
+    ActiveMany("Storage",   f.StorageLoc);
+    ActiveMany("Opened by", f.OpenedBy);
+    // The empty default is not announced: showing the inspection that stands is
+    // the normal view, not a filter someone should be told they applied.
     Active("Reinspection", f.Reinspection switch
     {
-        "originals"     => "reinspected originals",
+        "originals"     => "reinspected originals (reference)",
         "reinspections" => "reinspections",
+        "all"           => "all, including superseded",
         _               => null
     });
     Active("From",        D(f.From));
@@ -148,12 +149,42 @@
             {
                 <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>@Loc["Clear"]</a>
             }
+            <div class="dropdown" data-coltoggle-ui="quality-orders">
+                <button type="button" class="btn btn-outline-secondary dropdown-toggle"
+                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                        title="Choose which columns to show. Your choice is remembered on this device.">
+                    <i class="bi bi-layout-three-columns me-1"></i>Columns<span class="badge bg-secondary ms-1 d-none"
+                         data-coltoggle-count title="Columns currently hidden"></span>
+                </button>
+                <div class="dropdown-menu dropdown-menu-end p-2" data-coltoggle-menu style="min-width: 13rem;"></div>
+            </div>
         </div>
         <div class="col-auto">
             <div class="btn-group" role="group" aria-label='@Loc["Filter by status"]'>
                 @foreach (var s in statuses)
                 {
-                    <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)" style="min-width:6.5rem">@ChipLabel(s.Value)</button>
+                    @if (s.Value.Length == 0)
+                    {
+                        @* Unticks the status boxes and resubmits, rather than
+                           linking to a bare Index: "All" means every STATUS, not
+                           every record, and a link would silently drop the
+                           supplier, plant and dates the user had also set. *@
+                        <button type="button"
+                                class="btn btn-sm @(status.Count == 0 ? "btn-secondary active" : "btn-outline-secondary")"
+                                style="min-width:6.5rem" title="Show every status"
+                                onclick="this.closest('form').querySelectorAll('input[name=status]').forEach(b =&gt; b.checked = false); this.closest('form').requestSubmit();">@ChipLabel(s.Value)</button>
+                    }
+                    else
+                    {
+                        @* btn-check: a checkbox that renders as a chip, so the
+                           whole label is the hit area and ticking a second
+                           status ADDS it instead of replacing the first. *@
+                        <input type="checkbox" class="btn-check" name="status" value="@s.Value"
+                               id="status-@s.Value" autocomplete="off" checked="@ChipOn(s.Value)"
+                               onchange="this.form.requestSubmit()" />
+                        <label class="btn btn-sm @s.OutlineCss" for="status-@s.Value"
+                               style="min-width:6.5rem">@ChipLabel(s.Value)</label>
+                    }
                 }
             </div>
         </div>
@@ -194,81 +225,48 @@
                 </div>
                 <partial name="_MaterialCategoryFilter" model="@((f.MatMajor, f.MatSubMajor))" />
 
-                <div class="col-12 col-md-4">
-                    <label class="form-label small mb-1">@Loc["Supplier"]</label>
-                    <select name="supplier" class="form-select form-select-sm">
-                        <option value="">@Loc["All suppliers"]</option>
-                        @if (orphanSupplier)
-                        {
-                            <option value="@f.Supplier" selected>@f.Supplier (no matching orders)</option>
-                        }
-                        @foreach (var sup in opts.Suppliers)
-                        {
-                            <option value="@sup" selected="@(string.Equals(sup, f.Supplier, StringComparison.OrdinalIgnoreCase))">@sup</option>
-                        }
-                    </select>
-                </div>
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "supplier", Label = Loc["Supplier"], AllLabel = Loc["All suppliers"],
+                    ColumnCss = "col-12 col-md-4", Selected = f.Supplier,
+                    Options = opts.Suppliers.Select(x => new MultiSelectOption(x, x)).ToList() })" />
 
-                <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">@Loc["Plant"]</label>
-                    @if (plantScopeLocked != null)
-                    {
-                        @* Scoped operator: the server forces this plant anyway, so
-                           show why instead of a dropdown that can't take effect. *@
+                @if (plantScopeLocked != null)
+                {
+                    @* Scoped operator: the server forces this plant anyway, so
+                       show why instead of a control that cannot take effect. *@
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">@Loc["Plant"]</label>
                         <div class="form-control form-control-sm bg-light d-flex align-items-center"
                              title="Your account is restricted to this plant.">
                             <i class="bi bi-lock-fill text-muted me-1"></i>
                             <span class="small">@Codes.PlantLabel(plantScopeLocked)</span>
                         </div>
-                        <input type="hidden" id="qo-plant-filter" data-plant-filter="qo" data-filter-ignore name="plant" value="@plantScopeLocked" />
-                    }
-                    else
-                    {
-                        <select name="plant" id="qo-plant-filter" data-plant-filter="qo" class="form-select form-select-sm">
-                            <option value="">@Loc["All plants"]</option>
-                            @if (orphanPlant)
-                            {
-                                <option value="@f.Plant" selected>@f.Plant (no matching orders)</option>
-                            }
-                            @foreach (var pl in opts.Plants)
-                            {
-                                <option value="@pl" selected="@(string.Equals(pl, f.Plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
-                            }
-                        </select>
-                    }
-                </div>
-                <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">@Loc["Storage location"]</label>
-                    <select name="storageLoc" id="qo-storage-filter" data-storage-filter="qo" class="form-select form-select-sm">
-                        <option value="">@Loc["All storage locations"]</option>
-                        @if (orphanStorage)
-                        {
-                            <option value="@f.StorageLoc" data-plant="@f.Plant" selected>@f.StorageLoc (no matching orders)</option>
-                        }
-                        @foreach (var sl in opts.StorageLocations)
-                        {
-                            <option value="@sl.Code" data-plant="@sl.Plant"
-                                    selected="@(string.Equals(sl.Code, f.StorageLoc, StringComparison.OrdinalIgnoreCase)
-                                                && (string.IsNullOrEmpty(f.Plant) || string.Equals(sl.Plant, f.Plant, StringComparison.OrdinalIgnoreCase)))">
-                                @Codes.StorageLocationLabel(sl.Plant, sl.Code)
-                            </option>
-                        }
-                    </select>
-                </div>
-                <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">@Loc["Opened by"]</label>
-                    <select name="openedBy" class="form-select form-select-sm">
-                        <option value="">@Loc["Anyone"]</option>
-                        @if (orphanOpenedBy)
-                        {
-                            <option value="@f.OpenedBy" selected>@f.OpenedBy (no matching orders)</option>
-                        }
-                        @foreach (var ob in opts.OpenedBy)
-                        {
-                            <option value="@ob" selected="@(string.Equals(ob, f.OpenedBy, StringComparison.OrdinalIgnoreCase))">@ob</option>
-                        }
-                    </select>
-                </div>
+                        <input type="hidden" data-filter-ignore name="plant" value="@plantScopeLocked" />
+                    </div>
+                }
+                else
+                {
+                    <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                        Name = "plant", Label = Loc["Plant"], AllLabel = Loc["All plants"],
+                        ColumnCss = "col-6 col-md-3", Selected = f.Plant,
+                        Options = opts.Plants.Select(x => new MultiSelectOption(x, Codes.PlantLabel(x))).ToList() })" />
+                }
+                @* Storage codes repeat across plants, so each option carries its
+                   plant in the label. The old control narrowed this list to the
+                   picked plant with JS; with both sides multi-select that
+                   narrowing no longer has a single plant to key on, and the
+                   labelled list is what keeps the choice unambiguous. *@
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "storageLoc", Label = Loc["Storage location"],
+                    AllLabel = Loc["All storage locations"],
+                    ColumnCss = "col-6 col-md-3", Selected = f.StorageLoc,
+                    Options = opts.StorageLocations
+                        .Select(sl => new MultiSelectOption(sl.Code, Codes.StorageLocationLabel(sl.Plant, sl.Code)))
+                        .DistinctBy(o => o.Value).ToList() })" />
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "openedBy", Label = Loc["Opened by"], AllLabel = Loc["Anyone"],
+                    ColumnCss = "col-6 col-md-2", Selected = f.OpenedBy,
+                    Options = opts.OpenedBy.Select(x => new MultiSelectOption(x, x)).ToList() })" />
                 <div class="col-6 col-md-2">
                     <label class="form-label small mb-1">@Loc["Created from"]</label>
                     <input type="date" name="from" value="@D(f.From)" class="form-control form-control-sm" />
@@ -283,12 +281,15 @@
                 <div class="col-6 col-md-2">
                     <label class="form-label small mb-1">@Loc["Reinspection"]</label>
                     <select name="reinspection" class="form-select form-select-sm">
-                        <option value="">@Loc["All orders"]</option>
-                        <option value="originals" selected="@(f.Reinspection == "originals")">
-                            @Loc["Reinspected originals"]
-                        </option>
+                        <option value="">@Loc["Current inspections"]</option>
                         <option value="reinspections" selected="@(f.Reinspection == "reinspections")">
                             @Loc["Reinspections"]
+                        </option>
+                        <option value="originals" selected="@(f.Reinspection == "originals")">
+                            @Loc["Reinspected originals (reference)"]
+                        </option>
+                        <option value="all" selected="@(f.Reinspection == "all")">
+                            @Loc["All, including superseded"]
                         </option>
                     </select>
                 </div>
@@ -307,23 +308,28 @@
 
 <div class="card">
     <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0 qms-index-table" data-tablekit data-page-size="50">
+        @* data-col-key drives the Columns menu (columntoggle.js). Keys are
+           stable names, not positions, so adding a column later does not shift
+           what somebody chose to hide. QO Number and Actions are locked: one
+           identifies the row and the other is how you act on it. *@
+        <table id="quality-orders" class="table table-hover align-middle mb-0 qms-index-table"
+               data-tablekit data-page-size="50" data-coltoggle>
             <thead class="table-light">
                 <tr>
-                    <th data-sort>@Loc["QO Number"]</th>
-                    <th data-sort>@Loc["Container"]</th>
-                    <th data-sort>@Loc["BOL"]</th>
-                    <th data-sort>@Loc["PO"]</th>
-                    <th data-sort>@Loc["Plant"]</th>
-                    <th data-sort>@Loc["Supplier"]</th>
-                    <th data-sort>@Loc["Arrival"]</th>
-                    <th>@Loc["Materials"]</th>
-                    <th data-sort>@Loc["Status"]</th>
-                    <th data-sort>@Loc["Created"]</th>
+                    <th data-sort data-col-key="qono" data-col-lock>@Loc["QO Number"]</th>
+                    <th data-sort data-col-key="container">@Loc["Container"]</th>
+                    <th data-sort data-col-key="bol">@Loc["BOL"]</th>
+                    <th data-sort data-col-key="po">@Loc["PO"]</th>
+                    <th data-sort data-col-key="plant">@Loc["Plant"]</th>
+                    <th data-sort data-col-key="supplier">@Loc["Supplier"]</th>
+                    <th data-sort data-col-key="arrival">@Loc["Arrival"]</th>
+                    <th data-col-key="materials">@Loc["Materials"]</th>
+                    <th data-sort data-col-key="status">@Loc["Status"]</th>
+                    <th data-sort data-col-key="created">@Loc["Created"]</th>
                     @* Who opened the QO, not who created it -- the inspector who
                        took ownership is the useful name. Blank while Initial. *@
-                    <th data-sort>@Loc["Opened By"]</th>
-                    <th class="text-end">@Loc["Actions"]</th>
+                    <th data-sort data-col-key="openedby">@Loc["Opened By"]</th>
+                    <th class="text-end" data-col-key="actions" data-col-lock>@Loc["Actions"]</th>
                 </tr>
             </thead>
             <tbody>
@@ -378,14 +384,14 @@
                                     <span class="text-muted">—</span>
                                 }
                             </td>
-                            <td>@q.VendorName</td>
+                            <td class="cell-clip-sm" title="@q.VendorName">@q.VendorName</td>
                             <td>
                                 <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@q.ArrivalId"
                                    title="@q.ArrivalNo">
                                     <i class="bi bi-box-arrow-in-down me-1"></i>@q.ArrivalNo
                                 </a>
                             </td>
-                            <td>
+                            <td class="cell-clip-sm">
                                 @if (firstMat == null)
                                 {
                                     <span class="text-muted small fst-italic">@Loc["No materials"]</span>

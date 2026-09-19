@@ -90,7 +90,9 @@ public class ContainerCacheService : IContainerCacheService
 
     public async Task<PendingPage> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
-        string? plant = null, string? poType = null, string? storageLoc = null,
+        IReadOnlyList<string>? plant = null,
+        IReadOnlyList<string>? poType = null,
+        IReadOnlyList<string>? storageLoc = null,
         string? supplier = null, string? material = null,
         string? matMajor = null, string? matSubMajor = null,
         DateOnly? from = null, DateOnly? to = null,
@@ -108,9 +110,9 @@ public class ContainerCacheService : IContainerCacheService
         // Same filter clause is applied to both result sets so the
         // material-lines query never returns lines for triplets the
         // first query filtered out. Container / BOL / PO use LIKE for
-        // free-text contains-match; Plant / PoType / StorageLoc use
-        // equality because they come from dropdowns sourced from the
-        // same column values. Supplier is free text too -- operators
+        // free-text contains-match; Plant / PoType / StorageLoc match
+        // exactly and accept SEVERAL values each, because they come from
+        // multi-select dropdowns sourced from the same column values. Supplier is free text too -- operators
         // remember a word of the name, rarely the whole thing.
         // Plant matching runs on the EFFECTIVE plant -- COALESCE(override_plant,
         // plant) -- so a manager-reassigned container shows in the target plant's
@@ -142,9 +144,12 @@ public class ContainerCacheService : IContainerCacheService
             AND (@Po         IS NULL OR ebeln        LIKE @Po)
             AND (@Supplier   IS NULL OR vendor_name  LIKE @Supplier OR vendor_no LIKE @Supplier)
             AND (@Material   IS NULL OR material_no  LIKE @Material OR material_desc LIKE @Material)
-            AND (@Plant      IS NULL OR COALESCE(override_plant, plant) = @Plant)
-            AND (@PoType     IS NULL OR po_type      = @PoType)
-            AND (@StorageLoc IS NULL OR storage_loc  = @StorageLoc)
+            -- Multi-select: an any-flag plus an IN list. Dapper renders an
+            -- empty list as IN (SELECT 1 WHERE 1=0), so the flag is what turns
+            -- each filter off rather than the list being empty.
+            AND (@PlantAny      = 0 OR COALESCE(override_plant, plant) IN @Plants)
+            AND (@PoTypeAny     = 0 OR po_type     IN @PoTypes)
+            AND (@StorageLocAny = 0 OR storage_loc IN @StorageLocs)
             AND (@From       IS NULL OR doc_date    >= @From)
             AND (@To         IS NULL OR doc_date    <= @To)
             AND (@ArrFrom    IS NULL OR arrival_date >= @ArrFrom)
@@ -171,6 +176,12 @@ public class ContainerCacheService : IContainerCacheService
         static string? Exact(string? s) =>
             string.IsNullOrWhiteSpace(s) ? null : s.Trim();
 
+        // Cleaned for the any-flags, sentinel-wrapped for the IN clauses --
+        // see FilterValues for why those are two different things.
+        var plants      = ViewModels.FilterValues.Many(plant);
+        var poTypes     = ViewModels.FilterValues.Many(poType);
+        var storageLocs = ViewModels.FilterValues.Many(storageLoc);
+
         var p = new
         {
             Container  = Wrap(container),
@@ -180,9 +191,12 @@ public class ContainerCacheService : IContainerCacheService
             Material   = Wrap(material),
             matMajor    = Exact(matMajor),
             matSubMajor = Exact(matSubMajor),
-            Plant      = Exact(plant),
-            PoType     = Exact(poType),
-            StorageLoc = Exact(storageLoc),
+            // Trimmed and de-blanked: an unticked box submits nothing, but a
+            // hand-edited query string can still carry "?plant=" and an empty
+            // string would match no plant and silently empty the page.
+            Plants      = ViewModels.FilterValues.ForIn(plants),      PlantAny      = plants.Count      > 0,
+            PoTypes     = ViewModels.FilterValues.ForIn(poTypes),     PoTypeAny     = poTypes.Count     > 0,
+            StorageLocs = ViewModels.FilterValues.ForIn(storageLocs), StorageLocAny = storageLocs.Count > 0,
             // doc_date is a SQL DATE; pass DateTime (midnight) rather than
             // DateOnly — this Dapper/SqlClient pairing doesn't bind DateOnly,
             // which is why the arrivals list converts dates the same way. Both

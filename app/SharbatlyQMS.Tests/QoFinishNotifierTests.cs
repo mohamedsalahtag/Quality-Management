@@ -147,7 +147,8 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         var claims   = scope.ServiceProvider.GetRequiredService<IClaimService>();
 
         var rows = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
-        var qoId = rows.Select(r => r.QualityOrderId).FirstOrDefault();
+        var qoId = rows.Where(r => r.StatusCode == QualityOrderStatus.Closed)
+                       .Select(r => r.QualityOrderId).FirstOrDefault();
         if (qoId == 0) return;
 
         var built = await notifier.BuildPreviewAsync(qoId);
@@ -188,7 +189,9 @@ public class QoFinishNotifierTests : IClassFixture<QmsAppFactory>
         // means something -- an order with none would pass a weaker assertion.
         var rows = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
         long pick = 0;
-        foreach (var r in rows.Take(25))
+        // An in-progress reinspection can head this list; it has no samples,
+        // so the loop skips it, but be explicit rather than lucky.
+        foreach (var r in rows.Where(r => r.StatusCode == QualityOrderStatus.Closed).Take(25))
         {
             var mats = (await qos.GetMaterialsAsync(r.QualityOrderId)).ToList();
             if (mats.Count == 0) continue;

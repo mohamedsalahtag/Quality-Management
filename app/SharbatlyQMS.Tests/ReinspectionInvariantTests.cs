@@ -11,16 +11,21 @@ using Xunit.Abstractions;
 namespace SharbatlyQMS.Tests;
 
 /// <summary>
-/// What must NOT change when a container is reinspected.
+/// What a reinspection does, and does not, do to the operational figures.
 ///
 /// A reinspection is real work, but it is not a second container, and every
-/// operational figure in this application counts containers. The decision taken
-/// was that the original keeps counting — so the dangerous outcome is not a
-/// visible error but a quiet one: coverage above 100%, an un-inspected
-/// container hidden inside a Max(0, …) clamp, a clock restarting weeks after
-/// the inspection it measures. None of that announces itself, so it is pinned
-/// here by raising a real reinspection and comparing every figure either side
-/// of it.
+/// operational figure in this application counts containers. So the thing that
+/// must never happen is DOUBLE counting: coverage above 100%, an un-inspected
+/// container hidden inside a Max(0, …) clamp, one arrival fanned into two rows
+/// of a drill-through sheet.
+///
+/// What SHOULD happen is that the figures move to the reinspection. The first
+/// result was judged unsound and discarded, so until the second inspection
+/// closes the container is genuinely awaiting inspection again — it leaves the
+/// inspected bucket, and its clock runs to the inspection that stands.
+///
+/// Neither announces itself, so both are pinned here by raising a real
+/// reinspection and reading the figures either side of it.
 /// </summary>
 [Collection("workflow")]
 public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
@@ -63,8 +68,13 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
             INSERT INTO qms_arrival_item (arrival_id, ebeln, ebelp, material_no, material_desc, material_group)
             VALUES (@arrivalId, '4700000000', '00010', 'TESTMAT', 'Test material', 'APPLE');
             INSERT INTO qms_shipment_snapshot (arrival_id, internal_shipment_no, status_code, arrival_date)
-            VALUES (@arrivalId, @tag, 'Confirmed', CAST(SYSUTCDATETIME() AS DATE));",
-            new { arrivalId, tag });
+            VALUES (@arrivalId, @tag, 'Confirmed', @today);",
+            // The LOCAL date, not SYSUTCDATETIME(). arrival_date is a business
+            // date and the dashboard's "today" resolves from DateTime.Now, so
+            // seeding the UTC date made this fixture disagree with the filter
+            // for the three hours a night when UTC+3 is a day ahead -- the
+            // container landed outside "today" and every bucket read zero.
+            new { arrivalId, tag, today = DateTime.Now.Date });
 
         var qoId = await Dapper.SqlMapper.ExecuteScalarAsync<long>(c, @"
             INSERT INTO qms_quality_order
@@ -98,11 +108,38 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
             DELETE FROM qms_arrival WHERE arrival_id = @arrivalId;", new { arrivalId });
     }
 
-    private async Task<DashboardVm> DashboardAsync()
+    /// <summary>
+    /// The same fixture, but arrived and inspected <paramref name="daysAgo"/>
+    /// days back. The flip only SHOWS in the period the original belongs to:
+    /// query 11 counts orders CREATED in the window, so seeding everything
+    /// today leaves one order in today's window either way and the change is
+    /// invisible.
+    /// </summary>
+    private async Task<(long ArrivalId, long QoId, DateTime Day)> SeedBackdatedAsync(int daysAgo)
+    {
+        var (arrivalId, qoId) = await SeedAsync();
+        var day = DateTime.Now.Date.AddDays(-daysAgo);
+        var utc = DateTime.SpecifyKind(day.AddHours(9), DateTimeKind.Local).ToUniversalTime();
+
+        using var c = Db();
+        await c.OpenAsync();
+        await Dapper.SqlMapper.ExecuteAsync(c, @"
+            UPDATE qms_arrival SET created_at = @utc WHERE arrival_id = @arrivalId;
+            UPDATE qms_shipment_snapshot SET arrival_date = @day WHERE arrival_id = @arrivalId;
+            UPDATE qms_quality_order
+            SET    created_at = @utc, opened_at = @utc, closed_at = @utc
+            WHERE  quality_order_id = @qoId;",
+            new { arrivalId, qoId, utc, day });
+
+        return (arrivalId, qoId, day);
+    }
+
+    private async Task<DashboardVm> DashboardAsync(DashboardFilter? filter = null)
     {
         using var s = _factory.Services.CreateScope();
         return await s.ServiceProvider.GetRequiredService<IDashboardService>()
-            .GetSummaryAsync(new DashboardFilter { Period = "today" }, PlantScope.All, CancellationToken.None);
+            .GetSummaryAsync(filter ?? new DashboardFilter { Period = "today" },
+                             PlantScope.All, CancellationToken.None);
     }
 
     private static (int Received, int Inspected, int Pending, int Backlog, int Total) Figures(DashboardVm vm) =>
@@ -113,28 +150,64 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
          vm.Commitment.Sum(x => x.QosCreated));
 
     /// <summary>
-    /// Every dashboard figure is identical either side of a reinspection. This
-    /// is the decision "the original keeps counting", stated as arithmetic.
+    /// The container is counted once throughout, and moves from inspected to
+    /// pending when it is sent back — then returns once the reinspection is
+    /// closed. "The reinspection dominates", stated as arithmetic.
+    ///
+    /// Received is the invariant: it counts arrivals, and a reinspection does
+    /// not deliver a second container.
     /// </summary>
     [Fact]
-    public async Task A_reinspection_changes_no_dashboard_figure()
+    public async Task A_reinspection_moves_the_container_back_to_pending()
     {
-        var (arrivalId, qoId) = await SeedAsync();
+        var (arrivalId, qoId, day) = await SeedBackdatedAsync(40);
+        // The window the ORIGINAL belongs to. Narrow on purpose: whatever else
+        // production holds for that day is constant across the reinspection, so
+        // every assertion below is a delta and cancels it out.
+        var window = new DashboardFilter
+        {
+            Period = DashboardFilter.Periods.Custom, From = day, To = day
+        };
         try
         {
-            var before = Figures(await DashboardAsync());
+            var before = Figures(await DashboardAsync(window));
             _out.WriteLine($"before: received {before.Received}, inspected {before.Inspected}, " +
-                           $"pending {before.Pending}, backlog {before.Backlog}, total {before.Total}");
+                           $"pending {before.Pending}");
 
+            long newId;
             using (var scope = _factory.Services.CreateScope())
-                await scope.ServiceProvider.GetRequiredService<IQualityOrderService>()
-                    .ReinspectAsync(qoId, "Checking the dashboard does not move.", "test");
+                (newId, _) = await scope.ServiceProvider.GetRequiredService<IQualityOrderService>()
+                    .ReinspectAsync(qoId, "The figures should follow the reinspection.", "test");
 
-            var after = Figures(await DashboardAsync());
+            var during = Figures(await DashboardAsync(window));
+            _out.WriteLine($"during: received {during.Received}, inspected {during.Inspected}, " +
+                           $"pending {during.Pending}");
+
+            // Still one container -- this is the double-count guard.
+            Assert.Equal(before.Received, during.Received);
+            // But it is awaiting inspection again: the first result was discarded.
+            Assert.Equal(before.Inspected - 1, during.Inspected);
+            Assert.Equal(before.Pending + 1, during.Pending);
+
+            // Finish the reinspection and it comes back, counted once.
+            using (var c = Db())
+            {
+                await c.OpenAsync();
+                await Dapper.SqlMapper.ExecuteAsync(c, @"
+                    UPDATE qms_quality_order
+                    SET    status_code = 'Closed', closed_at = SYSUTCDATETIME(), closed_by = 'test'
+                    WHERE  quality_order_id = @newId", new { newId });
+            }
+
+            // Closing it does NOT restore the original window: the reinspection
+            // was created today, so the container now belongs to today's
+            // catch-up rather than to the month it first arrived in. Its
+            // container count is what must stay put.
+            var after = Figures(await DashboardAsync(window));
             _out.WriteLine($"after:  received {after.Received}, inspected {after.Inspected}, " +
-                           $"pending {after.Pending}, backlog {after.Backlog}, total {after.Total}");
-
-            Assert.Equal(before, after);
+                           $"pending {after.Pending}");
+            Assert.Equal(before.Received, after.Received);
+            Assert.Equal(during.Inspected, after.Inspected);
         }
         finally { await CleanupAsync(arrivalId); }
     }
@@ -180,11 +253,15 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
     }
 
     /// <summary>
-    /// The Inspection Time Bar keeps following the ORIGINAL. Left to itself it
-    /// picks the highest order id, which would restart a settled clock.
+    /// The Inspection Time Bar follows the REINSPECTION: one row for the
+    /// container, naming the inspection that stands, with its clock running
+    /// again because the container is genuinely awaiting inspection.
+    ///
+    /// The row count is the part worth guarding — two rows for one container
+    /// would be a silent double count in every time-to-inspection figure.
     /// </summary>
     [Fact]
-    public async Task The_time_bar_clock_stays_on_the_original()
+    public async Task The_time_bar_clock_follows_the_reinspection()
     {
         var (arrivalId, qoId) = await SeedAsync();
         try
@@ -208,23 +285,33 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
 
             _out.WriteLine($"{page.Rows.Count} row(s); original {originalNo}, reinspection {newNo}");
 
-            // One row for the container, and it names the ORIGINAL.
+            // One row for the container, and it names the REINSPECTION.
             Assert.Single(page.Rows);
-            Assert.Equal(originalNo, page.Rows[0].QualityOrderNo);
-            Assert.NotEqual(newNo, page.Rows[0].QualityOrderNo);
+            Assert.Equal(newNo, page.Rows[0].QualityOrderNo);
+            Assert.NotEqual(originalNo, page.Rows[0].QualityOrderNo);
 
-            // The clock is settled, not running again.
-            Assert.False(page.Rows[0].IsRunning);
+            // The clock is running again -- the container awaits an inspection.
+            Assert.True(page.Rows[0].IsRunning);
         }
         finally { await CleanupAsync(arrivalId); }
     }
 
     /// <summary>
-    /// The superseded original leaves the live Claims worklist, so a container
-    /// never sits there twice carrying two different answers.
+    /// The container stays on the live Claims worklist across a reinspection —
+    /// as exactly one row, which becomes the reinspection's.
+    ///
+    /// This is the regression pin for the defect that prompted the change.
+    /// Before it, the original was excluded as superseded, the reinspection
+    /// failed the Closed test, and a merely-superseded order has no
+    /// archived_at — so the container was on NO tab at all, with its claim and
+    /// the reason it came back unreachable from the Claims screen.
+    ///
+    /// Note that asserting only "the original has gone" is satisfied equally by
+    /// the correct behaviour and by that defect, which is why the row for the
+    /// container is counted here rather than just its absence.
     /// </summary>
     [Fact]
-    public async Task The_superseded_order_leaves_the_live_claims_list()
+    public async Task The_container_stays_on_the_live_claims_list_under_the_reinspection()
     {
         var (arrivalId, qoId) = await SeedAsync();
         try
@@ -234,14 +321,28 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
             var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
 
             var before = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
-            var wasThere = before.Any(r => r.QualityOrderId == qoId);
-            _out.WriteLine($"original on the claims list before: {wasThere}");
+            _out.WriteLine($"rows for this container before: {before.Count(r => r.ArrivalId == arrivalId)}");
 
-            await qos.ReinspectAsync(qoId, "Should drop off the claims list.", "test");
+            var (newId, _) = await qos.ReinspectAsync(
+                qoId, "Should not vanish from the claims list.", "test");
 
             var after = await claims.ListClosedQosAsync(new ClaimListFilter(), PlantScope.All, "test");
+
+            // The original has gone -- one container never sits there twice.
             Assert.DoesNotContain(after, r => r.QualityOrderId == qoId);
-            _out.WriteLine($"rows for this container after: {after.Count(r => r.ArrivalId == arrivalId)}");
+
+            // But the container has NOT vanished.
+            var rows = after.Where(r => r.ArrivalId == arrivalId).ToList();
+            _out.WriteLine($"rows for this container after: {rows.Count}");
+            Assert.Single(rows);
+            Assert.Equal(newId, rows[0].QualityOrderId);
+            Assert.Equal(ClaimStatus.Reinspection, rows[0].ClaimStatus);
+            Assert.NotEqual(QualityOrderStatus.Closed, rows[0].StatusCode);
+
+            // And it is not masquerading as untouched work.
+            var pending = await claims.ListClosedQosAsync(
+                new ClaimListFilter { Status = new List<string> { ClaimStatus.Pending } }, PlantScope.All, "test");
+            Assert.DoesNotContain(pending, r => r.ArrivalId == arrivalId);
         }
         finally { await CleanupAsync(arrivalId); }
     }
@@ -307,9 +408,11 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
 
             var originals     = await List("originals");
             var reinspections = await List("reinspections");
-            var all           = await List(null);
+            var current       = await List(null);
+            var all           = await List("all");
 
-            _out.WriteLine($"originals {originals.Count}, reinspections {reinspections.Count}, all {all.Count}");
+            _out.WriteLine($"originals {originals.Count}, reinspections {reinspections.Count}, " +
+                           $"current {current.Count}, all {all.Count}");
 
             // Each side finds its own order and not the other's.
             Assert.Contains(originals,        q => q.QualityOrderId == qoId);
@@ -317,8 +420,12 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
             Assert.Contains(reinspections,    q => q.QualityOrderId == newId);
             Assert.DoesNotContain(reinspections, q => q.QualityOrderId == qoId);
 
-            // Unfiltered still shows both -- the filter narrows, it does not
-            // become a permanent exclusion.
+            // THE DEFAULT hides the superseded original: a container search
+            // returns the inspection that stands, not both side by side.
+            Assert.Contains(current,       q => q.QualityOrderId == newId);
+            Assert.DoesNotContain(current, q => q.QualityOrderId == qoId);
+
+            // It is hidden, not gone -- asking for everything still finds it.
             Assert.Contains(all, q => q.QualityOrderId == qoId);
             Assert.Contains(all, q => q.QualityOrderId == newId);
 

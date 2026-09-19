@@ -10,7 +10,10 @@
 public class ArrivalListFilter
 {
     // ---- Quick bar (always visible) ----
-    public string? Status     { get; set; }
+    /// <summary>Arrival statuses to include. Multi-valued: "what is not
+    /// finished" spans Draft and In Progress, which a single-value chip could
+    /// not express. Empty means no status filter.</summary>
+    public List<string> Status { get; set; } = new();
     public string? Search     { get; set; }
 
     // ---- Collapsible panel ----
@@ -24,10 +27,10 @@ public class ArrivalListFilter
     /// <summary>Sub-major under that major, e.g. a variety group.</summary>
     public string? MatSubMajor { get; set; }
 
-    public string? Supplier   { get; set; }
-    public string? Plant      { get; set; }
-    public string? StorageLoc { get; set; }
-    public string? CreatedBy  { get; set; }
+    public List<string> Supplier   { get; set; } = new();
+    public List<string> Plant      { get; set; } = new();
+    public List<string> StorageLoc { get; set; } = new();
+    public List<string> CreatedBy  { get; set; } = new();
     /// <summary>Arrival created date, inclusive, as the user's LOCAL date. The
     /// service converts to UTC before it reaches SQL — a.created_at is stored UTC
     /// but displayed local, so a naive comparison silently drops rows either side
@@ -49,21 +52,12 @@ public class ArrivalListFilter
     /// <summary>True when any panel filter is set — the view uses this to open
     /// the panel on load so a bookmarked or shared URL doesn't look like an
     /// unexplained short list.</summary>
-    public bool AnyPanelFilter =>
-        !string.IsNullOrWhiteSpace(Container)
-        || !string.IsNullOrWhiteSpace(Bol)
-        || !string.IsNullOrWhiteSpace(Po)
-        || !string.IsNullOrWhiteSpace(ArrivalNo)
-        || !string.IsNullOrWhiteSpace(Material)
-        || !string.IsNullOrWhiteSpace(MatMajor)
-        || !string.IsNullOrWhiteSpace(MatSubMajor)
-        || !string.IsNullOrWhiteSpace(Supplier)
-        || !string.IsNullOrWhiteSpace(Plant)
-        || !string.IsNullOrWhiteSpace(StorageLoc)
-        || !string.IsNullOrWhiteSpace(CreatedBy)
-        || From.HasValue || To.HasValue;
+    public bool AnyPanelFilter => PanelFilterCount > 0;
 
-    /// <summary>How many panel filters are active — shown as a badge on the toggle.</summary>
+    /// <summary>How many panel filters are active — shown as a badge on the
+    /// toggle. A multi-select counts as ONE filter however many values it
+    /// holds: "Plant" is one thing the user narrowed by, and counting its
+    /// values would make the badge read like a row count.</summary>
     public int PanelFilterCount =>
         (string.IsNullOrWhiteSpace(Container)  ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Bol)        ? 0 : 1)
@@ -72,16 +66,16 @@ public class ArrivalListFilter
         + (string.IsNullOrWhiteSpace(Material)   ? 0 : 1)
         + (string.IsNullOrWhiteSpace(MatMajor)    ? 0 : 1)
         + (string.IsNullOrWhiteSpace(MatSubMajor) ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(Supplier)   ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(Plant)      ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(StorageLoc) ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(CreatedBy)  ? 0 : 1)
+        + (Supplier.Count   == 0 ? 0 : 1)
+        + (Plant.Count      == 0 ? 0 : 1)
+        + (StorageLoc.Count == 0 ? 0 : 1)
+        + (CreatedBy.Count  == 0 ? 0 : 1)
         + (From.HasValue ? 1 : 0)
         + (To.HasValue   ? 1 : 0);
 
     public bool Any => AnyPanelFilter
                        || !string.IsNullOrWhiteSpace(Search)
-                       || !string.IsNullOrWhiteSpace(Status);
+                       || Status.Count > 0;
 }
 
 /// <summary>Dropdown sources for the Arrivals filter panel. Drawn from arrivals

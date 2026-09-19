@@ -1,5 +1,6 @@
 ﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.Services
+@using SharbatlyQMS.Web.ViewModels
 @model IReadOnlyList<PendingPickupRow>
 @{
     // One view, two modes. archived=true renders the ARCHIVE: same filters,
@@ -12,9 +13,9 @@
     var container   = ViewBag.Container  as string;
     var bol         = ViewBag.Bol        as string;
     var po          = ViewBag.Po         as string;
-    var plant       = ViewBag.Plant      as string;
-    var poType      = ViewBag.PoType     as string;
-    var storageLoc  = ViewBag.StorageLoc as string;
+    var plant       = ViewBag.Plant      as List<string> ?? new List<string>();
+    var poType      = ViewBag.PoType     as List<string> ?? new List<string>();
+    var storageLoc  = ViewBag.StorageLoc as List<string> ?? new List<string>();
     var supplier    = ViewBag.Supplier   as string;
     var material    = ViewBag.Material   as string;
     var fromDate    = ViewBag.From       as DateOnly?;
@@ -29,9 +30,9 @@
                     || !string.IsNullOrWhiteSpace(material)
                     || fromDate.HasValue || toDate.HasValue
                     || arrFromDate.HasValue || arrToDate.HasValue
-                    || !string.IsNullOrWhiteSpace(plant)
-                    || !string.IsNullOrWhiteSpace(poType)
-                    || !string.IsNullOrWhiteSpace(storageLoc);
+                    || plant.Count > 0
+                    || poType.Count > 0
+                    || storageLoc.Count > 0;
     var pullStatus       = ViewBag.PullStatus        as ContainerPullStatus;
     var plantOptions     = ViewBag.PlantOptions      as IReadOnlyList<string>          ?? Array.Empty<string>();
     var poTypeOptions    = ViewBag.PoTypeOptions     as IReadOnlyList<string>          ?? Array.Empty<string>();
@@ -51,10 +52,20 @@
     var lastRow   = Math.Min(pageNo * pageSize, totalCount);
     // Current filter values, so pager links keep the same view. Only non-empty
     // filters are included so the URL stays clean; page + pageSize always ride.
-    Func<int, int, Dictionary<string, string>> pageRoute = (p, size) =>
+    // Built as a query STRING rather than the Dictionary this used to be:
+    // asp-all-route-data cannot express a repeated key, so the multi-select
+    // filters would silently collapse to one value the moment somebody went to
+    // page 2 -- widening the list without touching a control.
+    Func<int, int, string> PageQuery = (p, size) =>
     {
-        var d = new Dictionary<string, string>();
-        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) d[k] = v!; }
+        var q = new List<string>();
+        void Add(string k, string? v)
+        {
+            if (!string.IsNullOrWhiteSpace(v))
+                q.Add($"{Uri.EscapeDataString(k)}={Uri.EscapeDataString(v!)}");
+        }
+        void AddMany(string k, IEnumerable<string> vs) { foreach (var v in vs) Add(k, v); }
+
         Add("container", container);
         Add("bol", bol);
         Add("po", po);
@@ -68,13 +79,13 @@
         Add("to", Dstr(toDate));
         Add("arrFrom", Dstr(arrFromDate));
         Add("arrTo", Dstr(arrToDate));
-        Add("plant", plant);
-        Add("storageLoc", storageLoc);
-        Add("poType", poType);
-        if (isArchive) d["archived"] = "true";
-        d["page"]     = p.ToString();
-        d["pageSize"] = size.ToString();
-        return d;
+        AddMany("plant", plant);
+        AddMany("storageLoc", storageLoc);
+        AddMany("poType", poType);
+        if (isArchive) Add("archived", "true");
+        q.Add($"page={p}");
+        q.Add($"pageSize={size}");
+        return "?" + string.Join("&", q);
     };
 }
 
@@ -211,8 +222,11 @@
    (storage-loc codes repeat across plants). *@
 @{
     var activeCount =
-        new[] { container, bol, po, supplier, material, plant, poType, storageLoc }
+        new[] { container, bol, po, supplier, material }
             .Count(x => !string.IsNullOrWhiteSpace(x))
+        + (plant.Count      > 0 ? 1 : 0)
+        + (poType.Count     > 0 ? 1 : 0)
+        + (storageLoc.Count > 0 ? 1 : 0)
         + (fromDate.HasValue ? 1 : 0) + (toDate.HasValue ? 1 : 0);
 }
 <div class="mb-3">
@@ -277,43 +291,30 @@
                 <i class="bi bi-lock-fill text-muted me-1"></i>
                 <span class="small">@Codes.PlantLabel(plantScopeLocked)</span>
             </div>
-            <input type="hidden" id="pending-plant-filter" data-plant-filter="pending" name="plant" value="@plantScopeLocked" />
-        }
-        else
-        {
-            <select name="plant" id="pending-plant-filter" data-plant-filter="pending" class="form-select form-select-sm">
-                <option value="">@Loc["All plants"]</option>
-                @foreach (var pl in plantOptions)
-                {
-                    <option value="@pl" selected="@(string.Equals(pl, plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
-                }
-            </select>
+            <input type="hidden" name="plant" value="@plantScopeLocked" />
         }
     </div>
-    <div class="col-md-2">
-        <label class="form-label small mb-1">@Loc["Storage Loc"]</label>
-        <select name="storageLoc" id="pending-storage-filter" data-storage-filter="pending" class="form-select form-select-sm">
-            <option value="">@Loc["All storage locations"]</option>
-            @foreach (var sl in storageOptions)
-            {
-                <option value="@sl.Code" data-plant="@sl.Plant"
-                        selected="@(string.Equals(sl.Code, storageLoc, StringComparison.OrdinalIgnoreCase)
-                                    && (string.IsNullOrEmpty(plant) || string.Equals(sl.Plant, plant, StringComparison.OrdinalIgnoreCase)))">
-                    @Codes.StorageLocationLabel(sl.Plant, sl.Code)
-                </option>
-            }
-        </select>
-    </div>
-    <div class="col-md-1">
-        <label class="form-label small mb-1">@Loc["PO type"]</label>
-        <select name="poType" class="form-select form-select-sm">
-            <option value="">@Loc["All"]</option>
-            @foreach (var pt in poTypeOptions)
-            {
-                <option value="@pt" selected="@(string.Equals(pt, poType, StringComparison.OrdinalIgnoreCase))">@Codes.PoTypeDisplay(pt)</option>
-            }
-        </select>
-    </div>
+    @if (plantScopeLocked == null)
+    {
+        <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+            Name = "plant", Label = Loc["Plant"], AllLabel = Loc["All plants"],
+            ColumnCss = "col-md-2", Selected = plant,
+            Options = plantOptions.Select(x => new MultiSelectOption(x, Codes.PlantLabel(x))).ToList() })" />
+    }
+    @* Storage codes repeat across plants, so each option carries its plant in
+       the label. The old control narrowed this list to the picked plant with
+       JS; with both sides multi-select there is no single plant to key on. *@
+    <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+        Name = "storageLoc", Label = Loc["Storage Loc"],
+        AllLabel = Loc["All storage locations"],
+        ColumnCss = "col-md-2", Selected = storageLoc,
+        Options = storageOptions
+            .Select(sl => new MultiSelectOption(sl.Code, Codes.StorageLocationLabel(sl.Plant, sl.Code)))
+            .DistinctBy(o => o.Value).ToList() })" />
+    <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+        Name = "poType", Label = Loc["PO type"], AllLabel = Loc["All"],
+        ColumnCss = "col-md-2", Selected = poType,
+        Options = poTypeOptions.Select(x => new MultiSelectOption(x, Codes.PoTypeDisplay(x))).ToList() })" />
     @* The PO-date range is gone: this page is about when a container ARRIVED,
        and the PO date is no longer shown anywhere on it. The service still
        accepts from/to against doc_date for anyone with an old bookmark. *@
@@ -702,6 +703,25 @@
                                         <i class="bi bi-plus-circle me-1"></i>@Loc["Create"]
                                     </button>
                                 </form>
+                                @* One container out of the list, for the ones a
+                                   date range cannot express: a cancelled
+                                   shipment or a duplicate SAP row that will
+                                   never be inspected. Reversible from the
+                                   Archived view. *@
+                                @if (canArchive)
+                                {
+                                    <form asp-action="ArchivePendingOne" method="post" class="d-inline"
+                                          onsubmit="return confirm('Archive container @r.ContainerNo? It leaves the pending list; you can restore it from Archived.');">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="containerNo" value="@r.ContainerNo" />
+                                        <input type="hidden" name="bolNo"       value="@r.BolNo" />
+                                        <input type="hidden" name="po"          value="@r.Ebeln" />
+                                        <button type="submit" class="btn btn-sm btn-outline-secondary"
+                                                title="Archive just this container">
+                                            <i class="bi bi-archive"></i>
+                                        </button>
+                                    </form>
+                                }
                             }
                         </td>
                     </tr>
@@ -744,13 +764,13 @@
                         }
                         <li class="page-item @(pageNo == 1 ? "disabled" : "")">
                             <a class="page-link" data-pending-page="@(pageNo - 1)"
-                               asp-action="Pending" asp-all-route-data="pageRoute(pageNo - 1, pageSize)" aria-label='@Loc["Previous"]'>«</a>
+                               href="@PageQuery(pageNo - 1, pageSize)" aria-label='@Loc["Previous"]'>«</a>
                         </li>
                         @if (from > 1)
                         {
                             <li class="page-item">
                                 <a class="page-link" data-pending-page="1"
-                                   asp-action="Pending" asp-all-route-data="pageRoute(1, pageSize)">1</a>
+                                   href="@PageQuery(1, pageSize)">1</a>
                             </li>
                             @if (from > 2)
                             {
@@ -761,7 +781,7 @@
                         {
                             <li class="page-item @(pp == pageNo ? "active" : "")">
                                 <a class="page-link" data-pending-page="@pp"
-                                   asp-action="Pending" asp-all-route-data="pageRoute(pp, pageSize)">@pp</a>
+                                   href="@PageQuery(pp, pageSize)">@pp</a>
                             </li>
                         }
                         @if (to < pageCount)
@@ -772,12 +792,12 @@
                             }
                             <li class="page-item">
                                 <a class="page-link" data-pending-page="@pageCount"
-                                   asp-action="Pending" asp-all-route-data="pageRoute(pageCount, pageSize)">@pageCount</a>
+                                   href="@PageQuery(pageCount, pageSize)">@pageCount</a>
                             </li>
                         }
                         <li class="page-item @(pageNo == pageCount ? "disabled" : "")">
                             <a class="page-link" data-pending-page="@(pageNo + 1)"
-                               asp-action="Pending" asp-all-route-data="pageRoute(pageNo + 1, pageSize)" aria-label='@Loc["Next"]'>»</a>
+                               href="@PageQuery(pageNo + 1, pageSize)" aria-label='@Loc["Next"]'>»</a>
                         </li>
                     </ul>
                 </nav>

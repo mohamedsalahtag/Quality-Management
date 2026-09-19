@@ -34,7 +34,11 @@ public interface IContainerCacheService
     /// </summary>
     Task<PendingPage> ListPendingAsync(
         string? container = null, string? bol = null, string? po = null,
-        string? plant = null, string? poType = null, string? storageLoc = null,
+        // Multi-valued: the three dropdown filters on the Pending screen accept
+        // more than one value each. Null or empty means no filter.
+        IReadOnlyList<string>? plant = null,
+        IReadOnlyList<string>? poType = null,
+        IReadOnlyList<string>? storageLoc = null,
         string? supplier = null, string? material = null,
         string? matMajor = null, string? matSubMajor = null,
         DateOnly? from = null, DateOnly? to = null,

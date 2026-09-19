@@ -10,10 +10,10 @@ namespace SharbatlyQMS.Web.Services;
 ///
 /// Static and transaction-scoped, like <see cref="RejectionOrder"/> and
 /// <see cref="QoCascade"/>, so the whole reinspection — the new order, its
-/// materials, the supersede stamp on the original, the claim decision, history
-/// and audit — commits or rolls back as one unit. A half-applied reinspection
-/// would leave a container with two live orders, or an original superseded by
-/// an order that was never created.
+/// materials, the supersede stamp on the original, the MOVED claim, history and
+/// audit — commits or rolls back as one unit. A half-applied reinspection would
+/// leave a container with two live orders, an original superseded by an order
+/// that was never created, or a claim thread belonging to neither.
 /// </summary>
 public static class ReinspectionOrder
 {
@@ -116,16 +116,22 @@ public static class ReinspectionOrder
             WHERE  ai.arrival_id = @arrivalId",
             new { qoId, arrivalId }, tx);
 
-        // The decision itself is a claim decision, recorded on the ORIGINAL
-        // order's claim so the worklist says why the container came back
-        // rather than the row simply vanishing when the original is
-        // superseded.
+        // The claim MOVES to the reinspection. One container, one conversation:
+        // the thread opened about the first inspection is the same thread that
+        // settles the second one, and the reinspection is what speaks for the
+        // container everywhere else now.
+        //
+        // MOVED, not copied, and the row keeps its claim_id -- qms_claim_note
+        // and qms_claim_read_marker are keyed on claim_id, so the whole history
+        // and every reader's last-seen mark follow without being touched.
+        // Copying would restart the conversation and re-flag read notes as
+        // unread for everybody.
         //
         // The Claim Manager's lock-out is honoured rather than bypassed: once
         // they have decided, a Quality Manager cannot change the status, and
         // neither can this. Refusing here is the same rule, not a new one --
-        // silently leaving the claim untouched would supersede an order whose
-        // settled verdict no longer matches the inspection behind it.
+        // silently moving a settled verdict onto an inspection that has not
+        // happened yet would be worse than refusing.
         var claim = await c.QuerySingleOrDefaultAsync<ClaimRow>(@"
             SELECT claim_id ClaimId, claim_status ClaimStatus, decided_at DecidedAt
             FROM   qms_claim WHERE quality_order_id = @originalQoId",
@@ -138,27 +144,41 @@ public static class ReinspectionOrder
         long claimId;
         if (claim is null)
         {
+            // Nothing was ever raised against the first inspection -- claims are
+            // created lazily, so a Closed order with no row reads as "Pending".
+            // Start the thread on the reinspection, which is where the rest of
+            // the conversation is going to happen.
             claimId = await c.ExecuteScalarAsync<long>(@"
                 INSERT INTO qms_claim
                     (quality_order_id, claim_status, created_at, created_by,
                      last_changed_at, last_changed_by)
-                VALUES (@originalQoId, @status, SYSUTCDATETIME(), @user, SYSUTCDATETIME(), @user);
+                VALUES (@qoId, @status, SYSUTCDATETIME(), @user, SYSUTCDATETIME(), @user);
                 SELECT CAST(SCOPE_IDENTITY() AS BIGINT);",
-                new { originalQoId, status = ClaimStatus.Reinspection, user }, tx);
+                new { qoId, status = ClaimStatus.Reinspection, user }, tx);
         }
         else
         {
             claimId = claim.ClaimId;
-            // Guarded the same way the Quality Manager's own writes are: if a
-            // decision lands between the read above and this update, nothing
-            // is overwritten.
+            // UQ_qms_claim_qo is UNIQUE(quality_order_id). @qoId was inserted a
+            // few statements above and cannot already carry a claim, so the move
+            // cannot collide; FK_qms_claim_qo is satisfied for the same reason,
+            // which is why this block stays AFTER the new order's INSERT.
+            //
+            // Guarded three ways inside the transaction: the claim is still the
+            // one we read, it is still on the order being superseded, and it is
+            // still undecided. created_at / created_by are deliberately NOT
+            // touched -- the thread was opened when it was opened, and rewriting
+            // that would date the conversation after its own first note.
             var claimAffected = await c.ExecuteAsync(@"
                 UPDATE qms_claim
-                SET    claim_status    = @status,
-                       last_changed_at = SYSUTCDATETIME(),
-                       last_changed_by = @user
-                WHERE  claim_id = @claimId AND decided_at IS NULL",
-                new { claimId, status = ClaimStatus.Reinspection, user }, tx);
+                SET    quality_order_id = @qoId,
+                       claim_status     = @status,
+                       last_changed_at  = SYSUTCDATETIME(),
+                       last_changed_by  = @user
+                WHERE  claim_id         = @claimId
+                  AND  quality_order_id = @originalQoId
+                  AND  decided_at IS NULL",
+                new { claimId, qoId, originalQoId, status = ClaimStatus.Reinspection, user }, tx);
             if (claimAffected != 1)
                 throw new InvalidOperationException(
                     "The Claim Manager decided this claim a moment ago. Reopen that decision before reinspecting.");
@@ -174,9 +194,13 @@ public static class ReinspectionOrder
                   kind = ClaimNoteKind.StatusChange, status = ClaimStatus.Reinspection,
                   user, role = "Admin" }, tx);
 
+        // quality_order_id is in the diff on purpose: a claim silently changing
+        // which order it belongs to is exactly what an audit log is for.
         await audit.WriteAsync(c, tx, EntityTypes.Claim, claimId, ActionCodes.Reinspected,
-            oldValues: claim is null ? null : new { claim_status = claim.ClaimStatus },
-            newValues: new { claim_status = ClaimStatus.Reinspection, reinspected_as = qoNo, reason },
+            oldValues: claim is null ? null
+                     : new { claim_status = claim.ClaimStatus, quality_order_id = originalQoId },
+            newValues: new { claim_status = ClaimStatus.Reinspection, quality_order_id = qoId,
+                             reinspected_as = qoNo, reason },
             actor: user);
 
         // History: one row for the new order. None for the original -- its

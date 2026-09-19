@@ -1,4 +1,4 @@
-// plant-storage-filter: narrow a storage-location <select> to the plant chosen
+﻿// plant-storage-filter: narrow a storage-location <select> to the plant chosen
 // in a partner <select>.
 //
 // SAP storage-location codes repeat across plants ("0001" exists under several),
@@ -11,7 +11,15 @@
 // The plant control may also be a hidden input (plant-scoped operators see a
 // locked badge instead of a dropdown) — it still narrows correctly on load.
 //
-// Used by Pending Containers and the Quality Orders filter panel.
+// CURRENTLY UNUSED. Pending Containers, Quality Orders, Claims and Arrivals all
+// moved their plant and storage filters to multi-select checkbox dropdowns
+// (_MultiSelectFilter), and narrowing storage by plant no longer has a single
+// plant to key on -- each storage option carries its plant in its LABEL
+// instead, which is what keeps the choice unambiguous.
+//
+// Kept, not deleted: it still works on any paired <select> controls, and it is
+// the answer if a single-plant picker ever comes back. init() finds no
+// [data-plant-filter] today and no-ops.
 (function () {
     function wire(plantEl, storageEl) {
         function apply() {

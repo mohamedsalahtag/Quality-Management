@@ -1,0 +1,63 @@
+@model SharbatlyQMS.Web.ViewModels.MultiSelectFilterVm
+@*
+    A filter dropdown that accepts more than one value.
+
+    The checkboxes all carry the SAME name, so the browser submits one
+    query-string pair per ticked box and model binding collects them into the
+    filter's List<string>. No JavaScript is involved in submitting — that is a
+    browser primitive, and keeping it that way means the filter still works if
+    the script fails to load.
+
+    data-bs-auto-close="outside" so ticking a second value does not close the
+    menu, which is the whole point of the control.
+*@
+<div class="@Model.ColumnCss">
+    <label class="form-label small mb-1">@Model.Label</label>
+    <div class="dropdown" data-multiselect>
+        <button class="btn btn-sm btn-outline-secondary dropdown-toggle w-100 text-start text-truncate"
+                type="button" data-bs-toggle="dropdown" data-bs-auto-close="outside"
+                aria-expanded="false"
+                data-ms-summary
+                data-ms-all="@Model.AllLabel"
+                title="@Model.Label">
+            @Model.Summary
+        </button>
+        <div class="dropdown-menu p-2" style="min-width: 15rem; max-height: 18rem; overflow-y: auto;">
+            @* Clear is inside the menu rather than beside the button: it is only
+               reachable when the menu is open, which is also the only time it
+               makes sense to press. *@
+            <div class="d-flex justify-content-between align-items-center mb-1">
+                <span class="small text-muted">@Model.Label</span>
+                <button type="button" class="btn btn-sm btn-link p-0" data-ms-clear>@Loc["Clear"]</button>
+            </div>
+            <hr class="my-1" />
+
+            @foreach (var orphan in Model.Orphans)
+            {
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="@Model.Name"
+                           value="@orphan" id="ms-@Model.Name-orphan-@orphan.GetHashCode()" checked />
+                    <label class="form-check-label small text-muted"
+                           for="ms-@Model.Name-orphan-@orphan.GetHashCode()">
+                        @orphan <em>(no matching records)</em>
+                    </label>
+                </div>
+            }
+
+            @foreach (var opt in Model.Options)
+            {
+                var id = $"ms-{Model.Name}-{opt.Value.GetHashCode()}";
+                <div class="form-check">
+                    <input class="form-check-input" type="checkbox" name="@Model.Name"
+                           value="@opt.Value" id="@id" checked="@Model.IsSelected(opt.Value)" />
+                    <label class="form-check-label small" for="@id">@opt.Display</label>
+                </div>
+            }
+
+            @if (!Model.Options.Any() && !Model.Orphans.Any())
+            {
+                <div class="small text-muted fst-italic px-1">@Loc["Nothing to choose from"]</div>
+            }
+        </div>
+    </div>
+</div>

@@ -210,6 +210,12 @@ public static class QualityReportPdfSoft
                 {
                     c.Item().AlignCenter().Text(V(d.CompanyName)).Bold().FontSize(10.5f).FontColor(Ink);
                     c.Item().AlignCenter().Text(L("Quality Control Report")).FontSize(9).FontColor(Accent);
+                    // On EVERY page, not just beside the banner on page one: a
+                    // sheet that has been separated from the rest of the report
+                    // must not be readable as the standing result.
+                    if (d.IsSuperseded)
+                        c.Item().AlignCenter().Text(L("REFERENCE COPY - SUPERSEDED BY A REINSPECTION"))
+                         .Bold().FontSize(7).FontColor(Muted);
                 });
                 r.ConstantItem(72).AlignRight().AlignMiddle().Text(t =>
                 {
@@ -256,17 +262,22 @@ public static class QualityReportPdfSoft
             (L("Loading Date"),      Dt(s?.SailingDate)),
             (L("Discharge Date"),    Dt(s?.DischargeDate)),
             (L("Pullout Date"),      Dt(s?.PullOutDate)),
-            // Receive Date is an internal goods-receipt date; the supplier's
-            // copy omits it. Removed from the list rather than blanked so the
-            // column closes up instead of printing an orphaned label.
-            (L("Receive Date"),      Dt(s?.ReceiveDate)),
             (L("Unloading Date"),    Dt(s?.UnloadingDate)),
             (L("Inspection Date"),   Dt(d.InspectionDate)),
             (L("Transit Days"),      s?.TransitDays?.ToString() ?? "—"),
             ($"Time Bar ({basisLabel})", (TimeBarDays(basisDate, d.QualityOrder.ClosedAt ?? d.GeneratedAt) ?? "—") + " days"),
         };
-        if (d.SupplierCopy)
-            col2.RemoveAll(x => x.Item1 == "Receive Date");
+        // Receive Date is OUR goods-receipt date at the facility, not the
+        // supplier's, so their copy omits it.
+        //
+        // Inserted only for the internal copy rather than added-then-removed:
+        // the old RemoveAll matched the literal "Receive Date" against an entry
+        // built from L("Receive Date"), so the moment anyone renamed that
+        // caption on the Labels screen the row silently survived into the
+        // supplier's report. Not adding it cannot fail that way, and the column
+        // still closes up instead of printing an orphaned label.
+        if (!d.SupplierCopy)
+            col2.Insert(3, (L("Receive Date"), Dt(s?.ReceiveDate)));
 
         var col3 = new List<(string, string)>
         {
@@ -656,7 +667,7 @@ public static class QualityReportPdfSoft
                     .Bold().FontSize(9).FontColor(Accent);
                  col.Item().Text(t =>
                  {
-                     t.Span(L("This inspection was judged unsound and the container was inspected again. The report is kept in full, but the reinspection carries the result that stands."))
+                     t.Span(L("This inspection was judged unsound and the container was inspected again. It is kept and printed for reference only - it is not the standing result for this container."))
                       .FontSize(7.5f).FontColor(Ink);
                  });
                  if (!string.IsNullOrWhiteSpace(d.SupersededByNo))

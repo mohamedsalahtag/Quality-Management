@@ -140,16 +140,25 @@ public class TimeBarService : ITimeBarService
             WHERE  status_code <> 'Cancelled'
         ),
         qorder AS (
-            -- Reinspections are excluded, so this page keeps following the
-            -- ORIGINAL inspection. Left in, ROW_NUMBER's DESC would pick the
-            -- reinspection: a container inspected on time would have its clock
-            -- restart weeks later, turn from green to over-threshold, and lose
-            -- the finish date it was actually judged on.
+            -- The LIVE inspection, which is the reinspection once a container
+            -- has one: superseded_at IS NULL is the same filter that defines
+            -- UX_qms_quality_order_active_per_arrival, so this picks one order
+            -- per container by the database's own definition.
+            --
+            -- A reinspected container therefore has its clock RESTARTED and
+            -- measured to the second inspection -- it can turn from green to
+            -- over-threshold weeks after the first one finished. That is the
+            -- point: the first result was discarded, so the time that matters
+            -- is the time to the inspection that stands.
+            --
+            -- rn = 1 is belt-and-braces. The unique index already guarantees a
+            -- single row here; it costs nothing and keeps this correct if that
+            -- ever stops being true.
             SELECT arrival_id, quality_order_id, quality_order_no,
                    status_code, closed_at, archived_at,
                    ROW_NUMBER() OVER (PARTITION BY arrival_id ORDER BY quality_order_id DESC) AS rn
             FROM   qms_quality_order
-            WHERE  status_code <> 'Cancelled' AND reinspection_of IS NULL
+            WHERE  status_code <> 'Cancelled' AND superseded_at IS NULL
         ),
         k AS (
             -- Every container key, from BOTH sides. The cache alone is not

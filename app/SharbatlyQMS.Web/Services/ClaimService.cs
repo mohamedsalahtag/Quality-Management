@@ -21,14 +21,59 @@ public class ClaimService : IClaimService
 
     // ---- Read paths -------------------------------------------------
 
+    /// <summary>
+    /// Which orders belong on each Claims tab. ONE definition, concatenated into
+    /// both the list and the filter-option queries -- they had already drifted
+    /// (the options never carried the superseded clause), which is how a
+    /// dropdown came to offer values matching no row on the tab you were on.
+    ///
+    /// LIVE tab = the order that speaks for this container right now AND has
+    /// claim work hanging off it:
+    ///   * a Closed order that has not been superseded -- the ordinary case; or
+    ///   * a reinspection still being carried out, which HOLDS the claim thread
+    ///     moved off the original. Without that second arm the container is on
+    ///     NO tab between "sent for reinspection" and "reinspection finished":
+    ///     the original is excluded as superseded, the reinspection is not
+    ///     Closed, and a merely-superseded order has no archived_at.
+    ///
+    /// ARCHIVE tab = archived_at IS NOT NULL whatever the status. Unchanged.
+    ///
+    /// Requires `qo` and a LEFT JOIN'd `cl` in scope.
+    /// </summary>
+    private const string BucketPredicate = @"
+                 (
+                   (@archived = 0
+                    AND qo.archived_at   IS NULL
+                    AND qo.superseded_at IS NULL
+                    AND ( qo.status_code = 'Closed'
+                       OR ( qo.reinspection_of IS NOT NULL
+                        AND qo.status_code <> 'Cancelled'
+                        AND cl.claim_id  IS NOT NULL ) ))
+                OR (@archived = 1 AND qo.archived_at IS NOT NULL)
+                 )";
+
     public async Task<IReadOnlyList<ClaimListRow>> ListClosedQosAsync(
         ClaimListFilter f, PlantScope scope, string currentUser)
     {
-        // Pending = a Closed QO with NO row in qms_claim yet.
-        // Other statuses = qms_claim.claim_status equality.
-        // "All" / null = no claim-status WHERE clause.
-        var pendingFilter = f.Status == ClaimStatus.Pending;
-        var statusFilter  = !string.IsNullOrEmpty(f.Status) && !pendingFilter ? f.Status : null;
+        // Status is multi-valued, and one of its values is not a value at all:
+        // Pending means a Closed QO with NO row in qms_claim yet, which is a
+        // test on cl.claim_id rather than on cl.claim_status.
+        //
+        // So the picked statuses split in two, and the SQL ORs them. Ticking
+        // Pending AND Claim Notification Request has to mean "either", where
+        // the old single-value pair of ANDed clauses could only ever mean one
+        // or the other.
+        var pickedStatuses = FilterValues.Many(f.Status);
+        var wantPending    = pickedStatuses.Contains(ClaimStatus.Pending, StringComparer.OrdinalIgnoreCase);
+        var realStatuses   = pickedStatuses
+            .Where(x => !string.Equals(x, ClaimStatus.Pending, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        var plants      = FilterValues.Many(f.Plant);
+        var storageLocs = FilterValues.Many(f.StorageLoc);
+        var suppliers   = FilterValues.Many(f.Supplier);
+        var closedBys   = FilterValues.Many(f.ClosedBy);
+        var claimOwners = FilterValues.Many(f.ClaimOwner);
 
         // M24 QC assessment. Three buckets, and "Unset" has to be its own flag
         // because a NULL parameter already means "don't filter".
@@ -92,7 +137,11 @@ public class ClaimService : IClaimService
                    ISNULL(mt.material_count, 0) AS MaterialCount,
                    ISNULL(sc.sample_count,   0) AS SampleCount,
                    cl.claim_status       AS ClaimStatus,
-                   cl.last_changed_at    AS LastActivityAt,
+                   -- Matches the ORDER BY below, which is no longer a plain
+                   -- COALESCE. If this stayed cl.last_changed_at the grid's
+                   -- own column would disagree with the order it is sorted in.
+                   (SELECT MAX(v) FROM (VALUES (cl.last_changed_at), (qo.closed_at))
+                    AS t(v))             AS LastActivityAt,
                    cl.decided_at         AS DecidedAt,
                    ISNULL(nc.note_count,   0) AS NoteCount,
                    ISNULL(uc.unread_count, 0) AS UnreadCount
@@ -141,22 +190,20 @@ public class ClaimService : IClaimService
                 WHERE  sp.quality_order_id = qo.quality_order_id
                   AND  sp.is_deleted = 0
             ) sc
-            -- Two mutually exclusive buckets. The active worklist is Closed
-            -- orders only (a claim decision presupposes a finished inspection);
-            -- the archive holds every archived order whatever its status, which
-            -- is why the status test is inside the @archived branch.
-            WHERE  (
-                     (@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
-                  OR (@archived = 1 AND qo.archived_at IS NOT NULL)
-                   )
-              -- A superseded order has been reinspected: its verdict no longer
-              -- speaks for the container, and leaving it here would put the
-              -- same container in the worklist twice with two different
-              -- answers. It keeps its claim row, its notes and its report, and
-              -- the archive view still shows it.
-              AND  (@archived = 1 OR qo.superseded_at IS NULL)
-              AND  (@pendingFilter = 0 OR cl.claim_id IS NULL)
-              AND  (@statusFilter IS NULL OR cl.claim_status = @statusFilter)
+            -- Two mutually exclusive buckets -- see BucketPredicate.
+            WHERE " + BucketPredicate + @"
+              -- Either bucket satisfies the filter; see the C# above for why
+              -- Pending cannot simply join the IN list.
+              --
+              -- The Pending arm demands cl.claim_id IS NULL while
+              -- BucketPredicate's reinspection arm demands IS NOT NULL, so the
+              -- two are mutually exclusive by construction: the Pending chip
+              -- can never surface a reinspection in progress. That is right --
+              -- Pending means nobody has raised anything yet, and a
+              -- reinspection always has a thread.
+              AND  (@statusAny = 0
+                    OR (@wantPending = 1 AND cl.claim_id IS NULL)
+                    OR (@realStatusAny = 1 AND cl.claim_status IN @realStatuses))
               -- M24 QC assessment, independent of the claim status above.
               AND  (@assessmentUnset = 0 OR qo.potential_claim IS NULL)
               AND  (@claimAssessment IS NULL OR qo.potential_claim = @claimAssessment)
@@ -164,11 +211,15 @@ public class ClaimService : IClaimService
               -- without it here a plant-scoped user saw other plants' claims in
               -- the list, and the new Plant dropdown would have widened that.
               AND  (@sUnrestricted = 1 OR a.plant IN @sPlants)
-              AND  (@plant      IS NULL OR a.plant            = @plant)
-              AND  (@storageLoc IS NULL OR a.storage_location = @storageLoc)
-              AND  (@supplier   IS NULL OR a.vendor_name      = @supplier)
-              AND  (@closedBy   IS NULL OR qo.closed_by       = @closedBy)
-              AND  (@claimOwner IS NULL OR cl.last_changed_by = @claimOwner)
+              -- Multi-select: an any-flag plus an IN list, matching the
+              -- plant-scope convention just above. Dapper renders an empty list
+              -- as IN (SELECT 1 WHERE 1=0), so the flag is what turns each
+              -- filter off rather than the list being empty.
+              AND  (@plantAny      = 0 OR a.plant            IN @plants)
+              AND  (@storageLocAny = 0 OR a.storage_location IN @storageLocs)
+              AND  (@supplierAny   = 0 OR a.vendor_name      IN @suppliers)
+              AND  (@closedByAny   = 0 OR qo.closed_by       IN @closedBys)
+              AND  (@claimOwnerAny = 0 OR cl.last_changed_by IN @claimOwners)
               AND  (@container  IS NULL OR a.container_no LIKE '%' + @container + '%')
               AND  (@bol        IS NULL OR a.bol_no       LIKE '%' + @bol       + '%')
               AND  (@po         IS NULL OR a.ebeln        LIKE '%' + @po        + '%')
@@ -188,24 +239,34 @@ public class ClaimService : IClaimService
                     a.vendor_name       LIKE '%' + @search + '%' OR
                     qo.closed_by        LIKE '%' + @search + '%')
             ORDER BY
-                COALESCE(cl.last_changed_at, qo.closed_at, qo.opened_at, qo.created_at) DESC,
+                -- Last activity = the most recent thing that happened to this
+                -- row, whichever side it happened on. This was COALESCE, which
+                -- is first-non-null and relied on a claim only ever being
+                -- touched AFTER its order closed. Moving the thread onto a
+                -- reinspection breaks that: the claim is stamped when the
+                -- container is SENT BACK and the order closes days or weeks
+                -- later, so the row would sit frozen at the day it left.
+                -- SQL Server 2016 has no GREATEST, hence the one-row VALUES.
+                (SELECT MAX(v) FROM (VALUES (cl.last_changed_at), (qo.closed_at),
+                                            (qo.opened_at), (qo.created_at)) AS t(v)) DESC,
                 qo.quality_order_id DESC";
 
         using var c = Open();
         var rows = await c.QueryAsync<ClaimListRow>(sql, new
         {
-            pendingFilter,
-            statusFilter,
+            statusAny     = pickedStatuses.Count > 0,
+            wantPending,
+            realStatuses = FilterValues.ForIn(realStatuses), realStatusAny = realStatuses.Count > 0,
             claimAssessment,
             assessmentUnset,
             archived      = f.Archived,
             sUnrestricted = scope.Unrestricted,
             sPlants       = scope.QueryPlants,
-            plant         = Trim(f.Plant),
-            storageLoc    = Trim(f.StorageLoc),
-            supplier      = Trim(f.Supplier),
-            closedBy      = Trim(f.ClosedBy),
-            claimOwner    = Trim(f.ClaimOwner),
+            plants      = FilterValues.ForIn(plants),      plantAny      = plants.Count      > 0,
+            storageLocs = FilterValues.ForIn(storageLocs), storageLocAny = storageLocs.Count > 0,
+            suppliers   = FilterValues.ForIn(suppliers),   supplierAny   = suppliers.Count   > 0,
+            closedBys   = FilterValues.ForIn(closedBys),   closedByAny   = closedBys.Count   > 0,
+            claimOwners = FilterValues.ForIn(claimOwners), claimOwnerAny = claimOwners.Count > 0,
             container     = Trim(f.Container),
             bol           = Trim(f.Bol),
             po            = Trim(f.Po),
@@ -231,8 +292,8 @@ public class ClaimService : IClaimService
             SELECT DISTINCT a.plant
             FROM   qms_quality_order qo
             JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
-            WHERE  ((@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
-                   OR (@archived = 1 AND qo.archived_at IS NOT NULL))
+            LEFT   JOIN qms_claim cl ON cl.quality_order_id = qo.quality_order_id
+            WHERE " + BucketPredicate + @"
               AND  a.plant IS NOT NULL AND a.plant <> ''
               AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
             ORDER  BY a.plant;
@@ -240,8 +301,8 @@ public class ClaimService : IClaimService
             SELECT DISTINCT a.plant AS Plant, a.storage_location AS Code
             FROM   qms_quality_order qo
             JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
-            WHERE  ((@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
-                   OR (@archived = 1 AND qo.archived_at IS NOT NULL))
+            LEFT   JOIN qms_claim cl ON cl.quality_order_id = qo.quality_order_id
+            WHERE " + BucketPredicate + @"
               AND  a.plant            IS NOT NULL AND a.plant            <> ''
               AND  a.storage_location IS NOT NULL AND a.storage_location <> ''
               AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
@@ -250,8 +311,8 @@ public class ClaimService : IClaimService
             SELECT DISTINCT a.vendor_name
             FROM   qms_quality_order qo
             JOIN   qms_arrival a ON a.arrival_id = qo.arrival_id
-            WHERE  ((@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
-                   OR (@archived = 1 AND qo.archived_at IS NOT NULL))
+            LEFT   JOIN qms_claim cl ON cl.quality_order_id = qo.quality_order_id
+            WHERE " + BucketPredicate + @"
               AND  a.vendor_name IS NOT NULL AND a.vendor_name <> ''
               AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
             ORDER  BY a.vendor_name;
@@ -259,8 +320,8 @@ public class ClaimService : IClaimService
             SELECT DISTINCT qo.closed_by
             FROM   qms_quality_order qo
             LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
-            WHERE  ((@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
-                   OR (@archived = 1 AND qo.archived_at IS NOT NULL))
+            LEFT   JOIN qms_claim cl ON cl.quality_order_id = qo.quality_order_id
+            WHERE " + BucketPredicate + @"
               AND  qo.closed_by IS NOT NULL AND qo.closed_by <> ''
               AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
             ORDER  BY qo.closed_by;
@@ -269,8 +330,7 @@ public class ClaimService : IClaimService
             FROM   qms_claim cl
             JOIN   qms_quality_order qo ON qo.quality_order_id = cl.quality_order_id
             LEFT   JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
-            WHERE  ((@archived = 0 AND qo.archived_at IS NULL AND qo.status_code = 'Closed')
-                   OR (@archived = 1 AND qo.archived_at IS NOT NULL))
+            WHERE " + BucketPredicate + @"
               AND  cl.last_changed_by IS NOT NULL AND cl.last_changed_by <> ''
               AND (@sUnrestricted = 1 OR a.plant IN @sPlants)
             ORDER  BY cl.last_changed_by;",
@@ -366,8 +426,8 @@ public class ClaimService : IClaimService
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
 
-        if (!await IsClosedAsync(c, tx, qoId))
-            return (false, "Quality Order must be Closed.");
+        if (await DecisionBlockedAsync(c, tx, qoId) is string blocked)
+            return (false, blocked);
 
         var existing = await LoadClaimAsync(c, tx, qoId);
 
@@ -442,8 +502,8 @@ public class ClaimService : IClaimService
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
 
-        if (!await IsClosedAsync(c, tx, qoId))
-            return (false, "Quality Order must be Closed.");
+        if (await DecisionBlockedAsync(c, tx, qoId) is string blocked)
+            return (false, blocked);
 
         var existing = await LoadClaimAsync(c, tx, qoId);
         if (existing == null)
@@ -501,7 +561,18 @@ public class ClaimService : IClaimService
         await c.OpenAsync();
         using var tx = c.BeginTransaction();
 
-        if (!await IsClosedAsync(c, tx, qoId))
+        // A note is speech, not a decision. While a container is being inspected
+        // again the order carrying the thread is NOT Closed, and the blanket
+        // "must be Closed" gate would silence the conversation for exactly the
+        // days it is most needed -- pushing it into e-mail, which is the record
+        // qms_claim_note exists to replace. Status changes stay barred; the two
+        // transition methods keep DecisionBlockedAsync.
+        var qoCtx = await QoContextAsync(c, tx, qoId);
+        if (qoCtx is null)
+            return (false, "Quality Order not found.");
+        if (qoCtx.SupersededAt.HasValue)
+            return (false, "This inspection was superseded by a reinspection. The conversation moved with it — open the reinspection.");
+        if (qoCtx.StatusCode != "Closed" && !qoCtx.ReinspectionOf.HasValue)
             return (false, "Quality Order must be Closed.");
 
         var existing = await LoadClaimAsync(c, tx, qoId);
@@ -523,12 +594,58 @@ public class ClaimService : IClaimService
 
     // ---- Helpers ---------------------------------------------------
 
-    private static async Task<bool> IsClosedAsync(SqlConnection c, SqlTransaction tx, long qoId)
+    /// <summary>
+    /// The order's claim-relevant state, read in one round trip.
+    ///
+    /// A class with settable properties rather than a record struct: Dapper maps
+    /// a nullable value type by POSITION, not by name, which is the trap
+    /// documented on <see cref="ReinspectionOrder"/>'s own candidate type.
+    /// </summary>
+    private sealed class QoClaimContext
     {
-        var status = await c.QuerySingleOrDefaultAsync<string?>(
-            "SELECT status_code FROM qms_quality_order WHERE quality_order_id = @qoId",
+        public string    StatusCode     { get; set; } = "";
+        public string    QualityOrderNo { get; set; } = "";
+        public long?     ReinspectionOf { get; set; }
+        public DateTime? SupersededAt   { get; set; }
+    }
+
+    private static async Task<QoClaimContext?> QoContextAsync(
+        SqlConnection c, SqlTransaction tx, long qoId) =>
+        await c.QuerySingleOrDefaultAsync<QoClaimContext>(@"
+            SELECT status_code      StatusCode,
+                   quality_order_no QualityOrderNo,
+                   reinspection_of  ReinspectionOf,
+                   superseded_at    SupersededAt
+            FROM   qms_quality_order WHERE quality_order_id = @qoId",
             new { qoId }, tx);
-        return status == "Closed";
+
+    /// <summary>
+    /// Why this quality order cannot take a claim DECISION right now, or null if
+    /// it can.
+    ///
+    /// This replaced a bare "is it Closed?" test, which could only ever answer
+    /// "Quality Order must be Closed" -- true, but useless once a claim can
+    /// legitimately be sitting on an order that is being inspected as you read
+    /// the message.
+    ///
+    /// The superseded arm is load-bearing, not tidiness. A reinspection MOVES
+    /// the claim off the original, so GetForQoAsync returns nothing there and
+    /// the chat panel's "no claim yet" branch would otherwise let a Quality
+    /// Manager raise a SECOND claim on the superseded order. UQ_qms_claim_qo
+    /// does not stop that -- the two claims would be on different orders.
+    /// </summary>
+    private static async Task<string?> DecisionBlockedAsync(
+        SqlConnection c, SqlTransaction tx, long qoId)
+    {
+        var qo = await QoContextAsync(c, tx, qoId);
+        if (qo is null) return "Quality Order not found.";
+        if (qo.SupersededAt.HasValue)
+            return "This inspection was superseded by a reinspection. The claim moved with it — open the reinspection.";
+        if (qo.StatusCode == "Closed") return null;
+        if (qo.ReinspectionOf.HasValue)
+            return $"{qo.QualityOrderNo} is a reinspection that has not finished. " +
+                   "The claim can be decided once the second inspection is closed.";
+        return "Quality Order must be Closed.";
     }
 
     private static async Task<QualityClaim?> LoadClaimAsync(SqlConnection c, SqlTransaction tx, long qoId)

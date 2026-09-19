@@ -5,6 +5,7 @@ using Dapper;
 using Microsoft.Data.SqlClient;
 using SharbatlyQMS.Web.Models;
 using SharbatlyQMS.Web.Services.Sap;
+using SharbatlyQMS.Web.ViewModels;
 
 namespace SharbatlyQMS.Web.Services;
 
@@ -27,9 +28,11 @@ public class ArrivalService : IArrivalService
 
     private SqlConnection Open() => new(_cs);
 
-    // Outer-joins to the latest non-cancelled quality order for each arrival
-    // so list/detail views can render "Create QO" vs "View QO" without an
-    // extra round trip.
+    // Outer-joins to the LIVE quality order for each arrival so list/detail
+    // views can render "Create QO" vs "View QO" without an extra round trip,
+    // plus the superseded one behind it when the container was reinspected --
+    // kept reachable as a reference, never as the order that speaks for the
+    // container.
     private const string ArrivalSelect = @"
         SELECT a.arrival_id     ArrivalId,
                a.arrival_no     ArrivalNo,
@@ -53,14 +56,25 @@ public class ArrivalService : IArrivalService
                a.reject_reason  RejectReason,
                qo.quality_order_id QualityOrderId,
                qo.quality_order_no QualityOrderNo,
-               qo.status_code      QualityOrderStatus
+               qo.status_code      QualityOrderStatus,
+               prev.quality_order_id PreviousQualityOrderId,
+               prev.quality_order_no PreviousQualityOrderNo
         FROM   qms_arrival a
         OUTER APPLY (
-            SELECT TOP 1 quality_order_id, quality_order_no, status_code
+            -- superseded_at IS NULL, not TOP 1 by id. Both land on the
+            -- reinspection today, but only one of them SAYS so: this is the
+            -- same filter as UX_qms_quality_order_active_per_arrival, which is
+            -- what actually defines the live order.
+            SELECT TOP 1 quality_order_id, quality_order_no, status_code, reinspection_of
             FROM   qms_quality_order
             WHERE  arrival_id = a.arrival_id AND status_code <> 'Cancelled'
+              AND  superseded_at IS NULL
             ORDER  BY quality_order_id DESC
-        ) qo";
+        ) qo
+        -- The inspection the live one replaced, so the screen can offer it as a
+        -- reference instead of silently dropping it. NULL for the ordinary
+        -- container, which has only ever been inspected once.
+        LEFT   JOIN qms_quality_order prev ON prev.quality_order_id = qo.reinspection_of";
 
     public async Task<ViewModels.ArrivalPage> ListAsync(ViewModels.ArrivalListFilter f, Models.PlantScope scope)
     {
@@ -83,23 +97,31 @@ public class ArrivalService : IArrivalService
             ? DateTime.SpecifyKind(f.To.Value.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime()
             : null;
 
+        // Cleaned for the any-flags, sentinel-wrapped for the IN clauses --
+        // see FilterValues for why those are two different things.
+        var statuses    = FilterValues.Many(f.Status);
+        var plants      = FilterValues.Many(f.Plant);
+        var storageLocs = FilterValues.Many(f.StorageLoc);
+        var suppliers   = FilterValues.Many(f.Supplier);
+        var createdBys  = FilterValues.Many(f.CreatedBy);
+
         var p = new
         {
-            status     = Trim(f.Status),
+            statuses    = FilterValues.ForIn(statuses),    statusAny     = statuses.Count    > 0,
+            plants      = FilterValues.ForIn(plants),      plantAny      = plants.Count      > 0,
+            storageLocs = FilterValues.ForIn(storageLocs), storageLocAny = storageLocs.Count > 0,
+            suppliers   = FilterValues.ForIn(suppliers),   supplierAny   = suppliers.Count   > 0,
+            createdBys  = FilterValues.ForIn(createdBys),  createdByAny  = createdBys.Count  > 0,
             search     = Trim(f.Search),
-            plant      = Trim(f.Plant),
             sUnrestricted = scope.Unrestricted,
             sPlants       = scope.QueryPlants,
             container  = Trim(f.Container),
             bol        = Trim(f.Bol),
             po         = Trim(f.Po),
             arrivalNo  = Trim(f.ArrivalNo),
-            storageLoc = Trim(f.StorageLoc),
-            createdBy  = Trim(f.CreatedBy),
             material   = Trim(f.Material),
             matMajor    = Trim(f.MatMajor),
             matSubMajor = Trim(f.MatSubMajor),
-            supplier   = Trim(f.Supplier),
             fromUtc,
             toUtc,
             offset   = (page - 1) * pageSize,
@@ -128,16 +150,19 @@ public class ArrivalService : IArrivalService
     /// Shared by the count and the page query so the pager can never disagree
     /// with the rows it is counting.
     /// </summary>
-    private static readonly string ArrivalWhere = @"(@status     IS NULL OR a.status_code     = @status)
-              AND  (@plant      IS NULL OR a.plant           = @plant)
+    // Multi-select filters use an any-flag plus an IN list, matching the
+    // plant-scope convention below. Dapper renders an empty list as
+    // IN (SELECT 1 WHERE 1=0), so the flag is what turns a filter off.
+    private static readonly string ArrivalWhere = @"(@statusAny = 0 OR a.status_code IN @statuses)
+              AND  (@plantAny   = 0 OR a.plant           IN @plants)
               AND  (@sUnrestricted = 1 OR a.plant IN @sPlants)
               AND  (@container  IS NULL OR a.container_no     LIKE '%' + @container + '%')
               AND  (@bol        IS NULL OR a.bol_no           LIKE '%' + @bol       + '%')
               AND  (@po         IS NULL OR a.ebeln            LIKE '%' + @po        + '%')
               AND  (@arrivalNo  IS NULL OR a.arrival_no       LIKE '%' + @arrivalNo + '%')
-              AND  (@storageLoc IS NULL OR a.storage_location = @storageLoc)
-              AND  (@supplier   IS NULL OR a.vendor_name      = @supplier)
-              AND  (@createdBy  IS NULL OR a.created_by       = @createdBy)
+              AND  (@storageLocAny = 0 OR a.storage_location IN @storageLocs)
+              AND  (@supplierAny   = 0 OR a.vendor_name      IN @suppliers)
+              AND  (@createdByAny  = 0 OR a.created_by       IN @createdBys)
               AND  (@fromUtc    IS NULL OR a.created_at      >= @fromUtc)
               AND  (@toUtc      IS NULL OR a.created_at       < @toUtc)
               AND  (@material   IS NULL OR EXISTS (
@@ -1026,8 +1051,14 @@ public class ArrivalService : IArrivalService
     {
         var a = await GetAsync(arrivalId);
         if (a == null) return (false, "Arrival not found.");
+        // Named from the LIVE order, but tested against every non-cancelled one.
+        // A reinspected container carries two: cancelling only the live order
+        // would leave the superseded original behind, so a guard that looked at
+        // the live order alone would clear and then fail at the foreign key.
         if (a.QualityOrderId.HasValue)
-            return (false, $"Cannot delete: an active Quality Order ({a.QualityOrderNo}) exists for this arrival. Cancel the QO first.");
+            return (false, a.PreviousQualityOrderId.HasValue
+                ? $"Cannot delete: this container has been inspected twice ({a.QualityOrderNo} and {a.PreviousQualityOrderNo}). Both must be cancelled first."
+                : $"Cannot delete: an active Quality Order ({a.QualityOrderNo}) exists for this arrival. Cancel the QO first.");
 
         using var c = Open();
         await c.OpenAsync();

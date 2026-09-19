@@ -61,9 +61,15 @@ public static class ClaimStatus
 
     /// <summary>
     /// An administrator judged the inspection unsound and had the container
-    /// inspected again. Recorded against the ORIGINAL order's claim, so the
-    /// worklist says why the container came back instead of the row simply
-    /// disappearing when the original is superseded.
+    /// inspected again.
+    ///
+    /// The claim MOVES to the reinspection and carries this status: one
+    /// container, one conversation. The superseded original keeps its report
+    /// but ends up with no claim of its own, because it is a reference document
+    /// rather than a live commercial position.
+    ///
+    /// It means two different things depending on whether the second inspection
+    /// has finished -- see <see cref="LabelFor"/>.
     /// </summary>
     public const string Reinspection         = "Reinspection";
 
@@ -120,6 +126,51 @@ public static class ClaimStatus
         PassedQC             => "bg-success text-white",
         _                    => "bg-secondary text-white"
     };
+
+    // ---- 'Reinspection' describes two different situations ----------------
+    //
+    // The code is one value, but the row it labels is in one of two states, and
+    // telling them apart is the whole question a claim desk asks of a worklist:
+    // is this waiting on the warehouse, or on me?
+    //
+    //   Reinspection + order not yet Closed -> the second inspection is still
+    //       being carried out. Nobody can act. "Under reinspection".
+    //   Reinspection + order Closed         -> the second inspection is
+    //       finished and nobody has judged it yet. Actionable.
+    //
+    // Derived from (claim_status, qo.status_code) rather than stored. A sixth
+    // code would have to be written by whoever CLOSES a quality order -- a claim
+    // write on a path that has nothing to do with claims -- and it would be
+    // wrong again the moment a reinspection is reopened.
+    //
+    // The single-argument Label / ShortLabel / BadgeCss above are deliberately
+    // left alone: a chat bubble's status pill records what the status WAS when
+    // the note was posted, and re-labelling history by today's order status
+    // would be a lie.
+
+    public static bool IsUnderReinspection(string? claimStatus, string? qoStatusCode) =>
+        claimStatus == Reinspection && qoStatusCode != QualityOrderStatus.Closed;
+
+    public static string LabelFor(string? claimStatus, string? qoStatusCode) => claimStatus switch
+    {
+        Reinspection when IsUnderReinspection(claimStatus, qoStatusCode) => "Under reinspection",
+        Reinspection                                                     => "Reinspected — awaiting QC decision",
+        _                                                                => Label(claimStatus)
+    };
+
+    public static string ShortLabelFor(string? claimStatus, string? qoStatusCode) => claimStatus switch
+    {
+        Reinspection when IsUnderReinspection(claimStatus, qoStatusCode) => "Reinspecting",
+        Reinspection                                                     => "Awaiting QC",
+        _                                                                => ShortLabel(claimStatus)
+    };
+
+    /// <summary>Muted while the work is somebody else's; the full Reinspection
+    /// colour once it is back on the claim desk's own plate.</summary>
+    public static string BadgeCssFor(string? claimStatus, string? qoStatusCode) =>
+        IsUnderReinspection(claimStatus, qoStatusCode)
+            ? "bg-info-subtle text-info-emphasis border border-info-subtle"
+            : BadgeCss(claimStatus);
 }
 
 /// <summary>QC's finish-time claim assessment (M24) as it appears in the Claims

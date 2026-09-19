@@ -25,20 +25,30 @@
 
     // Every page link carries the active filters, so paging never silently
     // widens the result the way a bare ?page=2 would.
-    Dictionary<string, string> pageRoute(int p, int size)
+    // Built as a query STRING rather than the Dictionary this used to be:
+    // asp-all-route-data cannot express a repeated key, so a multi-select
+    // filter would silently collapse to one value the moment somebody went to
+    // page 2 -- widening the list without touching a control.
+    string PageQuery(int p, int size)
     {
-        var d = new Dictionary<string, string>();
-        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) d[k] = v!; }
-        Add("status", f.Status);        Add("search", f.Search);
+        var q = new List<string>();
+        void Add(string k, string? v)
+        {
+            if (!string.IsNullOrWhiteSpace(v))
+                q.Add($"{Uri.EscapeDataString(k)}={Uri.EscapeDataString(v!)}");
+        }
+        void AddMany(string k, IEnumerable<string> vs) { foreach (var v in vs) Add(k, v); }
+
+        AddMany("status", f.Status);    Add("search", f.Search);
         Add("container", f.Container);  Add("bol", f.Bol);
         Add("po", f.Po);                Add("arrivalNo", f.ArrivalNo);
-        Add("material", f.Material);    Add("supplier", f.Supplier);
-        Add("plant", f.Plant);          Add("storageLoc", f.StorageLoc);
-        Add("createdBy", f.CreatedBy);
+        Add("material", f.Material);    AddMany("supplier", f.Supplier);
+        AddMany("plant", f.Plant);      AddMany("storageLoc", f.StorageLoc);
+        AddMany("createdBy", f.CreatedBy);
         Add("from", D(f.From));         Add("to", D(f.To));
-        d["page"]     = p.ToString();
-        d["pageSize"] = size.ToString();
-        return d;
+        q.Add($"page={p}");
+        q.Add($"pageSize={size}");
+        return "?" + string.Join("&", q);
     }
 }
 
@@ -65,8 +75,7 @@
         (ArrivalStatus.Rejected,   "btn-outline-danger"),
     };
     string ChipLabel(string v) => v.Length == 0 ? "All" : v;
-    string ActiveClass(string v, string baseCss) =>
-        (status ?? "") == v ? baseCss.Replace("btn-outline-", "btn-") + " active" : baseCss;
+    bool ChipOn(string v) => status.Contains(v, StringComparer.OrdinalIgnoreCase);
 }
 @* One form for everything: the always-visible quick bar and the collapsible
    panel below it. Collapsed inputs still submit (display:none is not disabled),
@@ -92,12 +101,41 @@
             {
                 <a asp-action="Index" class="btn btn-outline-secondary" title="Clear every filter" data-filter-clear>@Loc["Clear"]</a>
             }
+            <div class="dropdown" data-coltoggle-ui="arrivals-list">
+                <button type="button" class="btn btn-outline-secondary dropdown-toggle"
+                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                        title="Choose which columns to show. Your choice is remembered on this device.">
+                    <i class="bi bi-layout-three-columns me-1"></i>Columns<span class="badge bg-secondary ms-1 d-none"
+                         data-coltoggle-count title="Columns currently hidden"></span>
+                </button>
+                <div class="dropdown-menu dropdown-menu-end p-2" data-coltoggle-menu style="min-width: 13rem;"></div>
+            </div>
         </div>
         <div class="col-auto">
             <div class="btn-group" role="group" aria-label='@Loc["Filter by status"]'>
                 @foreach (var s in statuses)
                 {
-                    <button type="submit" name="status" value="@s.Value" class="btn btn-sm @ActiveClass(s.Value, s.OutlineCss)" style="min-width:6.5rem">@ChipLabel(s.Value)</button>
+                    @if (s.Value.Length == 0)
+                    {
+                        @* "All" is the ABSENCE of a ticked status, so it clears
+                           the others rather than carrying a value of its own --
+                           a value would have to be filtered back out in SQL. *@
+                        <button type="button"
+                                class="btn btn-sm @(status.Count == 0 ? "btn-secondary active" : "btn-outline-secondary")"
+                                style="min-width:6.5rem"
+                                onclick="this.closest('form').querySelectorAll('input[name=status]').forEach(b =&gt; b.checked = false); this.closest('form').requestSubmit();">@ChipLabel(s.Value)</button>
+                    }
+                    else
+                    {
+                        @* btn-check: a checkbox that renders as a chip, so
+                           ticking a second status ADDS it rather than replacing
+                           the first. *@
+                        <input type="checkbox" class="btn-check" name="status" value="@s.Value"
+                               id="arr-status-@s.Value" autocomplete="off" checked="@ChipOn(s.Value)"
+                               onchange="this.form.requestSubmit()" />
+                        <label class="btn btn-sm @s.OutlineCss" for="arr-status-@s.Value"
+                               style="min-width:6.5rem">@ChipLabel(s.Value)</label>
+                    }
                 }
             </div>
         </div>
@@ -133,65 +171,47 @@
                 </div>
                 <partial name="_MaterialCategoryFilter" model="@((f.MatMajor, f.MatSubMajor))" />
 
-                <div class="col-12 col-md-4">
-                    <label class="form-label small mb-1">@Loc["Supplier"]</label>
-                    <select name="supplier" class="form-select form-select-sm">
-                        <option value="">@Loc["All suppliers"]</option>
-                        @foreach (var sup in opts.Suppliers)
-                        {
-                            <option value="@sup" selected="@(string.Equals(sup, f.Supplier, StringComparison.OrdinalIgnoreCase))">@sup</option>
-                        }
-                    </select>
-                </div>
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "supplier", Label = Loc["Supplier"], AllLabel = Loc["All suppliers"],
+                    ColumnCss = "col-12 col-md-4", Selected = f.Supplier,
+                    Options = opts.Suppliers.Select(x => new MultiSelectOption(x, x)).ToList() })" />
 
-                <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">@Loc["Plant"]</label>
-                    @if (plantScopeLocked != null)
-                    {
-                        @* Scoped operator: the server forces this plant anyway, so
-                           show why instead of a dropdown that can't take effect. *@
+                @if (plantScopeLocked != null)
+                {
+                    @* Scoped operator: the server forces this plant anyway, so
+                       show why instead of a control that cannot take effect. *@
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">@Loc["Plant"]</label>
                         <div class="form-control form-control-sm bg-light d-flex align-items-center"
                              title="Your account is restricted to this plant.">
                             <i class="bi bi-lock-fill text-muted me-1"></i>
                             <span class="small">@Codes.PlantLabel(plantScopeLocked)</span>
                         </div>
-                        <input type="hidden" id="arr-plant-filter" data-plant-filter="arr" data-filter-ignore name="plant" value="@plantScopeLocked" />
-                    }
-                    else
-                    {
-                        <select name="plant" id="arr-plant-filter" data-plant-filter="arr" class="form-select form-select-sm">
-                            <option value="">@Loc["All plants"]</option>
-                            @foreach (var pl in opts.Plants)
-                            {
-                                <option value="@pl" selected="@(string.Equals(pl, f.Plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
-                            }
-                        </select>
-                    }
-                </div>
-                <div class="col-6 col-md-3">
-                    <label class="form-label small mb-1">@Loc["Storage location"]</label>
-                    <select name="storageLoc" id="arr-storage-filter" data-storage-filter="arr" class="form-select form-select-sm">
-                        <option value="">@Loc["All storage locations"]</option>
-                        @foreach (var sl in opts.StorageLocations)
-                        {
-                            <option value="@sl.Code" data-plant="@sl.Plant"
-                                    selected="@(string.Equals(sl.Code, f.StorageLoc, StringComparison.OrdinalIgnoreCase)
-                                                && (string.IsNullOrEmpty(f.Plant) || string.Equals(sl.Plant, f.Plant, StringComparison.OrdinalIgnoreCase)))">
-                                @Codes.StorageLocationLabel(sl.Plant, sl.Code)
-                            </option>
-                        }
-                    </select>
-                </div>
-                <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">@Loc["Created by"]</label>
-                    <select name="createdBy" class="form-select form-select-sm">
-                        <option value="">@Loc["Anyone"]</option>
-                        @foreach (var cb in opts.CreatedBy)
-                        {
-                            <option value="@cb" selected="@(string.Equals(cb, f.CreatedBy, StringComparison.OrdinalIgnoreCase))">@cb</option>
-                        }
-                    </select>
-                </div>
+                        <input type="hidden" data-filter-ignore name="plant" value="@plantScopeLocked" />
+                    </div>
+                }
+                else
+                {
+                    <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                        Name = "plant", Label = Loc["Plant"], AllLabel = Loc["All plants"],
+                        ColumnCss = "col-6 col-md-3", Selected = f.Plant,
+                        Options = opts.Plants.Select(x => new MultiSelectOption(x, Codes.PlantLabel(x))).ToList() })" />
+                }
+                @* Storage codes repeat across plants, so each option carries its
+                   plant in the label. The old control narrowed this list to the
+                   picked plant with JS; with both sides multi-select there is no
+                   single plant to key on. *@
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "storageLoc", Label = Loc["Storage location"],
+                    AllLabel = Loc["All storage locations"],
+                    ColumnCss = "col-6 col-md-3", Selected = f.StorageLoc,
+                    Options = opts.StorageLocations
+                        .Select(sl => new MultiSelectOption(sl.Code, Codes.StorageLocationLabel(sl.Plant, sl.Code)))
+                        .DistinctBy(o => o.Value).ToList() })" />
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "createdBy", Label = Loc["Created by"], AllLabel = Loc["Anyone"],
+                    ColumnCss = "col-6 col-md-2", Selected = f.CreatedBy,
+                    Options = opts.CreatedBy.Select(x => new MultiSelectOption(x, x)).ToList() })" />
                 <div class="col-6 col-md-2">
                     <label class="form-label small mb-1">@Loc["Created from"]</label>
                     <input type="date" name="from" value="@D(f.From)" class="form-control form-control-sm" />
@@ -219,22 +239,26 @@
    sort-only mode (data-no-pager) and the pager below navigates. Before
    this the page shipped every arrival and the browser paginated, which
    is what made the list paint wide for ~2.5s on each load. *@
-        <table class="table table-hover align-middle mb-0 qms-index-table"
-               data-tablekit data-no-pager>
+        @* data-col-key drives the Columns menu (columntoggle.js). Keys are
+           stable names, not positions, so adding a column later does not shift
+           what somebody chose to hide. Arrival # and View are locked: one
+           identifies the row and the other is how you open it. *@
+        <table id="arrivals-list" class="table table-hover align-middle mb-0 qms-index-table"
+               data-tablekit data-no-pager data-coltoggle>
             <thead class="table-light">
                 <tr>
-                    <th data-sort>@Loc["Arrival #"]</th>
-                    <th data-sort>@Loc["Container"]</th>
-                    <th data-sort>@Loc["BOL"]</th>
-                    <th data-sort>@Loc["Plant"]</th>
-                    <th data-sort>@Loc["Storage"]</th>
-                    <th data-sort>@Loc["Type"]</th>
-                    <th data-sort>@Loc["Vendor"]</th>
-                    <th data-sort>@Loc["Created"]</th>
-                    <th data-sort>@Loc["Created By"]</th>
-                    <th data-sort>@Loc["Status"]</th>
-                    <th>@Loc["Quality Order"]</th>
-                    <th class="text-end">@Loc["View"]</th>
+                    <th data-sort data-col-key="arrivalno" data-col-lock>@Loc["Arrival #"]</th>
+                    <th data-sort data-col-key="container">@Loc["Container"]</th>
+                    <th data-sort data-col-key="bol">@Loc["BOL"]</th>
+                    <th data-sort data-col-key="plant">@Loc["Plant"]</th>
+                    <th data-sort data-col-key="storage">@Loc["Storage"]</th>
+                    <th data-sort data-col-key="potype">@Loc["Type"]</th>
+                    <th data-sort data-col-key="vendor">@Loc["Vendor"]</th>
+                    <th data-sort data-col-key="created">@Loc["Created"]</th>
+                    <th data-sort data-col-key="createdby">@Loc["Created By"]</th>
+                    <th data-sort data-col-key="status">@Loc["Status"]</th>
+                    <th data-col-key="qo">@Loc["Quality Order"]</th>
+                    <th class="text-end" data-col-key="view" data-col-lock>@Loc["View"]</th>
                 </tr>
             </thead>
             <tbody>
@@ -288,7 +312,7 @@
                                     <span class="text-muted">—</span>
                                 }
                             </td>
-                            <td class="cell-clip" title="@a.VendorName">@a.VendorName</td>
+                            <td class="cell-clip-sm" title="@a.VendorName">@a.VendorName</td>
                             <td>@a.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
                             <td>@a.CreatedBy</td>
                             <td>
@@ -303,7 +327,7 @@
                                     <a asp-controller="QualityOrders" asp-action="Details"
                                        asp-route-id="@a.QualityOrderId" class="btn btn-sm btn-outline-primary"
                                        title="@a.QualityOrderNo">
-                                        <i class="bi bi-clipboard-data me-1"></i>@Loc["Open Quality Order"]
+                                        <i class="bi bi-clipboard-data me-1"></i>@Loc["Open QC"]
                                     </a>
                                 }
                                 else if (a.StatusCode == ArrivalStatus.Completed && canEdit)
@@ -377,13 +401,12 @@
                             var pTo   = Math.Min(pageCount, pageNo + 2);
                         }
                         <li class="page-item @(pageNo == 1 ? "disabled" : "")">
-                            <a class="page-link" asp-action="Index"
-                               asp-all-route-data="pageRoute(pageNo - 1, pageSize)" aria-label='@Loc["Previous"]'>&laquo;</a>
+                            <a class="page-link" href="@PageQuery(pageNo - 1, pageSize)" aria-label='@Loc["Previous"]'>&laquo;</a>
                         </li>
                         @if (pFrom > 1)
                         {
                             <li class="page-item">
-                                <a class="page-link" asp-action="Index" asp-all-route-data="pageRoute(1, pageSize)">1</a>
+                                <a class="page-link" href="@PageQuery(1, pageSize)">1</a>
                             </li>
                             @if (pFrom > 2)
                             {
@@ -393,7 +416,7 @@
                         @for (var pp = pFrom; pp <= pTo; pp++)
                         {
                             <li class="page-item @(pp == pageNo ? "active" : "")">
-                                <a class="page-link" asp-action="Index" asp-all-route-data="pageRoute(pp, pageSize)">@pp</a>
+                                <a class="page-link" href="@PageQuery(pp, pageSize)">@pp</a>
                             </li>
                         }
                         @if (pTo < pageCount)
@@ -403,12 +426,12 @@
                                 <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
                             }
                             <li class="page-item">
-                                <a class="page-link" asp-action="Index" asp-all-route-data="pageRoute(pageCount, pageSize)">@pageCount</a>
+                                <a class="page-link" href="@PageQuery(pageCount, pageSize)">@pageCount</a>
                             </li>
                         }
                         <li class="page-item @(pageNo == pageCount ? "disabled" : "")">
-                            <a class="page-link" asp-action="Index"
-                               asp-all-route-data="pageRoute(pageNo + 1, pageSize)" aria-label='@Loc["Next"]'>&raquo;</a>
+                            <a class="page-link"
+                               href="@PageQuery(pageNo + 1, pageSize)" aria-label='@Loc["Next"]'>&raquo;</a>
                         </li>
                     </ul>
                 </nav>

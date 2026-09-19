@@ -120,6 +120,24 @@ public class ClaimManagementController : Controller
 
         var (claim, notes) = await _claims.GetForQoAsync(id);
 
+        // The sibling order, so the reinspection banner in Details.cshtml can
+        // link. QualityOrdersController.Details does exactly this; claim context
+        // never did — and now that the thread MOVES to the reinspection, this
+        // link is the claim desk's only route from the conversation back to the
+        // first inspection's evidence.
+        if (qo.IsReinspection)
+        {
+            var original = await _qos.GetAsync(qo.ReinspectionOf!.Value);
+            ViewBag.OriginalQoId = original?.QualityOrderId;
+            ViewBag.OriginalQoNo = original?.QualityOrderNo;
+        }
+        else if (qo.IsSuperseded)
+        {
+            var repeat = await _qos.GetReinspectionOfAsync(qo.QualityOrderId);
+            ViewBag.ReinspectionQoId = repeat?.QualityOrderId;
+            ViewBag.ReinspectionQoNo = repeat?.QualityOrderNo;
+        }
+
         // The finisher's optional comment (stored as the QO close reason) shows
         // as the first chat message on the claim page, attributed to whoever
         // finished the order — visible even before a formal claim is opened.

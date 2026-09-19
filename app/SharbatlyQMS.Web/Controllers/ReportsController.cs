@@ -146,6 +146,11 @@ public class ReportsController : Controller
             return Json(new { ok = false, error = "Report can only be sent for Closed Quality Orders." });
         if (qo.IsArchived)
             return Json(new { ok = false, error = "This order is archived and kept as a historical record. Its report cannot be sent." });
+        // A superseded order passes both gates above -- it is Closed and not
+        // archived -- so without this the one inspection we decided to discard
+        // is the one that can still be mailed to the supplier.
+        if (qo.IsFrozen)
+            return Json(new { ok = false, error = "This inspection was superseded by a reinspection and is kept only for reference. Send the reinspection's report instead." });
         var arrival = await _arrivals.GetAsync(qo.ArrivalId);
         var template = await _settings.GetQoMailTemplateAsync();
 
@@ -218,6 +223,11 @@ public class ReportsController : Controller
             return Json(new { ok = false, error = "Report can only be sent for Closed Quality Orders." });
         if (qo.IsArchived)
             return Json(new { ok = false, error = "This order is archived and kept as a historical record. Its report cannot be sent." });
+        // A superseded order passes both gates above -- it is Closed and not
+        // archived -- so without this the one inspection we decided to discard
+        // is the one that can still be mailed to the supplier.
+        if (qo.IsFrozen)
+            return Json(new { ok = false, error = "This inspection was superseded by a reinspection and is kept only for reference. Send the reinspection's report instead." });
         if (string.IsNullOrWhiteSpace(to))
             return Json(new { ok = false, error = "Recipient email is required." });
 

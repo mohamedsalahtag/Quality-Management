@@ -335,6 +335,9 @@
     <script src="~/js/site.js" asp-append-version="true"></script>
     <script src="~/js/tablekit.js" asp-append-version="true"></script>
     <script src="~/js/columntoggle.js" asp-append-version="true"></script>
+    @* Cosmetic only -- the multi-select filters submit as plain checkboxes, so
+       they keep working if this never loads. *@
+    <script src="~/js/multiselect.js" asp-append-version="true"></script>
     <script src="~/js/plant-storage-filter.js" asp-append-version="true"></script>
     @* Auto-dismiss any alert tagged with `data-auto-dismiss="<ms>"`. Lives
        here, after Bootstrap loads, so the fade animation reliably runs. *@

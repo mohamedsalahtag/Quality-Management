@@ -11,13 +11,28 @@
 
     var isQm        = Perms.Can(Perm.Claims.MarkClaimRequest);
     var isCm        = Perms.Can(Perm.Claims.Approve);
-    var canComment  = !isArchived && (isQm || isCm);
+
+    // A claim decision presupposes a finished inspection that still speaks for
+    // its container. Reopened orders and reinspections in progress fail the
+    // first test; a superseded original fails the second -- its thread MOVED to
+    // the reinspection, and acting here would open a SECOND claim on a
+    // container that already has one. Mirrored server-side in
+    // ClaimService.DecisionBlockedAsync, which is the actual boundary.
+    var canDecide = Model.StatusCode == QualityOrderStatus.Closed && !Model.IsSuperseded;
+
+    // The container is being inspected again. Nobody judges a verdict that is
+    // still being produced -- but the conversation stays open, which is the
+    // whole point of moving the thread rather than starting a new one.
+    var underReinspection = Model.IsReinspection
+                            && Model.StatusCode != QualityOrderStatus.Closed;
+
+    var canComment  = !isArchived && !Model.IsSuperseded && (isQm || isCm);
 
     // QM can only set/flip status while CM has not yet decided.
-    var qmCanAct = !isArchived && isQm && (claim == null || claim.DecidedAt == null);
+    var qmCanAct = !isArchived && canDecide && isQm && (claim == null || claim.DecidedAt == null);
     // CM can act when claim exists AND (status = ClaimRequest OR already decided).
     // i.e. CM cannot act on PassedQC -- QM has already cleared it.
-    var cmCanAct = !isArchived && isCm && claim != null
+    var cmCanAct = !isArchived && canDecide && isCm && claim != null
                    && (claim.ClaimStatus == ClaimStatus.ClaimRequest
                        || claim.DecidedAt != null);
 
@@ -30,8 +45,8 @@
     var canApprove            = cmCanAct && current != ClaimStatus.ClaimRequestApproved;
     var canHold               = cmCanAct && current != ClaimStatus.HoldClaim;
 
-    var currentLabel = ClaimStatus.Label(claim?.ClaimStatus);
-    var currentBadge = ClaimStatus.BadgeCss(claim?.ClaimStatus);
+    var currentLabel = ClaimStatus.LabelFor(claim?.ClaimStatus, Model.StatusCode);
+    var currentBadge = ClaimStatus.BadgeCssFor(claim?.ClaimStatus, Model.StatusCode);
 }
 
 <style>
@@ -77,6 +92,12 @@
             {
                 <span class="text-muted small ms-2">
                     Decided by <strong>@claim.DecidedBy</strong> on @claim.DecidedAt.Value.ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+                </span>
+            }
+            else if (underReinspection)
+            {
+                <span class="text-muted small ms-2">
+                    @Loc["Awaiting the reinspection"]
                 </span>
             }
             else if (claim != null)
@@ -150,7 +171,21 @@
                     Archived &mdash; this order is kept as a historical record and can no longer be changed.
                 </span>
             }
-            @if (claim != null && !qmCanAct && !cmCanAct && canComment)
+            @if (underReinspection && canComment)
+            {
+                <span class="text-muted small align-self-center">
+                    <i class="bi bi-arrow-repeat me-1"></i>
+                    @Loc["This container is being inspected again. You can still post notes; the claim can be decided once the reinspection is finished."]
+                </span>
+            }
+            @if (Model.IsSuperseded)
+            {
+                <span class="text-muted small align-self-center">
+                    <i class="bi bi-archive me-1"></i>
+                    @Loc["This inspection was superseded by a reinspection. The conversation moved with it."]
+                </span>
+            }
+            @if (claim != null && !underReinspection && !qmCanAct && !cmCanAct && canComment)
             {
                 <span class="text-muted small align-self-center">
                     <i class="bi bi-info-circle me-1"></i>

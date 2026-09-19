@@ -1,4 +1,4 @@
-html {
+﻿html {
   font-size: 14px;
 }
 
@@ -225,6 +225,17 @@ input[type="number"] {
 
 .qms-index-table td.cell-clip {
   max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Supplier and material names are the two columns that routinely run long
+   enough to push the row's buttons off the visible width. 16rem each is more
+   than either needs to be recognisable, and the full value stays in the title
+   attribute, so narrowing them buys back the horizontal room the action
+   buttons need without losing anything. */
+.qms-index-table td.cell-clip-sm {
+  max-width: 9rem;
   overflow: hidden;
   text-overflow: ellipsis;
 }

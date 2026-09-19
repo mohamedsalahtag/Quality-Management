@@ -1,9 +1,15 @@
-// columntoggle: let the user hide columns they don't need, and remember it.
+﻿// columntoggle: let the user hide columns they don't need, and remember it.
 //
 // Opt in by adding `data-coltoggle` to a <table> that also has an `id`:
 //   <table id="pending-containers" data-coltoggle>
 //     <th data-col-key="bol">BOL</th>        <!-- hideable -->
 //     <th data-col-key="action" data-col-lock>Action</th>   <!-- always shown -->
+//     <th data-col-key="notes" data-col-off>Notes</th>  <!-- hidden until asked for -->
+//
+// data-col-off is a DEFAULT, not a permanent hide: it applies only until the
+// user touches that table's menu, after which their stored choice wins and the
+// attribute is ignored. That distinction is the whole point -- a column nobody
+// wants day to day stays out of the way without becoming unreachable.
 //
 // Render the button yourself so it is painted with the rest of the page —
 // injecting it from here made it pop in late and pushed a line of its own:
@@ -40,13 +46,16 @@
         try { window.localStorage.setItem(key, value); } catch (_) { /* quota / private mode */ }
     }
 
+    // null = this table has no stored preference yet, which is NOT the same as
+    // an empty array (the user unticking everything). Only the former defers to
+    // data-col-off.
     function readHidden(tableId) {
         var raw = safeStorageGet(STORAGE_PREFIX + tableId);
-        if (!raw) return [];
+        if (!raw) return null;
         try {
             var parsed = JSON.parse(raw);
-            return Array.isArray(parsed) ? parsed : [];
-        } catch (_) { return []; }
+            return Array.isArray(parsed) ? parsed : null;
+        } catch (_) { return null; }
     }
 
     function enhance(table) {
@@ -60,13 +69,23 @@
                     key:    th.getAttribute('data-col-key'),
                     label:  (th.textContent || '').trim(),
                     locked: th.hasAttribute('data-col-lock'),
+                    off:    th.hasAttribute('data-col-off'),
                     nth:    i + 1                    // :nth-child is 1-based
                 };
             })
             .filter(function (c) { return !!c.key; });
         if (cols.length === 0) return;
 
-        var hidden = readHidden(table.id).filter(function (k) {
+        var stored = readHidden(table.id);
+        var hidden = (stored === null
+            // First visit to this table: start from whatever the page marked
+            // data-col-off. Nothing is written to storage yet, so adding or
+            // removing a default later still reaches people who never opened
+            // the menu.
+            ? cols.filter(function (c) { return c.off && !c.locked; })
+                  .map(function (c) { return c.key; })
+            : stored
+        ).filter(function (k) {
             // Drop stale keys, and never honour a stored hide on a locked column.
             return cols.some(function (c) { return c.key === k && !c.locked; });
         });
@@ -74,14 +93,21 @@
         var style = document.createElement('style');
         document.head.appendChild(style);
 
-        function apply() {
+        // persist=false on the very first paint: the defaults from
+        // data-col-off are a starting point, not a decision the user has
+        // made. Writing them straight to localStorage would freeze them on
+        // first visit, so a default changed later would never reach anyone
+        // who had merely LOOKED at the page.
+        function apply(persist) {
             var rules = cols
                 .filter(function (c) { return hidden.indexOf(c.key) !== -1; })
                 .map(function (c) {
                     return '#' + table.id + ' tr > :nth-child(' + c.nth + '){display:none}';
                 });
             style.textContent = rules.join('\n');
-            safeStorageSet(STORAGE_PREFIX + table.id, JSON.stringify(hidden));
+            if (persist !== false) {
+                safeStorageSet(STORAGE_PREFIX + table.id, JSON.stringify(hidden));
+            }
             if (countBadge) {
                 countBadge.textContent = hidden.length ? String(hidden.length) : '';
                 countBadge.classList.toggle('d-none', hidden.length === 0);
@@ -179,7 +205,7 @@
             }
         }
 
-        apply();
+        apply(false);
     }
 
     function init() {

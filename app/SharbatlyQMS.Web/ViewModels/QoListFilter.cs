@@ -13,7 +13,10 @@
 public class QoListFilter
 {
     // ---- Quick bar (always visible) ----
-    public string? Status     { get; set; }
+    /// <summary>Statuses to include. More than one is the common case --
+    /// "everything still in flight" is Initial + Open + Submitted. Empty means
+    /// no status filter at all.</summary>
+    public List<string> Status { get; set; } = new();
     public string? Search     { get; set; }
 
     // ---- Collapsible panel ----
@@ -26,16 +29,16 @@ public class QoListFilter
     public string? Bol        { get; set; }
     public string? Po         { get; set; }
     public string? ArrivalNo  { get; set; }
-    public string? Plant      { get; set; }
-    public string? StorageLoc { get; set; }
+    public List<string> Plant      { get; set; } = new();
+    public List<string> StorageLoc { get; set; } = new();
     public string? Material   { get; set; }
     /// <summary>Material master major category, e.g. Apples or Bananas.</summary>
     public string? MatMajor    { get; set; }
     /// <summary>Sub-major under that major, e.g. a variety group.</summary>
     public string? MatSubMajor { get; set; }
 
-    public string? Supplier   { get; set; }
-    public string? OpenedBy   { get; set; }
+    public List<string> Supplier { get; set; } = new();
+    public List<string> OpenedBy { get; set; } = new();
     /// <summary>QO created date, inclusive, as the user's LOCAL date. The
     /// controller converts to UTC before it reaches SQL — qo.created_at is
     /// stored UTC but displayed local, so a naive comparison silently drops
@@ -59,24 +62,14 @@ public class QoListFilter
     /// <summary>True when any panel filter is set — the view uses this to open
     /// the panel on load so a bookmarked or shared URL doesn't look like an
     /// unexplained short list.</summary>
-    public bool AnyPanelFilter =>
-        !string.IsNullOrWhiteSpace(QoNo)
-        || !string.IsNullOrWhiteSpace(Container)
-        || !string.IsNullOrWhiteSpace(Bol)
-        || !string.IsNullOrWhiteSpace(Po)
-        || !string.IsNullOrWhiteSpace(ArrivalNo)
-        || !string.IsNullOrWhiteSpace(Plant)
-        || !string.IsNullOrWhiteSpace(StorageLoc)
-        || !string.IsNullOrWhiteSpace(Material)
-        || !string.IsNullOrWhiteSpace(MatMajor)
-        || !string.IsNullOrWhiteSpace(MatSubMajor)
-        || !string.IsNullOrWhiteSpace(Supplier)
-        || !string.IsNullOrWhiteSpace(OpenedBy)
-        || !string.IsNullOrWhiteSpace(Reinspection)
-        || From.HasValue || To.HasValue;
+    public bool AnyPanelFilter => PanelFilterCount > 0;
 
     /// <summary>How many panel filters are active — shown as a badge on the toggle.</summary>
     public int PanelFilterCount =>
+        // A multi-select counts as ONE filter however many values it holds:
+        // "Plant" is one thing the user narrowed by, and counting its values
+        // would make the badge read like a row count.
+        //
         // QoNo counts here too. It opens the panel via AnyPanelFilter, so
         // leaving it out of the count produced an expanded panel with a "0"
         // badge — the two must agree or the page looks like it filtered itself.
@@ -85,20 +78,20 @@ public class QoListFilter
         + (string.IsNullOrWhiteSpace(Bol)        ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Po)         ? 0 : 1)
         + (string.IsNullOrWhiteSpace(ArrivalNo)  ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(Plant)      ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(StorageLoc) ? 0 : 1)
+        + (Plant.Count      == 0 ? 0 : 1)
+        + (StorageLoc.Count == 0 ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Material)   ? 0 : 1)
         + (string.IsNullOrWhiteSpace(MatMajor)    ? 0 : 1)
         + (string.IsNullOrWhiteSpace(MatSubMajor) ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(Supplier)   ? 0 : 1)
-        + (string.IsNullOrWhiteSpace(OpenedBy)   ? 0 : 1)
+        + (Supplier.Count   == 0 ? 0 : 1)
+        + (OpenedBy.Count   == 0 ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Reinspection) ? 0 : 1)
         + (From.HasValue ? 1 : 0)
         + (To.HasValue   ? 1 : 0);
 
     public bool Any => AnyPanelFilter
                        || !string.IsNullOrWhiteSpace(Search)
-                       || !string.IsNullOrWhiteSpace(Status);
+                       || Status.Count > 0;
 }
 
 /// <summary>Dropdown sources for the Quality Orders filter panel. Drawn from

@@ -41,8 +41,9 @@ public class QualityOrder
     /// alongside the status, not a rewrite of it.
     ///
     /// A superseded order keeps its number, its samples and its report; what it
-    /// loses is its place in the live numbers and on the Claims worklist, where
-    /// the reinspection now speaks for the container.
+    /// loses is its place in the live numbers, its claim — which moves to the
+    /// reinspection, conversation and all — and the right to change at all. It
+    /// becomes a reference copy; the reinspection speaks for the container.
     /// </summary>
     public DateTime? SupersededAt  { get; set; }
     public string?   SupersededBy  { get; set; }
@@ -52,6 +53,14 @@ public class QualityOrder
 
     /// <summary>This order has been re-done by a later one.</summary>
     public bool IsSuperseded   => SupersededAt.HasValue;
+
+    /// <summary>
+    /// A reference copy: readable and printable, but nothing about it may
+    /// change any more. One name shared by the views and by the guards in
+    /// QualityOrderService.Transition and ReportsController, so a screen and
+    /// the server cannot drift into disagreeing about what is editable.
+    /// </summary>
+    public bool IsFrozen       => IsSuperseded;
 
     /// <summary>
     /// Whether a reinspection may be raised against this order. The view hides
