@@ -139,6 +139,15 @@ public class ContainerCacheService : IContainerCacheService
             has_arrival = 0
             AND ((@Archived = 0 AND archived_at IS NULL)
               OR (@Archived = 1 AND archived_at IS NOT NULL))
+            -- No receive date, no place on the pending list. SAP leaves
+            -- Receive_Date blank until the goods are actually received, and a
+            -- container it cannot date is one it cannot say has arrived.
+            --
+            -- The archive is exempt: it shows what WAS archived, and those rows
+            -- keep whatever date they were archived with. Without the @Archived
+            -- arm, clearing a stale date here would also erase the row from the
+            -- archive, which is a record rather than a worklist.
+            AND (@Archived = 1 OR receive_date IS NOT NULL)
             AND (@Container  IS NULL OR container_no LIKE @Container)
             AND (@Bol        IS NULL OR bol_no       LIKE @Bol)
             AND (@Po         IS NULL OR ebeln        LIKE @Po)
@@ -684,6 +693,51 @@ public class ContainerCacheService : IContainerCacheService
         return status;
     }
 
+    /// <summary>
+    /// Clears the cached dates on pending rows that this sweep should have
+    /// refreshed but did not, because SAP no longer reports a Receive_Date for
+    /// them.
+    ///
+    /// The sweep fetches on `Receive_Date ge {start}`, and a blank date never
+    /// satisfies a `ge` comparison. So when SAP stops dating a container -- as
+    /// it does until the goods are actually received -- that container simply
+    /// stops appearing in the fetch. Left alone the row keeps whatever date it
+    /// was last given, which is how a container came to sit on the pending list
+    /// showing an arrival date SAP had already withdrawn.
+    ///
+    /// Scoped deliberately tight, because "SAP did not return it" has two very
+    /// different causes:
+    ///   * cached date >= the window start -- the row SHOULD have come back and
+    ///     did not, so SAP has withdrawn its date. That is this method's case.
+    ///   * cached date &lt; the window start -- the row is simply older than the
+    ///     fetch window and was never expected. Those are left alone; nulling
+    ///     them would erase the history of ~18,000 rows to fix ~150.
+    ///
+    /// Only visible pending rows are touched. An arrival already created has
+    /// its own dated snapshot, and an archived row is a record, not a worklist
+    /// entry.
+    ///
+    /// Self-healing: if SAP dates the container again, the next sweep returns it
+    /// and the MERGE fills both columns straight back in.
+    /// </summary>
+    private async Task<int> DropStaleReceiveDatesAsync(
+        DateTime sweepStartedAtUtc, DateOnly windowStart, CancellationToken ct)
+    {
+        using var c = Open();
+        await c.OpenAsync(ct);
+        return await c.ExecuteAsync(new CommandDefinition(@"
+            UPDATE qms_sap_container_cache
+            SET    receive_date = NULL,
+                   arrival_date = NULL
+            WHERE  has_arrival  = 0
+              AND  archived_at  IS NULL
+              AND  receive_date IS NOT NULL
+              AND  receive_date >= @windowStart
+              AND  last_seen_at <  @sweepStartedAtUtc",
+            new { windowStart = windowStart.ToDateTime(TimeOnly.MinValue), sweepStartedAtUtc },
+            cancellationToken: ct));
+    }
+
     public async Task<int> RefreshFromSapAsync(DateOnly hardFloorStartDate, string triggeredBy, string triggerSource,
                                                DateOnly? archiveArrivalsBefore = null, CancellationToken ct = default)
     {
@@ -730,8 +784,10 @@ public class ContainerCacheService : IContainerCacheService
                 await UpsertAsync(page, c2);
             }, ct);
             var reconciled = await ReconcileWithArrivalsAsync(ct);
+            var undated = await DropStaleReceiveDatesAsync(startedAtUtc, effectiveSince, ct);
             var autoArchived = await ArchiveArrivalsBeforeAsync(archiveArrivalsBefore, ct);
             message = $"Fetched {totalRows} SAP row(s) since {effectiveSince:yyyy-MM-dd}; reconciled {reconciled} pre-existing arrival(s)."
+                    + (undated > 0 ? $" Cleared {undated} container line(s) SAP no longer dates." : "")
                     + (autoArchived > 0 ? $" Auto-archived {autoArchived} container(s) that arrived before {archiveArrivalsBefore:yyyy-MM-dd}." : "");
             success = true;
             _log.LogInformation("Container pull OK ({Trigger}) -- {Msg}", triggerSource, message);
