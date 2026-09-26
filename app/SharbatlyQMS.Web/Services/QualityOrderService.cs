@@ -1623,8 +1623,8 @@ public class QualityOrderService : IQualityOrderService
     // Quality Order PDF -- grouped summary
     // ===================================================================
     //
-    // Rolls every material in the QO into (MaterialGroup, Brand, Variety,
-    // Grade) groups. The caller (ReportsController.BuildDataAsync) has
+    // Rolls every material in the QO into (MaterialGroup, Variety, Grade)
+    // groups -- brand is not a grouping field; see the GroupBy below. The caller (ReportsController.BuildDataAsync) has
     // already enriched `materials` with ApplyMara, so Brand / Variety /
     // MaterialClass / NetWeight reflect the current MARA snapshot rather
     // than a stale copy on qms_quality_order_material. Six queries up
@@ -1771,7 +1771,11 @@ public class QualityOrderService : IQualityOrderService
                 new { groups = distinctGroups })).ToList();
 
         // ---------- Aggregate in memory ----------
-        // (MaterialGroup, Brand, Variety, Grade) -> list of materials.
+        // (MaterialGroup, Variety, Grade) -> list of materials.
+        // Brand is deliberately NOT part of the key (2026-09-26, on request):
+        // the same fruit of the same variety and grade is one result whatever
+        // label is on the carton. The brands in a group are still printed, as a
+        // joined list, so nothing is lost from the report.
         // Null-safe: empty-string keys collapse so two materials missing
         // the same field still end up in the same group.
         static string Norm(string? s) => (s ?? "").Trim();
@@ -1783,11 +1787,9 @@ public class QualityOrderService : IQualityOrderService
         var groups = materials
             .GroupBy(m => (
                 MaterialGroup: Norm(m.MaterialGroup),
-                Brand:         Norm(m.Brand),
                 Variety:       Norm(m.Variety),
                 Grade:         Norm(m.MaterialClass)))
             .OrderBy(g => g.Key.MaterialGroup)
-            .ThenBy(g => g.Key.Brand)
             .ThenBy(g => g.Key.Variety)
             .ThenBy(g => g.Key.Grade)
             .ToList();
@@ -1838,7 +1840,8 @@ public class QualityOrderService : IQualityOrderService
             {
                 MaterialGroup     = g.Key.MaterialGroup,
                 MaterialGroupDesc = mats.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.MaterialGroupDesc))?.MaterialGroupDesc,
-                Brand             = string.IsNullOrEmpty(g.Key.Brand)   ? null : g.Key.Brand,
+                // Every brand among the group's sampled materials, e.g. "Chiquita / Dole".
+                Brand             = NullIfEmpty(JoinDistinct(mats.Select(m => Norm(m.Brand)).Where(b => b.Length > 0).OrderBy(b => b))),
                 Variety           = string.IsNullOrEmpty(g.Key.Variety) ? null : g.Key.Variety,
                 Grade             = string.IsNullOrEmpty(g.Key.Grade)   ? null : g.Key.Grade,
                 MajorCategory     = mats.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.MajorCategory))?.MajorCategory,
@@ -2003,6 +2006,8 @@ public class QualityOrderService : IQualityOrderService
     private static string JoinDistinct(IEnumerable<string> values) =>
         string.Join(" / ", values.Distinct(StringComparer.OrdinalIgnoreCase));
 
+    private static string? NullIfEmpty(string s) => s.Length == 0 ? null : s;
+
     /// <summary>Row shape for the Material-scoped header values feeding the
     /// group summary roll-up.</summary>
     private sealed class MaterialHeaderAggSource
@@ -2083,13 +2088,29 @@ public class QualityOrderService : IQualityOrderService
                    a.vendor_no          AS VendorNo,
                    cc.sto               AS Sto,
                    cc.doc_date          AS PoDate,
-                   -- Prefer authoritative shipment snapshot for dates;
-                   -- fall back to the SAP cache when shipment row is absent.
-                   COALESCE(ss.arrival_date, cc.arrival_date)  AS ArrivalDate,
-                   COALESCE(ss.receive_date, cc.receive_date)  AS ReceiveDate,
-                   ss.loading_date      AS LoadingDate,
+                   -- The receive date is SAP's branch goods receipt. The cache
+                   -- holds SAP's CURRENT value and leads; the snapshot (refreshed
+                   -- from the cache on every sweep) stands in for an arrival the
+                   -- cache has never seen. ArrivalDate is the same date: the
+                   -- column has always been Receive_Date's twin, never the
+                   -- vessel's arrival -- that is PortArrivalDate. Same rules as
+                   -- vw_qms_flat_defects (M36), so the Data Hub and the Report
+                   -- Builder agree.
+                   COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date)  AS ArrivalDate,
+                   COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date)  AS ReceiveDate,
+                   COALESCE(cc.port_arrival_date, ss.port_arrival_date)          AS PortArrivalDate,
+                   -- SAP's LoadingDate is empty on every row; the loading date
+                   -- the business uses is Sailing_Date, so both columns carry it.
+                   ss.sailing_date      AS LoadingDate,
                    ss.sailing_date      AS ShippingDate,
-                   ss.transit_days      AS TransitDays
+                   -- Transit = loading -> the inspector's discharge date, never
+                   -- negative; SAP's ETA-based figure until the discharge date is
+                   -- entered. Same expression as ShipmentDates.TransitDays.
+                   CAST(COALESCE(
+                        CASE WHEN ss.sailing_date IS NOT NULL AND ss.discharge_date IS NOT NULL
+                             THEN CASE WHEN DATEDIFF(DAY, ss.sailing_date, ss.discharge_date) < 0 THEN 0
+                                       ELSE DATEDIFF(DAY, ss.sailing_date, ss.discharge_date) END END,
+                        cc.transit_days, ss.transit_days) AS SMALLINT) AS TransitDays
             FROM   qms_sample s
             JOIN   qms_quality_order qo         ON qo.quality_order_id = s.quality_order_id
             JOIN   qms_quality_order_material m ON m.qo_material_id   = s.qo_material_id
@@ -2100,7 +2121,8 @@ public class QualityOrderService : IQualityOrderService
                 -- The cache's natural key is wider than (container_no, bol_no, ebeln).
                 -- Pick the newest matching row DETERMINISTICALLY so PoDate/Sto/dates
                 -- are reproducible across runs (matches vw_qms_flat_defects, V35).
-                SELECT TOP 1 c2.sto, c2.doc_date, c2.arrival_date, c2.receive_date
+                SELECT TOP 1 c2.sto, c2.doc_date, c2.arrival_date, c2.receive_date,
+                             c2.port_arrival_date, c2.transit_days
                 FROM   qms_sap_container_cache c2
                 WHERE  c2.container_no = a.container_no
                   AND  c2.bol_no       = a.bol_no
@@ -2267,6 +2289,7 @@ public class QualityOrderService : IQualityOrderService
                     PoDate          = s.PoDate,
                     LoadingDate     = s.LoadingDate,
                     ShippingDate    = s.ShippingDate,
+                    PortArrivalDate = s.PortArrivalDate,
                     ArrivalDate     = s.ArrivalDate,
                     ReceiveDate     = s.ReceiveDate,
                     TransitDays     = s.TransitDays,

@@ -29,8 +29,9 @@ public interface ITimeBarService
 /// nobody is looking at is the one that runs out of time.
 ///
 /// PERFORMANCE NOTE FOR THE NEXT PERSON: no id list ever crosses the wire here.
-/// Every filter is a scalar and the only expanded IN is the plant scope, which
-/// is bounded by the plant directory. Do not "optimise" this by selecting a
+/// The only expanded INs are the plant scope and the multi-select dropdown
+/// filters, each bounded by the options its dropdown offers (a handful of
+/// plants, statuses, PO types and material categories). Do not "optimise" this by selecting a
 /// page of keys in C# and re-querying with WHERE (container, bol, po) IN @keys
 /// — Dapper expands that to one parameter per item, SQL Server caps a command
 /// at 2100, and this application has already been broken twice that way. If a
@@ -51,18 +52,21 @@ public class TimeBarService : ITimeBarService
     // sort and the over-threshold filter can never drift apart.
 
     /// <summary>
-    /// The clock's start date. @Basis picks which source leads; the rest of the
-    /// chain is the fallback when it is missing.
+    /// The clock's start date. @Basis picks the date; the cache (SAP's current
+    /// value) leads and the arrival's snapshot stands in only for a container
+    /// the cache has never seen (created through /Arrivals/Search).
     ///
-    /// GoodsReceipt leads by default because cc.arrival_date is SAP's
-    /// Receive_Date, which is what every other screen in this application calls
-    /// the arrival date. A Time Bar that disagreed with the container list about
-    /// when a container arrived would be argued with rather than acted on.
+    /// GoodsReceipt is the default: SAP's Receive_Date, the branch goods
+    /// receipt, which is also what the dashboard counts a container in by and
+    /// what the QC report's Time Bar counts from (same setting). The two bases
+    /// deliberately do NOT fall back to each other: under the receipt basis a
+    /// container the branch has not booked in has no clock, rather than one
+    /// quietly measured from the vessel's arrival instead.
     /// </summary>
     private const string StartExpr = @"
         CASE WHEN @Basis = 'PortArrival'
-             THEN COALESCE(cc.port_arrival_date, ss.arrival_date, cc.arrival_date, cc.receive_date)
-             ELSE COALESCE(cc.arrival_date, cc.receive_date, ss.arrival_date, cc.port_arrival_date)
+             THEN COALESCE(cc.port_arrival_date, ss.port_arrival_date)
+             ELSE COALESCE(cc.receive_date, ss.receive_date)
         END";
 
     /// <summary>
@@ -180,9 +184,8 @@ public class TimeBarService : ITimeBarService
                (" + StartExpr + @")                 AS ArrivalDate,
                CASE WHEN (" + StartExpr + @") IS NULL THEN NULL
                     WHEN @Basis = 'PortArrival' AND cc.port_arrival_date IS NOT NULL THEN 'Port'
-                    WHEN @Basis <> 'PortArrival' AND cc.arrival_date IS NOT NULL THEN 'Receipt'
-                    WHEN ss.arrival_date IS NOT NULL THEN 'Snapshot'
-                    ELSE 'Other' END                AS ArrivalSource,
+                    WHEN @Basis <> 'PortArrival' AND cc.receive_date IS NOT NULL THEN 'Receipt'
+                    ELSE 'Snapshot' END             AS ArrivalSource,
                a.arrival_id                         AS ArrivalId,
                a.arrival_no                         AS ArrivalNo,
                qo.quality_order_id                  AS QualityOrderId,
@@ -223,23 +226,25 @@ public class TimeBarService : ITimeBarService
           AND (@Bol       IS NULL OR k.bol_no       LIKE @Bol)
           AND (@Po        IS NULL OR k.ebeln        LIKE @Po)
           AND (@Supplier  IS NULL OR cc.vendor_name LIKE @Supplier OR cc.vendor_no LIKE @Supplier)
-          AND (@Plant     IS NULL OR {EffPlantExpr} = @Plant)
-          AND (@PoType    IS NULL OR cc.po_type = @PoType)
+          -- Multi-select dropdowns: the any-flag switches each filter on, the
+          -- list (never empty -- see FilterValues) keeps the IN legal.
+          AND (@PlantAny  = 0 OR {EffPlantExpr} IN @Plants)
+          AND (@PoTypeAny = 0 OR cc.po_type IN @PoTypes)
           -- Material master categories. The cache is aggregated to one row per
           -- container before this point, so the test has to go back to the raw
           -- lines: a container counts as, say, Apples if ANY of its lines is.
-          AND (@matMajor IS NULL AND @matSubMajor IS NULL OR EXISTS (
+          AND (@MatMajorAny = 0 AND @MatSubMajorAny = 0 OR EXISTS (
                     SELECT 1
                     FROM   qms_sap_container_cache cl
                     JOIN   qms_sap_material_cache  mc ON mc.material_no = cl.material_no
                     WHERE  cl.container_no = k.container_no
                       AND  cl.bol_no       = k.bol_no
                       AND  cl.ebeln        = k.ebeln
-                      AND (@matMajor    IS NULL OR
-                           COALESCE(NULLIF(mc.major_category_desc,''), NULLIF(mc.major_category,'')) = @matMajor)
-                      AND (@matSubMajor IS NULL OR mc.sub_major_category = @matSubMajor)))
+                      AND (@MatMajorAny = 0 OR
+                           COALESCE(NULLIF(mc.major_category_desc,''), NULLIF(mc.major_category,'')) IN @MatMajors)
+                      AND (@MatSubMajorAny = 0 OR mc.sub_major_category IN @MatSubMajors)))
           AND (@Stage     IS NULL OR ({StageExpr}) = @Stage)
-          AND (@Status    IS NULL OR ({StatusExpr}) = @Status)
+          AND (@StatusAny = 0 OR ({StatusExpr}) IN @Statuses)
           -- The go-live floor. Applied to the count, the summary, the median and
           -- the page alike, because a page whose header disagreed with its own
           -- rows would be worse than no page. A container with no arrival date
@@ -276,6 +281,12 @@ public class TimeBarService : ITimeBarService
         var offset   = (page - 1) * pageSize;
 
         var now = DateTime.Now;
+        // Cleaned for the any-flags, sentinel-wrapped for the IN clauses.
+        var plants    = FilterValues.Many(f.Plant);
+        var poTypes   = FilterValues.Many(f.PoType);
+        var statuses  = FilterValues.Many(f.Status);
+        var majors    = FilterValues.Many(f.MatMajor);
+        var subMajors = FilterValues.Many(f.MatSubMajor);
         var p = new
         {
             Basis           = cfg.ArrivalBasis,
@@ -288,12 +299,12 @@ public class TimeBarService : ITimeBarService
             Bol       = Wrap(f.Bol),
             Po        = Wrap(f.Po),
             Supplier  = Wrap(f.Supplier),
-            Plant     = Exact(f.Plant),
-            PoType    = Exact(f.PoType),
-            matMajor    = Exact(f.MatMajor),
-            matSubMajor = Exact(f.MatSubMajor),
+            Plants       = FilterValues.ForIn(plants),    PlantAny       = plants.Count    > 0,
+            PoTypes      = FilterValues.ForIn(poTypes),   PoTypeAny      = poTypes.Count   > 0,
+            Statuses     = FilterValues.ForIn(statuses),  StatusAny      = statuses.Count  > 0,
+            MatMajors    = FilterValues.ForIn(majors),    MatMajorAny    = majors.Count    > 0,
+            MatSubMajors = FilterValues.ForIn(subMajors), MatSubMajorAny = subMajors.Count > 0,
             Stage     = Exact(f.Stage),
-            Status    = Exact(f.Status),
             From      = f.From?.ToDateTime(TimeOnly.MinValue),
             To        = f.To?.ToDateTime(TimeOnly.MinValue),
             OverOnly  = f.OverOnly,

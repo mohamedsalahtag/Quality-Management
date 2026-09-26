@@ -439,8 +439,10 @@ public class ReportsController : Controller
         data.LogoScalePercent = branding.LogoScalePercent;
 
         var reportCfg = await _settings.GetReportConfigAsync();
-        data.TimeBarBasis  = reportCfg.TimeBarBasis;
         data.LayoutVersion = reportCfg.LayoutVersion;
+        // The Time Bar counts from the same date as the Time Bar page -- one
+        // setting, so the report and the page cannot disagree on a container.
+        data.TimeBarBasis  = (await _settings.GetTimeBarConfigAsync()).ArrivalBasis;
 
         // Who created this quality order, with their branch — shown in the report
         // header. Branch is the creator's own plant when set, otherwise the
@@ -484,9 +486,12 @@ public class ReportsController : Controller
         data.RejectionHeader      = reportCfg.RejectedContainerHeader;
         data.RejectionComment     = data.Arrival.RejectReason;
 
-        // Transit Days comes from the SAP cache, not from the shipment
+        // SAP's own Transit_Days comes from the SAP cache, not from the shipment
         // snapshot's frozen copy -- see IArrivalService.GetCachedTransitDaysAsync
-        // for why. Best-effort: never fail a report over one field.
+        // for why. It is only the FALLBACK: the printed figure is
+        // ShipmentSnapshot.EffectiveTransitDays (loading to the inspector's
+        // discharge date) and reads this when the discharge date is missing.
+        // Best-effort: never fail a report over one field.
         if (data.Shipment != null)
         {
             try

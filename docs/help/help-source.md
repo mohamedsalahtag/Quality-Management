@@ -179,6 +179,25 @@ Read the short message and click **Back** in your browser, or open a different m
 5. When the arrival is ready, click **Create Quality Order** — you land on the Quality Order Details page.
 6. Use **Download checklist PDF** for the supplier copy.
 
+**The shipment dates, in the order they happen**
+
+| Date | Where it comes from | What it means |
+| --- | --- | --- |
+| Loading date | SAP | The day the container left the loading port (SAP's sailing date). |
+| Vessel arrival date | SAP | The day the vessel reached our port. |
+| Discharge date | You type it | The day the container was discharged from the vessel. Ends the transit leg. |
+| Pull-out date | You type it | The day the container was pulled out of the port. |
+| Receive date | SAP, refreshed on every SAP sync | The **branch goods receipt** — the day the branch booked the goods in. SAP moves this date forward after the pull-out, and QMS follows it. This is the date the dashboard counts a container on and the date every inspection clock starts from. |
+| Unloading date | You type it | The day the container was unloaded at the branch. |
+| Inspection date | Automatic | The day the Quality Order was opened. |
+
+Two figures are worked out from those dates and are the same on every screen, the QC report and the Data Hub:
+
+- **Transit days** = discharge date − loading date. Until you enter the discharge date, SAP's own estimate is shown.
+- **Time Bar** = the day QC was finished − the receive date. The QC report and the Inspection Time Bar page always show the same number. An administrator can switch both to count from the vessel arrival instead (Admin → Settings → Alerts → Time Bar thresholds).
+
+> **Tip** — If the receive date on an arrival looks a few days older than Pending Containers showed, wait for the next SAP sync (hourly) or click **Retrieve latest containers**; the arrival is refreshed from SAP automatically.
+
 ### Quality Orders list
 
 - **Route:** `/QualityOrders`
@@ -680,6 +699,7 @@ You need Manager or SiteAdmin. Open the closed QO and click **Reopen**, type a s
 - **Claim** — An insurance claim filed against a Closed Quality Order when the supplier owes the company.
 - **Container** — Refrigerated shipping container; the unit SAP tracks.
 - **Data Hub** — The flat-row report at `/Reports/FlatDefects`, with 15 filters and Excel export.
+- **Discharge date** — The day the container was discharged from the vessel, typed by the inspector on the arrival. Ends the transit leg.
 - **Defect** — A specific quality issue recorded against a sample (e.g. Creasing, Hail damage).
 - **Defect catalog** — The master list of defects per material group (Admin → Defect catalog).
 - **Drill filter** — A "include-only" filter you add inside the Perspective analyzer to limit the pivot to specific values.
@@ -694,6 +714,7 @@ You need Manager or SiteAdmin. Open the closed QO and click **Reopen**, type a s
 - **Plant** — A Sharbatly facility (warehouse / cold store). Operators are usually scoped to one.
 - **PO** — Purchase order. The SAP document under which a container ships.
 - **Quality Order (QO)** — The QMS workflow record for inspecting one arrival.
+- **Receive date** — The branch goods receipt from SAP: the day the branch booked the container's goods in. Refreshed from SAP on every sync. Every inspection clock starts here and the dashboard counts a container on this day.
 - **Reading type** — A measurement type with unit and range (e.g. Brix, firmness).
 - **Sample** — One inspection of one carton (or set of cartons) under a Quality Order.
 - **Sample header** — Per-sample fields the inspector fills (grower, pack code, date code).
@@ -705,4 +726,7 @@ You need Manager or SiteAdmin. Open the closed QO and click **Reopen**, type a s
 - **STO** — Stock Transport Order, a SAP document type SAP exposes alongside POs.
 - **Submit / Finish** — The two-stage workflow: operator submits a QO for review, supervisor finishes it.
 - **Supervisor** — The role that reviews submitted QOs. Above Operator, below Manager.
+- **Time Bar** — Days from the receive date to the day QC was finished. The same number on the Inspection Time Bar page, the QC report and the Data Hub.
+- **Transit days** — Days from the loading date to the discharge date; SAP's estimate until the discharge date is entered.
+- **Vessel arrival date** — The day the vessel reached our port, from SAP. Not the same as the receive date, which can be a week or more later.
 - **View-As** — Manager/SiteAdmin feature for previewing the app as another role for testing.

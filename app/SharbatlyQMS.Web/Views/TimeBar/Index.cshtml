@@ -1,5 +1,6 @@
 ﻿@using SharbatlyQMS.Web.ViewModels
 @using SharbatlyQMS.Web.Services
+@inject IMaterialTaxonomyService Taxonomy
 @model IReadOnlyList<TimeBarRow>
 @{
     ViewData["Title"] = Loc["Inspection Time Bar"];
@@ -25,28 +26,55 @@
     string Dstr(DateOnly? d) => d?.ToString("yyyy-MM-dd") ?? "";
 
     // Every link keeps the current view; only what it changes is overridden.
-    Func<object, Dictionary<string, string>> Route = overrides =>
+    //
+    // Builds the query STRING itself rather than using asp-all-route-data: that
+    // takes a Dictionary, which cannot repeat a key, so the multi-select filters
+    // (?plant=JD01&plant=RD02) would collapse to one value on the next page or
+    // chip click -- widening the list without anyone touching a control. Same
+    // reason as the Quality Orders list.
+    string Qs(string action, object overrides)
     {
-        var d = new Dictionary<string, string>();
-        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) d[k] = v!; }
-        Add("search", f.Search);      Add("stage", f.Stage);       Add("status", f.Status);
-        Add("plant", f.Plant);        Add("poType", f.PoType);     Add("supplier", f.Supplier);
-        Add("container", f.Container);Add("bol", f.Bol);           Add("po", f.Po);
-        Add("matMajor", f.MatMajor); Add("matSubMajor", f.MatSubMajor);
-        Add("from", Dstr(f.From));    Add("to", Dstr(f.To));
-        if (f.OverOnly)        d["overOnly"] = "true";
-        if (f.NoCacheOnly)     d["noCacheOnly"] = "true";
-        if (f.IncludeArchived) d["includeArchived"] = "true";
-        if (f.MinDays.HasValue) d["minDays"] = f.MinDays.Value.ToString();
-        Add("sort", f.Sort);          Add("dir", f.Dir);
-        d["pageSize"] = pageSize.ToString();
+        var q = new List<(string K, string V)>();
+        void Add(string k, string? v) { if (!string.IsNullOrWhiteSpace(v)) q.Add((k, v!.Trim())); }
+        void AddMany(string k, IEnumerable<string> vs) { foreach (var v in FilterValues.Many(vs)) Add(k, v); }
+
+        Add("search", f.Search);        Add("stage", f.Stage);
+        AddMany("status", f.Status);    AddMany("plant", f.Plant);    AddMany("poType", f.PoType);
+        Add("supplier", f.Supplier);
+        Add("container", f.Container);  Add("bol", f.Bol);            Add("po", f.Po);
+        AddMany("matMajor", f.MatMajor); AddMany("matSubMajor", f.MatSubMajor);
+        Add("from", Dstr(f.From));      Add("to", Dstr(f.To));
+        if (f.OverOnly)        Add("overOnly", "true");
+        if (f.NoCacheOnly)     Add("noCacheOnly", "true");
+        if (f.IncludeArchived) Add("includeArchived", "true");
+        if (f.MinDays.HasValue) Add("minDays", f.MinDays.Value.ToString());
+        Add("sort", f.Sort);            Add("dir", f.Dir);
+        Add("pageSize", pageSize.ToString());
+
+        // An override REPLACES every value of its key; null or empty removes it.
         foreach (var pi in overrides.GetType().GetProperties())
         {
             var v = pi.GetValue(overrides)?.ToString();
-            if (string.IsNullOrEmpty(v)) d.Remove(pi.Name); else d[pi.Name] = v;
+            q.RemoveAll(x => string.Equals(x.K, pi.Name, StringComparison.OrdinalIgnoreCase));
+            if (!string.IsNullOrEmpty(v)) q.Add((pi.Name, v));
         }
-        return d;
-    };
+        var qs = string.Join("&", q.Select(x => $"{Uri.EscapeDataString(x.K)}={Uri.EscapeDataString(x.V)}"));
+        return Url.Action(action) + (qs.Length > 0 ? "?" + qs : "");
+    }
+
+    // Material categories for the two multi-select pickers. The sub-major list
+    // narrows to the ticked majors once any are ticked; with none ticked it
+    // offers every sub-major, so it is never an empty dropdown.
+    var majors       = await Taxonomy.GetAsync();
+    var pickedMajors = FilterValues.Many(f.MatMajor);
+    var subOptions   = majors
+        .Where(m => pickedMajors.Count == 0
+                    || pickedMajors.Contains(m.Name, StringComparer.OrdinalIgnoreCase))
+        .SelectMany(m => m.SubMajors)
+        .Where(s => !string.IsNullOrWhiteSpace(s))
+        .Distinct(StringComparer.OrdinalIgnoreCase)
+        .OrderBy(s => s)
+        .ToList();
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -54,7 +82,9 @@
         <i class="bi bi-hourglass-split me-1"></i>@Loc["Inspection Time Bar"]
         <span class="badge bg-secondary ms-2">@total</span>
         <small class="text-muted fs-6 fw-normal ms-2">
-            @Loc["Days from a container's arrival to the moment QC finished. Optimum is"] @cfg.GoodDays @Loc["day(s)."]
+            @(cfg.ArrivalBasis == TimeBarArrivalBases.PortArrival
+                ? Loc["Days from the vessel reaching port to the moment QC finished. Optimum is"]
+                : Loc["Days from the branch receiving a container (SAP receive date) to the moment QC finished. Optimum is"]) @cfg.GoodDays @Loc["day(s)."]
         </small>
     </h1>
     <span class="d-flex align-items-center gap-2">
@@ -62,8 +92,7 @@
             <i class="bi bi-clock-history me-1"></i>@Loc["As of"] @asOf.ToString("yyyy-MM-dd HH:mm")
         </span>
         @* Exports the WHOLE filtered list, not the page on screen. *@
-        <a class="btn btn-sm btn-outline-success" asp-action="Excel"
-           asp-all-route-data="Route(new { })"
+        <a class="btn btn-sm btn-outline-success" href="@Qs("Excel", new { })"
            title="@Loc["Export every matching row to Excel"]">
             <i class="bi bi-file-earmark-excel me-1"></i>@Loc["Excel"]
         </a>
@@ -144,27 +173,27 @@ else if (cfg.StartDate.HasValue)
 <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
     <span class="text-muted small text-uppercase fw-semibold">@Loc["Stage"]</span>
     <div class="btn-group btn-group-sm">
-        <a asp-action="Index" asp-all-route-data='Route(new { stage = (string?)null })'
+        <a href="@Qs("Index", new { stage = (string?)null, page = (string?)null })"
            class="btn @(string.IsNullOrWhiteSpace(f.Stage) ? "btn-secondary" : "btn-outline-secondary")">@Loc["All"]</a>
         @foreach (var st in TimeBarStages.All)
         {
-            <a asp-action="Index" asp-all-route-data="Route(new { stage = st })"
+            <a href="@Qs("Index", new { stage = st, page = (string?)null })"
                class="btn @(string.Equals(st, f.Stage, StringComparison.OrdinalIgnoreCase) ? "btn-secondary" : "btn-outline-secondary")">
                 @(st == TimeBarStages.Pending ? Loc["Not started"] : (st == TimeBarStages.Qc ? Loc["In QC"] : Loc["Arrival only"]))
             </a>
         }
     </div>
 
-    <a asp-action="Index" asp-all-route-data='Route(new { overOnly = f.OverOnly ? null : "true" })'
+    <a href="@Qs("Index", new { overOnly = f.OverOnly ? null : "true" })"
        class="btn btn-sm @(f.OverOnly ? "btn-danger" : "btn-outline-danger")">
         <i class="bi bi-exclamation-triangle me-1"></i>@Loc["Over threshold only"]
     </a>
-    <a asp-action="Index" asp-all-route-data='Route(new { noCacheOnly = f.NoCacheOnly ? null : "true" })'
+    <a href="@Qs("Index", new { noCacheOnly = f.NoCacheOnly ? null : "true" })"
        class="btn btn-sm @(f.NoCacheOnly ? "btn-secondary" : "btn-outline-secondary")"
        title='@Loc["Arrivals created by searching SAP directly, with no cached container behind them."]'>
         @Loc["Not in SAP cache"]
     </a>
-    <a asp-action="Index" asp-all-route-data='Route(new { includeArchived = f.IncludeArchived ? null : "true" })'
+    <a href="@Qs("Index", new { includeArchived = f.IncludeArchived ? null : "true" })"
        class="btn btn-sm @(f.IncludeArchived ? "btn-secondary" : "btn-outline-secondary")">
         <i class="bi bi-archive me-1"></i>@Loc["Include archived"]
     </a>
@@ -192,53 +221,41 @@ else if (cfg.StartDate.HasValue)
                     <label class="form-label small mb-1">@Loc["PO"]</label>
                     <input type="text" name="po" value="@f.Po" class="form-control form-control-sm" autocomplete="off" />
                 </div>
-                <div class="col-md-2">
-                    <label class="form-label small mb-1">@Loc["Plant"]</label>
-                    @if (lockedPlant != null)
-                    {
+                @* Every dropdown here is multi-select: tick as many values as
+                   needed; ticking none means no filter. Same control as the
+                   Pending, Arrivals, Quality Orders and Claims lists. *@
+                @if (lockedPlant != null)
+                {
+                    <div class="col-md-2">
+                        <label class="form-label small mb-1">@Loc["Plant"]</label>
                         <div class="form-control form-control-sm bg-light d-flex align-items-center">
                             <i class="bi bi-lock-fill text-muted me-1"></i>
                             <span class="small">@Codes.PlantLabel(lockedPlant)</span>
                         </div>
                         <input type="hidden" name="plant" value="@lockedPlant" />
-                    }
-                    else
-                    {
-                        <select name="plant" class="form-select form-select-sm">
-                            <option value="">@Loc["All plants"]</option>
-                            @foreach (var pl in plants)
-                            {
-                                <option value="@pl" selected="@(string.Equals(pl, f.Plant, StringComparison.OrdinalIgnoreCase))">@Codes.PlantLabel(pl)</option>
-                            }
-                        </select>
-                    }
-                </div>
-                <div class="col-md-2">
-                    <label class="form-label small mb-1">@Loc["Status"]</label>
-                    <select name="status" class="form-select form-select-sm">
-                        <option value="">@Loc["Any status"]</option>
-                        @foreach (var st in statuses)
-                        {
-                            <option value="@st" selected="@(string.Equals(st, f.Status, StringComparison.OrdinalIgnoreCase))">@st</option>
-                        }
-                    </select>
-                </div>
-                <div class="col-md-1">
-                    <label class="form-label small mb-1">@Loc["PO type"]</label>
-                    <select name="poType" class="form-select form-select-sm">
-                        <option value="">@Loc["All"]</option>
-                        @foreach (var pt in poTypes)
-                        {
-                            <option value="@pt" selected="@(string.Equals(pt, f.PoType, StringComparison.OrdinalIgnoreCase))">@Codes.PoTypeDisplay(pt)</option>
-                        }
-                    </select>
-                </div>
+                    </div>
+                }
+                else
+                {
+                    <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                        Name = "plant", Label = Loc["Plant"], AllLabel = Loc["All plants"],
+                        ColumnCss = "col-md-2", Selected = f.Plant,
+                        Options = plants.Select(x => new MultiSelectOption(x, Codes.PlantLabel(x))).ToList() })" />
+                }
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "status", Label = Loc["Status"], AllLabel = Loc["Any status"],
+                    ColumnCss = "col-md-2", Selected = f.Status,
+                    Options = statuses.Select(x => new MultiSelectOption(x, x)).ToList() })" />
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "poType", Label = Loc["PO type"], AllLabel = Loc["All"],
+                    ColumnCss = "col-md-2", Selected = f.PoType,
+                    Options = poTypes.Select(x => new MultiSelectOption(x, Codes.PoTypeDisplay(x))).ToList() })" />
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">@Loc["Arrived from"]</label>
+                    <label class="form-label small mb-1">@Loc["Received from"]</label>
                     <input type="date" name="from" value="@Dstr(f.From)" class="form-control form-control-sm" />
                 </div>
                 <div class="col-6 col-md-2">
-                    <label class="form-label small mb-1">@Loc["Arrived to"]</label>
+                    <label class="form-label small mb-1">@Loc["Received to"]</label>
                     <input type="date" name="to" value="@Dstr(f.To)" class="form-control form-control-sm" />
                 </div>
                 <div class="col-6 col-md-2">
@@ -249,7 +266,14 @@ else if (cfg.StartDate.HasValue)
                     <label class="form-label small mb-1">@Loc["Supplier"]</label>
                     <input type="text" name="supplier" value="@f.Supplier" class="form-control form-control-sm" autocomplete="off" />
                 </div>
-                <partial name="_MaterialCategoryFilter" model="@((f.MatMajor, f.MatSubMajor))" />
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "matMajor", Label = Loc["Material major"], AllLabel = Loc["Any"],
+                    ColumnCss = "col-6 col-md-3 col-xl-2", Selected = f.MatMajor,
+                    Options = majors.Select(m => new MultiSelectOption(m.Name, m.Name)).ToList() })" />
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "matSubMajor", Label = Loc["Material sub-major"], AllLabel = Loc["Any"],
+                    ColumnCss = "col-6 col-md-3 col-xl-2", Selected = f.MatSubMajor,
+                    Options = subOptions.Select(s => new MultiSelectOption(s, s)).ToList() })" />
                 @* Chip state has to survive a filter submit, or using one control
                    would silently clear the other. *@
                 @if (f.OverOnly)        { <input type="hidden" name="overOnly" value="true" /> }
@@ -278,7 +302,9 @@ else if (cfg.StartDate.HasValue)
                     <th data-sort data-col-key="po">@Loc["PO / STO"]</th>
                     <th data-sort data-col-key="vendor">@Loc["Supplier"]</th>
                     <th data-sort data-col-key="plant">@Loc["Plant"]</th>
-                    <th data-sort data-col-key="arrived">@Loc["Arrived"]</th>
+                    <th data-sort data-col-key="arrived" title='@Loc["The date the clock starts from — set under Admin → Settings → Alerts"]'>
+                        @(cfg.ArrivalBasis == TimeBarArrivalBases.PortArrival ? Loc["Vessel arrival"] : Loc["Received"])
+                    </th>
                     <th data-sort data-col-key="status">@Loc["Status"]</th>
                     <th data-sort data-col-key="finished">@Loc["QC finished"]</th>
                     <th style="width:22%" data-col-key="bar">@Loc["Inspection time bar"]</th>
@@ -387,7 +413,7 @@ else if (cfg.StartDate.HasValue)
                         <td>
                             @if (r.ElapsedDays is null)
                             {
-                                <span class="text-muted small">@Loc["No arrival date recorded"]</span>
+                                <span class="text-muted small">@(cfg.ArrivalBasis == TimeBarArrivalBases.PortArrival ? Loc["No vessel arrival date from SAP"] : Loc["Not received yet — no SAP receive date"])</span>
                             }
                             else
                             {
@@ -433,16 +459,16 @@ else if (cfg.StartDate.HasValue)
                             var to   = Math.Min(pageCount, pageNo + 2);
                         }
                         <li class="page-item @(pageNo == 1 ? "disabled" : "")">
-                            <a class="page-link" asp-action="Index" asp-all-route-data="Route(new { page = pageNo - 1 })">«</a>
+                            <a class="page-link" href="@Qs("Index", new { page = pageNo - 1 })">«</a>
                         </li>
                         @for (var pp = from; pp <= to; pp++)
                         {
                             <li class="page-item @(pp == pageNo ? "active" : "")">
-                                <a class="page-link" asp-action="Index" asp-all-route-data="Route(new { page = pp })">@pp</a>
+                                <a class="page-link" href="@Qs("Index", new { page = pp })">@pp</a>
                             </li>
                         }
                         <li class="page-item @(pageNo == pageCount ? "disabled" : "")">
-                            <a class="page-link" asp-action="Index" asp-all-route-data="Route(new { page = pageNo + 1 })">»</a>
+                            <a class="page-link" href="@Qs("Index", new { page = pageNo + 1 })">»</a>
                         </li>
                     </ul>
                 </nav>

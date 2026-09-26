@@ -318,17 +318,17 @@
     @* The PO-date range is gone: this page is about when a container ARRIVED,
        and the PO date is no longer shown anywhere on it. The service still
        accepts from/to against doc_date for anyone with an old bookmark. *@
-    @* Arrival-date range, so the QC team can work through one day's arrivals.
-       Filters the same arrival_date the "Arr" cell displays. *@
+    @* Receive-date range, so the QC team can work through one day's receipts.
+       Filters the same SAP Receive_Date the "Received" cell displays. *@
     <div class="col-6 col-md-2">
-        <label class="form-label small mb-1">@Loc["Arrival date from"]</label>
+        <label class="form-label small mb-1">@Loc["Receive date from"]</label>
         <input type="date" name="arrFrom" value="@Dstr(arrFromDate)" class="form-control form-control-sm"
-               title="Show containers that arrived on/after this date" />
+               title="Show containers received on/after this date" />
     </div>
     <div class="col-6 col-md-2">
-        <label class="form-label small mb-1">@Loc["Arrival date to"]</label>
+        <label class="form-label small mb-1">@Loc["Receive date to"]</label>
         <input type="date" name="arrTo" value="@Dstr(arrToDate)" class="form-control form-control-sm"
-               title="Show containers that arrived on/before this date" />
+               title="Show containers received on/before this date" />
     </div>
     <div class="col-md-3 d-flex align-items-end gap-2">
         <button type="submit" class="btn btn-primary btn-sm">
@@ -460,7 +460,7 @@
                     <th data-sort data-col-key="storage">@Loc["Storage"]</th>
                     <th class="text-end" data-sort="num" data-col-key="lines">@Loc["Lines"]</th>
                     <th data-col-key="materials">@Loc["Materials"]</th>
-                    <th data-sort data-col-key="dates">@Loc["Arrival date"]</th>
+                    <th data-sort data-col-key="dates">@Loc["Receive date"]</th>
                     <th class="text-end" data-col-key="action" data-col-lock>@Loc["Action"]</th>
                 </tr>
             </thead>
@@ -650,13 +650,24 @@
                         </td>
                         <td>
                             <div class="pp-stack pp-code">
-                                @* Arrival date only. The PO date was the primary
-                                   line here and is the one nobody works from --
-                                   what matters is when the container landed. *@
-                                <span>
-                                    <span class="pp-sub-label">@Loc["Arr"]</span>
+                                @* The receive date leads: SAP's Receive_Date, the
+                                   branch goods receipt, which is the date the
+                                   list sorts and filters on and the date the
+                                   arrival, the dashboard and the Time Bar will
+                                   carry. The vessel's arrival at port sits under
+                                   it for context. The PO date was the primary
+                                   line here once and is the one nobody works from. *@
+                                <span title='@Loc["SAP Receive_Date — the branch goods receipt"]'>
+                                    <span class="pp-sub-label">@Loc["Recv"]</span>
                                     @(r.ArrivalDate?.ToString("yyyy-MM-dd") ?? "—")
                                 </span>
+                                @if (r.PortArrivalDate.HasValue)
+                                {
+                                    <span class="pp-sub" title='@Loc["SAP Arrival_Date — the vessel reaching the port"]'>
+                                        <span class="pp-sub-label">@Loc["Vessel"]</span>
+                                        @r.PortArrivalDate.Value.ToString("yyyy-MM-dd")
+                                    </span>
+                                }
                                 @* Who filed it away and when — the archive's only
                                    provenance, so it belongs next to the dates. *@
                                 @if (isArchive && r.ArchivedAt.HasValue)
@@ -806,8 +817,8 @@
     }
 </div>
 
-@* ---- Archive / restore by ARRIVAL-date range (Manager / Admin) ----
-   The range is matched on the same "Arr" date the grid prints, so what gets
+@* ---- Archive / restore by RECEIVE-date range (Manager / Admin) ----
+   The range is matched on the same receive date the grid prints, so what gets
    archived is exactly what the operator was looking at. Nothing is deleted:
    the flag is invisible to the SAP sweep, and the archive view restores. ---- *@
 @if (canArchive)
@@ -819,21 +830,21 @@
                 <form asp-action="RestorePendingRange" method="post" class="modal-content">
                     @Html.AntiForgeryToken()
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Restore by arrival date"]</h5>
+                        <h5 class="modal-title"><i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Restore by receive date"]</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <p class="small text-muted">
-                            Puts every <strong>@Loc["archived"]</strong> container whose arrival date falls in this range
+                            Puts every <strong>@Loc["archived"]</strong> container whose receive date falls in this range
                             back into the pending list. Leave a bound empty for an open-ended range.
                         </p>
                         <div class="row g-2">
                             <div class="col-6">
-                                <label class="form-label small mb-1">@Loc["Arrival date from"]</label>
+                                <label class="form-label small mb-1">@Loc["Receive date from"]</label>
                                 <input type="date" name="from" class="form-control form-control-sm" />
                             </div>
                             <div class="col-6">
-                                <label class="form-label small mb-1">@Loc["Arrival date to"]</label>
+                                <label class="form-label small mb-1">@Loc["Receive date to"]</label>
                                 <input type="date" name="to" class="form-control form-control-sm" />
                             </div>
                         </div>
@@ -855,12 +866,12 @@
                 <form asp-action="ArchivePending" method="post" class="modal-content">
                     @Html.AntiForgeryToken()
                     <div class="modal-header">
-                        <h5 class="modal-title"><i class="bi bi-archive me-1"></i>@Loc["Archive by arrival date"]</h5>
+                        <h5 class="modal-title"><i class="bi bi-archive me-1"></i>@Loc["Archive by receive date"]</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
                     </div>
                     <div class="modal-body">
                         <p class="small text-muted mb-2">
-                            Files every <strong>@Loc["pending"]</strong> container whose arrival date falls in this range out of
+                            Files every <strong>@Loc["pending"]</strong> container whose receive date falls in this range out of
                             this list — typically old shipments that will never become an Arrival. Leave a bound
                             empty for an open-ended range (e.g. only a <em>@Loc["to"]</em> date archives everything older).
                         </p>
@@ -871,11 +882,11 @@
                         </div>
                         <div class="row g-2">
                             <div class="col-6">
-                                <label class="form-label small mb-1">@Loc["Arrival date from"]</label>
+                                <label class="form-label small mb-1">@Loc["Receive date from"]</label>
                                 <input type="date" name="from" class="form-control form-control-sm" />
                             </div>
                             <div class="col-6">
-                                <label class="form-label small mb-1">@Loc["Arrival date to"]</label>
+                                <label class="form-label small mb-1">@Loc["Receive date to"]</label>
                                 <input type="date" name="to" class="form-control form-control-sm" />
                             </div>
                         </div>

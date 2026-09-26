@@ -38,13 +38,14 @@
             <div class="qcs-f"><span>@Loc["Vessel Name"]</span><span>@V(s?.VesselName)</span></div>
         </div>
         @* Middle column is the shipment TIMELINE, in the order the events
-           actually happen -- loading, discharge, pullout, receive, unloading,
-           inspection -- so a gap or an out-of-order date is visible at a
-           glance. Arrival Date is deliberately left out of the summary; the
-           QC report PDF still prints it from SAP's port-arrival date.
-           The derived figures (transit days) close the column. *@
+           actually happen -- loading, vessel arrival, discharge, pullout,
+           receive, unloading, inspection -- so a gap or an out-of-order date is
+           visible at a glance. Same sequence and captions as the QC report PDF.
+           The derived figure (transit days: loading to discharge) closes the
+           column. *@
         <div class="col-md-4">
             <div class="qcs-f"><span>@Loc["Loading Date"]</span><span>@D(s?.SailingDate)</span></div>
+            <div class="qcs-f"><span>@Loc["Vessel Arrival Date"]</span><span>@D(s?.PortArrivalDate)</span></div>
             <div class="qcs-f"><span>@Loc["Discharge Date"]</span><span>@D(s?.DischargeDate)</span></div>
             <div class="qcs-f"><span>@Loc["Pullout Date"]</span><span>@D(s?.PullOutDate)</span></div>
             <div class="qcs-f"><span>@Loc["Receive Date"]</span><span>@D(s?.ReceiveDate)</span></div>
@@ -53,7 +54,7 @@
                they differ whenever the order is raised days after the container
                was checked in. Matches the QC report. *@
             <div class="qcs-f"><span>@Loc["Inspection Date"]</span><span>@D(Model.InspectionDate ?? s?.InspectionDate)</span></div>
-            <div class="qcs-f"><span>@Loc["Transit Days"]</span><span>@(s?.TransitDays?.ToString() ?? "—")</span></div>
+            <div class="qcs-f"><span>@Loc["Transit Days"]</span><span>@(s?.EffectiveTransitDays?.ToString() ?? "—")</span></div>
         </div>
         <div class="col-md-4">
             <div class="qcs-f"><span>@Loc["Logger Serial"]</span><span>@V(cl?.DataLoggerSerial)</span></div>

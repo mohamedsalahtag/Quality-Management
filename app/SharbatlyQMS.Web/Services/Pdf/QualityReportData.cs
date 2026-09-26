@@ -99,8 +99,8 @@ public class QualityReportData
     public List<SampleBundle>   Samples         { get; set; } = new();
 
     /// <summary>
-    /// Page 1 grouped summaries keyed by (MaterialGroup, Brand, Variety,
-    /// Grade). Built by <see cref="QualityOrderService.BuildGroupSummariesAsync"/>.
+    /// Page 1 grouped summaries keyed by (MaterialGroup, Variety, Grade);
+    /// the brands in each group are listed, not grouped on. Built by <see cref="QualityOrderService.BuildGroupSummariesAsync"/>.
     /// Replaces the per-sample summary blocks that used to render on page 1.
     /// </summary>
     public IReadOnlyList<MaterialGroupSummary> GroupSummaries { get; set; } = Array.Empty<MaterialGroupSummary>();
@@ -152,9 +152,25 @@ public class QualityReportData
     public bool   ThumbCover   { get; set; } = true;
 
     /// <summary>Which shipment date the Time Bar counts from: one of
-    /// <see cref="TimeBarBases"/>. Defaults to Discharge. Set by
-    /// ReportsController from the Report.TimeBarBasis setting.</summary>
-    public string TimeBarBasis { get; set; } = TimeBarBases.Discharge;
+    /// <see cref="TimeBarArrivalBases"/> -- the SAME setting the Time Bar page
+    /// uses, so the report and the page print the same number for a container.
+    /// Defaults to the branch receive date. Set by ReportsController.</summary>
+    public string TimeBarBasis { get; set; } = TimeBarArrivalBases.GoodsReceipt;
+
+    /// <summary>The date the Time Bar counts from, per <see cref="TimeBarBasis"/>.</summary>
+    public DateTime? TimeBarStartDate =>
+        TimeBarBasis == TimeBarArrivalBases.PortArrival ? Shipment?.PortArrivalDate : Shipment?.ReceiveDate;
+
+    /// <summary>"Receipt" or "Port arrival" -- the suffix printed after "Time Bar".</summary>
+    public string TimeBarCaption => TimeBarArrivalBases.Caption(TimeBarBasis);
+
+    /// <summary>
+    /// Whole days from <see cref="TimeBarStartDate"/> to the day the order was
+    /// finished (or to today while it is open), in local dates. Null when the
+    /// start date is unknown. One arithmetic, shared with the Time Bar page.
+    /// </summary>
+    public int? TimeBarDays =>
+        ShipmentDates.TimeBarDays(TimeBarStartDate, QualityOrder.ClosedAt ?? GeneratedAt);
 
     /// <summary>
     /// Absolute file-system path to the company logo configured under

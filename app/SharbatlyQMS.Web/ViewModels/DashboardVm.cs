@@ -179,12 +179,15 @@ public class PlantCommitmentRow
 {
     public string Plant     { get; set; } = "";
 
-    /// <summary>Arrivals created in the period -- containers received.</summary>
+    /// <summary>Containers received in the period, by SAP's branch receive date.</summary>
     public int    Received  { get; set; }
 
     /// <summary>
-    /// How many of <see cref="Received"/> now have a quality order. The SAME
-    /// containers, not a second count of unrelated work.
+    /// How many of <see cref="Received"/> have a live quality order opened by
+    /// the end of the period. The SAME containers, not a second count of
+    /// unrelated work. "By the end", not "inside": SAP posts the branch receipt
+    /// after the inspection has begun on about one container in a hundred, and
+    /// that container is inspected, not pending, on the day it is received.
     ///
     /// This used to be "quality orders created in the period", which is a
     /// different cohort entirely and produced numbers nobody could read: on
@@ -211,9 +214,11 @@ public class PlantCommitmentRow
     /// </summary>
     public int    QosCatchUp { get; set; }
 
-    /// <summary>The rest of the period's orders: this period's own arrivals.
-    /// Equal to <see cref="Committed"/> by construction -- both count orders
-    /// OPENED in the period against arrivals received in it.</summary>
+    /// <summary>The rest of the period's orders: those not on earlier arrivals.
+    /// Usually equal to <see cref="Committed"/>; they part company only for an
+    /// inspection opened before SAP posted the container's receipt (counted in
+    /// Committed for the period the container was received in, and here for
+    /// the period the order was opened in).</summary>
     public int    QosOnNewArrivals => Math.Max(0, QosCreated - QosCatchUp);
 
     /// <summary>Orders opened per day over the period. Null when the period is

@@ -131,22 +131,23 @@ public class DashboardService : IDashboardService
         const string plantWhere =
             "(@plant IS NULL OR a.plant = @plant) AND (@sUnrestricted = 1 OR a.plant IN @sPlants)";
 
-        // WHEN THE CONTAINER ARRIVED, as SAP states it -- not when somebody
-        // got round to creating the arrival record in this application.
+        // WHEN THE BRANCH RECEIVED THE CONTAINER, as SAP states it (Receive_Date,
+        // the goods receipt) -- not when somebody got round to creating the
+        // arrival record in this application.
         //
         // The two are not close. Measured across 2,174 arrivals: the record is
-        // created on average 3.7 days after the SAP arrival date and as much as
-        // 34 days after, and 260 of them (12%) fall in a DIFFERENT MONTH. A
-        // dashboard keyed on created_at therefore disagrees with SAP for one
-        // container in eight, and over-counts September by 26% (939 against
-        // 743).
+        // created on average 3.7 days after the SAP date and as much as 34 days
+        // after, and 260 of them (12%) fall in a DIFFERENT MONTH. A dashboard
+        // keyed on created_at therefore disagrees with SAP for one container in
+        // eight, and over-counts September by 26% (939 against 743).
         //
-        // qms_shipment_snapshot carries SAP's date, frozen per arrival, and
-        // every arrival has one (2,174 of 2,174, exactly one row each, so the
-        // join cannot fan out). It agrees with the live SAP cache for 2,163 of
-        // them; the handful that differ are arrivals SAP corrected after the
-        // snapshot was taken. The fallback to created_at exists only for an
-        // arrival raised through /Arrivals/Search that SAP has never seen.
+        // qms_shipment_snapshot carries SAP's date and every arrival has one
+        // (exactly one row each, so the join cannot fan out). It is refreshed
+        // from the SAP cache on every sweep, because SAP advances Receive_Date
+        // from the port pull-out to the branch goods receipt days after the
+        // container is first seen -- see ShipmentDates. The fallback to
+        // created_at exists only for an arrival raised through /Arrivals/Search
+        // that SAP has never seen.
         const string arrivalJoin =
             "LEFT JOIN qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id";
 
@@ -166,14 +167,14 @@ public class DashboardService : IDashboardService
         // attributed to the period it actually finished in.
         const string liveOrderOnly = "qo.superseded_at IS NULL";
         const string arrivalDate =
-            "COALESCE(ss.arrival_date, CAST(a.created_at AS DATE))";
-        // ...compared against LOCAL dates. arrival_date is a SQL DATE holding a
+            "COALESCE(ss.receive_date, ss.arrival_date, CAST(a.created_at AS DATE))";
+        // ...compared against LOCAL dates. receive_date is a SQL DATE holding a
         // local business date while created_at is UTC, so the two need
         // different bounds -- comparing a local date against a UTC datetime is
         // how a container arriving late in the day lands in yesterday.
         const string arrivalInPeriod =
-            "COALESCE(ss.arrival_date, CAST(a.created_at AS DATE)) >= @fromDate AND " +
-            "COALESCE(ss.arrival_date, CAST(a.created_at AS DATE)) <  @toDateEx";
+            "COALESCE(ss.receive_date, ss.arrival_date, CAST(a.created_at AS DATE)) >= @fromDate AND " +
+            "COALESCE(ss.receive_date, ss.arrival_date, CAST(a.created_at AS DATE)) <  @toDateEx";
 
         // Single QueryMultiple = one round trip with many result sets.
         // Keeps SAP-cache + arrivals + QOs + defects under one connection
@@ -449,22 +450,28 @@ public class DashboardService : IDashboardService
 
             -- 11) Received vs inspected, per plant, over the period.
             --
-            --     Received        = arrivals created in the period.
-            --     PeriodInspected = quality orders opened in the period against
-            --                       THOSE arrivals.
+            --     Received        = containers received in the period (SAP's
+            --                       branch receive date).
+            --     PeriodInspected = how many of THOSE have a live quality order
+            --                       opened by the END of the period.
             --     BacklogInspected= quality orders opened in the period against
-            --                       arrivals from BEFORE it.
-            --     Total           = PeriodInspected + BacklogInspected, exactly.
+            --                       containers received BEFORE it.
+            --     Total           = quality orders opened in the period.
             --
-            --     That identity is the point. PeriodInspected used to be how
-            --     many of this period's arrivals have an order NOW, counted by
-            --     EXISTS -- a different question, and it did not reconcile: for
-            --     1-9 September the portlet showed 141 taken into QC beside 192
-            --     opened of which 64 were catching up, and 192 - 64 = 128, not
-            --     141. The 13 were arrivals whose order was opened outside the
-            --     window (mostly the following day), counted by one column and
-            --     not the other. Both halves are now about orders opened IN the
-            --     period, so the columns add up whatever the window.
+            --     PeriodInspected is bounded by the period's END, not by its
+            --     start as well, because the receive date is SAP's branch goods
+            --     receipt and SAP posts it AFTER the inspection has begun on
+            --     about one container in a hundred (20 of 2,041, up to five days
+            --     later). Counting only orders opened inside the window listed
+            --     those containers as pending inspection on the very day they
+            --     were received, with a finished inspection sitting on them.
+            --
+            --     The price is that Total = PeriodInspected + BacklogInspected
+            --     holds only up to those early inspections (and their mirror,
+            --     an order opened in the window for a container SAP receives
+            --     after it). An order opened outside the window at the LATE end
+            --     -- the following day -- is still not counted, which is right:
+            --     as of the period's end that container was not inspected.
             --
             --     Coverage stays a property of the received cohort:
             --     PeriodInspected / Received.
@@ -474,12 +481,21 @@ public class DashboardService : IDashboardService
             --     hide the very catching-up it exists to show.
             SELECT COALESCE(r.plant, q.plant)  AS Plant,
                    ISNULL(r.Received, 0)       AS Received,
-                   ISNULL(q.OnPeriod, 0)       AS Committed,
+                   ISNULL(r.Committed, 0)      AS Committed,
                    ISNULL(q.Cnt, 0)            AS QosCreated,
                    ISNULL(q.CatchUp, 0)        AS QosCatchUp
             FROM (
-                SELECT a.plant, COUNT(*) AS Received
+                -- OUTER APPLY rather than EXISTS inside the SUM: SQL Server
+                -- refuses a subquery in an aggregate's argument (Msg 130).
+                SELECT a.plant,
+                       COUNT(*)                                          AS Received,
+                       SUM(CASE WHEN o.arrival_id IS NULL THEN 0 ELSE 1 END) AS Committed
                 FROM   qms_arrival a {arrivalJoin}
+                OUTER APPLY (SELECT TOP 1 q2.arrival_id
+                             FROM   qms_quality_order q2
+                             WHERE  q2.arrival_id = a.arrival_id
+                               AND  q2.superseded_at IS NULL
+                               AND  q2.created_at < @toUtcEx) o
                 WHERE  {arrivalInPeriod}
                   AND  {plantWhere}
                 GROUP  BY a.plant
@@ -509,14 +525,17 @@ public class DashboardService : IDashboardService
                      WHERE DATEADD({bucket}, DATEDIFF({bucket}, 0, {arrivalDate}), 0) = b.Bucket
                        AND {arrivalInPeriod}
                        AND {plantWhere})                                        AS Received,
-                   -- Of the containers received IN THIS BUCKET, how many have an
-                   -- order. Same cohort as Received, so the two bars are
-                   -- comparable at every point on the axis.
+                   -- Of the containers received IN THIS BUCKET, how many have a
+                   -- live order opened by the period's end. Same cohort and the
+                   -- same rule as the table above, so the bars and the columns
+                   -- agree at every point on the axis.
                    (SELECT COUNT(*) FROM qms_arrival a {arrivalJoin}
                      WHERE DATEADD({bucket}, DATEDIFF({bucket}, 0, {arrivalDate}), 0) = b.Bucket
                        AND {arrivalInPeriod}
                        AND EXISTS (SELECT 1 FROM qms_quality_order qq
-                                   WHERE qq.arrival_id = a.arrival_id)
+                                   WHERE qq.arrival_id = a.arrival_id
+                                     AND qq.superseded_at IS NULL
+                                     AND qq.created_at < @toUtcEx)
                        AND {plantWhere})                                        AS Committed,
                    (SELECT COUNT(*) FROM qms_quality_order qo
                      JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
@@ -691,15 +710,20 @@ public class DashboardService : IDashboardService
         var fromUtc = DateTime.SpecifyKind(fromLocal, DateTimeKind.Local).ToUniversalTime();
         var toUtcEx = DateTime.SpecifyKind(toLocal.AddDays(1), DateTimeKind.Local).ToUniversalTime();
 
+        // A live order opened by the END of the period -- not necessarily inside
+        // it. SAP posts the branch receipt after the inspection has begun on
+        // about one container in a hundred, and such a container is inspected,
+        // not pending, on the day it is received. Same rule as the portlet.
         const string openedInPeriod =
             "EXISTS (SELECT 1 FROM qms_quality_order q2 WHERE q2.arrival_id = a.arrival_id " +
             "AND q2.superseded_at IS NULL " +
-            "AND q2.created_at >= @fromUtc AND q2.created_at < @toUtcEx)";
+            "AND q2.created_at < @toUtcEx)";
 
-        // The same arrival date the portlet counts on -- SAP's, not the moment
-        // the record was typed. The drill-through exists to answer with the
-        // rows behind a number, so it has to agree on what "arrived" means.
-        const string arrivalDate = "COALESCE(ss.arrival_date, CAST(a.created_at AS DATE))";
+        // The same receive date the portlet counts on -- SAP's goods receipt,
+        // not the moment the record was typed. The drill-through exists to
+        // answer with the rows behind a number, so it has to agree on what
+        // "received" means.
+        const string arrivalDate = "COALESCE(ss.receive_date, ss.arrival_date, CAST(a.created_at AS DATE))";
         // Same filter as the portlet. Without it the LEFT JOIN below fans a
         // reinspected container into two rows and the sheet stops matching the
         // number it was opened from.
@@ -737,7 +761,7 @@ public class DashboardService : IDashboardService
                     a.ebeln                    AS Ebeln,
                     a.vendor_name              AS VendorName,
                     a.status_code              AS ArrivalStatus,
-                    CAST(COALESCE(ss.arrival_date, CAST(a.created_at AS DATE)) AS DATETIME2) AS ArrivalCreatedAt,
+                    CAST({arrivalDate} AS DATETIME2) AS ArrivalCreatedAt,
                     a.created_at               AS RecordCreatedAt,
                     qo.quality_order_id        AS QualityOrderId,
                     qo.quality_order_no        AS QualityOrderNo,
@@ -751,7 +775,7 @@ public class DashboardService : IDashboardService
             WHERE   {where}
               AND   (@plant IS NULL OR a.plant = @plant)
               AND   (@sUnrestricted = 1 OR a.plant IN @sPlants)
-            ORDER BY a.plant, COALESCE(ss.arrival_date, CAST(a.created_at AS DATE)) DESC, a.arrival_no";
+            ORDER BY a.plant, {arrivalDate} DESC, a.arrival_no";
 
         using var c = new SqlConnection(_cs);
         var rows = await c.QueryAsync<CommitmentDetailRow>(new CommandDefinition(sql, new

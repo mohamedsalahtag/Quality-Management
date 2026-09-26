@@ -65,11 +65,14 @@ public class FlatSampleSeed
     // SAP container cache (one row via OUTER APPLY TOP 1)
     public string?   Sto              { get; set; }
     public DateTime? PoDate           { get; set; }  // V31: cc.doc_date
-    // Dates: prefer authoritative qms_shipment_snapshot, fall back to cc cache.
+    // Dates -- see ShipmentDates for what each means. The receive date is SAP's
+    // branch goods receipt, read from the cache first (SAP's current value) and
+    // the snapshot second; ArrivalDate is its legacy twin, not the vessel's arrival.
     public DateTime? ArrivalDate      { get; set; }
     public DateTime? ReceiveDate      { get; set; }
+    public DateTime? PortArrivalDate  { get; set; }  // M36: the vessel reaching port (SAP Arrival_Date)
     // Shipment snapshot (LEFT JOIN qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id)
-    public DateTime? LoadingDate      { get; set; }  // V31: ss.loading_date
+    public DateTime? LoadingDate      { get; set; }  // M36: ss.sailing_date (SAP's LoadingDate is always empty)
     public DateTime? ShippingDate     { get; set; }  // V31: ss.sailing_date (vessel departure)
-    public short?    TransitDays      { get; set; }  // V31: ss.transit_days
+    public short?    TransitDays      { get; set; }  // M36: loading -> discharge, SAP's figure as fallback
 }

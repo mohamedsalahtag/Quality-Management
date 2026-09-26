@@ -360,15 +360,18 @@
                than a blank, or the sequence would silently close up. *@
             @{
                 string SD(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "—";
+                // Labels share their keys with the arrival page, so a caption
+                // renamed on Admin -> Labels ("Vessel Discharge Date", "Branch
+                // Receive Date") reads the same here.
                 var timeline = new (string Label, DateTime? Value)[]
                 {
-                    ("Loading",    shipment.SailingDate),
-                    ("Arrival",    shipment.ArrivalDate),
-                    ("Discharge",  shipment.DischargeDate),
-                    ("Pullout",    shipment.PullOutDate),
-                    ("Receive",    shipment.ReceiveDate),
-                    ("Unloading",  shipment.UnloadingDate),
-                    ("Inspection", shipment.InspectionDate),
+                    (Loc["Loading date"],        shipment.SailingDate),
+                    (Loc["Vessel arrival date"], shipment.PortArrivalDate),
+                    (Loc["Discharge date"],      shipment.DischargeDate),
+                    (Loc["Pull-out date"],       shipment.PullOutDate),
+                    (Loc["Receive date"],        shipment.ReceiveDate),
+                    (Loc["Unloading date"],      shipment.UnloadingDate),
+                    (Loc["Inspection date"],     shipment.InspectionDate),
                 };
             }
             <hr class="my-2" />
@@ -379,10 +382,10 @@
                         <strong>@ev.Label:</strong> @SD(ev.Value)
                     </div>
                 }
-                @if (shipment.TransitDays.HasValue)
+                @if (shipment.EffectiveTransitDays.HasValue)
                 {
-                    <div class="col-6 col-md-3 col-xl-2">
-                        <strong>@Loc["Transit days:"]</strong> @shipment.TransitDays
+                    <div class="col-6 col-md-3 col-xl-2" title='@Loc["Loading date to discharge date; SAP's estimate until the discharge date is entered"]'>
+                        <strong>@Loc["Transit days:"]</strong> @shipment.EffectiveTransitDays
                     </div>
                 }
             </div>

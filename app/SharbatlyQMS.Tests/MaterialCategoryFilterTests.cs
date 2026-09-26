@@ -109,7 +109,7 @@ public class MaterialCategoryFilterTests : IClassFixture<QmsAppFactory>
         Assert.True(pOne.Total <= pAll.Total);
 
         var tAll = await timeBar.ListAsync(new TimeBarFilter { PageSize = 50 }, PlantScope.All, new TimeBarConfig());
-        var tOne = await timeBar.ListAsync(new TimeBarFilter { PageSize = 50, MatMajor = major }, PlantScope.All, new TimeBarConfig());
+        var tOne = await timeBar.ListAsync(new TimeBarFilter { PageSize = 50, MatMajor = new() { major } }, PlantScope.All, new TimeBarConfig());
         _out.WriteLine($"time bar       {tOne.Total} of {tAll.Total}");
         Assert.True(tOne.Total <= tAll.Total);
     }

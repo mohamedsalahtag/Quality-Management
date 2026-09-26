@@ -253,6 +253,7 @@ public class ContainerCacheService : IContainerCacheService
                 MAX(doc_date)      AS DocDate,
                 MAX(arrival_date)  AS ArrivalDate,
                 MAX(receive_date)  AS ReceiveDate,
+                MAX(port_arrival_date) AS PortArrivalDate,
                 MAX(transit_days)  AS TransitDays,
                 MIN(first_seen_at) AS FirstSeenAt,
                 MAX(archived_at)   AS ArchivedAt,
@@ -694,6 +695,62 @@ public class ContainerCacheService : IContainerCacheService
     }
 
     /// <summary>
+    /// Copies SAP's CURRENT dates from the cache onto every arrival's shipment
+    /// snapshot. This is the fix for the arrival page, the QO page, the claims
+    /// list, the QC report and the dashboard all disagreeing with the pending
+    /// list and the Time Bar page about when a container was received.
+    ///
+    /// SAP's Receive_Date is not fixed at first sight. It appears when the
+    /// container is pulled out of the port and is then advanced to the day the
+    /// branch books the goods in -- on average four days later, on more than
+    /// half of all arrivals (1,180 of 2,268 with a finished QC, measured
+    /// 2026-09-26). The snapshot copied it once at arrival creation and never
+    /// looked again, so everything reading the snapshot showed the pull-out
+    /// date while everything reading the cache showed the goods receipt.
+    ///
+    /// Only SAP-owned columns are touched (receive_date, its legacy twin
+    /// arrival_date, port_arrival_date and SAP's transit_days); the inspector's
+    /// own dates are never written here. A cache line that has lost its date is
+    /// ignored rather than copied, so a snapshot is never blanked: an arrival is
+    /// a record of a container that WAS received. Matching mirrors
+    /// TimeBarService -- ISNULL on the arrival's nullable keys, because the
+    /// cache stores '' for a BOL-less shipment.
+    ///
+    /// Safe to run on every sweep: it stops changing anything once SAP's dates
+    /// settle, and they do -- the receipt never moved more than five days past
+    /// a QC finish on any of the 2,268 measured.
+    /// </summary>
+    public async Task<int> RefreshArrivalSnapshotsAsync(CancellationToken ct = default)
+    {
+        using var c = Open();
+        await c.OpenAsync(ct);
+        return await c.ExecuteAsync(new CommandDefinition(@"
+            ;WITH k AS (
+                SELECT container_no, bol_no, ebeln,
+                       MAX(receive_date)      AS receive_date,
+                       MAX(port_arrival_date) AS port_arrival_date,
+                       MAX(transit_days)      AS transit_days
+                FROM   qms_sap_container_cache
+                GROUP  BY container_no, bol_no, ebeln
+            )
+            UPDATE ss
+            SET    ss.receive_date      = COALESCE(k.receive_date,      ss.receive_date),
+                   ss.arrival_date      = COALESCE(k.receive_date,      ss.arrival_date),
+                   ss.port_arrival_date = COALESCE(k.port_arrival_date, ss.port_arrival_date),
+                   ss.transit_days      = COALESCE(k.transit_days,      ss.transit_days)
+            FROM   qms_shipment_snapshot ss
+            JOIN   qms_arrival a ON a.arrival_id = ss.arrival_id
+            JOIN   k ON k.container_no = ISNULL(a.container_no, '')
+                    AND k.bol_no       = ISNULL(a.bol_no, '')
+                    AND k.ebeln        = ISNULL(a.ebeln, '')
+            WHERE  (k.receive_date      IS NOT NULL AND (ss.receive_date      IS NULL OR ss.receive_date      <> k.receive_date
+                                                      OR ss.arrival_date      IS NULL OR ss.arrival_date      <> k.receive_date))
+               OR  (k.port_arrival_date IS NOT NULL AND (ss.port_arrival_date IS NULL OR ss.port_arrival_date <> k.port_arrival_date))
+               OR  (k.transit_days      IS NOT NULL AND (ss.transit_days      IS NULL OR ss.transit_days      <> k.transit_days));",
+            commandTimeout: 120, cancellationToken: ct));
+    }
+
+    /// <summary>
     /// Clears the cached dates on pending rows that this sweep should have
     /// refreshed but did not, because SAP no longer reports a Receive_Date for
     /// them.
@@ -784,9 +841,11 @@ public class ContainerCacheService : IContainerCacheService
                 await UpsertAsync(page, c2);
             }, ct);
             var reconciled = await ReconcileWithArrivalsAsync(ct);
+            var refreshed = await RefreshArrivalSnapshotsAsync(ct);
             var undated = await DropStaleReceiveDatesAsync(startedAtUtc, effectiveSince, ct);
             var autoArchived = await ArchiveArrivalsBeforeAsync(archiveArrivalsBefore, ct);
             message = $"Fetched {totalRows} SAP row(s) since {effectiveSince:yyyy-MM-dd}; reconciled {reconciled} pre-existing arrival(s)."
+                    + (refreshed > 0 ? $" Refreshed SAP dates on {refreshed} arrival(s)." : "")
                     + (undated > 0 ? $" Cleared {undated} container line(s) SAP no longer dates." : "")
                     + (autoArchived > 0 ? $" Auto-archived {autoArchived} container(s) that arrived before {archiveArrivalsBefore:yyyy-MM-dd}." : "");
             success = true;

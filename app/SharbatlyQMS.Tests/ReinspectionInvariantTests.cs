@@ -241,7 +241,12 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
 
             _out.WriteLine($"received {received.Count} = period {period.Count} + pending {pending.Count}");
             Assert.Equal(received.Count, period.Count + pending.Count);
-            Assert.Equal(total.Count,    period.Count + backlog.Count);
+            // Total = Period + Backlog only up to the inspections SAP's receipt
+            // trails (see CommitmentDetailTests); what is exact is that Backlog
+            // is the orders on containers received before today.
+            var today = DateTime.Now.Date;
+            Assert.Equal(total.Where(r => r.ArrivalCreatedAt.Date < today).Select(r => r.ArrivalId).ToHashSet(),
+                         backlog.Select(r => r.ArrivalId).ToHashSet());
 
             // The reinspected container appears ONCE, not twice.
             Assert.Equal(1, received.Count(r => r.ArrivalId == arrivalId));

@@ -103,19 +103,35 @@ public class SapShipmentRow
     public string  Uom               { get; set; } = "";
 
     // Shipment
+    // Shipment dates. The meaning of each, and which one feeds which figure,
+    // is written down once on Services.ShipmentDates.
     public DateOnly? DocDate         { get; set; }   // SAP ZQC_Data column Doc_Date (DDIC BEDAT, PO document date)
+    /// <summary>ZQC_Data.LoadingDate. Empty on every row SAP has ever sent
+    /// (0 of 25,120 measured 2026-09-26); <see cref="SailingDate"/> is the
+    /// loading date the business works from.</summary>
     public DateOnly? LoadingDate     { get; set; }
+    /// <summary>ZQC_Data.Sailing_Date -- printed as "Loading date" everywhere.</summary>
     public DateOnly? SailingDate     { get; set; }
     public DateOnly? ExaminationDate { get; set; }
+    /// <summary>Legacy twin of <see cref="ReceiveDate"/>: it has always carried
+    /// ZQC_Data.Receive_Date, never the vessel's arrival. Feeds the cache's
+    /// arrival_date column, which the pending list sorts, filters and archives
+    /// on. Read <see cref="ReceiveDate"/> in new code.</summary>
     public DateOnly? ArrivalDate     { get; set; }
-    /// <summary>ZQC_Data.Arrival_Date — the date the vessel actually reached the
-    /// port of arrival. Sparse in SAP (~33% populated as of 2026-08), which is
-    /// why <see cref="ArrivalDate"/> deliberately carries Receive_Date instead
-    /// for the /Arrivals/Pending grid. Only the QC report reads this one, and it
-    /// prints blank when SAP has no value.</summary>
+    /// <summary>ZQC_Data.Arrival_Date — the vessel reaching the port of arrival.
+    /// 100% populated on current data (it was sparse on rows from 2023). Equal
+    /// to Estimated_Arrival_Date on 99.6% of rows, so it is an ETA-grade date.</summary>
     public DateOnly? PortArrivalDate { get; set; }
+    /// <summary>Not in ZQC_Data at all -- never populated from SAP. The
+    /// inspector enters the unloading date on the arrival.</summary>
     public DateOnly? UnloadingDate   { get; set; }
+    /// <summary>ZQC_Data.Receive_Date: the BRANCH goods receipt. SAP first sets
+    /// it when the container is pulled out of the port and then advances it to
+    /// the day the branch books the goods in, so the cache is re-read on every
+    /// sweep and the arrival snapshot is refreshed from it.</summary>
     public DateOnly? ReceiveDate     { get; set; }
+    /// <summary>ZQC_Data.Transit_Days = Arrival_Date - Sailing_Date (ETA-based).
+    /// Only the fallback: the application prints loading -> discharge.</summary>
     public short?    TransitDays     { get; set; }
     public string    LoadingPort     { get; set; } = "";
     public string    LoadingCountry  { get; set; } = "";

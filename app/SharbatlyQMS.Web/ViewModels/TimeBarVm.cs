@@ -12,16 +12,22 @@ public class TimeBarFilter
     /// <summary>One box across container / BOL / PO / arrival no / QO no / supplier.</summary>
     public string? Search   { get; set; }
 
-    /// <summary>Pending | Arrival | QC. See <see cref="TimeBarStages"/>.</summary>
+    /// <summary>Pending | Arrival | QC. See <see cref="TimeBarStages"/>.
+    /// Chosen by the stage chips, not a dropdown, so it stays single-valued.</summary>
     public string? Stage    { get; set; }
-    /// <summary>The raw arrival or quality-order status code.</summary>
-    public string? Status   { get; set; }
-    public string? Plant    { get; set; }
-    public string? PoType   { get; set; }
-    /// <summary>Material master major category, e.g. Apples.</summary>
-    public string? MatMajor    { get; set; }
-    /// <summary>Sub-major under that major.</summary>
-    public string? MatSubMajor { get; set; }
+
+    // Every filter that is a dropdown accepts several values: the query string
+    // repeats the key (?plant=JD01&plant=RD02) and binding collects the list.
+    // Empty list = no filter.
+
+    /// <summary>Raw arrival or quality-order status codes.</summary>
+    public List<string> Status   { get; set; } = new();
+    public List<string> Plant    { get; set; } = new();
+    public List<string> PoType   { get; set; } = new();
+    /// <summary>Material master major categories, e.g. Apples.</summary>
+    public List<string> MatMajor    { get; set; } = new();
+    /// <summary>Sub-majors.</summary>
+    public List<string> MatSubMajor { get; set; } = new();
     public string? Supplier { get; set; }
     public string? Container{ get; set; }
     public string? Bol      { get; set; }
@@ -48,11 +54,11 @@ public class TimeBarFilter
 
     public bool Any =>
         !string.IsNullOrWhiteSpace(Search)   || !string.IsNullOrWhiteSpace(Stage)
-        || !string.IsNullOrWhiteSpace(Status)|| !string.IsNullOrWhiteSpace(Plant)
-        || !string.IsNullOrWhiteSpace(PoType)|| !string.IsNullOrWhiteSpace(Supplier)
+        || FilterValues.Many(Status).Count > 0 || FilterValues.Many(Plant).Count > 0
+        || FilterValues.Many(PoType).Count > 0 || !string.IsNullOrWhiteSpace(Supplier)
         || !string.IsNullOrWhiteSpace(Container) || !string.IsNullOrWhiteSpace(Bol)
         || !string.IsNullOrWhiteSpace(Po)    || From.HasValue || To.HasValue
-        || !string.IsNullOrWhiteSpace(MatMajor) || !string.IsNullOrWhiteSpace(MatSubMajor)
+        || FilterValues.Many(MatMajor).Count > 0 || FilterValues.Many(MatSubMajor).Count > 0
         || OverOnly || NoCacheOnly || MinDays.HasValue;
 }
 

@@ -186,10 +186,22 @@ public class ArrivalDateSourceTests : IClassFixture<QmsAppFactory>
         var total    = await Detail(CommitmentBuckets.TotalInspected,    from, to);
 
         _out.WriteLine($"received {received.Count} = period {period.Count} + pending {pending.Count}");
-        _out.WriteLine($"total    {total.Count} = period {period.Count} + backlog {backlog.Count}");
+        _out.WriteLine($"total    {total.Count} = backlog {backlog.Count} + on-period + ahead-of-receipt");
 
         Assert.Equal(received.Count, period.Count + pending.Count);
-        Assert.Equal(total.Count,    period.Count + backlog.Count);
+
+        // Total = Period + Backlog only up to the inspections SAP's receipt
+        // trails (about one in a hundred): those count in Period Inspection for
+        // the period the container was received in. What must hold exactly is
+        // that Backlog is precisely the orders on containers received BEFORE
+        // the period, and that every order opened in the period on a container
+        // received in it is in Period Inspection.
+        var toEx      = to.AddDays(1);
+        var before    = total.Where(r => r.ArrivalCreatedAt.Date <  from.Date).Select(r => r.ArrivalId).ToHashSet();
+        var inPeriod  = total.Where(r => r.ArrivalCreatedAt.Date >= from.Date && r.ArrivalCreatedAt.Date < toEx.Date)
+                             .Select(r => r.ArrivalId).ToHashSet();
+        Assert.Equal(before, backlog.Select(r => r.ArrivalId).ToHashSet());
+        Assert.True(inPeriod.IsSubsetOf(period.Select(r => r.ArrivalId).ToHashSet()));
 
         Assert.Equal(vm.Commitment.Sum(x => x.Received),   received.Count);
         Assert.Equal(vm.Commitment.Sum(x => x.Committed),  period.Count);

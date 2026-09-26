@@ -1071,7 +1071,7 @@
         </div>
         <div class="card-body">
             <p class="text-muted small mb-3">
-                @Loc["How the Time Bar page judges the days between a container arriving and its QC being finished. The claim window is short, so the optimum is one day."]
+                @Loc["How the Time Bar page judges the days between the branch receiving a container and its QC being finished. The claim window is short, so the optimum is one day. The clock basis chosen here is also the one the QC report's Time Bar counts from."]
             </p>
             <form asp-action="SaveTimeBarSettings" method="post" class="row g-3">
                 @Html.AntiForgeryToken()
@@ -1088,7 +1088,7 @@
                     <small class="text-muted">@Loc["Above this the bar is red; between the two it is amber. Never stored below the good limit."]</small>
                 </div>
                 <div class="col-md-6">
-                    <label class="form-label">@Loc["Only count containers that arrived on or after"]</label>
+                    <label class="form-label">@Loc["Only count containers received on or after"]</label>
                     <div class="input-group">
                         <input name="TimeBar.StartDate" type="date"
                                value="@(Model.TimeBar.StartDate?.ToString("yyyy-MM-dd"))"
@@ -1111,15 +1111,15 @@
                     <select name="TimeBar.ArrivalBasis" class="form-select">
                         <option value="@TimeBarArrivalBases.GoodsReceipt"
                                 selected="@(Model.TimeBar.ArrivalBasis == TimeBarArrivalBases.GoodsReceipt)">
-                            @Loc["Goods receipt (the date shown as \"Arr\" everywhere else)"]
+                            @Loc["Branch receive date (SAP Receive_Date — the goods receipt, refreshed from SAP on every sync)"]
                         </option>
                         <option value="@TimeBarArrivalBases.PortArrival"
                                 selected="@(Model.TimeBar.ArrivalBasis == TimeBarArrivalBases.PortArrival)">
-                            @Loc["Port arrival (when the container physically landed)"]
+                            @Loc["Vessel arrival date (SAP Arrival_Date — when the vessel reached the port)"]
                         </option>
                     </select>
                     <small class="text-muted">
-                        @Loc["This changes what the number MEANS, not just its colour. Goods receipt keeps the Time Bar consistent with the container list; port arrival is the truer basis for a claim window and always gives a larger number."]
+                        @Loc["This changes what the number MEANS, not just its colour, on the Time Bar page, the QC report and the Data Hub alike. The receive date keeps the Time Bar consistent with the container list and the dashboard; vessel arrival is the truer basis for a claim window and always gives a larger number."]
                     </small>
                 </div>
                 <div class="col-12">
@@ -1149,26 +1149,9 @@
                 </div>
                 <div class="col-md-8">
                     <label class="form-label">@Loc["Time Bar basis"]</label>
-                    <p class="text-muted small mb-2">
-                        The Time Bar on the report is the number of days from this date to the date the
-                        Quality Order was finished.
+                    <p class="text-muted small mb-0">
+                        @Loc["The Time Bar on the report counts from the same date as the Time Bar page — the branch receive date by default. Change it under Alerts → Time Bar thresholds → \"Start the clock from\", and both move together."]
                     </p>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="TimeBarBasis" id="tbb-discharge"
-                               value="@TimeBarBases.Discharge"
-                               checked="@(Model.Report.TimeBarBasis == TimeBarBases.Discharge)" />
-                        <label class="form-check-label" for="tbb-discharge">
-                            <strong>@Loc["Discharge date"]</strong> — count from the discharge date entered on the arrival.
-                        </label>
-                    </div>
-                    <div class="form-check">
-                        <input class="form-check-input" type="radio" name="TimeBarBasis" id="tbb-arrival"
-                               value="@TimeBarBases.Arrival"
-                               checked="@(Model.Report.TimeBarBasis == TimeBarBases.Arrival)" />
-                        <label class="form-check-label" for="tbb-arrival">
-                            <strong>@Loc["Arrival date"]</strong> — count from the SAP arrival date.
-                        </label>
-                    </div>
                 </div>
                 <div class="col-md-8">
                     <label class="form-label">@Loc["Report layout"]</label>

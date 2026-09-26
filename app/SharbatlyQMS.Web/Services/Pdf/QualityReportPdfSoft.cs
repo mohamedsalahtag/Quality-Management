@@ -234,9 +234,6 @@ public static class QualityReportPdfSoft
         var s  = d.Shipment;
         var cl = d.Checklist;
 
-        var basisDate  = d.TimeBarBasis == TimeBarBases.Arrival ? s?.ArrivalDate : s?.DischargeDate;
-        var basisLabel = d.TimeBarBasis == TimeBarBases.Arrival ? "Arrival" : "Discharge";
-
         var col1 = new List<(string, string)>
         {
             (L("Shipper"),           V(d.Arrival.VendorName)),
@@ -251,21 +248,24 @@ public static class QualityReportPdfSoft
             (L("Vessel Name"),       V(s?.VesselName)),
         };
         // Middle column is the shipment TIMELINE, in the order the events
-        // actually happen: loading -> discharge -> pullout -> receive ->
-        // unloading -> inspection. Reading it top to bottom shows the movement,
-        // so a gap or an out-of-order date stands out. Arrival Date is not
-        // printed; only the Time Bar basis above still reads one. Derived
-        // figures (transit days, time bar) close the column. The QO page, the
-        // Claims page and the QC summary panel use the same sequence.
+        // actually happen: loading -> vessel arrival -> discharge -> pullout ->
+        // receive -> unloading -> inspection. Reading it top to bottom shows the
+        // movement, so a gap or an out-of-order date stands out. The two derived
+        // figures close the column: transit (loading to discharge) and the Time
+        // Bar (receive date to QC finish, the same arithmetic as the Time Bar
+        // page) -- both from ShipmentDates, so no screen can print a different
+        // number. The QO page, the Claims page and the QC summary panel use the
+        // same sequence.
         var col2 = new List<(string, string)>
         {
-            (L("Loading Date"),      Dt(s?.SailingDate)),
-            (L("Discharge Date"),    Dt(s?.DischargeDate)),
-            (L("Pullout Date"),      Dt(s?.PullOutDate)),
-            (L("Unloading Date"),    Dt(s?.UnloadingDate)),
-            (L("Inspection Date"),   Dt(d.InspectionDate)),
-            (L("Transit Days"),      s?.TransitDays?.ToString() ?? "—"),
-            ($"Time Bar ({basisLabel})", (TimeBarDays(basisDate, d.QualityOrder.ClosedAt ?? d.GeneratedAt) ?? "—") + " days"),
+            (L("Loading Date"),        Dt(s?.SailingDate)),
+            (L("Vessel Arrival Date"), Dt(s?.PortArrivalDate)),
+            (L("Discharge Date"),      Dt(s?.DischargeDate)),
+            (L("Pullout Date"),        Dt(s?.PullOutDate)),
+            (L("Unloading Date"),      Dt(s?.UnloadingDate)),
+            (L("Inspection Date"),     Dt(d.InspectionDate)),
+            (L("Transit Days"),        s?.EffectiveTransitDays?.ToString() ?? "—"),
+            ($"Time Bar ({d.TimeBarCaption})", (d.TimeBarDays?.ToString() ?? "—") + " days"),
         };
         // Receive Date is OUR goods-receipt date at the facility, not the
         // supplier's, so their copy omits it.
@@ -277,7 +277,7 @@ public static class QualityReportPdfSoft
         // supplier's report. Not adding it cannot fail that way, and the column
         // still closes up instead of printing an orphaned label.
         if (!d.SupplierCopy)
-            col2.Insert(3, (L("Receive Date"), Dt(s?.ReceiveDate)));
+            col2.Insert(4, (L("Receive Date"), Dt(s?.ReceiveDate)));
 
         var col3 = new List<(string, string)>
         {
@@ -896,9 +896,6 @@ public static class QualityReportPdfSoft
         var distinct = sampleSizes.Where(x => x is > 0).Select(x => x!.Value).Distinct().OrderBy(x => x).ToList();
         return distinct.Count == 0 ? "—" : $"{string.Join(" / ", distinct)} {unit}";
     }
-
-    private static string? TimeBarDays(DateTime? basis, DateTime finished)
-        => basis == null ? null : (finished.Date - basis.Value.Date).Days.ToString();
 
     private static string? JoinLines(string? s) => string.IsNullOrWhiteSpace(s)
         ? null

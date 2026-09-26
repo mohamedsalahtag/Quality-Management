@@ -433,6 +433,7 @@ public class ArrivalService : IArrivalService
                    internal_shipment_no InternalShipmentNo,
                    loading_date LoadingDate, sailing_date SailingDate,
                    examination_date ExaminationDate, arrival_date ArrivalDate,
+                   port_arrival_date PortArrivalDate,
                    discharge_date DischargeDate,
                    unloading_date UnloadingDate, inspection_date InspectionDate,
                    transit_days TransitDays, time_bar TimeBar,
@@ -539,15 +540,24 @@ public class ArrivalService : IArrivalService
         // inspection_date is the arrival/checklist creation date (read-only in the
         // UI) -- CAST to date so it matches the DATE column and stays in step with
         // created_at on the arrival row above.
+        //
+        // The receive date is the LATEST over the selected lines, exactly what
+        // the pending list showed as MAX(receive_date) for this triplet -- so
+        // the date on the new arrival is the date the operator just clicked on.
+        // It is only the starting value: the SAP sweep refreshes it afterwards,
+        // because SAP advances Receive_Date to the branch goods receipt days
+        // after the first sweep sees the container.
+        var receive     = rows.Max(r => r.ReceiveDate);
+        var portArrival = rows.Max(r => r.PortArrivalDate);
         await c.ExecuteAsync(@"
             INSERT INTO qms_shipment_snapshot
                 (arrival_id, internal_shipment_no, sailing_date,
-                 examination_date, arrival_date, unloading_date, receive_date, inspection_date,
+                 examination_date, arrival_date, port_arrival_date, receive_date, inspection_date,
                  transit_days, loading_port, loading_country, arrival_place,
                  vessel_name, voyage_number, status_code)
             VALUES
                 (@arrivalId, @internalShipmentNo, @sailing,
-                 @examination, @arrival, @unloading, @receive, CAST(SYSUTCDATETIME() AS date),
+                 @examination, @receive, @portArrival, @receive, CAST(SYSUTCDATETIME() AS date),
                  @transit, @loadingPort, @loadingCountry, @arrivalPlace,
                  @vessel, @voyage, 'Draft');",
             new
@@ -556,9 +566,8 @@ public class ArrivalService : IArrivalService
                 internalShipmentNo,
                 sailing        = first.SailingDate?.ToDateTime(TimeOnly.MinValue),
                 examination    = first.ExaminationDate?.ToDateTime(TimeOnly.MinValue),
-                arrival        = first.ArrivalDate?.ToDateTime(TimeOnly.MinValue),
-                unloading      = first.UnloadingDate?.ToDateTime(TimeOnly.MinValue),
-                receive        = first.ReceiveDate?.ToDateTime(TimeOnly.MinValue),
+                receive        = receive?.ToDateTime(TimeOnly.MinValue),
+                portArrival    = portArrival?.ToDateTime(TimeOnly.MinValue),
                 transit        = first.TransitDays,
                 loadingPort    = first.LoadingPort,
                 loadingCountry = first.LoadingCountry,

@@ -390,6 +390,7 @@ public class QoFinishNotifier : IQoFinishNotifier
             ("Arrival",          arrival?.ArrivalNo),
             ("Vessel",           shipment?.VesselName),
             ("Discharge date",   shipment?.DischargeDate?.ToString("yyyy-MM-dd")),
+            ("Receive date",     shipment?.ReceiveDate?.ToString("yyyy-MM-dd")),
             ("Finished",         qo.ClosedAt?.ToLocalTime().ToString("yyyy-MM-dd HH:mm")),
             ("Samples",          samples.Count.ToString()),
         }.Where(f => !string.IsNullOrWhiteSpace(f.Item2)).ToList();

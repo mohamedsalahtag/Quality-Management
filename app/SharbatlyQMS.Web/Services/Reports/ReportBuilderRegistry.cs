@@ -50,7 +50,10 @@ public static class ReportBuilderRegistry
         new("PoDate",           "PO Date",          ReportFieldType.Date,   r => r.PoDate),
         new("LoadingDate",      "Loading Date",     ReportFieldType.Date,   r => r.LoadingDate),
         new("ShippingDate",     "Shipping Date",    ReportFieldType.Date,   r => r.ShippingDate),
-        new("ArrivalDate",      "Arrival Date",     ReportFieldType.Date,   r => r.ArrivalDate),
+        new("PortArrivalDate",  "Vessel Arrival Date", ReportFieldType.Date, r => r.PortArrivalDate),
+        // ArrivalDate and ReceiveDate are the same date -- SAP's branch goods
+        // receipt. The key is kept for saved definitions; the caption says so.
+        new("ArrivalDate",      "Receive Date (arrival)", ReportFieldType.Date, r => r.ArrivalDate),
         new("ReceiveDate",      "Receive Date",     ReportFieldType.Date,   r => r.ReceiveDate),
         new("TransitDays",      "Transit Days",     ReportFieldType.Number, r => (int?)r.TransitDays),
         new("VendorNo",         "Vendor No",        ReportFieldType.Text,   r => r.VendorNo),

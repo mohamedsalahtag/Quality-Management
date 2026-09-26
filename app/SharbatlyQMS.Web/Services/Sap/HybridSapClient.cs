@@ -243,18 +243,26 @@ public class HybridSapClient : ISapClient
         BatchNo           = Get(d, "Batch"),
         Quantity          = ParseDecimal(Get(d, "Qty")) ?? 0m,
         Uom               = Get(d, "OrderUnit") ?? "",
+        // What each date means is written down once on ShipmentDates. In short:
+        // LoadingDate is empty on every row SAP sends, so Sailing_Date is the
+        // loading date; Receive_Date is the BRANCH goods receipt and SAP moves
+        // it forward after the first sweep sees it; Arrival_Date is the vessel
+        // reaching port (ETA-grade, equal to Estimated_Arrival_Date on 99.6% of
+        // rows).
         LoadingDate       = ParseDate(Get(d, "LoadingDate")),
         SailingDate       = ParseDate(Get(d, "Sailing_Date")),
         ExaminationDate   = ParseDate(Get(d, "Examination_Date")),
-        // Operator wants the "Arrival date" column on /Arrivals/Pending sourced
-        // from the SAP Receive_Date field (Arrival_Date in this CDS view is
-        // sparse / unreliable). Both properties read the same source for now.
+        // ArrivalDate is a legacy twin of ReceiveDate: it has always carried
+        // Receive_Date, and the cache's arrival_date column (which the pending
+        // list sorts, filters and archives on) is fed from it. Kept identical.
         ArrivalDate       = ParseDate(Get(d, "Receive_Date")),
         ReceiveDate       = ParseDate(Get(d, "Receive_Date")),
-        // The genuine port-arrival date, kept separate so the line above keeps
-        // feeding /Arrivals/Pending unchanged. Only the QC report reads it, and
-        // it is left blank rather than substituted when SAP has no value.
+        // The vessel's arrival at the port -- the only "arrival" in the physical
+        // sense. Stored as port_arrival_date on the cache and the snapshot.
         PortArrivalDate   = ParseDate(Get(d, "Arrival_Date")),
+        // SAP's transit = Arrival_Date - Sailing_Date, an ETA-based figure. The
+        // application prints loading -> discharge instead and reads this only
+        // until the inspector has entered the discharge date.
         TransitDays       = ParseShort(Get(d, "Transit_Days")),
         LoadingPort       = Get(d, "Loading_Port") ?? "",
         LoadingCountry    = Get(d, "Loading_Country") ?? "",

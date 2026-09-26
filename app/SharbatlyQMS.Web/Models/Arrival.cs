@@ -160,23 +160,42 @@ public class ArrivalChecklist
 /// Editable on the arrival page so inspectors can correct or fill any
 /// values that SAP didn't carry across, and locked once the arrival is
 /// completed.
+///
+/// What each date means, and which SAP field feeds it, is written down once
+/// on <see cref="Services.ShipmentDates"/>. In short: SailingDate is the
+/// loading date, PortArrivalDate is the vessel reaching port, DischargeDate is
+/// the inspector's, ReceiveDate is the branch goods receipt and is refreshed
+/// from SAP on every sweep.
 /// </summary>
 public class ShipmentSnapshot
 {
     public long       ShipmentSnapshotId  { get; set; }
     public long       ArrivalId           { get; set; }
     public string     InternalShipmentNo  { get; set; } = "";
+    /// <summary>SAP's LoadingDate column. Empty on every row SAP has ever sent;
+    /// kept only because the column exists. The loading date the business uses
+    /// is <see cref="SailingDate"/>.</summary>
     public DateTime?  LoadingDate         { get; set; }
+    /// <summary>SAP Sailing_Date -- printed as "Loading date" everywhere.</summary>
     public DateTime?  SailingDate         { get; set; }
     public DateTime?  ExaminationDate     { get; set; }
+    /// <summary>Legacy twin of <see cref="ReceiveDate"/>: it has always held SAP's
+    /// Receive_Date, never the vessel's arrival. Kept equal to ReceiveDate by the
+    /// SAP sweep; read ReceiveDate in new code.</summary>
     public DateTime?  ArrivalDate         { get; set; }
-    /// <summary>Inspector-entered date the container was discharged. Shown next
-    /// to ArrivalDate on the arrival page and the default basis for the report
-    /// Time Bar (see SettingKeys.TimeBarBasis).</summary>
+    /// <summary>SAP Arrival_Date: the vessel reaching the port of arrival.</summary>
+    public DateTime?  PortArrivalDate     { get; set; }
+    /// <summary>Inspector-entered date the container was discharged from the
+    /// vessel. The end of the transit leg (see <see cref="EffectiveTransitDays"/>).</summary>
     public DateTime?  DischargeDate       { get; set; }
     public DateTime?  UnloadingDate       { get; set; }
     public DateTime?  InspectionDate      { get; set; }
+    /// <summary>SAP's own Transit_Days (Arrival_Date - Sailing_Date, ETA-based).
+    /// The fallback behind <see cref="EffectiveTransitDays"/>.</summary>
     public short?     TransitDays         { get; set; }
+    /// <summary>Days at sea as the business defines it: loading to the
+    /// inspector's discharge date, SAP's figure until that is entered.</summary>
+    public short?     EffectiveTransitDays => Services.ShipmentDates.TransitDays(SailingDate, DischargeDate, TransitDays);
     public short?     TimeBar             { get; set; }
     public string?    LoadingPort         { get; set; }
     public string?    LoadingCountry      { get; set; }
@@ -184,6 +203,9 @@ public class ShipmentSnapshot
     public string?    VesselName          { get; set; }
     public string?    VoyageNumber        { get; set; }
     public DateTime?  PullOutDate         { get; set; }
+    /// <summary>SAP Receive_Date: the branch goods receipt. The start of every
+    /// inspection clock and the date the dashboard counts a container in.
+    /// Refreshed from the SAP cache on every sweep because SAP advances it.</summary>
     public DateTime?  ReceiveDate         { get; set; }
     public bool?      TimeBarExceeded     { get; set; }
     public string?    InspectionPoint     { get; set; }

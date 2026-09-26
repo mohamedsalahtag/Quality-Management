@@ -92,10 +92,11 @@ public class TimeBarController : Controller
         using var wb = new ClosedXML.Excel.XLWorkbook();
         var ws = wb.Worksheets.Add("Inspection Time Bar");
 
+        var clockStart = cfg.ArrivalBasis == TimeBarArrivalBases.PortArrival ? "Vessel arrival date" : "Receive date";
         var headers = new[]
         {
             "Container", "BOL", "PO", "STO", "Supplier", "Plant", "PO type",
-            "Arrival date", "Arrival source", "Arrival no", "Quality order",
+            clockStart, "Date source", "Arrival no", "Quality order",
             "Stage", "Status", "Days elapsed", "Still running", "Closed at",
             "Not in SAP cache", "Archived"
         };

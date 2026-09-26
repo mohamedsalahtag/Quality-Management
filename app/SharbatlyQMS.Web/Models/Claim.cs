@@ -270,7 +270,12 @@ public class ClaimListRow
     public string?   LoadingPort     { get; set; }
     public string?   LoadingCountry  { get; set; }
     public string?   ArrivalPlace    { get; set; }
+    /// <summary>Loading date (SAP Sailing_Date).</summary>
     public DateTime? SailingDate     { get; set; }
+    /// <summary>The vessel reaching the port (SAP Arrival_Date).</summary>
+    public DateTime? PortArrivalDate { get; set; }
+    /// <summary>The branch goods receipt (SAP Receive_Date) -- named for the
+    /// column it always held, not for the vessel's arrival.</summary>
     public DateTime? ArrivalDate     { get; set; }
     public DateTime? DischargeDate   { get; set; }
     /// <summary>When the Quality Order was opened — the date the inspection

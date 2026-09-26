@@ -254,9 +254,9 @@
                 @Loc["What do these columns count?"]
             </summary>
             <div class="mt-2 ps-3 border-start">
-                @Loc["The first four columns are about the containers RECEIVED in this period. The last three count inspections OPENED in the period, whichever day their container arrived — which is why the total can be larger."]
+                @Loc["The first four columns are about the containers RECEIVED in this period (SAP's branch receive date). The last three count inspections OPENED in the period, whichever day their container was received — which is why the total can be larger."]
                 <div class="text-muted mt-1">
-                    @Loc["Total Inspected = Period Inspection + Backlog Inspected, always. Example: 3 received and 1 inspected (2 pending, 33% coverage), while the team opened 13 inspections — 10 of them clearing containers that arrived earlier."]
+                    @Loc["Total Inspected = Period Inspection + Backlog Inspected, except for the rare inspection opened before SAP posted the branch receipt (about 1 in 100): it counts in Period Inspection for the period the container was received in. Example: 3 received and 1 inspected (2 pending, 33% coverage), while the team opened 13 inspections — 10 of them clearing containers received earlier."]
                 </div>
             </div>
         </details>
@@ -267,13 +267,13 @@
                         <thead class="table-light">
                             <tr>
                                 <th>@Loc["Plant"]</th>
-                                <th class="text-end" title='@Loc["Containers that arrived in this period."]'>
+                                <th class="text-end" title='@Loc["Containers received in this period, by SAP's branch receive date."]'>
                                     @Loc["Received"]
                                 </th>
-                                <th class="text-end" title='@Loc["Inspections opened in this period against containers received in it."]'>
+                                <th class="text-end" title='@Loc["Containers received in this period that have an inspection opened by the end of it."]'>
                                     @Loc["Period Inspection"]
                                 </th>
-                                <th class="text-end" title='@Loc["Received minus Period Inspection: arrived but not yet inspected."]'>
+                                <th class="text-end" title='@Loc["Received minus Period Inspection: received but not yet inspected."]'>
                                     @Loc["Pending Inspection"]
                                 </th>
                                 <th class="text-end" title='@Loc["Period Inspection as a share of Received."]'>

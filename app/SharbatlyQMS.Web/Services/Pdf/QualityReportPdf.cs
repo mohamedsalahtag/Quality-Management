@@ -286,28 +286,22 @@ public static class QualityReportPdf
                     Field(c, "Port Of Arrival",  s?.ArrivalPlace);
                     Field(c, "Vessel Name",      s?.VesselName);
                 });
-                // Shipment TIMELINE in event order (loading -> discharge ->
-                // pullout -> receive -> unloading -> inspection), matching the
-                // Soft layout and the on-screen shipment blocks. Arrival Date is
-                // not printed -- only the Time Bar basis below still reads one.
+                // Shipment TIMELINE in event order (loading -> vessel arrival ->
+                // discharge -> pullout -> receive -> unloading -> inspection),
+                // matching the Soft layout and the on-screen shipment blocks.
+                // Transit and the Time Bar are the two derived figures; both
+                // come from ShipmentDates so every screen prints the same number.
                 row.RelativeItem().Column(c => {
-                    Field(c, "Loading Date",     s?.SailingDate?.ToString("MMM dd, yyyy"));
-                    Field(c, "Discharge Date",   s?.DischargeDate?.ToString("MMM dd, yyyy"));
-                    Field(c, "Pullout Date",     s?.PullOutDate?.ToString("MMM dd, yyyy"));
-                    Field(c, "Receive Date",     s?.ReceiveDate?.ToString("MMM dd, yyyy"));
-                    Field(c, "Unloading Date",   s?.UnloadingDate?.ToString("MMM dd, yyyy"));
-                    Field(c, "Inspection Date",  d.InspectionDate?.ToString("MMM dd, yyyy"));
-                    Field(c, "Transit Days",     s?.TransitDays?.ToString());
-                    // Time Bar = whole days between the chosen basis date and the
-                    // date the quality order was finished (Closed / ClosedAt);
-                    // falls back to the report date when the QO is not yet
-                    // closed. The basis is Discharge date by default, or Arrival
-                    // date when Report.TimeBarBasis says so (Admin → Settings →
-                    // Report). Blank when the basis date is missing.
-                    var basisDate = d.TimeBarBasis == TimeBarBases.Arrival ? s?.ArrivalDate : s?.DischargeDate;
-                    var basisLabel = d.TimeBarBasis == TimeBarBases.Arrival ? "Arrival" : "Discharge";
-                    Field(c, $"Time Bar ({basisLabel})", TimeBarDays(basisDate, d.QualityOrder.ClosedAt ?? d.GeneratedAt));
-                    Field(c, "Date",             d.GeneratedAt.ToLocalTime().ToString("MMM dd, yyyy"));
+                    Field(c, "Loading Date",        s?.SailingDate?.ToString("MMM dd, yyyy"));
+                    Field(c, "Vessel Arrival Date", s?.PortArrivalDate?.ToString("MMM dd, yyyy"));
+                    Field(c, "Discharge Date",      s?.DischargeDate?.ToString("MMM dd, yyyy"));
+                    Field(c, "Pullout Date",        s?.PullOutDate?.ToString("MMM dd, yyyy"));
+                    Field(c, "Receive Date",        s?.ReceiveDate?.ToString("MMM dd, yyyy"));
+                    Field(c, "Unloading Date",      s?.UnloadingDate?.ToString("MMM dd, yyyy"));
+                    Field(c, "Inspection Date",     d.InspectionDate?.ToString("MMM dd, yyyy"));
+                    Field(c, "Transit Days",        s?.EffectiveTransitDays?.ToString());
+                    Field(c, $"Time Bar ({d.TimeBarCaption})", d.TimeBarDays?.ToString());
+                    Field(c, "Date",                d.GeneratedAt.ToLocalTime().ToString("MMM dd, yyyy"));
                 });
                 row.RelativeItem().Column(c => {
                     // Col-3 labels are long ("External damage to container",
@@ -1122,11 +1116,6 @@ public static class QualityReportPdf
         ? null
         : string.Join(" / ", s.Split('\n', StringSplitOptions.RemoveEmptyEntries)
                                .Select(x => x.Trim()).Where(x => x.Length > 0));
-
-    /// <summary>Whole days between the chosen basis date (discharge or arrival)
-    /// and the QO finish (Closed) date. Null when the basis date is missing.</summary>
-    private static string? TimeBarDays(DateTime? basis, DateTime finished)
-        => basis == null ? null : (finished.Date - basis.Value.Date).Days.ToString();
 
     // Fields the QO report must NOT show. Matching is by a normalised name so
     // every spelling variant of the same field is caught: the header field

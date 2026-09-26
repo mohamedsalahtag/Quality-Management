@@ -147,6 +147,15 @@ public interface IContainerCacheService
     Task<int> ReconcileWithArrivalsAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Copies SAP's current receive / vessel-arrival / transit values from the
+    /// cache onto every arrival's shipment snapshot, so the arrival page, the
+    /// QC report and the dashboard show the same dates as the pending list and
+    /// the Time Bar page. Runs at the end of every sweep; returns the number of
+    /// snapshots changed. See ShipmentDates for why the receive date moves.
+    /// </summary>
+    Task<int> RefreshArrivalSnapshotsAsync(CancellationToken ct = default);
+
+    /// <summary>
     /// Dashboard tile feed: count of triplets pending an Arrival.
     /// </summary>
     Task<int> CountPendingTripletsAsync(CancellationToken ct = default);
@@ -246,9 +255,16 @@ public class PendingPickupRow
     // built-in mapper to DateOnly). The view only reads .ToString("yyyy-MM-dd")
     // so DateTime works identically here.
     public DateTime? DocDate    { get; set; }
+    /// <summary>Legacy twin of <see cref="ReceiveDate"/> (both hold SAP's
+    /// Receive_Date); the column the list sorts, filters and archives on.</summary>
     public DateTime? ArrivalDate{ get; set; }
+    /// <summary>SAP Receive_Date -- the branch goods receipt.</summary>
     public DateTime? ReceiveDate{ get; set; }
-    /// <summary>Days in transit, straight from SAP's Transit_Days. Promoted from
+    /// <summary>SAP Arrival_Date -- the vessel reaching the port.</summary>
+    public DateTime? PortArrivalDate { get; set; }
+    /// <summary>Days in transit, straight from SAP's Transit_Days (an ETA-based
+    /// figure: Arrival_Date - Sailing_Date). No arrival exists yet, so there is
+    /// no discharge date to compute the real one from. Promoted from
     /// payload_json to its own cache column in M12 so the list can sort on it.</summary>
     public short?    TransitDays{ get; set; }
     public DateTime  FirstSeenAt{ get; set; }

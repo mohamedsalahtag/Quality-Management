@@ -138,6 +138,7 @@ public static class ReportLabelCatalog
         "Unit",
         "Unloading Date",
         "Variety",
+        "Vessel Arrival Date",
         "Vessel Name",
         "Visual cargo condition acceptable",
         "finished",

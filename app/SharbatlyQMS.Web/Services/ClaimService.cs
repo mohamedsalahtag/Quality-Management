@@ -124,7 +124,10 @@ public class ClaimService : IClaimService
                    sh.loading_country    AS LoadingCountry,
                    sh.arrival_place      AS ArrivalPlace,
                    sh.sailing_date       AS SailingDate,
-                   sh.arrival_date       AS ArrivalDate,
+                   sh.port_arrival_date  AS PortArrivalDate,
+                   -- The branch goods receipt (SAP Receive_Date); arrival_date
+                   -- is its legacy twin, kept for a snapshot that predates it.
+                   COALESCE(sh.receive_date, sh.arrival_date) AS ArrivalDate,
                    sh.discharge_date     AS DischargeDate,
                    -- Inspection date is when the QO was OPENED, not the
                    -- arrival checklist's own date (they differ when the order is

@@ -582,7 +582,7 @@ public class AdminController : Controller
     {
         await _settings.SaveReportConfigAsync(report ?? new ReportConfig(), GetCurrentUserId());
         await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null,
-            new { section = "Report options", timeBarBasis = report?.TimeBarBasis });
+            new { section = "Report options", rejectedContainerHeader = report?.RejectedContainerHeader });
         TempData["Success"] = "Report options saved.";
         return RedirectToAction(nameof(Settings), new { activeTab = "report" });
     }

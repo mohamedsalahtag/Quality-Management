@@ -23,11 +23,12 @@ public class FlatDefectRow
     public string?   Ebeln           { get; set; }   // PO (current mapping = ShipmentNo)
     public string?   Sto             { get; set; }
     public DateTime? PoDate          { get; set; }   // V31: cc.doc_date
-    public DateTime? LoadingDate     { get; set; }   // V31: ss.loading_date (not shown by default)
+    public DateTime? LoadingDate     { get; set; }   // M36: ss.sailing_date (SAP's LoadingDate is always empty)
     public DateTime? ShippingDate    { get; set; }   // V31: ss.sailing_date
-    public DateTime? ArrivalDate     { get; set; }
-    public DateTime? ReceiveDate     { get; set; }
-    public short?    TransitDays     { get; set; }   // V31: ss.transit_days
+    public DateTime? PortArrivalDate { get; set; }   // M36: the vessel reaching port (SAP Arrival_Date)
+    public DateTime? ArrivalDate     { get; set; }   // SAP Receive_Date's legacy twin -- the branch goods receipt
+    public DateTime? ReceiveDate     { get; set; }   // SAP Receive_Date -- the branch goods receipt
+    public short?    TransitDays     { get; set; }   // M36: loading -> discharge, SAP's figure as fallback
     public string?   VendorName      { get; set; }
     public string?   VendorNo        { get; set; }   // V31: a.vendor_no
 

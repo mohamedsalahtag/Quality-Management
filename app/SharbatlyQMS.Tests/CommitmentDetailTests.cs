@@ -28,7 +28,13 @@ public class CommitmentDetailTests : IClassFixture<QmsAppFactory>
         _out = output;
     }
 
-    private const string Period = "month";
+    // TODAY, on purpose. It is the sharpest window: a container SAP received
+    // today whose inspection was opened yesterday -- SAP posts the branch
+    // receipt after the inspection has begun on about one container in a
+    // hundred -- must count as inspected, not pending, and only a one-day
+    // window makes that case visible. (This used to read "month", which is not
+    // a real period key and silently resolved to today anyway.)
+    private const string Period = DashboardFilter.Periods.Today;
 
     private async Task<(DashboardVm Vm, IDashboardService Svc, IServiceScope Scope)> LoadAsync()
     {
@@ -90,17 +96,34 @@ public class CommitmentDetailTests : IClassFixture<QmsAppFactory>
             var total    = await DetailAsync(svc, CommitmentBuckets.TotalInspected);
 
             _out.WriteLine($"received {received.Count} = period {period.Count} + pending {pending.Count}");
-            _out.WriteLine($"total    {total.Count} = period {period.Count} + backlog {backlog.Count}");
+            _out.WriteLine($"total    {total.Count} = backlog {backlog.Count} + on-period + ahead-of-receipt");
 
+            // Identity 1, exact: every container received in the period is either
+            // inspected or pending, and never both.
             Assert.Equal(received.Count, period.Count + pending.Count);
-            Assert.Equal(total.Count,    period.Count + backlog.Count);
-
-            // And they really are disjoint sets of arrivals, not just equal counts.
             var periodIds  = period.Select(r => r.ArrivalId).ToHashSet();
             var pendingIds = pending.Select(r => r.ArrivalId).ToHashSet();
             Assert.Empty(periodIds.Intersect(pendingIds));
             Assert.Equal(received.Select(r => r.ArrivalId).ToHashSet(),
                          periodIds.Union(pendingIds).ToHashSet());
+
+            // Identity 2: the orders opened in the period partition by WHEN their
+            // container was received -- before the period (backlog), in it, or
+            // after it (SAP posted the receipt later than the inspection began).
+            // Backlog is exactly the "before" slice, and every order opened in the
+            // period on a container received in it is in Period Inspection.
+            var (from, to) = new DashboardFilter { Period = Period }.Resolve();
+            var toEx       = to.AddDays(1);
+            var before     = total.Where(r => r.ArrivalCreatedAt.Date <  from.Date).Select(r => r.ArrivalId).ToHashSet();
+            var inPeriod   = total.Where(r => r.ArrivalCreatedAt.Date >= from.Date && r.ArrivalCreatedAt.Date < toEx.Date)
+                                  .Select(r => r.ArrivalId).ToHashSet();
+            var ahead      = total.Count - before.Count - inPeriod.Count;
+            _out.WriteLine($"         backlog {before.Count}, on-period {inPeriod.Count}, ahead of receipt {ahead}");
+
+            Assert.Equal(before, backlog.Select(r => r.ArrivalId).ToHashSet());
+            Assert.True(inPeriod.IsSubsetOf(periodIds),
+                "an order opened in the period on a container received in it is missing from Period Inspection");
+            Assert.True(ahead >= 0);
         }
     }
 

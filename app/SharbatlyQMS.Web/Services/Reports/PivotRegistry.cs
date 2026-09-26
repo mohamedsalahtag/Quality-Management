@@ -118,8 +118,12 @@ public static class PivotRegistry
             new PivotDimension("LoadingMonth",     "Loading month",    "FORMAT(LoadingDate, 'yyyy-MM')", PivotCategories.Dates),
             new PivotDimension("ShippingDate",     "Shipping date",    "FORMAT(ShippingDate, 'yyyy-MM-dd')", PivotCategories.Dates),
             new PivotDimension("ShippingMonth",    "Shipping month",   "FORMAT(ShippingDate, 'yyyy-MM')", PivotCategories.Dates),
-            new PivotDimension("ArrivalDate",      "Arrival date",     "FORMAT(ArrivalDate, 'yyyy-MM-dd')", PivotCategories.Dates),
-            new PivotDimension("ArrivalMonth",     "Arrival month",    "FORMAT(ArrivalDate, 'yyyy-MM')", PivotCategories.Dates),
+            new PivotDimension("PortArrivalDate",  "Vessel arrival date", "FORMAT(PortArrivalDate, 'yyyy-MM-dd')", PivotCategories.Dates),
+            new PivotDimension("PortArrivalMonth", "Vessel arrival month","FORMAT(PortArrivalDate, 'yyyy-MM')", PivotCategories.Dates),
+            // ArrivalDate is the same date as ReceiveDate (SAP's branch goods
+            // receipt); the key stays for saved perspectives, the caption says so.
+            new PivotDimension("ArrivalDate",      "Receive date (arrival)",  "FORMAT(ArrivalDate, 'yyyy-MM-dd')", PivotCategories.Dates),
+            new PivotDimension("ArrivalMonth",     "Receive month (arrival)", "FORMAT(ArrivalDate, 'yyyy-MM')", PivotCategories.Dates),
             new PivotDimension("ReceiveDate",      "Receive date",     "FORMAT(ReceiveDate, 'yyyy-MM-dd')", PivotCategories.Dates),
             new PivotDimension("ReceiveMonth",     "Receive month",    "FORMAT(ReceiveDate, 'yyyy-MM')", PivotCategories.Dates),
             new PivotDimension("DischargeDate",    "Discharge date",   "FORMAT(DischargeDate, 'yyyy-MM-dd')", PivotCategories.Dates),
@@ -155,11 +159,14 @@ public static class PivotRegistry
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
             new PivotMeasure("TransitDays",    "Transit days",    "TransitDays",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
-            // Time Bar (days) = discharge/arrival date -> QO finish (closed) date.
-            // Same grain caveat as SampleSize (repeats per defect row), so no SUM.
-            new PivotMeasure("TimeBarDischarge","Time Bar (discharge)", "TimeBarDischarge",
+            // Time Bar (days) = receive date -> QO finish (closed) date, in local
+            // dates -- the same figure the Time Bar page and the QC report print.
+            // TimeBarDischarge counts from the inspector's discharge date instead
+            // and is kept for anyone who still wants it. Same grain caveat as
+            // SampleSize (repeats per defect row), so no SUM.
+            new PivotMeasure("TimeBarArrival", "Time Bar (receipt)",   "TimeBarArrival",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
-            new PivotMeasure("TimeBarArrival", "Time Bar (arrival)",   "TimeBarArrival",
+            new PivotMeasure("TimeBarDischarge","Time Bar (discharge)", "TimeBarDischarge",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
             new PivotMeasure("NetWeight",      "Net weight",      "NetWeight",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),

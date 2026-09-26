@@ -226,13 +226,11 @@ public class SettingsService : ISettingsService
     public async Task<ReportConfig> GetReportConfigAsync()
     {
         var c = await _db.GetConfigManyAsync(new[] {
-            SettingKeys.TimeBarBasis, SettingKeys.RejectedContainerHeader
+            SettingKeys.RejectedContainerHeader
         });
         var rejectHeader = c.GetValueOrDefault(SettingKeys.RejectedContainerHeader);
-        var basis = c.GetValueOrDefault(SettingKeys.TimeBarBasis);
         return new ReportConfig
         {
-            TimeBarBasis  = TimeBarBases.IsValid(basis) ? basis! : TimeBarBases.Discharge,
             // Blank falls back to the shipped wording rather than printing an
             // empty banner, which would read as a rendering fault.
             RejectedContainerHeader = string.IsNullOrWhiteSpace(rejectHeader)
@@ -245,9 +243,6 @@ public class SettingsService : ISettingsService
 
     public async Task SaveReportConfigAsync(ReportConfig cfg, int? updatedBy)
     {
-        var basis = TimeBarBases.IsValid(cfg.TimeBarBasis) ? cfg.TimeBarBasis : TimeBarBases.Discharge;
-        await _db.SetConfigAsync(SettingKeys.TimeBarBasis, basis, updatedBy);
-
         var header = string.IsNullOrWhiteSpace(cfg.RejectedContainerHeader)
                         ? RejectedContainerDefaults.Header
                         : cfg.RejectedContainerHeader.Trim();

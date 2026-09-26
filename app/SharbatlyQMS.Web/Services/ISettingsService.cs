@@ -184,9 +184,10 @@ public static class SettingKeys
     // could see. The stored setting row is left in place, unread.
 
     // QO report options.
-    //   TimeBarBasis: which date the report Time Bar counts from to the QO
-    //   finish date. "Discharge" (default) or "Arrival".
-    public const string TimeBarBasis       = "Report.TimeBarBasis";
+    //   Report.TimeBarBasis was removed 2026-09-26. The report's Time Bar now
+    //   counts from the same date as the Time Bar page (timebar_arrival_basis,
+    //   goods receipt by default), so the two can no longer disagree. M36
+    //   deletes the stored row.
     //   LayoutVersion: which visual layout the QO report PDF renders with.
     //   Fixed at "Soft" — the layout is no longer selectable. The key is kept
     //   so old stored values stay readable (and are ignored).
@@ -432,25 +433,11 @@ public class ReportConfig
     /// </summary>
     public string RejectedContainerHeader { get; set; } = RejectedContainerDefaults.Header;
 
-    /// <summary>Which date the QO report Time Bar counts from to the QO finish
-    /// date. One of <see cref="TimeBarBases"/>. Defaults to Discharge.</summary>
-    public string TimeBarBasis { get; set; } = TimeBarBases.Discharge;
-
     /// <summary>Which visual layout the QO report PDF renders with. Fixed at
     /// <see cref="ReportLayouts.Soft"/> — no longer selectable from Site
     /// Configuration. Kept as a property so the report code has one place to
     /// read the layout from.</summary>
     public string LayoutVersion { get; set; } = ReportLayouts.Soft;
-}
-
-/// <summary>Allowed values for <see cref="ReportConfig.TimeBarBasis"/>.</summary>
-public static class TimeBarBases
-{
-    public const string Discharge = "Discharge";
-    public const string Arrival   = "Arrival";
-
-    public static bool IsValid(string? v) =>
-        v == Discharge || v == Arrival;
 }
 
 /// <summary>Values for <see cref="ReportConfig.LayoutVersion"/>. Soft is the
@@ -483,12 +470,13 @@ public class TimeBarConfig
     public int WarnDays { get; set; } = 3;
 
     /// <summary>
-    /// Which date starts the clock. GoodsReceipt (the default) is SAP's
-    /// Receive_Date -- the field this application already stores as
-    /// arrival_date and labels "Arr" everywhere, so the Time Bar and the
-    /// container list agree. PortArrival is SAP's Arrival_Date, the true
-    /// physical landing: a truer basis for a claim window, and a LARGER number,
-    /// but one that disagrees with every other screen.
+    /// Which date starts the clock -- on the Time Bar page AND on the QC
+    /// report's Time Bar, which read this same setting since 2026-09-26.
+    /// GoodsReceipt (the default) is SAP's Receive_Date, the branch goods
+    /// receipt, which is also the date the dashboard counts a container in.
+    /// PortArrival is SAP's Arrival_Date, the vessel reaching port: a truer
+    /// basis for a claim window and a LARGER number. See
+    /// <see cref="ShipmentDates"/> for what each date means.
     /// </summary>
     public string ArrivalBasis { get; set; } = TimeBarArrivalBases.GoodsReceipt;
 
@@ -512,9 +500,10 @@ public class TimeBarConfig
 }
 
 /// <summary>
-/// The two clock bases. Note the separate, older <see cref="TimeBarBases"/>
-/// (Discharge / Arrival) belongs to the QC REPORT's time bar and measures a
-/// different thing; the two must not share a key.
+/// The two clock bases, shared by the Time Bar page and the QC report. The
+/// report used to have its own Discharge/Arrival setting; it counted from the
+/// inspector's discharge date while the page counted from the goods receipt,
+/// and the two "time bars" disagreed by days on the same container.
 /// </summary>
 public static class TimeBarArrivalBases
 {
@@ -522,6 +511,10 @@ public static class TimeBarArrivalBases
     public const string PortArrival  = "PortArrival";
     public static bool IsValid(string? v) =>
         v == GoodsReceipt || v == PortArrival;
+
+    /// <summary>The caption printed beside the number, e.g. "Time Bar (Receipt)".</summary>
+    public static string Caption(string? basis) =>
+        basis == PortArrival ? "Port arrival" : "Receipt";
 }
 
 public class AlertConfig

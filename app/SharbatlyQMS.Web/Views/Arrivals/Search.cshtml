@@ -213,8 +213,9 @@
                         <div class="col-md-3"><span class="text-muted">@Loc["Vessel:"]</span> @s.Header.VesselName</div>
                         <div class="col-md-2"><span class="text-muted">@Loc["Voyage:"]</span> @s.Header.VoyageNumber</div>
                         <div class="col-md-3"><span class="text-muted">@Loc["Loading:"]</span> @s.Header.LoadingPort, @Countries.Display(s.Header.LoadingCountry)</div>
-                        <div class="col-md-2"><span class="text-muted">@Loc["Sailing:"]</span> @s.Header.SailingDate</div>
-                        <div class="col-md-2"><span class="text-muted">@Loc["Arrival:"]</span> @s.Header.ArrivalDate</div>
+                        <div class="col-md-2"><span class="text-muted">@Loc["Loading:"]</span> @s.Header.SailingDate</div>
+                        <div class="col-md-2"><span class="text-muted" title="SAP Arrival_Date — the vessel reaching the port">@Loc["Vessel arrival:"]</span> @s.Header.PortArrivalDate</div>
+                        <div class="col-md-2"><span class="text-muted" title="SAP Receive_Date — the branch goods receipt">@Loc["Received:"]</span> @s.Header.ReceiveDate</div>
                     </div>
                 </div>
                 <div class="table-responsive">
