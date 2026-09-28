@@ -85,38 +85,30 @@ public class ShipmentDatesTests
     }
 
     /// <summary>
-    /// The report's two figures, as defined on 2026-09-27:
-    ///   Time Bar            = inspection date - vessel discharge date
-    ///   Inspection Time Bar = inspection date - branch receive date
-    /// Both count to the INSPECTION date, not to when QC finished.
+    /// The report's Time Bar (defined 2026-09-27) is inspection date minus
+    /// vessel discharge date. It counts to the INSPECTION date, not to when QC
+    /// finished, and the receive date does not move it.
     /// </summary>
     [Fact]
-    public void The_report_prints_both_time_bars_to_the_inspection_date()
+    public void The_report_time_bar_is_inspection_minus_discharge()
     {
         var d = new QualityReportData
         {
             Shipment = new ShipmentSnapshot
             {
-                DischargeDate   = new DateTime(2026, 9, 18),
-                PortArrivalDate = new DateTime(2026, 9, 17),
-                ReceiveDate     = new DateTime(2026, 9, 24),
+                DischargeDate = new DateTime(2026, 9, 18),
+                ReceiveDate   = new DateTime(2026, 9, 24),
             },
             InspectionDate = new DateTime(2026, 9, 25, 10, 0, 0),
-            // Finished much later -- must not move either figure.
+            // Finished much later -- must not move the figure.
             QualityOrder   = new QualityOrder { ClosedAt = new DateTime(2026, 10, 3, 9, 0, 0, DateTimeKind.Utc) }
         };
 
         Assert.Equal(7, d.TimeBarDays);            // 25 Sep - 18 Sep discharge
-        Assert.Equal(1, d.InspectionTimeBarDays);  // 25 Sep - 24 Sep receipt
-
-        // The Inspection Time Bar follows the page's basis; the claim Time Bar does not.
-        d.TimeBarBasis = TimeBarArrivalBases.PortArrival;
-        Assert.Equal(8, d.InspectionTimeBarDays);  // 25 Sep - 17 Sep vessel arrival
-        Assert.Equal(7, d.TimeBarDays);
     }
 
     [Fact]
-    public void A_missing_date_leaves_that_time_bar_blank_not_zero()
+    public void A_missing_date_leaves_the_time_bar_blank_not_zero()
     {
         var d = new QualityReportData
         {
@@ -124,9 +116,9 @@ public class ShipmentDatesTests
             InspectionDate = new DateTime(2026, 9, 26)
         };
         Assert.Null(d.TimeBarDays);                // no discharge date entered
-        Assert.Equal(2, d.InspectionTimeBarDays);
 
+        d.Shipment.DischargeDate = new DateTime(2026, 9, 20);
         d.InspectionDate = null;
-        Assert.Null(d.InspectionTimeBarDays);
+        Assert.Null(d.TimeBarDays);                // no inspection yet
     }
 }

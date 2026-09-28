@@ -113,12 +113,13 @@ public class GoodsReceiptDateTests : IClassFixture<QmsAppFactory>
     }
 
     /// <summary>
-    /// The crux of the complaint: the QC report's Inspection Time Bar and the
-    /// Inspection Time Bar page must be the same number for the same container
-    /// -- inspection date (QO opened) minus branch receive date.
+    /// The Inspection Time Bar page measures inspection date (QO opened, local
+    /// day) minus branch receive date, through the same shared arithmetic the
+    /// rest of the application uses. (The QC report no longer prints this
+    /// figure since 2026-09-28; the page is its home.)
     /// </summary>
     [Fact]
-    public async Task The_report_inspection_time_bar_equals_the_time_bar_page()
+    public async Task The_time_bar_page_is_inspection_minus_receipt()
     {
         var samples = await SamplesAsync();
         if (samples.Count == 0) { _out.WriteLine("No finished orders with a cached container."); return; }
@@ -137,23 +138,17 @@ public class GoodsReceiptDateTests : IClassFixture<QmsAppFactory>
             var row = page.Rows.FirstOrDefault(r => r.ContainerNo == s.ContainerNo && r.BolNo == s.BolNo && r.Ebeln == s.Ebeln);
             if (row is null) continue;
 
-            // What the report prints: the snapshot's receive date to the
-            // inspection date, which ReportsController sets to the local
-            // opened_at -- through the one shared helper.
+            // Expected: the arrival's receive date to the local day the order
+            // was opened, through the one shared helper.
             var shipment = await arrivals.GetShipmentAsync(s.ArrivalId);
             Assert.NotNull(shipment);
-            var report = new SharbatlyQMS.Web.Services.Pdf.QualityReportData
-            {
-                Shipment       = shipment,
-                QualityOrder   = new QualityOrder { ClosedAt = s.ClosedAt },
-                InspectionDate = s.OpenedAt.HasValue ? ShipmentDates.ToLocal(s.OpenedAt.Value) : null,
-                TimeBarBasis   = cfg.ArrivalBasis
-            };
+            var inspection = s.OpenedAt.HasValue ? ShipmentDates.ToLocal(s.OpenedAt.Value) : (DateTime?)null;
+            var expected   = ShipmentDates.DaysToInspection(shipment!.ReceiveDate, inspection);
 
             _out.WriteLine($"{s.ContainerNo}: page {row.ElapsedDays} d from {row.ArrivalDate:yyyy-MM-dd}, " +
-                           $"report {report.InspectionTimeBarDays} d from {report.InspectionTimeBarStartDate:yyyy-MM-dd}");
-            Assert.Equal(row.ArrivalDate?.Date, report.InspectionTimeBarStartDate?.Date);
-            Assert.Equal(row.ElapsedDays, report.InspectionTimeBarDays);
+                           $"expected {expected} d from {shipment.ReceiveDate:yyyy-MM-dd} to {inspection:yyyy-MM-dd}");
+            Assert.Equal(row.ArrivalDate?.Date, shipment.ReceiveDate?.Date);
+            Assert.Equal(expected, row.ElapsedDays);
             Assert.False(row.IsRunning);
             checkedCount++;
         }

@@ -296,15 +296,13 @@ public static class QualityReportPdf
                     Field(c, "Vessel Arrival Date", s?.PortArrivalDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Discharge Date",      s?.DischargeDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Pullout Date",        s?.PullOutDate?.ToString("MMM dd, yyyy"));
-                    Field(c, "Receive Date",        s?.ReceiveDate?.ToString("MMM dd, yyyy"));
+                    // Branch Receive Date and Inspection Time Bar are internal
+                    // measures and are not printed on any copy (2026-09-28).
                     Field(c, "Unloading Date",      s?.UnloadingDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Inspection Date",     d.InspectionDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Transit Days",        s?.EffectiveTransitDays?.ToString());
                     // Supplier-claim figure: inspection date - vessel discharge.
                     Field(c, "Time Bar",            d.TimeBarDays?.ToString());
-                    // Internal figure: inspection date - branch receipt.
-                    if (!d.SupplierCopy)
-                        Field(c, "Inspection Time Bar", d.InspectionTimeBarDays?.ToString());
                     Field(c, "Date",                d.GeneratedAt.ToLocalTime().ToString("MMM dd, yyyy"));
                 });
                 row.RelativeItem().Column(c => {
@@ -451,7 +449,8 @@ public static class QualityReportPdf
                     if (!string.IsNullOrWhiteSpace(g.Brand))   parts.Add(g.Brand!);
                     if (!string.IsNullOrWhiteSpace(g.Variety)) parts.Add(g.Variety!);
                     if (!string.IsNullOrWhiteSpace(g.Grade))   parts.Add(g.Grade!);
-                    if (parts.Count == 0) parts.Add("(brand / variety / grade not set)");
+                    if (g.WeightText != null)                  parts.Add(g.WeightText);
+                    if (parts.Count == 0) parts.Add("(brand / variety / grade / weight not set)");
                     t.Span(string.Join("  ·  ", parts)).SemiBold().FontColor(Accent);
                 });
                 hr.ConstantItem(180).AlignRight().Text(t =>
@@ -479,6 +478,7 @@ public static class QualityReportPdf
                     Field(c, "Brand",          Dash(g.Brand));
                     Field(c, "Variety",        Dash(g.Variety));
                     Field(c, "Grade",          Dash(g.Grade));
+                    Field(c, "Weight",         Dash(g.WeightText));
                 });
                 row.RelativeItem().Column(c => {
                     Field(c, "Material Group",     Dash(g.MaterialGroup));

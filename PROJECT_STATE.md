@@ -213,6 +213,19 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-09-28b (vessel arrival backfill for uncached arrivals — M38)
+
+- QO-2026-002935 printed a blank vessel arrival and a blank branch receive date. **Receive date: correct** — SAP still has no `Receive_Date` for MMAU1500290 (goods receipt not posted), so the sweep never cached it and the operator created the arrival via Search SAP. 12 arrivals since go-live are in that state; they fill in by themselves once the branch posts the receipt (the sweep then caches the container and `RefreshArrivalSnapshotsAsync` copies the date).
+- **Vessel arrival: a gap in M36**, which backfilled `port_arrival_date` from the cache only. **M38** fills it from the arrival's own SAP payload (`qms_arrival_sap_snapshot`), blanks only: 3 arrivals (ARR-2026-002715, -002893, -002947). Applied to production. New arrivals already store it at creation.
+
+### 2026-09-28 (QC summary groups by weight too)
+
+- **QC summary key is now (Material group, Variety, Grade, Weight).** Requested after brand was taken out: a 13.5 kg and a 6 kg carton of the same fruit are different products and get separate blocks with their own defect percentages. Brand stays listed, not grouped on.
+- **Weight = carton net weight from SAP's material master** (`qms_sap_material_cache.weight`, populated on every QO material). The QO's own `net_weight` column is empty everywhere; `ApplyMara` copies SAP's value into `QualityOrderMaterial.NetWeight`, and every caller of `BuildGroupSummariesAsync` runs it first. Zero counts as unknown; decimal equality makes 13.5 and 13.50 one group.
+- Printed as "13.5 kg" (`MaterialGroupSummary.WeightText`, one formatter) in the heading and as a Weight row, in both PDF layouts and the on-screen `_QcSummary`. "Weight" added to `ReportLabelCatalog`.
+- **Effect:** 378 summary groups on finished orders split into more than one block on reprint. New `SummaryGroupingTests`.
+- **Branch Receive Date and Inspection Time Bar are no longer printed on the QC report — any copy** (same day, on request). Both are internal measures. With them gone the supplier copy and the internal copy were identical, so `QualityReportData.SupplierCopy`, the report's `TimeBarBasis` and the `InspectionTimeBar*` properties were removed; the report prints only the claim **Time Bar** (inspection − discharge). Both figures remain on the screens, the Inspection Time Bar page and the Data Hub. "Receive Date" / "Inspection Time Bar" left `ReportLabelCatalog` (the screen label rows are untouched, including the admin's "Branch Receive Date" rename).
+
 ### 2026-09-27 (two time bars, both to the inspection date — M37)
 
 User defined the two figures: **Time Bar** is for supplier claims and reads *inspection date − vessel discharge date*; **Inspection Time Bar** is the internal performance measure and reads *inspection date − branch receive date*.

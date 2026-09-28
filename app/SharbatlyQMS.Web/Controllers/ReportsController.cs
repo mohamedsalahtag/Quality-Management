@@ -231,11 +231,10 @@ public class ReportsController : Controller
         if (string.IsNullOrWhiteSpace(to))
             return Json(new { ok = false, error = "Recipient email is required." });
 
+        // The supplier receives exactly the report internal users download.
+        // The two internal-only rows (branch Receive Date, Inspection Time Bar)
+        // were the only difference, and since 2026-09-28 no copy prints them.
         var data  = await BuildDataAsync(qo);
-        // The supplier's copy: Receive Date is our goods-receipt date, not
-        // theirs. Set here and nowhere else, so the download and the inline
-        // preview keep showing the complete report to internal users.
-        data.SupplierCopy = true;
         var bytes = QualityReportRenderer.Build(data);
         var fileName = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf";
 
@@ -440,10 +439,6 @@ public class ReportsController : Controller
 
         var reportCfg = await _settings.GetReportConfigAsync();
         data.LayoutVersion = reportCfg.LayoutVersion;
-        // The Inspection Time Bar counts from the same date as the Inspection
-        // Time Bar page -- one setting, so the two cannot disagree. (The
-        // supplier-claim Time Bar always counts from the discharge date.)
-        data.TimeBarBasis  = (await _settings.GetTimeBarConfigAsync()).ArrivalBasis;
 
         // Who created this quality order, with their branch — shown in the report
         // header. Branch is the creator's own plant when set, otherwise the
@@ -533,7 +528,7 @@ public class ReportsController : Controller
 
         // Page-1 grouped summary (replaces the per-sample summary blocks).
         // Materials are passed in already MARA-enriched so the grouping key
-        // (MaterialGroup, Brand, Variety, Grade) reflects the live cache.
+        // (MaterialGroup, Variety, Grade, Weight) reflects the live cache.
         data.GroupSummaries = await _qos.BuildGroupSummariesAsync(
             qo.QualityOrderId, materials, data.UnitsByGroup);
 

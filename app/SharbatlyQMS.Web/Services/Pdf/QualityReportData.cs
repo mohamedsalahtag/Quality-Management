@@ -19,17 +19,6 @@ public class QualityReportData
     /// </summary>
     public Func<string, string>? Localiser { get; set; }
 
-    /// <summary>
-    /// True only for the copy emailed to the SUPPLIER. Internal fields that the
-    /// supplier has no business seeing are omitted from that copy; everything
-    /// else is identical, so the download and the preview still show the
-    /// complete report.
-    ///
-    /// Consequence worth knowing: the emailed PDF and the downloadable PDF are
-    /// no longer byte-identical, so "what exactly did we send them?" is answered
-    /// by this flag, not by re-downloading.
-    /// </summary>
-    public bool                 SupplierCopy    { get; set; }
 
     /// <summary>
     /// The container was refused on arrival, so this report carries the
@@ -99,7 +88,7 @@ public class QualityReportData
     public List<SampleBundle>   Samples         { get; set; } = new();
 
     /// <summary>
-    /// Page 1 grouped summaries keyed by (MaterialGroup, Variety, Grade);
+    /// Page 1 grouped summaries keyed by (MaterialGroup, Variety, Grade, Weight);
     /// the brands in each group are listed, not grouped on. Built by <see cref="QualityOrderService.BuildGroupSummariesAsync"/>.
     /// Replaces the per-sample summary blocks that used to render on page 1.
     /// </summary>
@@ -151,35 +140,17 @@ public class QualityReportData
     public int    ThumbnailH   { get; set; } = 90;
     public bool   ThumbCover   { get; set; } = true;
 
-    // ---- The two time bars. Both count to InspectionDate (the local day the
-    //      Quality Order was opened); see ShipmentDates for the definitions.
-
     /// <summary>
-    /// TIME BAR -- the supplier-claim figure: inspection date minus vessel
-    /// discharge date. Printed on every copy, the supplier's included. Null
-    /// when either date is missing.
+    /// TIME BAR -- the supplier-claim figure: inspection date (the local day
+    /// the Quality Order was opened) minus vessel discharge date. Null when
+    /// either date is missing. See ShipmentDates.
+    ///
+    /// The internal Inspection Time Bar (inspection date - branch receive date)
+    /// is deliberately not on the report (2026-09-28); it lives on the
+    /// Inspection Time Bar page.
     /// </summary>
     public int? TimeBarDays =>
         ShipmentDates.DaysToInspection(Shipment?.DischargeDate, InspectionDate);
-
-    /// <summary>Which date the INSPECTION time bar counts from: one of
-    /// <see cref="TimeBarArrivalBases"/> -- the SAME setting the Inspection Time
-    /// Bar page uses, so the report and the page print the same number.
-    /// Defaults to the branch receive date. Set by ReportsController.</summary>
-    public string TimeBarBasis { get; set; } = TimeBarArrivalBases.GoodsReceipt;
-
-    /// <summary>The date the Inspection Time Bar counts from, per <see cref="TimeBarBasis"/>.</summary>
-    public DateTime? InspectionTimeBarStartDate =>
-        TimeBarBasis == TimeBarArrivalBases.PortArrival ? Shipment?.PortArrivalDate : Shipment?.ReceiveDate;
-
-    /// <summary>
-    /// INSPECTION TIME BAR -- the internal performance figure: inspection date
-    /// minus branch receive date (or vessel arrival, if the page's basis says
-    /// so). Printed on the internal copy only. Same arithmetic as the
-    /// Inspection Time Bar page.
-    /// </summary>
-    public int? InspectionTimeBarDays =>
-        ShipmentDates.DaysToInspection(InspectionTimeBarStartDate, InspectionDate);
 
     /// <summary>
     /// Absolute file-system path to the company logo configured under

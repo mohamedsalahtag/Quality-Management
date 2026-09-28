@@ -249,18 +249,17 @@ public static class QualityReportPdfSoft
         };
         // Middle column is the shipment TIMELINE, in the order the events
         // actually happen: loading -> vessel arrival -> discharge -> pullout ->
-        // receive -> unloading -> inspection. Reading it top to bottom shows the
-        // movement, so a gap or an out-of-order date stands out. The derived
-        // figures close the column, all from ShipmentDates so no screen can
-        // print a different number:
-        //   * Transit Days        = discharge - loading
-        //   * Time Bar            = inspection date - vessel discharge (the
-        //                           supplier-claim figure, on every copy)
-        //   * Inspection Time Bar = inspection date - branch receive date (the
-        //                           internal performance figure; added below
-        //                           for the internal copy only)
-        // The QO page, the Claims page and the QC summary panel use the same
-        // sequence.
+        // unloading -> inspection. Reading it top to bottom shows the movement,
+        // so a gap or an out-of-order date stands out. The derived figures close
+        // the column, both from ShipmentDates so no screen can print a
+        // different number:
+        //   * Transit Days = discharge - loading
+        //   * Time Bar     = inspection date - vessel discharge (supplier claim)
+        //
+        // The branch Receive Date and the Inspection Time Bar are NOT printed
+        // on any copy (2026-09-28, on request): both are internal measures of
+        // our own receiving and inspection speed. They remain on the screens
+        // and on the Inspection Time Bar page.
         var col2 = new List<(string, string)>
         {
             (L("Loading Date"),        Dt(s?.SailingDate)),
@@ -272,22 +271,6 @@ public static class QualityReportPdfSoft
             (L("Transit Days"),        s?.EffectiveTransitDays?.ToString() ?? "—"),
             (L("Time Bar"),            (d.TimeBarDays?.ToString() ?? "—") + " days"),
         };
-        // The Inspection Time Bar measures OUR performance against OUR receipt
-        // date, so -- like the Receive Date itself -- it stays off the copy
-        // mailed to the supplier.
-        if (!d.SupplierCopy)
-            col2.Add((L("Inspection Time Bar"), (d.InspectionTimeBarDays?.ToString() ?? "—") + " days"));
-        // Receive Date is OUR goods-receipt date at the facility, not the
-        // supplier's, so their copy omits it.
-        //
-        // Inserted only for the internal copy rather than added-then-removed:
-        // the old RemoveAll matched the literal "Receive Date" against an entry
-        // built from L("Receive Date"), so the moment anyone renamed that
-        // caption on the Labels screen the row silently survived into the
-        // supplier's report. Not adding it cannot fail that way, and the column
-        // still closes up instead of printing an orphaned label.
-        if (!d.SupplierCopy)
-            col2.Insert(4, (L("Receive Date"), Dt(s?.ReceiveDate)));
 
         var col3 = new List<(string, string)>
         {
@@ -374,14 +357,15 @@ public static class QualityReportPdfSoft
                 if (!string.IsNullOrWhiteSpace(g.Brand))   parts.Add(g.Brand!);
                 if (!string.IsNullOrWhiteSpace(g.Variety)) parts.Add(g.Variety!);
                 if (!string.IsNullOrWhiteSpace(g.Grade))   parts.Add(g.Grade!);
-                if (parts.Count == 0) parts.Add("(brand / variety / grade not set)");
+                if (g.WeightText != null)                  parts.Add(g.WeightText);
+                if (parts.Count == 0) parts.Add("(brand / variety / grade / weight not set)");
                 r.RelativeItem().Text(string.Join("  ·  ", parts)).Bold().FontColor(Ink);
                 r.RelativeItem().AlignRight()
                     .Text($"Material Group: {V(g.MaterialGroup)} — {V(g.MaterialGroupDesc)}").FontColor(Muted);
             });
 
             ThreeColumns(gc.Item(),
-                new() { (L("Product"), V(g.MajorCategory)), (L("Brand"), V(g.Brand)), (L("Variety"), V(g.Variety)), (L("Grade"), V(g.Grade)) },
+                new() { (L("Product"), V(g.MajorCategory)), (L("Brand"), V(g.Brand)), (L("Variety"), V(g.Variety)), (L("Grade"), V(g.Grade)), (L("Weight"), V(g.WeightText)) },
                 new() { (L("Material Group"), V(g.MaterialGroup)), (L("Count of Materials"), g.MaterialCount.ToString()), (L("Samples"), $"{g.SampleCount} Cartons") },
                 new() { (L("Sample Size"), $"{g.SumSampleSize} {V(g.SampleUnit)}"), (L("PO Quantity"), Fmt.Dec2(g.SumPoQuantity)),
                         (L("Tara Weight"), string.IsNullOrEmpty(g.TaraWeightText) ? "—" : $"{g.TaraWeightText} kg") });

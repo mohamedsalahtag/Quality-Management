@@ -406,6 +406,15 @@ public class MaterialGroupSummary
     public string? Brand            { get; set; }
     public string? Variety          { get; set; }
     public string? Grade            { get; set; }          // = MaterialClass
+    /// <summary>Carton net weight from SAP's material master -- a grouping
+    /// field since 2026-09-28. Null when SAP has no weight.</summary>
+    public decimal? Weight          { get; set; }
+    /// <summary>The weight as every summary prints it, e.g. "13.5 kg". One
+    /// formatter so the PDF and the on-screen summary cannot disagree.</summary>
+    public string? WeightText =>
+        Weight.HasValue
+            ? Weight.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + " kg"
+            : null;
     public string? MajorCategory    { get; set; }
     /// <summary>Tara weight of the group's materials, pre-rendered: one value
     /// when they agree, otherwise every distinct value joined. Empty when no

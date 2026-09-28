@@ -1623,8 +1623,9 @@ public class QualityOrderService : IQualityOrderService
     // Quality Order PDF -- grouped summary
     // ===================================================================
     //
-    // Rolls every material in the QO into (MaterialGroup, Variety, Grade)
-    // groups -- brand is not a grouping field; see the GroupBy below. The caller (ReportsController.BuildDataAsync) has
+    // Rolls every material in the QO into (MaterialGroup, Variety, Grade,
+    // Weight) groups -- brand is not a grouping field; see the GroupBy below.
+    // The caller (ReportsController.BuildDataAsync) has
     // already enriched `materials` with ApplyMara, so Brand / Variety /
     // MaterialClass / NetWeight reflect the current MARA snapshot rather
     // than a stale copy on qms_quality_order_material. Six queries up
@@ -1771,14 +1772,21 @@ public class QualityOrderService : IQualityOrderService
                 new { groups = distinctGroups })).ToList();
 
         // ---------- Aggregate in memory ----------
-        // (MaterialGroup, Variety, Grade) -> list of materials.
+        // (MaterialGroup, Variety, Grade, Weight) -> list of materials.
         // Brand is deliberately NOT part of the key (2026-09-26, on request):
         // the same fruit of the same variety and grade is one result whatever
         // label is on the carton. The brands in a group are still printed, as a
         // joined list, so nothing is lost from the report.
+        // Weight IS part of the key (2026-09-28, on request): a 13.5 kg and a
+        // 6 kg carton of the same fruit are different products with their own
+        // defect picture. It is the carton net weight from SAP's material
+        // master, which ApplyMara has copied into NetWeight before this runs
+        // (the QO's own net_weight column is empty). Zero counts as unknown.
         // Null-safe: empty-string keys collapse so two materials missing
-        // the same field still end up in the same group.
+        // the same field still end up in the same group; decimal equality
+        // ignores trailing zeros, so 13.5 and 13.50 are one group.
         static string Norm(string? s) => (s ?? "").Trim();
+        static decimal? NormWeight(decimal? w) => w is > 0 ? w : null;
 
         var bySample = samples.ToLookup(s => s.QoMaterialId);
         var defectsBySample = sampleDefects.ToLookup(d => d.SampleId);
@@ -1788,10 +1796,13 @@ public class QualityOrderService : IQualityOrderService
             .GroupBy(m => (
                 MaterialGroup: Norm(m.MaterialGroup),
                 Variety:       Norm(m.Variety),
-                Grade:         Norm(m.MaterialClass)))
+                Grade:         Norm(m.MaterialClass),
+                Weight:        NormWeight(m.NetWeight)))
             .OrderBy(g => g.Key.MaterialGroup)
             .ThenBy(g => g.Key.Variety)
             .ThenBy(g => g.Key.Grade)
+            .ThenBy(g => g.Key.Weight.HasValue ? 1 : 0)
+            .ThenBy(g => g.Key.Weight)
             .ToList();
 
         var result = new List<MaterialGroupSummary>(groups.Count);
@@ -1844,6 +1855,7 @@ public class QualityOrderService : IQualityOrderService
                 Brand             = NullIfEmpty(JoinDistinct(mats.Select(m => Norm(m.Brand)).Where(b => b.Length > 0).OrderBy(b => b))),
                 Variety           = string.IsNullOrEmpty(g.Key.Variety) ? null : g.Key.Variety,
                 Grade             = string.IsNullOrEmpty(g.Key.Grade)   ? null : g.Key.Grade,
+                Weight            = g.Key.Weight,
                 MajorCategory     = mats.FirstOrDefault(m => !string.IsNullOrWhiteSpace(m.MajorCategory))?.MajorCategory,
                 SumSampleSize     = sumSize,
                 SumPoQuantity     = sumPoQty,

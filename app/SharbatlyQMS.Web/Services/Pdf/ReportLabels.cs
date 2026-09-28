@@ -87,7 +87,6 @@ public static class ReportLabelCatalog
         "External damage to container",
         "Grade",
         "Inspection Date",
-        "Inspection Time Bar",
         "Joint Survey",
         "Loading Date",
         "Loading Port",
@@ -113,7 +112,6 @@ public static class ReportLabelCatalog
         "Quantity",
         "REINSPECTION",
         "Readings",
-        "Receive Date",
         "Replaced by",
         "Replaces",
         "Report Location",
@@ -143,6 +141,7 @@ public static class ReportLabelCatalog
         "Vessel Arrival Date",
         "Vessel Name",
         "Visual cargo condition acceptable",
+        "Weight",
         "finished",
         "on",
     };
