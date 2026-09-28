@@ -97,22 +97,27 @@ public class TimeBarRow
     public string?   ArrivalNo   { get; set; }
     public long?     QualityOrderId { get; set; }
     public string?   QualityOrderNo { get; set; }
-    /// <summary>The clock's end when QC has finished. Null while it is running.</summary>
+    /// <summary>The INSPECTION DATE (UTC): when the live Quality Order was opened.
+    /// The clock's end. Null while no inspection has been opened.</summary>
+    public DateTime? InspectedAt { get; set; }
+    /// <summary>When QC finished (UTC). Shown for reference; not the clock's end.</summary>
     public DateTime? ClosedAt    { get; set; }
 
     public string  Stage      { get; set; } = TimeBarStages.Pending;
     public string? StatusCode { get; set; }
 
-    /// <summary>Days between the arrival date and the QC finish — or between the
-    /// arrival date and now while it is still running. Null when no arrival date
-    /// is known, in which case the page shows a dash rather than inventing one.</summary>
+    /// <summary>Days between the receive date and the inspection date — or
+    /// between the receive date and today while no inspection has been opened.
+    /// Null when no receive date is known, in which case the page shows a dash
+    /// rather than inventing one.</summary>
     public int?  ElapsedDays { get; set; }
-    /// <summary>True while there is no finished quality order: the number is
-    /// still growing.</summary>
+    /// <summary>True while no inspection has been opened: the number is still
+    /// growing.</summary>
     public bool  IsRunning   { get; set; }
-    /// <summary>QC finished BEFORE the recorded arrival date. Happens with
-    /// back-dated receipts. The elapsed value is clamped to 0 and flagged rather
-    /// than printed negative, which would read as a bug in the page.</summary>
+    /// <summary>Inspection opened BEFORE the recorded receive date (SAP posts
+    /// the receipt late on about one container in a hundred). The elapsed
+    /// value is clamped to 0 and flagged rather than printed negative, which
+    /// would read as a bug in the page.</summary>
     public bool  IsBackwards { get; set; }
     /// <summary>The container is not in the SAP cache at all.</summary>
     public bool  NotInCache  { get; set; }
@@ -151,11 +156,11 @@ public class TimeBarSummary
     public int Containers   { get; set; }
     /// <summary>No arrival created — nobody has started.</summary>
     public int Pending      { get; set; }
-    /// <summary>Clock still running (no finished quality order).</summary>
+    /// <summary>Clock still running (no inspection opened yet).</summary>
     public int Running      { get; set; }
     /// <summary>Past the warning threshold.</summary>
     public int OverThreshold{ get; set; }
-    /// <summary>Median elapsed days among the settled rows. Median, not mean:
+    /// <summary>Median elapsed days among the inspected rows. Median, not mean:
     /// one container stuck for 90 days would drag an average somewhere no
     /// individual container actually is.</summary>
     public int? MedianSettled { get; set; }

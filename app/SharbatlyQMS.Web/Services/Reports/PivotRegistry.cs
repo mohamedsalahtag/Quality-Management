@@ -159,14 +159,15 @@ public static class PivotRegistry
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
             new PivotMeasure("TransitDays",    "Transit days",    "TransitDays",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
-            // Time Bar (days) = receive date -> QO finish (closed) date, in local
-            // dates -- the same figure the Time Bar page and the QC report print.
-            // TimeBarDischarge counts from the inspector's discharge date instead
-            // and is kept for anyone who still wants it. Same grain caveat as
-            // SampleSize (repeats per defect row), so no SUM.
-            new PivotMeasure("TimeBarArrival", "Time Bar (receipt)",   "TimeBarArrival",
+            // The QC report's two figures, both counted to the inspection date
+            // (QO opened, local):
+            //   TimeBarDischarge = Time Bar            = inspection - vessel discharge
+            //   TimeBarArrival   = Inspection Time Bar = inspection - branch receipt
+            // Keys kept for saved perspectives. Same grain caveat as SampleSize
+            // (repeats per defect row), so no SUM.
+            new PivotMeasure("TimeBarDischarge","Time Bar (discharge → inspection)", "TimeBarDischarge",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
-            new PivotMeasure("TimeBarDischarge","Time Bar (discharge)", "TimeBarDischarge",
+            new PivotMeasure("TimeBarArrival", "Inspection Time Bar (receipt → inspection)", "TimeBarArrival",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),
             new PivotMeasure("NetWeight",      "Net weight",      "NetWeight",
                 new[] { PivotAggregations.Avg, PivotAggregations.Min, PivotAggregations.Max }),

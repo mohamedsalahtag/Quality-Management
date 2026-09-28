@@ -1071,7 +1071,7 @@
         </div>
         <div class="card-body">
             <p class="text-muted small mb-3">
-                @Loc["How the Time Bar page judges the days between the branch receiving a container and its QC being finished. The claim window is short, so the optimum is one day. The clock basis chosen here is also the one the QC report's Time Bar counts from."]
+                @Loc["How the Inspection Time Bar page judges the days from the branch receiving a container to its inspection date (the day the Quality Order was opened). The optimum is one day. The basis chosen here is also the one the QC report's Inspection Time Bar counts from; the report's supplier-claim Time Bar always counts from the vessel discharge date."]
             </p>
             <form asp-action="SaveTimeBarSettings" method="post" class="row g-3">
                 @Html.AntiForgeryToken()
@@ -1150,7 +1150,7 @@
                 <div class="col-md-8">
                     <label class="form-label">@Loc["Time Bar basis"]</label>
                     <p class="text-muted small mb-0">
-                        @Loc["The Time Bar on the report counts from the same date as the Time Bar page — the branch receive date by default. Change it under Alerts → Time Bar thresholds → \"Start the clock from\", and both move together."]
+                        @Loc["The report prints two figures. Time Bar = inspection date − vessel discharge date (for supplier claims; on every copy). Inspection Time Bar = inspection date − branch receive date (internal; not on the supplier's copy), the same figure as the Inspection Time Bar page — its basis is set under Alerts → Time Bar thresholds."]
                     </p>
                 </div>
                 <div class="col-md-8">

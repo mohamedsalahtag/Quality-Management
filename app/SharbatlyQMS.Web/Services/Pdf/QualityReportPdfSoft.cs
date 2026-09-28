@@ -250,12 +250,17 @@ public static class QualityReportPdfSoft
         // Middle column is the shipment TIMELINE, in the order the events
         // actually happen: loading -> vessel arrival -> discharge -> pullout ->
         // receive -> unloading -> inspection. Reading it top to bottom shows the
-        // movement, so a gap or an out-of-order date stands out. The two derived
-        // figures close the column: transit (loading to discharge) and the Time
-        // Bar (receive date to QC finish, the same arithmetic as the Time Bar
-        // page) -- both from ShipmentDates, so no screen can print a different
-        // number. The QO page, the Claims page and the QC summary panel use the
-        // same sequence.
+        // movement, so a gap or an out-of-order date stands out. The derived
+        // figures close the column, all from ShipmentDates so no screen can
+        // print a different number:
+        //   * Transit Days        = discharge - loading
+        //   * Time Bar            = inspection date - vessel discharge (the
+        //                           supplier-claim figure, on every copy)
+        //   * Inspection Time Bar = inspection date - branch receive date (the
+        //                           internal performance figure; added below
+        //                           for the internal copy only)
+        // The QO page, the Claims page and the QC summary panel use the same
+        // sequence.
         var col2 = new List<(string, string)>
         {
             (L("Loading Date"),        Dt(s?.SailingDate)),
@@ -265,8 +270,13 @@ public static class QualityReportPdfSoft
             (L("Unloading Date"),      Dt(s?.UnloadingDate)),
             (L("Inspection Date"),     Dt(d.InspectionDate)),
             (L("Transit Days"),        s?.EffectiveTransitDays?.ToString() ?? "—"),
-            ($"Time Bar ({d.TimeBarCaption})", (d.TimeBarDays?.ToString() ?? "—") + " days"),
+            (L("Time Bar"),            (d.TimeBarDays?.ToString() ?? "—") + " days"),
         };
+        // The Inspection Time Bar measures OUR performance against OUR receipt
+        // date, so -- like the Receive Date itself -- it stays off the copy
+        // mailed to the supplier.
+        if (!d.SupplierCopy)
+            col2.Add((L("Inspection Time Bar"), (d.InspectionTimeBarDays?.ToString() ?? "—") + " days"));
         // Receive Date is OUR goods-receipt date at the facility, not the
         // supplier's, so their copy omits it.
         //

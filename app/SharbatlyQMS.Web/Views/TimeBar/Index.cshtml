@@ -83,8 +83,8 @@
         <span class="badge bg-secondary ms-2">@total</span>
         <small class="text-muted fs-6 fw-normal ms-2">
             @(cfg.ArrivalBasis == TimeBarArrivalBases.PortArrival
-                ? Loc["Days from the vessel reaching port to the moment QC finished. Optimum is"]
-                : Loc["Days from the branch receiving a container (SAP receive date) to the moment QC finished. Optimum is"]) @cfg.GoodDays @Loc["day(s)."]
+                ? Loc["Inspection date minus vessel arrival date. Optimum is"]
+                : Loc["Inspection date minus branch receive date. Optimum is"]) @cfg.GoodDays @Loc["day(s)."]
         </small>
     </h1>
     <span class="d-flex align-items-center gap-2">
@@ -148,9 +148,9 @@ else if (cfg.StartDate.HasValue)
         {
             (Loc["Containers"],     summary.Containers.ToString(),    "secondary", "bi-box-seam",       Loc["In this view"]),
             (Loc["Not started"],    summary.Pending.ToString(),       summary.Pending > 0 ? "danger" : "success", "bi-hourglass",       Loc["No arrival created yet"]),
-            (Loc["Clock running"],  summary.Running.ToString(),       summary.Running > 0 ? "warning" : "success", "bi-play-circle",     Loc["QC not finished"]),
+            (Loc["Clock running"],  summary.Running.ToString(),       summary.Running > 0 ? "warning" : "success", "bi-play-circle",     Loc["Not inspected yet"]),
             (Loc["Over threshold"], summary.OverThreshold.ToString(), summary.OverThreshold > 0 ? "danger" : "success", "bi-exclamation-triangle", $"{Loc["More than"]} {cfg.WarnDays} {Loc["day(s)"]}"),
-            (Loc["Median (finished)"], summary.MedianSettled?.ToString() ?? "—", "info", "bi-graph-down", Loc["Typical days to finish"]),
+            (Loc["Median (inspected)"], summary.MedianSettled?.ToString() ?? "—", "info", "bi-graph-down", Loc["Typical days to inspection"]),
         };
     }
     @foreach (var t in tiles)
@@ -306,7 +306,7 @@ else if (cfg.StartDate.HasValue)
                         @(cfg.ArrivalBasis == TimeBarArrivalBases.PortArrival ? Loc["Vessel arrival"] : Loc["Received"])
                     </th>
                     <th data-sort data-col-key="status">@Loc["Status"]</th>
-                    <th data-sort data-col-key="finished">@Loc["QC finished"]</th>
+                    <th data-sort data-col-key="finished" title='@Loc["The day the Quality Order was opened — where the clock stops"]'>@Loc["Inspection date"]</th>
                     <th style="width:22%" data-col-key="bar">@Loc["Inspection time bar"]</th>
                 </tr>
             </thead>
@@ -408,7 +408,11 @@ else if (cfg.StartDate.HasValue)
                             }
                         </td>
                         <td class="pp-code">
-                            @(r.ClosedAt?.ToLocalTime().ToString("yyyy-MM-dd") ?? "—")
+                            @(r.InspectedAt.HasValue ? ShipmentDates.ToLocal(r.InspectedAt.Value).ToString("yyyy-MM-dd") : "—")
+                            @if (r.ClosedAt.HasValue)
+                            {
+                                <div class="pp-sub" title='@Loc["When QC finished"]'>@Loc["finished"] @ShipmentDates.ToLocal(r.ClosedAt.Value).ToString("yyyy-MM-dd")</div>
+                            }
                         </td>
                         <td>
                             @if (r.ElapsedDays is null)
@@ -429,12 +433,12 @@ else if (cfg.StartDate.HasValue)
                                     @if (r.IsRunning)
                                     {
                                         <i class="bi bi-hourglass-split text-muted"
-                                           title='@Loc["Still running — QC has not finished"]'></i>
+                                           title='@Loc["Still running — no inspection opened yet"]'></i>
                                     }
                                     @if (r.IsBackwards)
                                     {
                                         <i class="bi bi-exclamation-triangle text-warning"
-                                           title='@Loc["QC finished before the recorded arrival date — check the dates"]'></i>
+                                           title='@Loc["Inspection opened before the recorded receive date — check the dates"]'></i>
                                     }
                                 </div>
                             }

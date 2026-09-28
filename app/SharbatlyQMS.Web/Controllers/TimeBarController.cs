@@ -97,8 +97,8 @@ public class TimeBarController : Controller
         {
             "Container", "BOL", "PO", "STO", "Supplier", "Plant", "PO type",
             clockStart, "Date source", "Arrival no", "Quality order",
-            "Stage", "Status", "Days elapsed", "Still running", "Closed at",
-            "Not in SAP cache", "Archived"
+            "Stage", "Status", "Inspection time bar (days)", "Still running", "QC finished",
+            "Not in SAP cache", "Archived", "Inspection date"
         };
         for (var i = 0; i < headers.Length; i++)
         {
@@ -127,15 +127,19 @@ public class TimeBarController : Controller
             // averaged and charted as if it were instant.
             if (row.ElapsedDays.HasValue) ws.Cell(r, 14).Value = row.ElapsedDays.Value;
             ws.Cell(r, 15).Value = row.IsRunning ? "Yes" : "No";
-            if (row.ClosedAt.HasValue) ws.Cell(r, 16).Value = row.ClosedAt.Value.ToLocalTime();
+            if (row.ClosedAt.HasValue) ws.Cell(r, 16).Value = ShipmentDates.ToLocal(row.ClosedAt.Value);
             ws.Cell(r, 17).Value = row.NotInCache ? "Yes" : "No";
             ws.Cell(r, 18).Value = row.IsArchived ? "Yes" : "No";
+            // Appended last so a workbook someone already built formulas on
+            // keeps its columns where they were.
+            if (row.InspectedAt.HasValue) ws.Cell(r, 19).Value = ShipmentDates.ToLocal(row.InspectedAt.Value).Date;
             r++;
         }
 
+        var measure = $"Inspection time bar = inspection date (Quality Order opened) - {clockStart.ToLowerInvariant()}.";
         ws.Cell(r + 1, 1).Value = cfg.StartDate.HasValue
-            ? $"Containers that arrived on or after {cfg.StartDate:yyyy-MM-dd}. Green up to {cfg.GoodDays} day(s), red above {cfg.WarnDays}."
-            : $"All containers. Green up to {cfg.GoodDays} day(s), red above {cfg.WarnDays}.";
+            ? $"{measure} Containers received on or after {cfg.StartDate:yyyy-MM-dd}. Green up to {cfg.GoodDays} day(s), red above {cfg.WarnDays}."
+            : $"{measure} All containers. Green up to {cfg.GoodDays} day(s), red above {cfg.WarnDays}.";
         if (rows.Count >= MaxRows)
             ws.Cell(r + 2, 1).Value = $"Truncated at {MaxRows:N0} rows - narrow the filter for the rest.";
         ws.Columns().AdjustToContents();

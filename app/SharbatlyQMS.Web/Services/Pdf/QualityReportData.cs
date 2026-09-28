@@ -151,26 +151,35 @@ public class QualityReportData
     public int    ThumbnailH   { get; set; } = 90;
     public bool   ThumbCover   { get; set; } = true;
 
-    /// <summary>Which shipment date the Time Bar counts from: one of
-    /// <see cref="TimeBarArrivalBases"/> -- the SAME setting the Time Bar page
-    /// uses, so the report and the page print the same number for a container.
+    // ---- The two time bars. Both count to InspectionDate (the local day the
+    //      Quality Order was opened); see ShipmentDates for the definitions.
+
+    /// <summary>
+    /// TIME BAR -- the supplier-claim figure: inspection date minus vessel
+    /// discharge date. Printed on every copy, the supplier's included. Null
+    /// when either date is missing.
+    /// </summary>
+    public int? TimeBarDays =>
+        ShipmentDates.DaysToInspection(Shipment?.DischargeDate, InspectionDate);
+
+    /// <summary>Which date the INSPECTION time bar counts from: one of
+    /// <see cref="TimeBarArrivalBases"/> -- the SAME setting the Inspection Time
+    /// Bar page uses, so the report and the page print the same number.
     /// Defaults to the branch receive date. Set by ReportsController.</summary>
     public string TimeBarBasis { get; set; } = TimeBarArrivalBases.GoodsReceipt;
 
-    /// <summary>The date the Time Bar counts from, per <see cref="TimeBarBasis"/>.</summary>
-    public DateTime? TimeBarStartDate =>
+    /// <summary>The date the Inspection Time Bar counts from, per <see cref="TimeBarBasis"/>.</summary>
+    public DateTime? InspectionTimeBarStartDate =>
         TimeBarBasis == TimeBarArrivalBases.PortArrival ? Shipment?.PortArrivalDate : Shipment?.ReceiveDate;
 
-    /// <summary>"Receipt" or "Port arrival" -- the suffix printed after "Time Bar".</summary>
-    public string TimeBarCaption => TimeBarArrivalBases.Caption(TimeBarBasis);
-
     /// <summary>
-    /// Whole days from <see cref="TimeBarStartDate"/> to the day the order was
-    /// finished (or to today while it is open), in local dates. Null when the
-    /// start date is unknown. One arithmetic, shared with the Time Bar page.
+    /// INSPECTION TIME BAR -- the internal performance figure: inspection date
+    /// minus branch receive date (or vessel arrival, if the page's basis says
+    /// so). Printed on the internal copy only. Same arithmetic as the
+    /// Inspection Time Bar page.
     /// </summary>
-    public int? TimeBarDays =>
-        ShipmentDates.TimeBarDays(TimeBarStartDate, QualityOrder.ClosedAt ?? GeneratedAt);
+    public int? InspectionTimeBarDays =>
+        ShipmentDates.DaysToInspection(InspectionTimeBarStartDate, InspectionDate);
 
     /// <summary>
     /// Absolute file-system path to the company logo configured under

@@ -34,9 +34,16 @@ namespace SharbatlyQMS.Web.Services;
 ///   * TRANSIT DAYS      = discharge date - loading date. SAP's Transit_Days
 ///                         (= Arrival_Date - Sailing_Date, i.e. ETA-based) is the
 ///                         fallback until the inspector enters the discharge date.
-///   * TIME BAR          = QC finished (local date) - receive date. The same
-///                         arithmetic on the Time Bar page, the QC report and the
-///                         Data Hub, so the three print the same number.
+///   * TIME BAR          = inspection date - vessel discharge date. The
+///                         SUPPLIER-CLAIM figure: how long after discharge the
+///                         container was inspected. Printed on the QC report,
+///                         the supplier's copy included.
+///   * INSPECTION TIME BAR = inspection date - branch receive date. The INTERNAL
+///                         performance figure the Inspection Time Bar page
+///                         monitors; the QC report prints it on the internal copy
+///                         only.
+///   Both count to the INSPECTION DATE -- the local day the Quality Order was
+///   opened -- not to the day QC was finished (2026-09-27, on request).
 /// </summary>
 public static class ShipmentDates
 {
@@ -58,20 +65,27 @@ public static class ShipmentDates
     }
 
     /// <summary>
-    /// The inspection time bar: whole days from the clock's start date (a
-    /// business date with no time part) to the LOCAL date the quality order was
-    /// finished. <paramref name="finishedUtc"/> is <c>closed_at</c> (UTC), or the
-    /// moment of rendering while the order is still open; it is shifted into
-    /// local time before the day is taken, because an order finished at 01:00
-    /// Riyadh time is 22:00 UTC the previous day and would otherwise count a
-    /// day short. Clamped at zero for the same reason as transit.
+    /// Whole days from a start date (a business date with no time part) to the
+    /// inspection date, both as LOCAL days. Used for both the Time Bar (start =
+    /// vessel discharge) and the Inspection Time Bar (start = branch receipt).
+    /// Null when either date is missing. Clamped at zero: an inspection dated
+    /// before its discharge or receipt is a data condition, and printing "-2"
+    /// on a report reads as a bug in the report.
     /// </summary>
-    public static int? TimeBarDays(DateTime? startDate, DateTime? finishedUtc)
+    public static int? DaysToInspection(DateTime? startDate, DateTime? inspectionLocal)
     {
-        if (!startDate.HasValue || !finishedUtc.HasValue) return null;
-        var finishedLocal = ToLocal(finishedUtc.Value);
-        return Math.Max(0, (finishedLocal.Date - startDate.Value.Date).Days);
+        if (!startDate.HasValue || !inspectionLocal.HasValue) return null;
+        return Math.Max(0, (inspectionLocal.Value.Date - startDate.Value.Date).Days);
     }
+
+    /// <summary>
+    /// Same as <see cref="DaysToInspection"/> for an end moment stored in UTC
+    /// (<c>opened_at</c>). It is shifted into local time before the day is
+    /// taken, because an order opened at 01:00 Riyadh time is 22:00 UTC the
+    /// previous day and would otherwise count a day short.
+    /// </summary>
+    public static int? TimeBarDays(DateTime? startDate, DateTime? endUtc) =>
+        endUtc.HasValue ? DaysToInspection(startDate, ToLocal(endUtc.Value)) : null;
 
     /// <summary>
     /// UTC-to-local for values read back from <c>datetime2</c> columns, which

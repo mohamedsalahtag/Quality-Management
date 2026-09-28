@@ -163,8 +163,9 @@ public class TimeBarServiceTests : IClassFixture<QmsAppFactory>
                 Assert.NotNull(r.ArrivalId);
                 Assert.Null(r.QualityOrderId);
             }
-            // A settled clock and a running one are opposites; nothing may be both.
-            Assert.Equal(r.ClosedAt is null, r.IsRunning);
+            // The clock stops at the inspection date (QO opened); a stopped
+            // clock and a running one are opposites, nothing may be both.
+            Assert.Equal(r.InspectedAt is null, r.IsRunning);
         }
     }
 

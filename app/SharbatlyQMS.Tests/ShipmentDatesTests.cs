@@ -57,73 +57,76 @@ public class ShipmentDatesTests
     }
 
     [Fact]
-    public void Time_bar_counts_to_the_local_finish_date()
+    public void An_end_stored_in_utc_counts_as_its_local_day()
     {
-        // Finished at 22:30 UTC. In Riyadh (UTC+3) that is 01:30 the NEXT day,
-        // and the day the inspector finished is the day that counts. Computed
-        // against the machine's own zone so the test says the same thing
-        // wherever it runs; on a UTC machine both readings coincide.
-        var start       = new DateTime(2026, 9, 20);
-        var finishedUtc = new DateTime(2026, 9, 24, 22, 30, 0, DateTimeKind.Utc);
-        var expected    = (finishedUtc.ToLocalTime().Date - start).Days;
+        // Opened at 22:30 UTC. In Riyadh (UTC+3) that is 01:30 the NEXT day,
+        // and the day the inspector opened the order is the day that counts.
+        // Computed against the machine's own zone so the test says the same
+        // thing wherever it runs; on a UTC machine both readings coincide.
+        var start     = new DateTime(2026, 9, 20);
+        var openedUtc = new DateTime(2026, 9, 24, 22, 30, 0, DateTimeKind.Utc);
+        var expected  = (openedUtc.ToLocalTime().Date - start).Days;
 
-        Assert.Equal(expected, ShipmentDates.TimeBarDays(start, finishedUtc));
+        Assert.Equal(expected, ShipmentDates.TimeBarDays(start, openedUtc));
 
         // The value Dapper hands back from datetime2 is Kind=Unspecified and
         // still means UTC; it must not be taken as local.
-        var unspecified = DateTime.SpecifyKind(finishedUtc, DateTimeKind.Unspecified);
+        var unspecified = DateTime.SpecifyKind(openedUtc, DateTimeKind.Unspecified);
         Assert.Equal(expected, ShipmentDates.TimeBarDays(start, unspecified));
     }
 
     [Fact]
-    public void Time_bar_is_null_without_a_start_and_never_negative()
+    public void Days_to_inspection_is_null_without_both_dates_and_never_negative()
     {
-        Assert.Null(ShipmentDates.TimeBarDays(null, DateTime.UtcNow));
-        Assert.Null(ShipmentDates.TimeBarDays(new DateTime(2026, 9, 20), null));
-        Assert.Equal(0, ShipmentDates.TimeBarDays(new DateTime(2026, 9, 30),
-                                                  new DateTime(2026, 9, 20, 12, 0, 0, DateTimeKind.Utc)));
+        Assert.Null(ShipmentDates.DaysToInspection(null, DateTime.Today));
+        Assert.Null(ShipmentDates.DaysToInspection(new DateTime(2026, 9, 20), null));
+        Assert.Equal(0, ShipmentDates.DaysToInspection(new DateTime(2026, 9, 30), new DateTime(2026, 9, 20)));
+        Assert.Equal(4, ShipmentDates.DaysToInspection(new DateTime(2026, 9, 20), new DateTime(2026, 9, 24, 15, 0, 0)));
     }
 
     /// <summary>
-    /// The report reads the same basis setting as the Time Bar page and counts
-    /// from the receive date by default -- not from the discharge date, which
-    /// is what made "Time Bar 8 days" appear on a container inspected the day
-    /// it was received.
+    /// The report's two figures, as defined on 2026-09-27:
+    ///   Time Bar            = inspection date - vessel discharge date
+    ///   Inspection Time Bar = inspection date - branch receive date
+    /// Both count to the INSPECTION date, not to when QC finished.
     /// </summary>
     [Fact]
-    public void The_report_time_bar_counts_from_the_receive_date_by_default()
+    public void The_report_prints_both_time_bars_to_the_inspection_date()
     {
         var d = new QualityReportData
         {
             Shipment = new ShipmentSnapshot
             {
                 DischargeDate   = new DateTime(2026, 9, 18),
-                ReceiveDate     = new DateTime(2026, 9, 26),
-                PortArrivalDate = new DateTime(2026, 9, 18),
+                PortArrivalDate = new DateTime(2026, 9, 17),
+                ReceiveDate     = new DateTime(2026, 9, 24),
             },
-            QualityOrder = new QualityOrder { ClosedAt = new DateTime(2026, 9, 26, 9, 0, 0, DateTimeKind.Utc) }
+            InspectionDate = new DateTime(2026, 9, 25, 10, 0, 0),
+            // Finished much later -- must not move either figure.
+            QualityOrder   = new QualityOrder { ClosedAt = new DateTime(2026, 10, 3, 9, 0, 0, DateTimeKind.Utc) }
         };
 
-        Assert.Equal(TimeBarArrivalBases.GoodsReceipt, d.TimeBarBasis);
-        Assert.Equal(new DateTime(2026, 9, 26), d.TimeBarStartDate);
-        Assert.Equal("Receipt", d.TimeBarCaption);
-        Assert.Equal(0, d.TimeBarDays);
+        Assert.Equal(7, d.TimeBarDays);            // 25 Sep - 18 Sep discharge
+        Assert.Equal(1, d.InspectionTimeBarDays);  // 25 Sep - 24 Sep receipt
 
+        // The Inspection Time Bar follows the page's basis; the claim Time Bar does not.
         d.TimeBarBasis = TimeBarArrivalBases.PortArrival;
-        Assert.Equal(new DateTime(2026, 9, 18), d.TimeBarStartDate);
-        Assert.Equal("Port arrival", d.TimeBarCaption);
-        Assert.Equal(8, d.TimeBarDays);
+        Assert.Equal(8, d.InspectionTimeBarDays);  // 25 Sep - 17 Sep vessel arrival
+        Assert.Equal(7, d.TimeBarDays);
     }
 
     [Fact]
-    public void An_open_order_counts_to_the_report_date()
+    public void A_missing_date_leaves_that_time_bar_blank_not_zero()
     {
         var d = new QualityReportData
         {
-            Shipment     = new ShipmentSnapshot { ReceiveDate = DateTime.Today.AddDays(-3) },
-            QualityOrder = new QualityOrder { ClosedAt = null },
-            GeneratedAt  = DateTime.UtcNow
+            Shipment       = new ShipmentSnapshot { ReceiveDate = new DateTime(2026, 9, 24) },
+            InspectionDate = new DateTime(2026, 9, 26)
         };
-        Assert.Equal(3, d.TimeBarDays);
+        Assert.Null(d.TimeBarDays);                // no discharge date entered
+        Assert.Equal(2, d.InspectionTimeBarDays);
+
+        d.InspectionDate = null;
+        Assert.Null(d.InspectionTimeBarDays);
     }
 }

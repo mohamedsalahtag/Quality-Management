@@ -328,14 +328,14 @@
                             <small class="text-muted">@Loc["From SAP (Arrival_Date)"]</small></div>
                         <div class="col-md-3"><label class="form-label">@Loc["Discharge date"]@(FMand("discharge_date") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <input name="DischargeDate" type="date" class="form-control" value="@shipment?.DischargeDate?.ToString("yyyy-MM-dd")" @FDis("discharge_date") />
-                            <small class="text-muted">@Loc["End of the transit leg: transit days = discharge − loading"]</small></div>
+                            <small class="text-muted">@Loc["Transit days = discharge − loading; Time Bar = inspection − discharge"]</small></div>
 
                         <div class="col-md-3"><label class="form-label">@Loc["Pull-out date"]@(FMand("pullout_date") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <input name="PullOutDate" type="date" class="form-control" value="@shipment?.PullOutDate?.ToString("yyyy-MM-dd")" @FDis("pullout_date") /></div>
                         <div class="col-md-3"><label class="form-label">@Loc["Receive date"]</label>
                             <input type="date" class="form-control" disabled
                                    value="@shipment?.ReceiveDate?.ToString("yyyy-MM-dd")" />
-                            <small class="text-muted">@Loc["From SAP (Receive_Date) — the branch goods receipt, refreshed on every SAP sync. Starts the Time Bar; the dashboard counts the container on this day."]</small></div>
+                            <small class="text-muted">@Loc["From SAP (Receive_Date) — the branch goods receipt, refreshed on every SAP sync. Starts the Inspection Time Bar; the dashboard counts the container on this day."]</small></div>
                         <div class="col-md-3"><label class="form-label">@Loc["Unloading date"]@(FMand("unloading_date") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <input name="UnloadingDate" type="date" class="form-control" value="@shipment?.UnloadingDate?.ToString("yyyy-MM-dd")" @FDis("unloading_date") /></div>
                         @* This is the ARRIVAL's own date (when the container was
@@ -355,7 +355,7 @@
                                 : Loc["SAP's estimate until the discharge date is entered"])</small></div>
                         <div class="col-md-3"><label class="form-label">@Loc["Time bar (days)"]@(FMand("time_bar") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <input name="TimeBar" type="number" class="form-control" value="@shipment?.TimeBar" @FDis("time_bar") />
-                            <small class="text-muted">@Loc["Manual note only. The QC report and the Time Bar page compute their own from the receive date."]</small></div>
+                            <small class="text-muted">@Loc["Manual note only. The QC report computes its own: Time Bar = inspection date − discharge date."]</small></div>
                         <div class="col-md-3"><label class="form-label">@Loc["Arrival port"]@(FMand("arrival_place") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
                             <input name="ArrivalPlace" class="form-control" value="@shipment?.ArrivalPlace" @FDis("arrival_place") /></div>
                         <div class="col-md-3"><label class="form-label">@Loc["Inspection point"]@(FMand("inspection_point") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>

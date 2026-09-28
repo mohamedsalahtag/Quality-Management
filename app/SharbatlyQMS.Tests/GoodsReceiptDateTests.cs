@@ -43,7 +43,8 @@ public class GoodsReceiptDateTests : IClassFixture<QmsAppFactory>
     }
 
     private sealed record Sample(long ArrivalId, long QualityOrderId, string ContainerNo, string BolNo, string Ebeln,
-                                 string Plant, DateTime? SnapshotReceive, DateTime? CacheReceive, DateTime? ClosedAt);
+                                 string Plant, DateTime? SnapshotReceive, DateTime? CacheReceive, DateTime? ClosedAt,
+                                 DateTime? OpenedAt);
 
     /// <summary>Recent finished orders whose container the SAP cache knows.</summary>
     private async Task<List<Sample>> SamplesAsync(int take = 25)
@@ -60,7 +61,8 @@ public class GoodsReceiptDateTests : IClassFixture<QmsAppFactory>
                    a.plant             AS Plant,
                    ss.receive_date     AS SnapshotReceive,
                    k.receive_date      AS CacheReceive,
-                   qo.closed_at        AS ClosedAt
+                   qo.closed_at        AS ClosedAt,
+                   qo.opened_at        AS OpenedAt
             FROM   qms_arrival a
             JOIN   qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id
             JOIN   qms_quality_order qo ON qo.arrival_id = a.arrival_id
@@ -111,11 +113,12 @@ public class GoodsReceiptDateTests : IClassFixture<QmsAppFactory>
     }
 
     /// <summary>
-    /// The crux of the complaint: the QC report's Time Bar and the Time Bar
-    /// page's clock must be the same number for the same container.
+    /// The crux of the complaint: the QC report's Inspection Time Bar and the
+    /// Inspection Time Bar page must be the same number for the same container
+    /// -- inspection date (QO opened) minus branch receive date.
     /// </summary>
     [Fact]
-    public async Task The_report_time_bar_equals_the_time_bar_page()
+    public async Task The_report_inspection_time_bar_equals_the_time_bar_page()
     {
         var samples = await SamplesAsync();
         if (samples.Count == 0) { _out.WriteLine("No finished orders with a cached container."); return; }
@@ -134,21 +137,24 @@ public class GoodsReceiptDateTests : IClassFixture<QmsAppFactory>
             var row = page.Rows.FirstOrDefault(r => r.ContainerNo == s.ContainerNo && r.BolNo == s.BolNo && r.Ebeln == s.Ebeln);
             if (row is null) continue;
 
-            // What the report prints: the snapshot's receive date to the local
-            // finish date, through the one shared helper.
+            // What the report prints: the snapshot's receive date to the
+            // inspection date, which ReportsController sets to the local
+            // opened_at -- through the one shared helper.
             var shipment = await arrivals.GetShipmentAsync(s.ArrivalId);
             Assert.NotNull(shipment);
             var report = new SharbatlyQMS.Web.Services.Pdf.QualityReportData
             {
-                Shipment     = shipment,
-                QualityOrder = new QualityOrder { ClosedAt = s.ClosedAt },
-                TimeBarBasis = cfg.ArrivalBasis
+                Shipment       = shipment,
+                QualityOrder   = new QualityOrder { ClosedAt = s.ClosedAt },
+                InspectionDate = s.OpenedAt.HasValue ? ShipmentDates.ToLocal(s.OpenedAt.Value) : null,
+                TimeBarBasis   = cfg.ArrivalBasis
             };
 
             _out.WriteLine($"{s.ContainerNo}: page {row.ElapsedDays} d from {row.ArrivalDate:yyyy-MM-dd}, " +
-                           $"report {report.TimeBarDays} d from {report.TimeBarStartDate:yyyy-MM-dd}");
-            Assert.Equal(row.ArrivalDate?.Date, report.TimeBarStartDate?.Date);
-            Assert.Equal(row.ElapsedDays, report.TimeBarDays);
+                           $"report {report.InspectionTimeBarDays} d from {report.InspectionTimeBarStartDate:yyyy-MM-dd}");
+            Assert.Equal(row.ArrivalDate?.Date, report.InspectionTimeBarStartDate?.Date);
+            Assert.Equal(row.ElapsedDays, report.InspectionTimeBarDays);
+            Assert.False(row.IsRunning);
             checkedCount++;
         }
         Assert.True(checkedCount > 0, "no Time Bar row matched any sampled container");

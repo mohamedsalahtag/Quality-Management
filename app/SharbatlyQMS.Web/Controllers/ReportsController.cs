@@ -440,8 +440,9 @@ public class ReportsController : Controller
 
         var reportCfg = await _settings.GetReportConfigAsync();
         data.LayoutVersion = reportCfg.LayoutVersion;
-        // The Time Bar counts from the same date as the Time Bar page -- one
-        // setting, so the report and the page cannot disagree on a container.
+        // The Inspection Time Bar counts from the same date as the Inspection
+        // Time Bar page -- one setting, so the two cannot disagree. (The
+        // supplier-claim Time Bar always counts from the discharge date.)
         data.TimeBarBasis  = (await _settings.GetTimeBarConfigAsync()).ArrivalBasis;
 
         // Who created this quality order, with their branch — shown in the report

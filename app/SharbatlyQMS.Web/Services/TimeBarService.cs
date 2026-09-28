@@ -70,16 +70,20 @@ public class TimeBarService : ITimeBarService
         END";
 
     /// <summary>
-    /// The clock's end, IN LOCAL TERMS. closed_at is UTC datetime2 while the
-    /// arrival columns are SQL DATE holding a local business date; subtracting
-    /// one from the other under-counts by a day whenever a quality order is
-    /// finished before 03:00 Riyadh time. On a page whose optimum is one day
-    /// that is the difference between green and amber, so the UTC value is
-    /// shifted into the local frame before any DATEDIFF touches it.
+    /// The clock's end: the INSPECTION DATE -- the day the live Quality Order
+    /// was opened -- and today while no inspection has been opened. The
+    /// Inspection Time Bar is "inspection date - branch receive date"
+    /// (2026-09-27, on request); it used to run to the day QC was finished.
+    ///
+    /// IN LOCAL TERMS: opened_at is UTC datetime2 while the start columns are
+    /// SQL DATE holding a local business date; subtracting one from the other
+    /// under-counts by a day whenever an order is opened before 03:00 Riyadh
+    /// time. On a page whose optimum is one day that is the difference between
+    /// green and amber, so the UTC value is shifted into the local frame first.
     /// </summary>
     private const string EndExpr = @"
-        CASE WHEN qo.closed_at IS NOT NULL
-             THEN CAST(DATEADD(MINUTE, @TzOffsetMinutes, qo.closed_at) AS DATE)
+        CASE WHEN qo.opened_at IS NOT NULL
+             THEN CAST(DATEADD(MINUTE, @TzOffsetMinutes, qo.opened_at) AS DATE)
              ELSE CAST(@NowLocal AS DATE) END";
 
     private const string ElapsedExpr = @"
@@ -150,8 +154,8 @@ public class TimeBarService : ITimeBarService
             -- per container by the database's own definition.
             --
             -- A reinspected container therefore has its clock RESTARTED and
-            -- measured to the second inspection -- it can turn from green to
-            -- over-threshold weeks after the first one finished. That is the
+            -- measured to the second inspection's opening -- it can turn from
+            -- green to over-threshold weeks after the first one. That is the
             -- point: the first result was discarded, so the time that matters
             -- is the time to the inspection that stands.
             --
@@ -159,7 +163,7 @@ public class TimeBarService : ITimeBarService
             -- single row here; it costs nothing and keeps this correct if that
             -- ever stops being true.
             SELECT arrival_id, quality_order_id, quality_order_no,
-                   status_code, closed_at, archived_at,
+                   status_code, opened_at, closed_at, archived_at,
                    ROW_NUMBER() OVER (PARTITION BY arrival_id ORDER BY quality_order_id DESC) AS rn
             FROM   qms_quality_order
             WHERE  status_code <> 'Cancelled' AND superseded_at IS NULL
@@ -190,11 +194,12 @@ public class TimeBarService : ITimeBarService
                a.arrival_no                         AS ArrivalNo,
                qo.quality_order_id                  AS QualityOrderId,
                qo.quality_order_no                  AS QualityOrderNo,
+               qo.opened_at                         AS InspectedAt,
                qo.closed_at                         AS ClosedAt,
                (" + StageExpr + @")                 AS Stage,
                (" + StatusExpr + @")                AS StatusCode,
                (" + ElapsedExpr + @")               AS ElapsedDays,
-               CASE WHEN qo.closed_at IS NULL THEN 1 ELSE 0 END AS IsRunning,
+               CASE WHEN qo.opened_at IS NULL THEN 1 ELSE 0 END AS IsRunning,
                CASE WHEN (" + StartExpr + @") IS NOT NULL
                      AND DATEDIFF(DAY, (" + StartExpr + @"), (" + EndExpr + @")) < 0
                     THEN 1 ELSE 0 END               AS IsBackwards,
@@ -328,17 +333,17 @@ public class TimeBarService : ITimeBarService
             --    the visible page -- a summary of one page would be misleading.
             SELECT COUNT(*)                                                  AS Containers,
                    SUM(CASE WHEN ArrivalId IS NULL THEN 1 ELSE 0 END)        AS Pending,
-                   SUM(CASE WHEN ClosedAt  IS NULL THEN 1 ELSE 0 END)        AS Running,
+                   SUM(CASE WHEN InspectedAt IS NULL THEN 1 ELSE 0 END)      AS Running,
                    SUM(CASE WHEN ElapsedDays > @WarnDays THEN 1 ELSE 0 END)  AS OverThreshold
             FROM   #tb;
 
-            -- 3) median elapsed among SETTLED rows. Median, not mean: one
-            --    container stuck for 90 days would drag an average to a number
-            --    no individual container is anywhere near.
+            -- 3) median elapsed among INSPECTED rows (clock stopped). Median,
+            --    not mean: one container stuck for 90 days would drag an
+            --    average to a number no individual container is anywhere near.
             SELECT DISTINCT PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY CAST(ElapsedDays AS FLOAT))
                    OVER ()                                                   AS MedianSettled
             FROM   #tb
-            WHERE  ClosedAt IS NOT NULL AND ArrivalDate IS NOT NULL;
+            WHERE  InspectedAt IS NOT NULL AND ArrivalDate IS NOT NULL;
 
             -- 4) the page. Worst first: the longest clock at the top, unknown
             --    dates last, and among equals the ones still running -- those

@@ -213,6 +213,15 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-09-27 (two time bars, both to the inspection date — M37)
+
+User defined the two figures: **Time Bar** is for supplier claims and reads *inspection date − vessel discharge date*; **Inspection Time Bar** is the internal performance measure and reads *inspection date − branch receive date*.
+
+- **Inspection date = the local day the live Quality Order was opened** (`opened_at`; every live order has one). Both figures used to count to the QC *finish* date.
+- **QC report** prints both (`QualityReportData.TimeBarDays` / `InspectionTimeBarDays`, via `ShipmentDates.DaysToInspection`). The Inspection Time Bar is **left off the supplier's copy**, like the Receive Date — it measures our performance against our receipt. The claim Time Bar always counts from the discharge date; the Inspection Time Bar follows the Time Bar page's basis setting (receipt by default).
+- **Inspection Time Bar page** clock now stops at the inspection date, not at QC finish; "Clock running" = no inspection opened yet, median over inspected rows. The column shows the inspection date with the finish date beneath it; Excel gains an "Inspection date" column appended at the end so existing sheets keep their columns.
+- **Data Hub:** M37 re-creates `vw_qms_flat_defects` with `TimeBarDischarge` (= Time Bar) and `TimeBarArrival` (= Inspection Time Bar) counted to the local opened date. Applied to production.
+
 ### 2026-09-26b (QC summary no longer splits by brand; Time Bar filters multi-select)
 
 - **QC summary groups by (Material group, Variety, Grade).** Brand was removed from the key on request: the same fruit, variety and grade is one result whatever label is on the carton. The group's brands are still printed, joined ("A / B"), so the report loses no information. One change in `QualityOrderService.BuildGroupSummariesAsync`; the QC report PDF and the on-screen summary both use it. Reprinting an old report can therefore merge blocks that used to be separate.

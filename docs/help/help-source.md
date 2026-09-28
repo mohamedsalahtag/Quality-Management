@@ -194,7 +194,9 @@ Read the short message and click **Back** in your browser, or open a different m
 Two figures are worked out from those dates and are the same on every screen, the QC report and the Data Hub:
 
 - **Transit days** = discharge date − loading date. Until you enter the discharge date, SAP's own estimate is shown.
-- **Time Bar** = the day QC was finished − the receive date. The QC report and the Inspection Time Bar page always show the same number. An administrator can switch both to count from the vessel arrival instead (Admin → Settings → Alerts → Time Bar thresholds).
+- **Time Bar** = inspection date − discharge date. This is the figure for supplier claims, and it is printed on every copy of the QC report, including the supplier's.
+- **Inspection Time Bar** = inspection date − receive date. This measures our own speed. It is on the internal QC report and on the Inspection Time Bar page, which always show the same number, and it is not on the supplier's copy. An administrator can switch it to count from the vessel arrival instead (Admin → Settings → Alerts → Time Bar thresholds).
+- The **inspection date** is the day the Quality Order was opened.
 
 > **Tip** — If the receive date on an arrival looks a few days older than Pending Containers showed, wait for the next SAP sync (hourly) or click **Retrieve latest containers**; the arrival is refreshed from SAP automatically.
 
@@ -726,7 +728,8 @@ You need Manager or SiteAdmin. Open the closed QO and click **Reopen**, type a s
 - **STO** — Stock Transport Order, a SAP document type SAP exposes alongside POs.
 - **Submit / Finish** — The two-stage workflow: operator submits a QO for review, supervisor finishes it.
 - **Supervisor** — The role that reviews submitted QOs. Above Operator, below Manager.
-- **Time Bar** — Days from the receive date to the day QC was finished. The same number on the Inspection Time Bar page, the QC report and the Data Hub.
+- **Inspection Time Bar** — Days from the receive date to the inspection date (the day the Quality Order was opened). Measures our own speed. The same number on the Inspection Time Bar page, the internal QC report and the Data Hub.
+- **Time Bar** — Days from the discharge date to the inspection date. Used for supplier claims, and printed on the supplier's copy of the QC report.
 - **Transit days** — Days from the loading date to the discharge date; SAP's estimate until the discharge date is entered.
 - **Vessel arrival date** — The day the vessel reached our port, from SAP. Not the same as the receive date, which can be a week or more later.
 - **View-As** — Manager/SiteAdmin feature for previewing the app as another role for testing.

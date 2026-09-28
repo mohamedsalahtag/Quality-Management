@@ -300,7 +300,11 @@ public static class QualityReportPdf
                     Field(c, "Unloading Date",      s?.UnloadingDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Inspection Date",     d.InspectionDate?.ToString("MMM dd, yyyy"));
                     Field(c, "Transit Days",        s?.EffectiveTransitDays?.ToString());
-                    Field(c, $"Time Bar ({d.TimeBarCaption})", d.TimeBarDays?.ToString());
+                    // Supplier-claim figure: inspection date - vessel discharge.
+                    Field(c, "Time Bar",            d.TimeBarDays?.ToString());
+                    // Internal figure: inspection date - branch receipt.
+                    if (!d.SupplierCopy)
+                        Field(c, "Inspection Time Bar", d.InspectionTimeBarDays?.ToString());
                     Field(c, "Date",                d.GeneratedAt.ToLocalTime().ToString("MMM dd, yyyy"));
                 });
                 row.RelativeItem().Column(c => {
