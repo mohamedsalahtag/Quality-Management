@@ -404,8 +404,12 @@ public class ReportsController : Controller
         if (qo == null) return NotFound();
         ct.ThrowIfCancellationRequested();
 
+        var clock = System.Diagnostics.Stopwatch.StartNew();
         var data  = await BuildDataAsync(qo);
+        var dataMs = clock.ElapsedMilliseconds;
         var bytes = QualityReportRenderer.Build(data);
+        var renderMs = clock.ElapsedMilliseconds - dataMs;
+        WriteReportTiming(qo.QualityOrderNo, dataMs, renderMs, bytes.Length);
 
         // ContentDisposition rather than File(..., fileName): the filename is
         // what the viewer's own Save button offers, but the disposition has to
@@ -413,6 +417,24 @@ public class ReportsController : Controller
         Response.Headers.ContentDisposition =
             $"inline; filename=\"{qo.QualityOrderNo}.pdf\"";
         return File(bytes, "application/pdf");
+    }
+
+    private const string PhotoMsKey = "qc-report-photo-ms";
+
+    /// <summary>
+    /// Says where a report's time went, so "the preview is slow" can be
+    /// answered from data rather than guessed at: a Server-Timing header the
+    /// browser's developer tools show, and one log line per report (Event
+    /// Viewer, source SharbatlyQMS.Web). Photos are measured inside BuildDataAsync.
+    /// </summary>
+    private void WriteReportTiming(string qoNo, long dataMs, long renderMs, int bytes)
+    {
+        var photoMs = HttpContext.Items[PhotoMsKey] as long? ?? 0;
+        Response.Headers["Server-Timing"] =
+            $"data;dur={dataMs - photoMs}, photos;dur={photoMs}, render;dur={renderMs}";
+        _log.LogInformation(
+                "QC report {Qo}: data {Data} ms (photos {Photos} ms), render {Render} ms, {Kb} KB",
+                qoNo, dataMs - photoMs, photoMs, renderMs, bytes / 1024);
     }
 
     private async Task<QualityReportData> BuildDataAsync(QualityOrder qo)
@@ -626,16 +648,30 @@ public class ReportsController : Controller
         // V31 (2026-06-20): photos are now per-sample. Each SampleBundle
         // carries its own Images list, populated by the parallel fetch
         // below. The appendix groups them by material -> sample.
-        var sampleImageTasks = samples.ToDictionary(
-            s => s.SampleId,
-            s => _images.ListAsync("Sample", s.SampleId));
-        await Task.WhenAll(sampleImageTasks.Values);
+        //
+        // Every photo of the report -- all samples' AND the arrival's -- is
+        // processed in ONE parallel batch. It used to go one sample at a time,
+        // so a 15-sample order ran fifteen small batches back to back and never
+        // used more than a handful of cores (2026-09-28: 9.4 s of a 13 s
+        // preview on a 111-photo order).
+        var photoClock = System.Diagnostics.Stopwatch.StartNew();
+        var sampleLists = await Task.WhenAll(samples.Select(async s =>
+            (s.SampleId, Infos: (await _images.ListAsync("Sample", s.SampleId)).ToArray())));
+        var arrivalInfos = (await _images.ListAsync("Arrival", qo.ArrivalId)).ToArray();
+        var allInfos  = sampleLists.SelectMany(x => x.Infos).Concat(arrivalInfos).ToArray();
+        var processed = await PreprocessInOrderAsync(allInfos, targetW, targetH, tier.Quality);
+
         var sampleImages = new Dictionary<long, List<SharbatlyQMS.Web.Services.Pdf.ImageRef>>();
-        foreach (var (sampleId, task) in sampleImageTasks)
+        var at = 0;
+        foreach (var (sampleId, infos) in sampleLists)
         {
-            var imgs = await PreprocessImagesAsync(await task, targetW, targetH, tier.Quality);
+            var imgs = processed.Skip(at).Take(infos.Length)
+                                .Where(r => r != null).Cast<SharbatlyQMS.Web.Services.Pdf.ImageRef>().ToList();
+            at += infos.Length;
             if (imgs.Count > 0) sampleImages[sampleId] = imgs;
         }
+        var arrivalImages = processed.Skip(at)
+                                     .Where(r => r != null).Cast<SharbatlyQMS.Web.Services.Pdf.ImageRef>().ToList();
         foreach (var s in samples)
         {
             var mat = materials.FirstOrDefault(m => m.QoMaterialId == s.QoMaterialId);
@@ -660,9 +696,9 @@ public class ReportsController : Controller
         // Per-material photos are no longer fetched -- legacy
         // owner_type='QualityOrderMaterial' rows stay on disk + in DB but
         // are not surfaced in new reports.
-        data.ArrivalImages = await PreprocessImagesAsync(
-            await _images.ListAsync("Arrival", qo.ArrivalId), targetW, targetH, tier.Quality);
+        data.ArrivalImages = arrivalImages;
         data.MaterialImages = new Dictionary<long, List<SharbatlyQMS.Web.Services.Pdf.ImageRef>>();
+        HttpContext.Items[PhotoMsKey] = photoClock.ElapsedMilliseconds;
 
         data.ThumbnailW = thumb.PdfWidth;
         data.ThumbnailH = thumb.PdfHeight;
@@ -715,16 +751,24 @@ public class ReportsController : Controller
         IEnumerable<ViewModels.ImageInfo> assets, int targetW, int targetH,
         int quality = ReportJpegQuality)
     {
-        var inputs = assets.ToArray();
-        if (inputs.Length == 0) return new List<SharbatlyQMS.Web.Services.Pdf.ImageRef>();
-
-        // Each TryPreprocess is CPU-bound (ImageSharp resize + JPEG encode);
-        // dispatch to the thread pool with Task.Run, then await Task.WhenAll
-        // so the request thread is freed while the workers run. Replaces a
-        // sync-over-async Task.WaitAll that risked thread-pool starvation.
-        var tasks = inputs.Select(i => Task.Run(() => TryPreprocess(i, targetW, targetH, quality))).ToArray();
-        var results = await Task.WhenAll(tasks);
+        var results = await PreprocessInOrderAsync(assets.ToArray(), targetW, targetH, quality);
         return results.Where(r => r != null).Cast<SharbatlyQMS.Web.Services.Pdf.ImageRef>().ToList();
+    }
+
+    /// <summary>
+    /// Processes every input in parallel and returns one result per input, in
+    /// the SAME order (null where a photo was missing or failed), so a caller
+    /// that batched several owners' photos together can split them back apart.
+    /// Each TryPreprocess is CPU-bound (ImageSharp decode, resize, JPEG
+    /// encode), so it runs on the thread pool and the request thread is free
+    /// while the workers run.
+    /// </summary>
+    private async Task<SharbatlyQMS.Web.Services.Pdf.ImageRef?[]> PreprocessInOrderAsync(
+        ViewModels.ImageInfo[] inputs, int targetW, int targetH, int quality)
+    {
+        if (inputs.Length == 0) return Array.Empty<SharbatlyQMS.Web.Services.Pdf.ImageRef?>();
+        var tasks = inputs.Select(i => Task.Run(() => TryPreprocess(i, targetW, targetH, quality))).ToArray();
+        return await Task.WhenAll(tasks);
     }
 
     /// <summary>One embedded-photo setting: longest side and JPEG quality.</summary>
@@ -793,11 +837,80 @@ public class ReportsController : Controller
     /// </summary>
     private const int ReportJpegQuality = 82;
 
+    // ---- Processed-photo cache -------------------------------------------
+    //
+    // Shrinking a phone photo means decoding the full original, and a report
+    // re-did that for every photo on every open -- the Refresh button and each
+    // reopen of the preview paid it again. The result depends only on the
+    // original file and the size tier, so it is kept on disk under a key made
+    // of exactly those: path, length, last-write time, target size, quality.
+    // A photo replaced on disk changes length or time and so misses the cache;
+    // nothing can be served stale. Entries untouched for 30 days are pruned
+    // (at most once a day). Any cache I/O failure falls back to doing the work.
+    private static readonly TimeSpan PhotoCacheMaxAge = TimeSpan.FromDays(30);
+    private static long _photoCacheLastPruneTicks;
+
+    private string PhotoCacheDir => Path.Combine(_env.ContentRootPath, "App_Data", "report-photo-cache");
+
+    private string? PhotoCachePath(string origAbs, int targetW, int targetH, int quality)
+    {
+        try
+        {
+            var fi  = new FileInfo(origAbs);
+            var raw = $"{origAbs.ToLowerInvariant()}|{fi.Length}|{fi.LastWriteTimeUtc.Ticks}|{targetW}x{targetH}|q{quality}";
+            var hash = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(raw)));
+            return Path.Combine(PhotoCacheDir, hash[..2], hash + ".jpg");
+        }
+        catch { return null; }
+    }
+
+    private void PrunePhotoCacheOccasionally()
+    {
+        var now  = DateTime.UtcNow.Ticks;
+        var last = Interlocked.Read(ref _photoCacheLastPruneTicks);
+        if (now - last < TimeSpan.TicksPerDay) return;
+        if (Interlocked.CompareExchange(ref _photoCacheLastPruneTicks, now, last) != last) return;
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                if (!Directory.Exists(PhotoCacheDir)) return;
+                var cutoff = DateTime.UtcNow - PhotoCacheMaxAge;
+                foreach (var f in Directory.EnumerateFiles(PhotoCacheDir, "*.jpg", SearchOption.AllDirectories))
+                    if (System.IO.File.GetLastWriteTimeUtc(f) < cutoff)
+                        try { System.IO.File.Delete(f); } catch { }
+            }
+            catch (Exception ex) { _log.LogWarning(ex, "Report photo cache prune failed"); }
+        });
+    }
+
     private SharbatlyQMS.Web.Services.Pdf.ImageRef? TryPreprocess(
         ViewModels.ImageInfo i, int targetW, int targetH, int quality)
     {
         var origAbs = ToAbsolute(i.StorageUrl);
         if (!System.IO.File.Exists(origAbs)) return null;
+
+        PrunePhotoCacheOccasionally();
+        var cachePath = PhotoCachePath(origAbs, targetW, targetH, quality);
+        if (cachePath != null && System.IO.File.Exists(cachePath))
+        {
+            try
+            {
+                var cached = System.IO.File.ReadAllBytes(cachePath);
+                // Keep a photo that is still being used from ageing out.
+                if (DateTime.UtcNow - System.IO.File.GetLastWriteTimeUtc(cachePath) > TimeSpan.FromDays(1))
+                    System.IO.File.SetLastWriteTimeUtc(cachePath, DateTime.UtcNow);
+                if (cached.Length > 0)
+                    return new SharbatlyQMS.Web.Services.Pdf.ImageRef
+                    {
+                        InlineBytes  = cached,
+                        OriginalName = i.OriginalName,
+                        Category     = i.Category
+                    };
+            }
+            catch { /* unreadable entry: fall through and rebuild it */ }
+        }
+
         try
         {
             using var src = SixLabors.ImageSharp.Image.Load(origAbs);
@@ -832,9 +945,25 @@ public class ReportsController : Controller
             src.Metadata.XmpProfile  = null;
             using var ms = new MemoryStream();
             src.Save(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = quality });
+            var bytes = ms.ToArray();
+
+            // Written to a temp name and moved into place, so a report reading
+            // the cache at the same moment never sees a half-written file.
+            if (cachePath != null)
+            {
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(cachePath)!);
+                    var tmp = cachePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
+                    System.IO.File.WriteAllBytes(tmp, bytes);
+                    System.IO.File.Move(tmp, cachePath, overwrite: true);
+                }
+                catch (Exception ex) { _log.LogDebug(ex, "Report photo cache write skipped for {Path}", cachePath); }
+            }
+
             return new SharbatlyQMS.Web.Services.Pdf.ImageRef
             {
-                InlineBytes  = ms.ToArray(),
+                InlineBytes  = bytes,
                 OriginalName = i.OriginalName,
                 Category     = i.Category
             };

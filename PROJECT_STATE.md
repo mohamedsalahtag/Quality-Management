@@ -213,6 +213,15 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-09-28c (QC report preview: faster photos, maximise button)
+
+- **Measured first** (on QO-2026-002803, 111 photos, photos read over the admin share from this PC): 13.1 s first open = photos 9.4 s + PDF render 3.4 s + data 0.2 s. Every open decoded and shrank every full-size original again, and did it **one sample at a time**, so a 15-sample order ran 15 small batches back to back.
+- **All of a report's photos (every sample's and the arrival's) now go through ONE parallel batch** (`PreprocessInOrderAsync`, order-preserving so they split back per owner). The server has 20 cores; the old per-sample loop used a handful.
+- **Processed photos are cached on disk** (`App_Data/report-photo-cache` under the deploy folder), keyed by original path + length + last-write time + target size + quality, so a replaced photo can never be served stale. Written temp-then-move; pruned after 30 days unused, at most once a day; any cache I/O failure falls back to doing the work. Warm-cache photo time on the same order: 1.8 s → 0.8 s from this PC.
+- **Every report build now logs its timing** (Event Viewer, source SharbatlyQMS.Web: "QC report QO-…: data / photos / render ms, KB") and returns a `Server-Timing` header — the server's own numbers are the real measure, since this PC's first-open times are dominated by copying ~100 MB of photos over the network. The PDF render step (~2–3 s on a 100-photo order, the engine re-encoding each photo at 600 DPI) was left alone: that setting was chosen deliberately for zoom quality.
+- **Maximise / restore button** on the preview dialog (Bootstrap's own full-screen class); the choice is remembered per browser.
+- `SummaryGroupingTests` fixed to choose orders by the SAP-enriched variety/grade the summary actually groups on.
+
 ### 2026-09-28b (vessel arrival backfill for uncached arrivals — M38)
 
 - QO-2026-002935 printed a blank vessel arrival and a blank branch receive date. **Receive date: correct** — SAP still has no `Receive_Date` for MMAU1500290 (goods receipt not posted), so the sweep never cached it and the operator created the arrival via Search SAP. 12 arrivals since go-live are in that state; they fill in by themselves once the branch posts the receipt (the sweep then caches the container and `RefreshArrivalSnapshotsAsync` copies the date).

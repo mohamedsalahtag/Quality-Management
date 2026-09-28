@@ -46,3 +46,6 @@ docs/help/output/
 docs/help/_capture_details.py
 docs/help/_verify_xlsx.py
 docs/help/_verify*.xlsx
+
+# Report photo cache created by dev/test runs (production keeps it under deploy/, already ignored)
+app/SharbatlyQMS.Web/App_Data/report-photo-cache/

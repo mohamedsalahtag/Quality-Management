@@ -57,7 +57,15 @@ public class SummaryGroupingTests : IClassFixture<QmsAppFactory>
                 WHERE  qo.status_code = 'Closed' AND qo.superseded_at IS NULL
                   AND  EXISTS (SELECT 1 FROM qms_sample s
                                WHERE s.qo_material_id = m.qo_material_id AND s.is_deleted = 0)
-                GROUP  BY m.quality_order_id, m.material_group, m.variety, m.material_class
+                -- Group on the values the SUMMARY groups on: ApplyMara lets SAP's
+                -- material group, variety and class win over the order's own
+                -- (often blank) copies. Grouping on the order's columns picked a
+                -- flower order whose seven materials all had different SAP
+                -- varieties -- seven blocks for the right reason, not weight.
+                GROUP  BY m.quality_order_id,
+                          COALESCE(mc.material_group, m.material_group),
+                          COALESCE(mc.variety_name,   m.variety),
+                          COALESCE(mc.class_name,     m.material_class)
                 HAVING COUNT(DISTINCT mc.weight) > 1
                 ORDER  BY m.quality_order_id DESC");
         }

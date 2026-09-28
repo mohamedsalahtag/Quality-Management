@@ -286,15 +286,22 @@
 @if (!isClaimContext)
 {
     <div class="modal fade" id="reportPreviewModal" tabindex="-1">
-        <div class="modal-dialog modal-xl modal-fullscreen-lg-down">
+        <div class="modal-dialog modal-xl modal-fullscreen-lg-down" id="reportPreviewDialog">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title"><i class="bi bi-file-earmark-text me-1"></i>QC Report — @Model.QualityOrderNo</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    @* Maximise / restore. The choice is remembered in this browser,
+                       so whoever prefers the report full-screen gets it every time. *@
+                    <button type="button" class="btn btn-sm btn-outline-secondary ms-auto me-2" id="reportPreviewMaxBtn"
+                            title='@Loc["Maximize"]' aria-label='@Loc["Maximize"]' aria-pressed="false">
+                        <i class="bi bi-arrows-fullscreen"></i>
+                    </button>
+                    <button type="button" class="btn-close ms-0" data-bs-dismiss="modal"></button>
                 </div>
                 @* Fixed-height body so the PDF viewer has somewhere to live; the
-                   iframe scrolls the document, the modal itself does not. *@
-                <div class="modal-body p-0 position-relative" style="height: 78vh;">
+                   iframe scrolls the document, the modal itself does not. Taller
+                   when maximised: header and footer are all that is left. *@
+                <div class="modal-body p-0 position-relative" id="reportPreviewBody" style="height: 78vh;">
                     @* Progress panel. Building the report re-reads the order, its
                        samples and every photo, so on a big order it takes a few
                        seconds — long enough that a blank frame reads as broken.
@@ -1175,6 +1182,30 @@
         });
         var rb = document.getElementById('reportPreviewRefreshBtn');
         if (rb) rb.addEventListener('click', load);
+
+        // Maximise / restore. Toggles Bootstrap's own full-screen dialog class,
+        // so the maximised view is the same one small screens already get.
+        // Remembered per browser; storage can be blocked (private windows), in
+        // which case it simply starts restored every time.
+        var dialog = document.getElementById('reportPreviewDialog');
+        var body   = document.getElementById('reportPreviewBody');
+        var maxBtn = document.getElementById('reportPreviewMaxBtn');
+        var KEY = 'qms.reportPreview.maximized';
+        function setMax(on) {
+            dialog.classList.toggle('modal-fullscreen', on);
+            body.style.height = on ? 'calc(100vh - 8.5rem)' : '78vh';
+            maxBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            maxBtn.title = on ? 'Restore' : 'Maximize';
+            maxBtn.setAttribute('aria-label', maxBtn.title);
+            maxBtn.innerHTML = on ? '<i class="bi bi-fullscreen-exit"></i>' : '<i class="bi bi-arrows-fullscreen"></i>';
+            try { localStorage.setItem(KEY, on ? '1' : '0'); } catch (e) { }
+        }
+        var startMax = false;
+        try { startMax = localStorage.getItem(KEY) === '1'; } catch (e) { }
+        setMax(startMax);
+        maxBtn.addEventListener('click', function () {
+            setMax(!dialog.classList.contains('modal-fullscreen'));
+        });
     })();
 
     // ---- Delete confirmation: arm the button only on an exact QO-number
