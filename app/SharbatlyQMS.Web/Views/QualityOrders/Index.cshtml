@@ -265,6 +265,7 @@
                 <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
                     Name = "supplier", Label = Loc["Supplier"], AllLabel = Loc["All suppliers"],
                     ColumnCss = "col-12 col-md-4", Selected = f.Supplier,
+                    Searchable = true, SearchPlaceholder = Loc["Search supplier name…"],
                     Options = opts.Suppliers.Select(x => new MultiSelectOption(x, x)).ToList() })" />
 
                 @if (plantScopeLocked != null)

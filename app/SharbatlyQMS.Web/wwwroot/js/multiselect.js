@@ -45,6 +45,38 @@
                 summarise(root);
             });
         }
+
+        // Optional search box (data-ms-search): narrows the options to those
+        // whose label contains the typed text, ignoring case. Ticked options
+        // always stay visible, so narrowing the list can never hide what is
+        // already selected.
+        var search = root.querySelector('[data-ms-search]');
+        if (search) {
+            var noMatch = root.querySelector('[data-ms-nomatch]');
+            var apply = function () {
+                var q = search.value.trim().toLowerCase();
+                var shown = 0;
+                root.querySelectorAll('.form-check').forEach(function (row) {
+                    var box   = row.querySelector('input[type=checkbox]');
+                    var label = row.querySelector('label');
+                    var text  = (label ? label.textContent : '').toLowerCase();
+                    var show  = q === '' || (box && box.checked) || text.indexOf(q) !== -1;
+                    row.classList.toggle('d-none', !show);
+                    if (show) shown++;
+                });
+                if (noMatch) noMatch.classList.toggle('d-none', shown > 0);
+            };
+            search.addEventListener('input', apply);
+            // Enter would submit the whole filter form mid-search.
+            search.addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') e.preventDefault();
+            });
+            // Ready to type the moment the menu opens; cleared each time so the
+            // next visit starts with the full list.
+            root.addEventListener('shown.bs.dropdown', function () { search.focus(); });
+            root.addEventListener('hidden.bs.dropdown', function () { search.value = ''; apply(); });
+            if (clear) clear.addEventListener('click', function () { search.value = ''; apply(); });
+        }
     }
 
     function init() {

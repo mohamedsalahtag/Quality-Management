@@ -213,6 +213,11 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-09-28d (supplier filter: search by name)
+
+- The Supplier filter on **Quality Orders, Arrivals and Claims** has a search box at the top of its dropdown that narrows the list as you type (part of a name, any case). Opt-in on the shared `_MultiSelectFilter` via `MultiSelectFilterVm.Searchable` / `SearchPlaceholder`; the filtering lives in `wwwroot/js/multiselect.js`.
+- The box has **no `name`**, so it is never submitted and cannot become a filter by itself (remembered filters use the query string, so it cannot leak in there either). Ticked suppliers stay visible while searching; Enter does not submit; the box clears when the menu closes. New `SupplierFilterSearchTests`.
+
 ### 2026-09-28c (QC report preview: faster photos, maximise button)
 
 - **Measured first** (on QO-2026-002803, 111 photos, photos read over the admin share from this PC): 13.1 s first open = photos 9.4 s + PDF render 3.4 s + data 0.2 s. Every open decoded and shrank every full-size original again, and did it **one sample at a time**, so a 15-sample order ran 15 small batches back to back.

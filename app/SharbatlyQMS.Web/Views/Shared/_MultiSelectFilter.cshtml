@@ -30,6 +30,14 @@
                 <span class="small text-muted">@Model.Label</span>
                 <button type="button" class="btn btn-sm btn-link p-0" data-ms-clear>@Loc["Clear"]</button>
             </div>
+            @if (Model.Searchable)
+            {
+                @* No name attribute: typing here narrows the list on screen only;
+                   it is never submitted, so it cannot become a filter by itself. *@
+                <input type="search" class="form-control form-control-sm my-1" data-ms-search
+                       placeholder="@Model.SearchPlaceholder" aria-label="@Model.SearchPlaceholder" autocomplete="off" />
+                <div class="small text-muted fst-italic px-1 d-none" data-ms-nomatch>@Loc["No matching names"]</div>
+            }
             <hr class="my-1" />
 
             @foreach (var orphan in Model.Orphans)

@@ -35,6 +35,17 @@ public sealed class MultiSelectFilterVm
     public string ColumnCss { get; init; } = "col-6 col-md-3";
 
     /// <summary>
+    /// Adds a search box at the top of the menu that narrows the list as you
+    /// type (part of a name, any case). For long lists such as suppliers. The
+    /// box has no name, so it is never submitted and never becomes a filter by
+    /// itself -- only the ticked boxes do.
+    /// </summary>
+    public bool Searchable { get; init; }
+
+    /// <summary>Placeholder for the search box, e.g. "Search supplier name…".</summary>
+    public string SearchPlaceholder { get; init; } = "Search…";
+
+    /// <summary>
     /// Values that are selected but no longer offered — a bookmarked filter, or
     /// a vendor whose last order was archived. Listed anyway and flagged, so a
     /// short list is explained instead of looking like the filter broke.
