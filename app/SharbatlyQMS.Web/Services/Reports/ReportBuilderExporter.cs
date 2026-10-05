@@ -88,14 +88,22 @@ public class ReportBuilderExporter : IReportBuilderExporter
                     break;
 
                 case ColumnKinds.SampleHeader:
-                    rep.SampleHeaderValues.TryGetValue(Strip(col.Key, ReportBuilderRegistry.SampleHeaderPrefix), out var shv);
+                {
+                    var key = Strip(col.Key, ReportBuilderRegistry.SampleHeaderPrefix);
+                    if (rep.SampleHeaderNumbers.TryGetValue(key, out var shn)) { val = shn; break; }
+                    rep.SampleHeaderValues.TryGetValue(key, out var shv);
                     val = shv;
                     break;
+                }
 
                 case ColumnKinds.MaterialHeader:
-                    rep.MaterialHeaderValues.TryGetValue(Strip(col.Key, ReportBuilderRegistry.MaterialHeaderPrefix), out var mhv);
+                {
+                    var key = Strip(col.Key, ReportBuilderRegistry.MaterialHeaderPrefix);
+                    if (rep.MaterialHeaderNumbers.TryGetValue(key, out var mhn)) { val = mhn; break; }
+                    rep.MaterialHeaderValues.TryGetValue(key, out var mhv);
                     val = mhv;
                     break;
+                }
 
                 case ColumnKinds.Defect:
                     if (int.TryParse(Strip(col.Key, ReportBuilderRegistry.DefectPrefix), out var did))

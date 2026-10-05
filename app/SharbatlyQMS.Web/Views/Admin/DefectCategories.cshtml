@@ -2,6 +2,10 @@
 @model IReadOnlyList<DefectCategory>
 @{
     ViewData["Title"] = Loc["Defect Categories"];
+    var groups      = ViewBag.Groups      as IReadOnlyList<SharbatlyQMS.Web.Services.MaraGroup> ?? new List<SharbatlyQMS.Web.Services.MaraGroup>();
+    var filterGroup = ViewBag.FilterGroup as string;
+    var tolerances  = ViewBag.Tolerances  as IReadOnlyDictionary<int, decimal?> ?? new Dictionary<int, decimal?>();
+    string GroupLabel(SharbatlyQMS.Web.Services.MaraGroup g) => string.IsNullOrWhiteSpace(g.Name) ? g.Code : $"{g.Code} — {g.Name}";
 }
 
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
@@ -77,6 +81,117 @@
                 }
             </tbody>
         </table>
+    </div>
+</div>
+
+@* ---- Tolerance per category, per material group (M39). A category is shared
+       by every fruit but its agreed limit is not, so the values are edited one
+       material group at a time. A category's TOTAL % at or above its tolerance
+       prints in red on the QC summary and the report. ---- *@
+<div class="card mt-4" id="tolerances">
+    <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+            <strong><i class="bi bi-rulers me-1"></i>@Loc["Category tolerance by material group"]</strong>
+            <div class="small text-muted">@Loc["Compared with the category's total percentage. At or above it, the total prints in red."]</div>
+        </div>
+        <div class="d-flex gap-2">
+            <form method="get" asp-action="DefectCategories" asp-fragment="tolerances" class="d-flex gap-2">
+                <select name="materialGroup" class="form-select form-select-sm" onchange="this.form.submit()">
+                    <option value="">@Loc["Choose a material group…"]</option>
+                    @foreach (var g in groups)
+                    {
+                        <option value="@g.Code" selected="@(g.Code == filterGroup)">@GroupLabel(g)</option>
+                    }
+                </select>
+            </form>
+            <a class="btn btn-sm btn-outline-success"
+               asp-action="DefectCategoryTolerancesExcel" asp-route-materialGroup="@filterGroup"
+               title="@Loc["Export category tolerances to Excel"]">
+                <i class="bi bi-file-earmark-excel me-1"></i>@Loc["Export"]
+            </a>
+            <button type="button" class="btn btn-sm btn-outline-primary"
+                    data-bs-toggle="modal" data-bs-target="#tolImportModal"
+                    title="@Loc["Upload the exported file after editing its tolerances"]">
+                <i class="bi bi-upload me-1"></i>@Loc["Import tolerances"]
+            </button>
+        </div>
+    </div>
+    @if (string.IsNullOrEmpty(filterGroup))
+    {
+        <div class="card-body text-muted small">
+            @Loc["Choose a material group to set its category tolerances, or use Export to fill them in for every group at once."]
+        </div>
+    }
+    else
+    {
+        <form asp-action="SaveCategoryTolerances" method="post">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="materialGroup" value="@filterGroup" />
+            <div class="table-responsive">
+                <table class="table align-middle mb-0">
+                    <thead class="table-light">
+                        <tr>
+                            <th>@Loc["Category"]</th>
+                            <th style="width: 220px">@Loc["Tolerance (%)"]</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in Model.Where(x => x.IsActive))
+                        {
+                            tolerances.TryGetValue(c.CategoryId, out var tol);
+                            <tr>
+                                <td>
+                                    <span class="d-inline-block border rounded me-1" style="width:.9rem;height:.9rem;vertical-align:middle;background:@(c.ColorHex ?? "#6c757d")"></span>
+                                    @c.CategoryName
+                                    <input type="hidden" name="categoryId" value="@c.CategoryId" />
+                                </td>
+                                <td>
+                                    <input name="tolerance" type="number" min="0" step="@DefectTolerance.Step" inputmode="decimal"
+                                           class="form-control form-control-sm"
+                                           value="@(tol?.ToString(DefectTolerance.Format, System.Globalization.CultureInfo.InvariantCulture))"
+                                           placeholder="@Loc["none agreed"]" />
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            <div class="card-footer d-flex justify-content-between align-items-center">
+                <small class="text-muted">@Loc["Leave empty when no tolerance has been agreed — that is not the same as 0."]</small>
+                <button type="submit" class="btn btn-primary btn-sm">@Loc["Save tolerances"]</button>
+            </div>
+        </form>
+    }
+</div>
+
+<div class="modal fade" id="tolImportModal" tabindex="-1">
+    <div class="modal-dialog">
+        <form asp-action="DefectCategoryTolerancesImport" method="post" enctype="multipart/form-data" class="modal-content">
+            @Html.AntiForgeryToken()
+            <input type="hidden" name="materialGroup" value="@filterGroup" />
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-upload me-1"></i>@Loc["Import tolerances"]</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-muted">
+                    @Loc["Export the category tolerances, fill in the Tolerance column, and upload the same file here."]
+                </p>
+                <div class="mb-3">
+                    <label class="form-label" for="tol-imp-file">@Loc["Excel file (.xlsx)"]</label>
+                    <input type="file" name="file" id="tol-imp-file" accept=".xlsx" class="form-control" required />
+                </div>
+                <ul class="small text-muted mb-0 ps-3">
+                    <li>@Loc["Only the Tolerance column is read; rows are matched on Category ID and Material group."]</li>
+                    <li>@Loc["An empty Tolerance clears it, which means no tolerance agreed — not zero."]</li>
+                    <li>@Loc["If any row cannot be read, nothing at all is imported."]</li>
+                </ul>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="submit" class="btn btn-primary"><i class="bi bi-upload me-1"></i>@Loc["Import"]</button>
+            </div>
+        </form>
     </div>
 </div>
 

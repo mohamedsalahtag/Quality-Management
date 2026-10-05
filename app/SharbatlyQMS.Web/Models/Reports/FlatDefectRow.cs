@@ -92,4 +92,13 @@ public class FlatDefectRow
     public Dictionary<string, string?> SampleHeaderValues   { get; set; } = new();
     /// <summary>Sample readings keyed by reading_type_code (e.g. "BRIX").</summary>
     public Dictionary<string, string?> Readings             { get; set; } = new();
+
+    // Typed twins of the bags above, holding only the entries that were captured
+    // as numbers (Brix, gross/net weight...). The string bags feed the preview
+    // and the identifier pick-up; these keep Excel cells numeric instead of text.
+    public IReadOnlyDictionary<string, decimal> MaterialHeaderNumbers { get; set; } = EmptyNumbers;
+    public IReadOnlyDictionary<string, decimal> SampleHeaderNumbers   { get; set; } = EmptyNumbers;
+    public IReadOnlyDictionary<string, decimal> ReadingNumbers        { get; set; } = EmptyNumbers;
+
+    private static readonly IReadOnlyDictionary<string, decimal> EmptyNumbers = new Dictionary<string, decimal>();
 }

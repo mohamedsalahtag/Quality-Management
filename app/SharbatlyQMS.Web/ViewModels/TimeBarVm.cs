@@ -74,6 +74,55 @@ public static class TimeBarStages
     public const string Qc      = "QC";
 
     public static readonly string[] All = { Pending, Arrival, Qc };
+
+    /// <summary>The chip label. Same words as <see cref="TimeBarStatus"/>.</summary>
+    public static string Label(string? stage) => stage switch
+    {
+        Pending => TimeBarStatus.NotYetInspectedLabel,
+        Arrival => "Arrival",
+        Qc      => "Inspection",
+        _       => stage ?? ""
+    };
+}
+
+/// <summary>
+/// The one set of status names the Time Bar uses -- stage chips, the Status
+/// filter, the grid column and the Excel export all read from here, so a row
+/// is never called one thing in the filter and another in the grid. The filter
+/// value is the persisted code (arrival and inspection codes do not overlap)
+/// plus <see cref="NotYetInspected"/> for a container with no arrival.
+/// </summary>
+public static class TimeBarStatus
+{
+    public const string NotYetInspected      = "Pending";
+    public const string NotYetInspectedLabel = "Not yet inspected";
+
+    public static readonly IReadOnlyList<(string Value, string Label)> All = new[]
+    {
+        (NotYetInspected,              NotYetInspectedLabel),
+        (ArrivalStatus.Draft,          "Arrival – Draft"),
+        (ArrivalStatus.Completed,      "Arrival – Completed"),
+        (ArrivalStatus.Rejected,       "Arrival – Rejected"),
+        (QualityOrderStatus.Open,      "Inspection – Open"),
+        (QualityOrderStatus.Submitted, "Inspection – Submitted"),
+        (QualityOrderStatus.Closed,    "Inspection – Finished"),
+    };
+
+    /// <summary>Initial and Reopened both read as Open, as they do everywhere else.</summary>
+    public static string Normalize(string stage, string? code) => stage switch
+    {
+        TimeBarStages.Pending => NotYetInspected,
+        TimeBarStages.Qc when code is QualityOrderStatus.Initial or QualityOrderStatus.Reopened
+                              => QualityOrderStatus.Open,
+        _                     => code ?? ""
+    };
+
+    public static string Label(string stage, string? code)
+    {
+        var key = Normalize(stage, code);
+        foreach (var (v, l) in All) if (v == key) return l;
+        return string.IsNullOrWhiteSpace(code) ? "—" : code!;
+    }
 }
 
 /// <summary>One container's line on the Time Bar page.</summary>
@@ -123,15 +172,9 @@ public class TimeBarRow
     public bool  NotInCache  { get; set; }
     public bool  IsArchived  { get; set; }
 
-    /// <summary>What to print in the Status column. Quality-order codes go
-    /// through DisplayName so "Closed" reads as "Finished", the word the rest of
-    /// the application uses.</summary>
-    public string StatusLabel => Stage switch
-    {
-        TimeBarStages.Pending => "Pending",
-        TimeBarStages.Qc      => QualityOrderStatus.DisplayName(StatusCode),
-        _                     => string.IsNullOrWhiteSpace(StatusCode) ? "—" : StatusCode!
-    };
+    /// <summary>What to print in the Status column -- the same words the Status
+    /// filter offers. See <see cref="TimeBarStatus"/>.</summary>
+    public string StatusLabel => TimeBarStatus.Label(Stage, StatusCode);
 
     /// <summary>success / warning / danger / secondary, from the configured
     /// thresholds. Kept out of the view so the page and any future export agree.</summary>

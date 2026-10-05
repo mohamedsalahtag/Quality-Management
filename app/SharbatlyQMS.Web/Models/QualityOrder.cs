@@ -496,6 +496,33 @@ public class DefectCategorySection
     // unrounded maths is right.
     public decimal TotalPct    => Rows.Sum(r => Math.Round(r.Percentage, 2, MidpointRounding.AwayFromZero));
     public decimal TotalPieces => Rows.Sum(r => Math.Round(r.SumValue,   2, MidpointRounding.AwayFromZero));
+
+    /// <summary>The tolerance agreed for this category in this section's
+    /// material group (Admin -> Defect Categories). Null = none agreed, which
+    /// is not zero. Compared against <see cref="TotalPct"/>.</summary>
+    public decimal? Tolerance { get; set; }
+
+    /// <summary>Same rule as <see cref="DefectAggRow.ExceedsTolerance"/>, on the
+    /// category's total: inclusive, and only once the category has occurred, so
+    /// a zero tolerance does not turn every empty section red.</summary>
+    public bool ExceedsTolerance =>
+        Tolerance.HasValue && TotalPieces > 0 && TotalPct >= Tolerance.Value;
+}
+
+/// <summary>
+/// A category's tolerance for one material group (M39). A category is shared by
+/// every fruit but its agreed limit is not, so the value lives per pair.
+/// </summary>
+public class DefectCategoryTolerance
+{
+    public int      CategoryId     { get; set; }
+    public string   CategoryName   { get; set; } = "";
+    public string   MaterialGroup  { get; set; } = "";
+    public decimal? Tolerance      { get; set; }
+
+    /// <summary>Lookup key used by the builders: group and category, case-insensitive.</summary>
+    public static string Key(string? materialGroup, string? categoryName) =>
+        $"{materialGroup?.Trim().ToUpperInvariant()}|{categoryName?.Trim().ToUpperInvariant()}";
 }
 
 public class ReadingAggRow

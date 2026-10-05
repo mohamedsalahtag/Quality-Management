@@ -115,10 +115,15 @@ else
                                                 <td class="text-end fw-semibold" style="color:@pctCol">@Fmt.Dec2(dr.Percentage)%</td>
                                             </tr>
                                         }
-                                        <tr class="qcs-total">
+                                        @* The category as a whole against the tolerance set
+                                           for it in this material group on Defect Categories --
+                                           same red as a defect line and as the printed report. *@
+                                        var secOver = sec.ExceedsTolerance;
+                                        <tr class="qcs-total" style="@(secOver ? "color:" + SummaryReadingFilter.BreachColor : "")"
+                                            title="@(secOver ? $"At or above the {Fmt.Dec2(sec.Tolerance ?? 0)} category tolerance set in Defect Categories" : null)">
                                             <td class="fw-semibold">@Loc["Total"]</td>
                                             <td class="text-end fw-semibold">@Fmt.Dec2(sec.TotalPieces)</td>
-                                            <td class="text-end fw-bold" style="color:@col">@Fmt.Dec2(sec.TotalPct)%</td>
+                                            <td class="text-end fw-bold" style="color:@(secOver ? SummaryReadingFilter.BreachColor : col)">@Fmt.Dec2(sec.TotalPct)%</td>
                                         </tr>
                                     }
                                 </tbody>

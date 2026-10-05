@@ -5,7 +5,7 @@
 //   header/column toggle, totals selector, defect count/% and (for calc) a
 //   validated formula.
 // - Save/load/delete reuse the generic Perspectives CRUD with report=report_builder.
-// - Browse by supplier (cascades to containers) / BOL / PO / PO date range,
+// - Browse by supplier (cascades to containers) / BOL / PO / receive date range,
 //   preview the first rows, and export a professional xlsx.
 (function () {
     "use strict";
@@ -555,8 +555,8 @@
             containerNo: $("rbContainer").value || null,
             bolNo: $("rbBol").value || null,
             ebeln: $("rbPo").value || null,
-            poFrom: $("rbPoFrom").value || null,
-            poTo: $("rbPoTo").value || null
+            receiveFrom: $("rbReceiveFrom").value || null,
+            receiveTo: $("rbReceiveTo").value || null
         };
     }
     function requestBody() {

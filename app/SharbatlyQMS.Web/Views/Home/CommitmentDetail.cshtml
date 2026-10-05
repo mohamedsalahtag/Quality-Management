@@ -9,6 +9,7 @@
     var from     = ViewBag.PeriodFrom as DateTime? ?? DateTime.Today;
     var to       = ViewBag.PeriodTo   as DateTime? ?? DateTime.Today;
     ViewData["Title"] = caption;
+    var isPending = string.Equals(bucket, CommitmentBuckets.PendingInspection, StringComparison.OrdinalIgnoreCase);
 
     // Back to the dashboard on the same slice the reader came from.
     var back = new Dictionary<string, string> { ["period"] = filter.Period ?? "" };
@@ -21,6 +22,17 @@
     <h1 class="h4 mb-0">
         @caption
         <span class="badge bg-secondary ms-1">@Model.Count</span>
+        @if (isPending)
+        {
+            @* The two halves of Pending Inspection, so the reader sees at once
+               how much has not been started and how much is under way. *@
+            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle ms-1 fs-6 fw-normal">
+                @Loc[CommitmentBuckets.NotYetInspectedLabel]: @Model.Count(x => !x.OpenedByEnd)
+            </span>
+            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle ms-1 fs-6 fw-normal">
+                @Loc[CommitmentBuckets.InProgressLabel]: @Model.Count(x => x.OpenedByEnd)
+            </span>
+        }
         @if (!string.IsNullOrWhiteSpace(plant))
         {
             <span class="badge bg-light text-dark border ms-1">@Codes.PlantDisplay(plant)</span>
@@ -47,6 +59,7 @@
             <thead class="table-light">
                 <tr>
                     <th data-sort>@Loc["Plant"]</th>
+                    @if (isPending) { <th data-sort>@Loc["Status"]</th> }
                     <th data-sort>@Loc["Arrival"]</th>
                     <th data-sort>@Loc["Container"]</th>
                     <th data-sort>@Loc["BOL"]</th>
@@ -62,7 +75,7 @@
             <tbody>
             @if (Model.Count == 0)
             {
-                <tr><td colspan="11" class="text-center text-muted py-4">
+                <tr><td colspan="@(isPending ? 12 : 11)" class="text-center text-muted py-4">
                     @Loc["Nothing in this group for the chosen period."]
                 </td></tr>
             }
@@ -72,9 +85,25 @@
                 {
                     <tr>
                         <td>@Codes.PlantDisplay(r.Plant)</td>
+                        @if (isPending)
+                        {
+                            <td>
+                                <span class="badge @(!r.OpenedByEnd ? "bg-warning-subtle text-warning-emphasis border border-warning-subtle" : "bg-info-subtle text-info-emphasis border border-info-subtle")">
+                                    @Loc[r.PendingStatus]
+                                </span>
+                            </td>
+                        }
                         <td>
-                            <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@r.ArrivalId"
-                               class="text-decoration-none">@r.ArrivalNo</a>
+                            @if (r.ArrivalId.HasValue)
+                            {
+                                <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@r.ArrivalId"
+                                   class="text-decoration-none">@r.ArrivalNo</a>
+                            }
+                            else
+                            {
+                                @* Goods-received in SAP, nobody has raised the arrival yet. *@
+                                <span class="text-muted small">@Loc["No arrival yet"]</span>
+                            }
                         </td>
                         <td class="font-monospace small">@r.ContainerNo</td>
                         <td class="small">@r.BolNo</td>
@@ -84,7 +113,7 @@
                         @* Shown beside it because they are routinely days apart,
                            and a reader checking a figure against SAP needs to
                            see which one the period used. *@
-                        <td class="small text-muted">@r.RecordCreatedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                        <td class="small text-muted">@(r.RecordCreatedAt?.ToLocalTime().ToString("yyyy-MM-dd") ?? "—")</td>
                         <td>
                             @if (r.QualityOrderId.HasValue)
                             {
@@ -97,7 +126,7 @@
                                    rather than leaving a blank that reads as
                                    missing data. *@
                                 <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">
-                                    @Loc["Not inspected"]
+                                    @Loc[CommitmentBuckets.NotYetInspectedLabel]
                                 </span>
                             }
                         </td>

@@ -5,8 +5,9 @@ namespace SharbatlyQMS.Web.Models.Reports;
 /// maps to one WHERE clause in <c>StreamFlatDefectRowsAsync</c>.
 ///
 /// Defaults: a request that sets none of the identity filters
-/// (QualityOrderId, ArrivalId) and no PO date range gets the last 30
-/// days on cc.doc_date applied by <c>ReportsController.FlatDefects</c>.
+/// (QualityOrderId, ArrivalId) and no receive date range gets the last 30
+/// days of receive date (SAP's branch goods receipt) applied by
+/// <c>ReportsController.FlatDefects</c>. Was the PO date until 2026-10.
 /// </summary>
 public class FlatDefectFilter
 {
@@ -26,6 +27,12 @@ public class FlatDefectFilter
     public string?   BolNo           { get; set; }
     public string?   Ebeln           { get; set; }   // PO / Shipment number
     public string?   SampleScope     { get; set; }
-    public DateTime? PoFrom          { get; set; }   // inclusive
-    public DateTime? PoTo            { get; set; }   // inclusive (whole day rolls to +1 inside)
+    public DateTime? ReceiveFrom     { get; set; }   // inclusive
+    public DateTime? ReceiveTo       { get; set; }   // inclusive (whole day rolls to +1 inside)
+
+    // The range used to be on the PO date under these names. They still bind,
+    // so bookmarked links and saved Report Builder layouts keep their window --
+    // now applied to the receive date.
+    public DateTime? PoFrom { get => ReceiveFrom; set => ReceiveFrom ??= value; }
+    public DateTime? PoTo   { get => ReceiveTo;   set => ReceiveTo   ??= value; }
 }

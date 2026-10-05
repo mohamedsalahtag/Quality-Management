@@ -161,7 +161,7 @@ public static class QualityReportPdfSoft
                 // other and still read as two different things.
                 PartBand(col.Item(), d.GroupSummaries.Count > 0 ? 2 : 1,
                                      d.GroupSummaries.Count > 0 ? 2 : 1, L("Sample Details"),
-                    L("Every sample and every reading, material by material. A defect shown in red has reached or passed the tolerance set for it."),
+                    L("Every sample and every reading, material by material. A defect, or a category total, shown in red has reached or passed the tolerance set for it."),
                     DetailHead);
                 foreach (var grp in d.Samples.GroupBy(s => s.Sample.QoMaterialId))
                 {
@@ -217,12 +217,23 @@ public static class QualityReportPdfSoft
                         c.Item().AlignCenter().Text(L("REFERENCE COPY - SUPERSEDED BY A REINSPECTION"))
                          .Bold().FontSize(7).FontColor(Muted);
                 });
-                r.ConstantItem(72).AlignRight().AlignMiddle().Text(t =>
+                // The QC number rides in the header so every page -- the photo
+                // appendix included -- can be traced back to its order once the
+                // sheets are separated.
+                r.ConstantItem(110).AlignRight().AlignMiddle().Column(pc =>
                 {
-                    t.Span("Page ").FontColor(Muted);
-                    t.CurrentPageNumber().SemiBold();
-                    t.Span(" / ").FontColor(Muted);
-                    t.TotalPages().SemiBold();
+                    pc.Item().AlignRight().Text(t =>
+                    {
+                        t.Span(L("QC No.") + "  ").FontColor(Muted);
+                        t.Span(V(d.QualityOrder.QualityOrderNo)).SemiBold();
+                    });
+                    pc.Item().AlignRight().Text(t =>
+                    {
+                        t.Span("Page ").FontColor(Muted);
+                        t.CurrentPageNumber().SemiBold();
+                        t.Span(" / ").FontColor(Muted);
+                        t.TotalPages().SemiBold();
+                    });
                 });
             });
             h.Item().PaddingTop(3).Height(1.4f).Background(Accent);
@@ -467,7 +478,8 @@ public static class QualityReportPdfSoft
 
             var catalog = (m?.MaterialGroup != null && d.DefectsByGroup.TryGetValue(m.MaterialGroup!, out var cat))
                 ? cat : Array.Empty<DefectCatalogEntry>();
-            var sections = BuildSampleDefectSections(s, catalog, d.Categories, d.UnitFor(m?.MaterialGroup));
+            var sections = BuildSampleDefectSections(s, catalog, d.Categories, d.UnitFor(m?.MaterialGroup),
+                                                     m?.MaterialGroup, d.CategoryTolerances);
             if (sections.Count > 0)
                 DefectsTwoAcross(sccol.Item(), sections);
         });
@@ -475,7 +487,8 @@ public static class QualityReportPdfSoft
     // Mirrors QualityReportPdf.BuildSampleDefectSections exactly.
     private static List<DefectCategorySection> BuildSampleDefectSections(
         SampleBundle s, IReadOnlyList<DefectCatalogEntry> catalog,
-        IReadOnlyList<DefectCategory> categories, string unit)
+        IReadOnlyList<DefectCategory> categories, string unit,
+        string? materialGroup, IReadOnlyDictionary<string, decimal> categoryTolerances)
     {
         var catMeta      = categories.ToDictionary(c => c.CategoryName, StringComparer.OrdinalIgnoreCase);
         var sections     = new Dictionary<string, DefectCategorySection>(StringComparer.OrdinalIgnoreCase);
@@ -492,7 +505,10 @@ public static class QualityReportPdfSoft
                     CategoryName = category,
                     ColorHex     = meta?.ColorHex,
                     SortOrder    = meta?.SortOrder ?? 999,
-                    Unit         = unit
+                    Unit         = unit,
+                    Tolerance    = categoryTolerances.TryGetValue(
+                                       DefectCategoryTolerance.Key(materialGroup, category), out var tol)
+                                   ? tol : null
                 };
                 sections[category] = sec;
             }
@@ -853,9 +869,12 @@ public static class QualityReportPdfSoft
                 Cell(t.Cell(), fill: bg).AlignRight().Text(Fmt.Dec2(row.Percentage) + "%").FontColor(ink);
             }
 
-            Cell(t.Cell(), head: true).Text(L("Total")).Bold().FontColor(Ink);
-            Cell(t.Cell(), head: true).AlignRight().Text(Fmt.Dec2(s.TotalPieces)).Bold().FontColor(Ink);
-            Cell(t.Cell(), head: true).AlignRight().Text(Fmt.Dec2(s.TotalPct) + "%").Bold().FontColor(Ink);
+            // The category as a whole against the tolerance agreed for it in
+            // this material group (Admin -> Defect Categories): same red line.
+            var totalInk = s.ExceedsTolerance ? Breach : Ink;
+            Cell(t.Cell(), head: true).Text(L("Total")).Bold().FontColor(totalInk);
+            Cell(t.Cell(), head: true).AlignRight().Text(Fmt.Dec2(s.TotalPieces)).Bold().FontColor(totalInk);
+            Cell(t.Cell(), head: true).AlignRight().Text(Fmt.Dec2(s.TotalPct) + "%").Bold().FontColor(totalInk);
         });
 
     private static IContainer Cell(IContainer c, bool head = false, string? fill = null)

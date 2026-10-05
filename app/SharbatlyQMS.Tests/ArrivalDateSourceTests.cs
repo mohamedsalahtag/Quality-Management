@@ -163,9 +163,11 @@ public class ArrivalDateSourceTests : IClassFixture<QmsAppFactory>
             Assert.Equal(sap.Value.Date, r.ArrivalCreatedAt.Date);
         }
 
-        var apart = rows.Count(r => r.ArrivalCreatedAt.Date != r.RecordCreatedAt.Date);
+        var apart = rows.Count(r => r.ArrivalCreatedAt.Date != r.RecordCreatedAt?.Date);
         _out.WriteLine($"{apart} of {rows.Count} rows have the two dates on different days");
-        Assert.All(rows, r => Assert.NotEqual(default, r.RecordCreatedAt));
+        // Every ARRIVAL has a record date; a goods-received container with no
+        // arrival yet has none to show.
+        Assert.All(rows.Where(r => r.ArrivalId is not null), r => Assert.NotNull(r.RecordCreatedAt));
     }
 
     /// <summary>
@@ -188,7 +190,9 @@ public class ArrivalDateSourceTests : IClassFixture<QmsAppFactory>
         _out.WriteLine($"received {received.Count} = period {period.Count} + pending {pending.Count}");
         _out.WriteLine($"total    {total.Count} = backlog {backlog.Count} + on-period + ahead-of-receipt");
 
-        Assert.Equal(received.Count, period.Count + pending.Count);
+        // Pending also holds inspections opened but not finished, which are in
+        // Period as well; the ones with no inspection complete the partition.
+        Assert.Equal(received.Count, period.Count + pending.Count(r => !r.OpenedByEnd));
 
         // Total = Period + Backlog only up to the inspections SAP's receipt
         // trails (about one in a hundred): those count in Period Inspection for

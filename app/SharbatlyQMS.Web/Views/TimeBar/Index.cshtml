@@ -147,8 +147,8 @@ else if (cfg.StartDate.HasValue)
         var tiles = new (string Label, string Value, string Tone, string Icon, string Hint)[]
         {
             (Loc["Containers"],     summary.Containers.ToString(),    "secondary", "bi-box-seam",       Loc["In this view"]),
-            (Loc["Not started"],    summary.Pending.ToString(),       summary.Pending > 0 ? "danger" : "success", "bi-hourglass",       Loc["No arrival created yet"]),
-            (Loc["Clock running"],  summary.Running.ToString(),       summary.Running > 0 ? "warning" : "success", "bi-play-circle",     Loc["Not inspected yet"]),
+            (Loc[TimeBarStatus.NotYetInspectedLabel], summary.Pending.ToString(), summary.Pending > 0 ? "danger" : "success", "bi-hourglass", Loc["No arrival created yet"]),
+            (Loc["Clock running"],  summary.Running.ToString(),       summary.Running > 0 ? "warning" : "success", "bi-play-circle",     Loc["No inspection opened yet"]),
             (Loc["Over threshold"], summary.OverThreshold.ToString(), summary.OverThreshold > 0 ? "danger" : "success", "bi-exclamation-triangle", $"{Loc["More than"]} {cfg.WarnDays} {Loc["day(s)"]}"),
             (Loc["Median (inspected)"], summary.MedianSettled?.ToString() ?? "—", "info", "bi-graph-down", Loc["Typical days to inspection"]),
         };
@@ -179,7 +179,7 @@ else if (cfg.StartDate.HasValue)
         {
             <a href="@Qs("Index", new { stage = st, page = (string?)null })"
                class="btn @(string.Equals(st, f.Stage, StringComparison.OrdinalIgnoreCase) ? "btn-secondary" : "btn-outline-secondary")">
-                @(st == TimeBarStages.Pending ? Loc["Not started"] : (st == TimeBarStages.Qc ? Loc["In QC"] : Loc["Arrival only"]))
+                @Loc[TimeBarStages.Label(st)]
             </a>
         }
     </div>
@@ -245,7 +245,8 @@ else if (cfg.StartDate.HasValue)
                 <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
                     Name = "status", Label = Loc["Status"], AllLabel = Loc["Any status"],
                     ColumnCss = "col-md-2", Selected = f.Status,
-                    Options = statuses.Select(x => new MultiSelectOption(x, x)).ToList() })" />
+                    Options = TimeBarStatus.All.Where(s => statuses.Contains(s.Value))
+                                               .Select(s => new MultiSelectOption(s.Value, Loc[s.Label])).ToList() })" />
                 <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
                     Name = "poType", Label = Loc["PO type"], AllLabel = Loc["All"],
                     ColumnCss = "col-md-2", Selected = f.PoType,
@@ -391,7 +392,7 @@ else if (cfg.StartDate.HasValue)
                                               : r.Stage == TimeBarStages.Qc      ? "primary" : "warning";
                             }
                             <span class="badge bg-@stageTone-subtle text-@stageTone-emphasis border border-@stageTone">
-                                @r.StatusLabel
+                                @Loc[r.StatusLabel]
                             </span>
                             @if (r.ArrivalNo != null)
                             {

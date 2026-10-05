@@ -101,6 +101,16 @@ public class TimeBarService : ITimeBarService
              WHEN qo.quality_order_id IS NULL THEN a.status_code
              ELSE qo.status_code END";
 
+    /// <summary>The Status filter's value for a row: the code the grid labels
+    /// through <see cref="TimeBarStatus"/>, with no arrival as 'Pending' and
+    /// Initial/Reopened folded into Open -- so a filter option and the grid
+    /// label always describe the same rows.</summary>
+    private const string FilterStatusExpr = @"
+        CASE WHEN a.arrival_id       IS NULL THEN 'Pending'
+             WHEN qo.quality_order_id IS NULL THEN a.status_code
+             WHEN qo.status_code IN ('Initial', 'Reopened') THEN 'Open'
+             ELSE qo.status_code END";
+
     private const string EffPlantExpr = "COALESCE(cc.eff_plant, a.plant)";
 
     /// <summary>
@@ -249,7 +259,7 @@ public class TimeBarService : ITimeBarService
                            COALESCE(NULLIF(mc.major_category_desc,''), NULLIF(mc.major_category,'')) IN @MatMajors)
                       AND (@MatSubMajorAny = 0 OR mc.sub_major_category IN @MatSubMajors)))
           AND (@Stage     IS NULL OR ({StageExpr}) = @Stage)
-          AND (@StatusAny = 0 OR ({StatusExpr}) IN @Statuses)
+          AND (@StatusAny = 0 OR ({FilterStatusExpr}) IN @Statuses)
           -- The go-live floor. Applied to the count, the summary, the median and
           -- the page alike, because a page whose header disagreed with its own
           -- rows would be worse than no page. A container with no arrival date
@@ -388,15 +398,7 @@ public class TimeBarService : ITimeBarService
             FROM   qms_sap_container_cache
             WHERE  po_type IS NOT NULL AND po_type <> ''
               AND (@sUnrestricted = 1 OR COALESCE(override_plant, plant) IN @sPlants)
-            ORDER  BY po_type;
-
-            -- Arrival AND quality-order codes together: the Status column shows
-            -- whichever applies, so the filter has to offer both.
-            SELECT DISTINCT s FROM (
-                SELECT status_code AS s FROM qms_arrival        WHERE status_code <> 'Cancelled'
-                UNION
-                SELECT status_code      FROM qms_quality_order  WHERE status_code <> 'Cancelled'
-            ) x WHERE s IS NOT NULL ORDER BY s;",
+            ORDER  BY po_type;",
             new { sUnrestricted = sc.Unrestricted, sPlants = sc.QueryPlants },
             cancellationToken: ct));
 
@@ -404,7 +406,9 @@ public class TimeBarService : ITimeBarService
         {
             Plants   = (await grid.ReadAsync<string>()).ToList(),
             PoTypes  = (await grid.ReadAsync<string>()).ToList(),
-            Statuses = (await grid.ReadAsync<string>()).ToList()
+            // A fixed list in the grid's own words (TimeBarStatus) rather than
+            // the distinct raw codes, which read differently from the column.
+            Statuses = TimeBarStatus.All.Select(s => s.Value).ToList()
         };
     }
 

@@ -28,6 +28,45 @@ public class DashboardService : IDashboardService
     private readonly string _cs;
     private readonly ISettingsService _settings;
 
+    /// <summary>
+    /// Containers SAP has goods-received that nobody has raised an arrival for
+    /// yet -- the same population as the Pending page (has_arrival = 0, not
+    /// archived, with a receive date), one row per container. They are received
+    /// and not inspected, so they belong in the Received cohort and in Pending
+    /// Inspection; counting arrivals alone hid every one of them.
+    ///
+    /// The NOT EXISTS keeps a container whose only arrival was cancelled from
+    /// being counted twice: the arrival side of the union already has it.
+    /// </summary>
+    private const string GoodsReceivedNoArrival = @"
+        SELECT g.container_no, g.bol_no, g.ebeln, g.plant, g.receive_date, g.vendor_name
+        FROM (
+            SELECT container_no, bol_no, ebeln,
+                   COALESCE(MAX(override_plant), MAX(plant)) AS plant,
+                   MAX(receive_date)                         AS receive_date,
+                   MAX(vendor_name)                          AS vendor_name
+            FROM   qms_sap_container_cache
+            WHERE  has_arrival = 0 AND archived_at IS NULL AND receive_date IS NOT NULL
+            GROUP  BY container_no, bol_no, ebeln
+        ) g
+        WHERE NOT EXISTS (SELECT 1 FROM qms_arrival ax
+                          WHERE ax.container_no        = g.container_no
+                            AND ISNULL(ax.bol_no, '')  = g.bol_no
+                            AND ISNULL(ax.ebeln, '')   = g.ebeln)";
+
+    /// <summary>The period and plant filter on <see cref="GoodsReceivedNoArrival"/>
+    /// aliased as gr -- the receive date is a local business date, like the
+    /// arrival side's.</summary>
+    private const string GoodsReceivedWhere =
+        "gr.receive_date >= @fromDate AND gr.receive_date < @toDateEx " +
+        "AND (@plant IS NULL OR gr.plant = @plant) AND (@sUnrestricted = 1 OR gr.plant IN @sPlants)";
+
+    /// <summary>The live order was finished by the END of the period. A
+    /// container is pending inspection until then -- not merely until an order
+    /// is opened on it.</summary>
+    private static string FinishedByEnd(string q) =>
+        $"{q}.status_code = 'Closed' AND {q}.closed_at < @toUtcEx";
+
     public DashboardService(IConfiguration config, ISettingsService settings)
     {
         _cs = config.GetConnectionString("Default")
@@ -482,23 +521,40 @@ public class DashboardService : IDashboardService
             SELECT COALESCE(r.plant, q.plant)  AS Plant,
                    ISNULL(r.Received, 0)       AS Received,
                    ISNULL(r.Committed, 0)      AS Committed,
+                   ISNULL(r.Finished, 0)       AS Finished,
                    ISNULL(q.Cnt, 0)            AS QosCreated,
                    ISNULL(q.CatchUp, 0)        AS QosCatchUp
             FROM (
                 -- OUTER APPLY rather than EXISTS inside the SUM: SQL Server
                 -- refuses a subquery in an aggregate's argument (Msg 130).
-                SELECT a.plant,
-                       COUNT(*)                                          AS Received,
-                       SUM(CASE WHEN o.arrival_id IS NULL THEN 0 ELSE 1 END) AS Committed
-                FROM   qms_arrival a {arrivalJoin}
-                OUTER APPLY (SELECT TOP 1 q2.arrival_id
-                             FROM   qms_quality_order q2
-                             WHERE  q2.arrival_id = a.arrival_id
-                               AND  q2.superseded_at IS NULL
-                               AND  q2.created_at < @toUtcEx) o
-                WHERE  {arrivalInPeriod}
-                  AND  {plantWhere}
-                GROUP  BY a.plant
+                --
+                -- Finished = of those, the live order was finished by the
+                -- period's end. Pending Inspection is Received - Finished: a
+                -- container waits until its inspection is FINISHED, and that
+                -- includes the goods-received containers with no arrival yet.
+                SELECT x.plant,
+                       COUNT(*)        AS Received,
+                       SUM(x.opened)   AS Committed,
+                       SUM(x.finished) AS Finished
+                FROM (
+                    SELECT a.plant,
+                           CASE WHEN o.arrival_id IS NULL THEN 0 ELSE 1 END AS opened,
+                           ISNULL(o.finished, 0)                            AS finished
+                    FROM   qms_arrival a {arrivalJoin}
+                    OUTER APPLY (SELECT TOP 1 q2.arrival_id,
+                                        CASE WHEN {FinishedByEnd("q2")} THEN 1 ELSE 0 END AS finished
+                                 FROM   qms_quality_order q2
+                                 WHERE  q2.arrival_id = a.arrival_id
+                                   AND  q2.superseded_at IS NULL
+                                   AND  q2.created_at < @toUtcEx) o
+                    WHERE  {arrivalInPeriod}
+                      AND  {plantWhere}
+                    UNION ALL
+                    SELECT gr.plant, 0, 0
+                    FROM   ({GoodsReceivedNoArrival}) gr
+                    WHERE  {GoodsReceivedWhere}
+                ) x
+                GROUP  BY x.plant
             ) r
             FULL OUTER JOIN (
                 -- Split by WHEN THE CONTAINER CAME IN, not when the order was
@@ -524,7 +580,10 @@ public class DashboardService : IDashboardService
                    (SELECT COUNT(*) FROM qms_arrival a {arrivalJoin}
                      WHERE DATEADD({bucket}, DATEDIFF({bucket}, 0, {arrivalDate}), 0) = b.Bucket
                        AND {arrivalInPeriod}
-                       AND {plantWhere})                                        AS Received,
+                       AND {plantWhere})
+                 + (SELECT COUNT(*) FROM ({GoodsReceivedNoArrival}) gr
+                     WHERE DATEADD({bucket}, DATEDIFF({bucket}, 0, gr.receive_date), 0) = b.Bucket
+                       AND {GoodsReceivedWhere})                                AS Received,
                    -- Of the containers received IN THIS BUCKET, how many have a
                    -- live order opened by the period's end. Same cohort and the
                    -- same rule as the table above, so the bars and the columns
@@ -549,6 +608,10 @@ public class DashboardService : IDashboardService
                     SELECT CAST({arrivalDate} AS DATETIME2) AS dt
                       FROM qms_arrival a {arrivalJoin}
                      WHERE {arrivalInPeriod} AND {plantWhere}
+                    UNION ALL
+                    SELECT CAST(gr.receive_date AS DATETIME2)
+                      FROM ({GoodsReceivedNoArrival}) gr
+                     WHERE {GoodsReceivedWhere}
                     UNION ALL
                     SELECT qo.created_at FROM qms_quality_order qo
                      JOIN qms_arrival a ON a.arrival_id = qo.arrival_id
@@ -674,17 +737,19 @@ public class DashboardService : IDashboardService
     /// read wrong the first time somebody changed one of them. They mirror the
     /// portlet's own SQL exactly:
     ///
-    ///   received  arrivals created in the period
-    ///   period    ... that also have an inspection opened in the period
-    ///   pending   ... that do not
+    ///   received  containers received in the period -- arrivals, plus
+    ///             goods-received containers with no arrival yet
+    ///   period    ... that also have an inspection opened by its end
+    ///   pending   ... whose inspection was not FINISHED by its end, each
+    ///             marked Not yet inspected (no order) or Pending (order open)
     ///   backlog   inspections opened in the period on EARLIER arrivals
     ///   total     inspections opened in the period, whenever the container came
     ///
     /// A container can now carry a second order when an administrator has it
     /// reinspected, so "an order" and "a container" are no longer the same
     /// thing. Here and in the portlet alike, only the LIVE order counts --
-    /// superseded ones are filtered out -- which keeps both identities true:
-    ///   Received = Period + Pending, and Total = Period + Backlog.
+    /// superseded ones are filtered out -- which keeps these identities true:
+    ///   Received = Period + Not yet inspected, and Total = Period + Backlog.
     ///
     /// The live order is the reinspection once one exists, so a reinspected
     /// container leaves Period for Pending until the second inspection closes.
@@ -718,6 +783,10 @@ public class DashboardService : IDashboardService
             "EXISTS (SELECT 1 FROM qms_quality_order q2 WHERE q2.arrival_id = a.arrival_id " +
             "AND q2.superseded_at IS NULL " +
             "AND q2.created_at < @toUtcEx)";
+        var finishedInPeriod =
+            "EXISTS (SELECT 1 FROM qms_quality_order q2 WHERE q2.arrival_id = a.arrival_id " +
+            "AND q2.superseded_at IS NULL " +
+            "AND q2.created_at < @toUtcEx AND " + FinishedByEnd("q2") + ")";
 
         // The same receive date the portlet counts on -- SAP's goods receipt,
         // not the moment the record was typed. The drill-through exists to
@@ -736,7 +805,7 @@ public class DashboardService : IDashboardService
             CommitmentBuckets.PeriodInspection =>
                 $"{arrivedInPeriod} AND {openedInPeriod}",
             CommitmentBuckets.PendingInspection =>
-                $"{arrivedInPeriod} AND NOT {openedInPeriod}",
+                $"{arrivedInPeriod} AND NOT {finishedInPeriod}",
             CommitmentBuckets.BacklogInspected =>
                 $"qo.created_at >= @fromUtc AND qo.created_at < @toUtcEx AND {arrivalDate} < @fromDate",
             CommitmentBuckets.TotalInspected =>
@@ -751,6 +820,18 @@ public class DashboardService : IDashboardService
                                              or CommitmentBuckets.TotalInspected
             ? "JOIN"
             : "LEFT JOIN";
+
+        // Received and Pending also list the containers SAP has goods-received
+        // with no arrival yet -- same population as the portlet counts.
+        var withGoodsReceived = bucket.ToLowerInvariant() is CommitmentBuckets.Received
+                                                         or CommitmentBuckets.PendingInspection;
+        var goodsReceived = !withGoodsReceived ? "" : $@"
+            UNION ALL
+            SELECT  gr.plant, NULL, NULL, gr.container_no, gr.bol_no, gr.ebeln, gr.vendor_name,
+                    NULL, CAST(gr.receive_date AS DATETIME2), NULL,
+                    NULL, NULL, NULL, NULL, NULL, CAST(0 AS BIT)
+            FROM    ({GoodsReceivedNoArrival}) gr
+            WHERE   {GoodsReceivedWhere}";
 
         var sql = $@"
             SELECT  a.plant                    AS Plant,
@@ -767,7 +848,8 @@ public class DashboardService : IDashboardService
                     qo.quality_order_no        AS QualityOrderNo,
                     qo.status_code             AS QoStatus,
                     qo.created_at              AS QoCreatedAt,
-                    qo.closed_at               AS QoClosedAt
+                    qo.closed_at               AS QoClosedAt,
+                    CAST(CASE WHEN {openedInPeriod} THEN 1 ELSE 0 END AS BIT) AS OpenedByEnd
             FROM    qms_arrival a
             LEFT    JOIN qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id
             {join}  qms_quality_order qo ON qo.arrival_id = a.arrival_id
@@ -775,7 +857,8 @@ public class DashboardService : IDashboardService
             WHERE   {where}
               AND   (@plant IS NULL OR a.plant = @plant)
               AND   (@sUnrestricted = 1 OR a.plant IN @sPlants)
-            ORDER BY a.plant, {arrivalDate} DESC, a.arrival_no";
+            {goodsReceived}
+            ORDER BY Plant, ArrivalCreatedAt DESC, ArrivalNo";
 
         using var c = new SqlConnection(_cs);
         var rows = await c.QueryAsync<CommitmentDetailRow>(new CommandDefinition(sql, new

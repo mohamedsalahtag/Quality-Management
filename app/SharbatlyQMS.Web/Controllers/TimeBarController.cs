@@ -120,8 +120,8 @@ public class TimeBarController : Controller
             ws.Cell(r,  9).Value = row.ArrivalSource;
             ws.Cell(r, 10).Value = row.ArrivalNo;
             ws.Cell(r, 11).Value = row.QualityOrderNo;
-            ws.Cell(r, 12).Value = row.Stage;
-            ws.Cell(r, 13).Value = row.StatusCode;
+            ws.Cell(r, 12).Value = TimeBarStages.Label(row.Stage);
+            ws.Cell(r, 13).Value = row.StatusLabel;
             // Left EMPTY, not zero, when there is no clock: a container with no
             // arrival date has an unknown elapsed time, and a zero would be
             // averaged and charted as if it were instant.

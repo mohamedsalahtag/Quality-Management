@@ -1278,7 +1278,7 @@ public class AdminController : Controller
     // dynamic per-category sections in the sample form + PDF. -------------
     [HttpGet]
     [RequireScreen(Screens.DefectCategories, Seed.ManagerOrAdmin, "Open Defect Categories")]
-    public async Task<IActionResult> DefectCategories()
+    public async Task<IActionResult> DefectCategories(string? materialGroup = null)
     {
         using var c = new Microsoft.Data.SqlClient.SqlConnection(
             HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
@@ -1289,7 +1289,331 @@ public class AdminController : Controller
                              THEN 1 ELSE 0 END AS BIT) IsInUse
             FROM   qms_defect_category c
             ORDER  BY c.sort_order, c.category_name");
+
+        // Tolerances per material group (M39), edited one group at a time.
+        var groups = await CategoryToleranceGroupsAsync(c);
+        if (!string.IsNullOrWhiteSpace(materialGroup)
+            && !groups.Any(g => string.Equals(g.Code, materialGroup, StringComparison.OrdinalIgnoreCase)))
+            materialGroup = null;
+        ViewBag.Groups      = groups;
+        ViewBag.FilterGroup = materialGroup;
+        ViewBag.Tolerances  = materialGroup == null
+            ? new Dictionary<int, decimal?>()
+            : (await c.QueryAsync<(int CategoryId, decimal? Tolerance)>(@"
+                SELECT category_id, tolerance FROM qms_defect_category_tolerance
+                WHERE  material_group = @materialGroup", new { materialGroup }))
+              .ToDictionary(x => x.CategoryId, x => x.Tolerance);
         return View(rows.ToList());
+    }
+
+    // ===================================================================
+    // Category tolerances per material group (M39). A category's TOTAL
+    // percentage at or above its tolerance prints in red on the summary and
+    // the report, the same rule as a catalog defect's own tolerance.
+    // Maintained on screen one group at a time, or for every group at once
+    // through the same Excel round trip the Defect Catalog uses.
+    // ===================================================================
+
+    /// <summary>The material groups that have defects in the catalog -- the only
+    /// ones a category total can be computed for -- named from MARA where it
+    /// knows them.</summary>
+    private async Task<IReadOnlyList<MaraGroup>> CategoryToleranceGroupsAsync(System.Data.IDbConnection c)
+    {
+        var codes = (await c.QueryAsync<string>(@"
+            SELECT DISTINCT material_group FROM qms_defect_catalog
+            WHERE  material_group IS NOT NULL AND material_group <> ''
+            ORDER  BY material_group")).ToList();
+        var names = (await _mara.ListMaterialGroupsAsync())
+            .GroupBy(g => g.Code, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(g => g.Key, g => g.First().Name, StringComparer.OrdinalIgnoreCase);
+        return codes.Select(code => new MaraGroup { Code = code, Name = names.GetValueOrDefault(code) }).ToList();
+    }
+
+    /// <summary>Writes tolerances, inserting the (category, group) row the first
+    /// time. An empty value is stored as NULL -- "none agreed", not zero.</summary>
+    private async Task UpsertCategoryTolerancesAsync(System.Data.IDbConnection c, System.Data.IDbTransaction tx,
+        IEnumerable<(int CategoryId, string MaterialGroup, decimal? Tolerance)> rows)
+    {
+        var user = User.FindFirstValue(ClaimTypes.Name) ?? "unknown";
+        foreach (var r in rows)
+            await c.ExecuteAsync(@"
+                UPDATE qms_defect_category_tolerance
+                SET    tolerance = @Tolerance, updated_at = SYSUTCDATETIME(), updated_by = @user
+                WHERE  category_id = @CategoryId AND material_group = @MaterialGroup;
+                IF @@ROWCOUNT = 0
+                    INSERT INTO qms_defect_category_tolerance (category_id, material_group, tolerance, updated_at, updated_by)
+                    VALUES (@CategoryId, @MaterialGroup, @Tolerance, SYSUTCDATETIME(), @user);",
+                new { r.CategoryId, r.MaterialGroup, r.Tolerance, user }, tx);
+    }
+
+    /// <summary>Validates one tolerance value the way the catalog does: empty is
+    /// NULL, negative or absurd is refused, the rest rounds to two decimals.</summary>
+    private static bool TryReadTolerance(string? raw, out decimal? tolerance, out string? error)
+    {
+        tolerance = null; error = null;
+        if (string.IsNullOrWhiteSpace(raw)) return true;
+        if (!decimal.TryParse(raw.Trim(), System.Globalization.NumberStyles.Number,
+                              System.Globalization.CultureInfo.InvariantCulture, out var v))
+        { error = $"'{raw}' is not a number."; return false; }
+        if (v < 0)        { error = "a tolerance cannot be negative."; return false; }
+        if (v > 9999999)  { error = $"{v} is too large for a tolerance."; return false; }
+        tolerance = Math.Round(v, DefectTolerance.Decimals, MidpointRounding.AwayFromZero);
+        return true;
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Parameters.DefectCategoriesEdit, Seed.ManagerOrAdmin, "Edit Defect Categories")]
+    public async Task<IActionResult> SaveCategoryTolerances(string materialGroup, int[] categoryId, string?[] tolerance)
+    {
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+        await c.OpenAsync();
+
+        var groups = await CategoryToleranceGroupsAsync(c);
+        if (string.IsNullOrWhiteSpace(materialGroup)
+            || !groups.Any(g => string.Equals(g.Code, materialGroup, StringComparison.OrdinalIgnoreCase))
+            || categoryId.Length != tolerance.Length)
+        {
+            TempData["Error"] = "Choose a material group first.";
+            return RedirectToAction(nameof(DefectCategories));
+        }
+
+        var parsed = new List<(int CategoryId, string MaterialGroup, decimal? Tolerance)>();
+        for (var i = 0; i < categoryId.Length; i++)
+        {
+            if (!TryReadTolerance(tolerance[i], out var tol, out var error))
+            {
+                TempData["Error"] = $"Nothing was saved - {error}";
+                return RedirectToAction(nameof(DefectCategories), new { materialGroup });
+            }
+            parsed.Add((categoryId[i], materialGroup, tol));
+        }
+
+        var current = (await c.QueryAsync<(int CategoryId, decimal? Tolerance)>(
+            "SELECT category_id, tolerance FROM qms_defect_category_tolerance WHERE material_group = @materialGroup",
+            new { materialGroup })).ToDictionary(x => x.CategoryId, x => x.Tolerance);
+        var changed = parsed.Where(p => current.GetValueOrDefault(p.CategoryId) != p.Tolerance).ToList();
+
+        using (var tx = c.BeginTransaction())
+        {
+            await UpsertCategoryTolerancesAsync(c, tx, changed);
+            tx.Commit();
+        }
+        if (changed.Count > 0)
+            await AuditAdminAsync(EntityTypes.DefectCategory, 0, ActionCodes.Updated,
+                changed.Select(p => new { p.CategoryId, tolerance = current.GetValueOrDefault(p.CategoryId) }).ToList(),
+                new { action = "Category tolerances", materialGroup,
+                      tolerances = changed.Select(p => new { p.CategoryId, p.Tolerance }).ToList() });
+
+        TempData["Success"] = changed.Count == 0
+            ? "Nothing changed."
+            : $"{changed.Count} category tolerance(s) saved for {materialGroup}.";
+        return RedirectToAction(nameof(DefectCategories), new { materialGroup });
+    }
+
+    private static readonly string[] CategoryToleranceHeaders =
+        { "Category ID", "Material group", "Category", "Tolerance" };
+
+    private const string CategoryToleranceSheetName = "Category tolerances";
+
+    [RequireScreen(Screens.DefectCategories, Seed.ManagerOrAdmin, "Open Defect Categories")]
+    public async Task<IActionResult> DefectCategoryTolerancesExcel(string? materialGroup = null)
+    {
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+
+        var groups = (await CategoryToleranceGroupsAsync(c))
+            .Where(g => string.IsNullOrWhiteSpace(materialGroup)
+                        || string.Equals(g.Code, materialGroup, StringComparison.OrdinalIgnoreCase))
+            .Select(g => g.Code).ToList();
+        var categories = (await c.QueryAsync<DefectCategory>(@"
+            SELECT category_id CategoryId, category_name CategoryName, sort_order SortOrder
+            FROM   qms_defect_category WHERE is_active = 1
+            ORDER  BY sort_order, category_name")).ToList();
+        var tolerances = (await c.QueryAsync<(int CategoryId, string MaterialGroup, decimal? Tolerance)>(
+            "SELECT category_id, material_group, tolerance FROM qms_defect_category_tolerance"))
+            .ToDictionary(x => DefectCategoryTolerance.Key(x.MaterialGroup, x.CategoryId.ToString()), x => x.Tolerance);
+
+        using var wb = new ClosedXML.Excel.XLWorkbook();
+        var ws = wb.Worksheets.Add(CategoryToleranceSheetName);
+        for (var i = 0; i < CategoryToleranceHeaders.Length; i++)
+        {
+            ws.Cell(1, i + 1).Value = CategoryToleranceHeaders[i];
+            ws.Cell(1, i + 1).Style.Font.Bold = true;
+        }
+
+        // Every (group, active category) pair, set or not, so the sheet is the
+        // form: fill in the blanks and upload it back.
+        var r = 2;
+        foreach (var g in groups)
+            foreach (var cat in categories)
+            {
+                ws.Cell(r, 1).Value = cat.CategoryId;
+                ws.Cell(r, 2).Value = g;
+                ws.Cell(r, 3).Value = cat.CategoryName;
+                // EMPTY when unset, never 0 -- the import reads it back the same way.
+                if (tolerances.TryGetValue(DefectCategoryTolerance.Key(g, cat.CategoryId.ToString()), out var tol)
+                    && tol.HasValue)
+                    ws.Cell(r, 4).Value = tol.Value;
+                r++;
+            }
+
+        ws.Column(4).Style.NumberFormat.Format = DefectTolerance.Format;
+        ws.Range(1, 1, Math.Max(1, r - 1), CategoryToleranceHeaders.Length).Style.Protection.SetLocked(true);
+        if (r > 2) ws.Range(2, 4, r - 1, 4).Style.Protection.SetLocked(false);
+        ws.Protect();
+        ws.Range(1, 1, 1, CategoryToleranceHeaders.Length).SetAutoFilter();
+        ws.SheetView.FreezeRows(1);
+        ws.Columns(1, CategoryToleranceHeaders.Length).AdjustToContents();
+
+        using var ms = new MemoryStream();
+        wb.SaveAs(ms);
+        var name = string.IsNullOrWhiteSpace(materialGroup) ? "all-groups" : materialGroup;
+        return File(ms.ToArray(),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            $"category-tolerances-{name}-{DateTime.Now:yyyyMMdd-HHmm}.xlsx");
+    }
+
+    /// <summary>
+    /// Reads category tolerances back from the exported workbook. As with the
+    /// catalog import: everything is validated before anything is written, a
+    /// row is matched on (Category ID, Material group), and unchanged rows are
+    /// left alone so re-uploading the same file is a no-op.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequestFormLimits(MultipartBodyLengthLimit = 10 * 1024 * 1024)]
+    [RequirePermission(Perm.Parameters.DefectCategoriesEdit, Seed.ManagerOrAdmin, "Edit Defect Categories")]
+    public async Task<IActionResult> DefectCategoryTolerancesImport(IFormFile? file, string? materialGroup = null)
+    {
+        if (file == null || file.Length == 0)
+        {
+            TempData["Error"] = "No file was chosen.";
+            return RedirectToAction(nameof(DefectCategories), new { materialGroup });
+        }
+        if (!Path.GetExtension(file.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            TempData["Error"] = "Upload the .xlsx file that Export produced.";
+            return RedirectToAction(nameof(DefectCategories), new { materialGroup });
+        }
+
+        var parsed = new List<(int CategoryId, string MaterialGroup, decimal? Tolerance)>();
+        var errors = new List<string>();
+        try
+        {
+            using var stream = file.OpenReadStream();
+            using var wb = new ClosedXML.Excel.XLWorkbook(stream);
+            var ws = wb.Worksheets.FirstOrDefault(w => w.Name == CategoryToleranceSheetName)
+                     ?? wb.Worksheets.First();
+            var headerRow = ws.FirstRowUsed();
+            if (headerRow == null)
+            {
+                TempData["Error"] = "That sheet is empty.";
+                return RedirectToAction(nameof(DefectCategories), new { materialGroup });
+            }
+            var header = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+            foreach (var cell in headerRow.CellsUsed())
+                header[cell.GetString().Trim()] = cell.Address.ColumnNumber;
+            foreach (var needed in new[] { "Category ID", "Material group", "Tolerance" })
+                if (!header.ContainsKey(needed))
+                {
+                    TempData["Error"] = $"The sheet has no '{needed}' column. Upload the file that Export produced.";
+                    return RedirectToAction(nameof(DefectCategories), new { materialGroup });
+                }
+
+            foreach (var row in ws.RowsUsed().Skip(1))
+            {
+                var excelRow = row.RowNumber();
+                var idCell   = row.Cell(header["Category ID"]);
+                if (idCell.IsEmpty()) continue;
+                if (!idCell.TryGetValue<int>(out var catId) || catId <= 0)
+                {
+                    errors.Add($"Row {excelRow}: '{idCell.GetString()}' is not a category id.");
+                    continue;
+                }
+                var group = row.Cell(header["Material group"]).GetString().Trim();
+                if (group.Length == 0)
+                {
+                    errors.Add($"Row {excelRow}: the material group is empty.");
+                    continue;
+                }
+                var tolCell = row.Cell(header["Tolerance"]);
+                // A numeric cell is read as a number, never through its
+                // formatted text, so the workbook's locale cannot shift a comma.
+                var raw = tolCell.IsEmpty() ? null
+                        : tolCell.TryGetValue<decimal>(out var num)
+                            ? num.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                            : tolCell.GetString();
+                if (!TryReadTolerance(raw, out var tol, out var error))
+                {
+                    errors.Add($"Row {excelRow}: {error}");
+                    continue;
+                }
+                parsed.Add((catId, group, tol));
+            }
+        }
+        catch (Exception ex)
+        {
+            _adminLog.LogWarning(ex, "Category tolerance import could not read {File}", file.FileName);
+            TempData["Error"] = "That file could not be read as an Excel workbook.";
+            return RedirectToAction(nameof(DefectCategories), new { materialGroup });
+        }
+
+        if (errors.Count > 0)
+        {
+            TempData["Error"] = $"Nothing was imported - {errors.Count} row(s) could not be read. " +
+                                string.Join(" ", errors.Take(5)) +
+                                (errors.Count > 5 ? $" (+{errors.Count - 5} more)" : "");
+            return RedirectToAction(nameof(DefectCategories), new { materialGroup });
+        }
+        if (parsed.Count == 0)
+        {
+            TempData["Error"] = "That sheet had no rows to import.";
+            return RedirectToAction(nameof(DefectCategories), new { materialGroup });
+        }
+
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            HttpContext.RequestServices.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+        await c.OpenAsync();
+
+        // A category or group that does not exist usually means the wrong file:
+        // reported and skipped rather than written.
+        var knownGroups = (await CategoryToleranceGroupsAsync(c))
+            .Select(g => g.Code).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var knownCats = (await c.QueryAsync<int>("SELECT category_id FROM qms_defect_category")).ToHashSet();
+        var current = (await c.QueryAsync<(int CategoryId, string MaterialGroup, decimal? Tolerance)>(
+            "SELECT category_id, material_group, tolerance FROM qms_defect_category_tolerance"))
+            .ToDictionary(x => DefectCategoryTolerance.Key(x.MaterialGroup, x.CategoryId.ToString()), x => x.Tolerance);
+
+        var unknown = parsed.Where(p => !knownCats.Contains(p.CategoryId) || !knownGroups.Contains(p.MaterialGroup)).ToList();
+        var changed = parsed.Except(unknown)
+            .Where(p => current.GetValueOrDefault(DefectCategoryTolerance.Key(p.MaterialGroup, p.CategoryId.ToString())) != p.Tolerance)
+            .ToList();
+
+        using (var tx = c.BeginTransaction())
+        {
+            await UpsertCategoryTolerancesAsync(c, tx, changed);
+            tx.Commit();
+        }
+
+        await AuditAdminAsync(EntityTypes.DefectCategory, 0, ActionCodes.Updated, null,
+            new
+            {
+                action = "Category tolerance import",
+                file = file.FileName,
+                rowsInFile = parsed.Count,
+                updated = changed.Count,
+                unchanged = parsed.Count - changed.Count - unknown.Count,
+                unknownRows = unknown.Count
+            });
+
+        var message = $"{changed.Count} category tolerance(s) updated from {parsed.Count} row(s).";
+        if (unknown.Count > 0)
+            message += $" {unknown.Count} row(s) named a category or material group that does not exist and were skipped.";
+        TempData[changed.Count == 0 && unknown.Count == 0 ? "Error" : "Success"] =
+            changed.Count == 0 && unknown.Count == 0
+                ? "Nothing changed - every tolerance in the file already matched."
+                : message;
+        return RedirectToAction(nameof(DefectCategories), new { materialGroup });
     }
 
     [HttpPost, ValidateAntiForgeryToken]

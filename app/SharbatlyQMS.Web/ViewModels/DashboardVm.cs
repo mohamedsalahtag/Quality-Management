@@ -226,9 +226,21 @@ public class PlantCommitmentRow
     public double? DailyAverage(int periodDays) =>
         periodDays <= 0 ? null : (double)QosCreated / periodDays;
 
-    /// <summary>Containers received in the period still waiting for a quality
-    /// order. Cannot go negative now that both halves are the same cohort.</summary>
-    public int    Outstanding => Math.Max(0, Received - Committed);
+    /// <summary>How many of <see cref="Received"/> had their live inspection
+    /// FINISHED by the end of the period.</summary>
+    public int    Finished  { get; set; }
+
+    /// <summary>Containers received in the period whose inspection was not
+    /// finished by its end -- <see cref="NotYetInspected"/> plus
+    /// <see cref="InProgress"/>. Includes the goods-received containers nobody
+    /// has raised an arrival for yet.</summary>
+    public int    Outstanding => Math.Max(0, Received - Finished);
+
+    /// <summary>Received with no inspection opened at all.</summary>
+    public int    NotYetInspected => Math.Max(0, Received - Committed);
+
+    /// <summary>Inspection opened but not finished: the drill-down's "Pending".</summary>
+    public int    InProgress => Math.Max(0, Committed - Finished);
 
     /// <summary>Committed as a share of received. Null when nothing arrived --
     /// 0% would read as a failure on a day with no containers.</summary>
@@ -325,7 +337,7 @@ public static class CommitmentBuckets
     public static string Explain(string bucket) => bucket switch
     {
         PeriodInspection  => "Containers received in this period that were inspected in it.",
-        PendingInspection => "Containers received in this period with no inspection opened in it.",
+        PendingInspection => "Containers received in this period whose inspection was not finished by its end: not yet inspected, or inspection pending.",
         BacklogInspected  => "Inspections opened in this period on containers received BEFORE it.",
         TotalInspected    => "Every inspection opened in this period, whenever its container arrived.",
         _                 => "Containers received in this period."
@@ -333,6 +345,10 @@ public static class CommitmentBuckets
 
     public static readonly string[] All =
         { Received, PeriodInspection, PendingInspection, BacklogInspected, TotalInspected };
+
+    /// <summary>The two statuses Pending Inspection splits into.</summary>
+    public const string NotYetInspectedLabel = "Not yet inspected";
+    public const string InProgressLabel      = "Pending";
 
     public static bool IsValid(string? b) =>
         !string.IsNullOrWhiteSpace(b) && All.Contains(b, StringComparer.OrdinalIgnoreCase);
@@ -346,7 +362,8 @@ public static class CommitmentBuckets
 public class CommitmentDetailRow
 {
     public string    Plant           { get; set; } = "";
-    public long      ArrivalId       { get; set; }
+    /// <summary>Null for a container SAP has goods-received with no arrival yet.</summary>
+    public long?     ArrivalId       { get; set; }
     public string?   ArrivalNo       { get; set; }
     public string?   ContainerNo     { get; set; }
     public string?   BolNo           { get; set; }
@@ -359,15 +376,24 @@ public class CommitmentDetailRow
     /// <summary>When the arrival record was created in this application --
     /// on average 3.7 days after the container actually arrived, so the two
     /// are shown separately rather than one standing in for the other.</summary>
-    public DateTime  RecordCreatedAt { get; set; }
+    public DateTime? RecordCreatedAt { get; set; }
     public long?     QualityOrderId  { get; set; }
     public string?   QualityOrderNo  { get; set; }
     public string?   QoStatus        { get; set; }
     public DateTime? QoCreatedAt     { get; set; }
     public DateTime? QoClosedAt      { get; set; }
+    /// <summary>The live inspection was opened by the END of the period -- the
+    /// portlet's Period Inspection rule. On a past window an order opened
+    /// afterwards is on the row, yet the container was not inspected then.</summary>
+    public bool      OpenedByEnd     { get; set; }
 
     /// <summary>Days from the container being received to its inspection being
-    /// opened. Null while nothing has been opened.</summary>
-    public int? DaysToInspection =>
-        QoCreatedAt.HasValue ? Math.Max(0, (int)(QoCreatedAt.Value.Date - ArrivalCreatedAt.Date).TotalDays) : null;
+    /// opened, counted in LOCAL days like the Time Bar. Null while nothing has
+    /// been opened.</summary>
+    public int? DaysToInspection => ShipmentDates.TimeBarDays(ArrivalCreatedAt, QoCreatedAt);
+
+    /// <summary>Which half of Pending Inspection the row is in: no order yet,
+    /// or an order that is not finished.</summary>
+    public string PendingStatus => OpenedByEnd ? CommitmentBuckets.InProgressLabel
+                                               : CommitmentBuckets.NotYetInspectedLabel;
 }

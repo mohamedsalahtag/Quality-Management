@@ -102,6 +102,9 @@ public interface IQualityOrderService
     Task<IReadOnlyDictionary<string, string>> GetDisplaySectionMapAsync(string? materialGroup, string? majorCategory);
     /// <summary>Active defect categories (V22+), ordered by sort_order; drives the dynamic per-category sections + colours.</summary>
     Task<IReadOnlyList<DefectCategory>> GetActiveCategoriesAsync();
+    /// <summary>Category tolerances (M39) for the given material groups, keyed by
+    /// <see cref="DefectCategoryTolerance.Key"/>. Only rows with a value appear.</summary>
+    Task<IReadOnlyDictionary<string, decimal>> GetCategoryTolerancesAsync(IEnumerable<string> materialGroups);
     /// <summary>Report unit label per material group (qms_material_group_unit, M11).
     /// Only configured groups appear; everything else defaults to "Pieces".</summary>
     Task<IReadOnlyDictionary<string, string>> GetReportUnitsAsync();

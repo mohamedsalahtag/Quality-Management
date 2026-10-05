@@ -240,7 +240,7 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
             var total    = await Bucket(CommitmentBuckets.TotalInspected);
 
             _out.WriteLine($"received {received.Count} = period {period.Count} + pending {pending.Count}");
-            Assert.Equal(received.Count, period.Count + pending.Count);
+            Assert.Equal(received.Count, period.Count + pending.Count(r => !r.OpenedByEnd));
             // Total = Period + Backlog only up to the inspections SAP's receipt
             // trails (see CommitmentDetailTests); what is exact is that Backlog
             // is the orders on containers received before today.

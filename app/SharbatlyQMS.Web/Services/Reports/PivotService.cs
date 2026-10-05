@@ -415,22 +415,22 @@ public class PivotService : IPivotService
             sb.Append(" AND SampleScope = @sampleScope");
             p.Add("sampleScope", f.SampleScope, DbType.AnsiString);
         }
-        // PO date range. Mirror the data-hub semantics: include NULL PoDate
-        // rows so arrivals whose SAP cache row is missing still surface in
-        // the unfiltered window. End-of-day is rolled forward when the user
-        // picks a whole date so 'to = today' includes today's POs.
-        if (f.PoFrom.HasValue)
+        // Receive date range, same semantics as the data hub: a row with no
+        // goods receipt has no date to be in a range. End-of-day is rolled
+        // forward when the user picks a whole date so 'to = today' includes
+        // today's receipts.
+        if (f.ReceiveFrom.HasValue)
         {
-            sb.Append(" AND (PoDate IS NULL OR PoDate >= @poFrom)");
-            p.Add("poFrom", f.PoFrom.Value.Date, DbType.Date);
+            sb.Append(" AND ReceiveDate >= @receiveFrom");
+            p.Add("receiveFrom", f.ReceiveFrom.Value.Date, DbType.Date);
         }
-        if (f.PoTo.HasValue)
+        if (f.ReceiveTo.HasValue)
         {
-            var poToExcl = f.PoTo.Value.TimeOfDay == TimeSpan.Zero
-                ? f.PoTo.Value.AddDays(1)
-                : f.PoTo.Value;
-            sb.Append(" AND (PoDate IS NULL OR PoDate < @poToExcl)");
-            p.Add("poToExcl", poToExcl.Date, DbType.Date);
+            var receiveToExcl = f.ReceiveTo.Value.TimeOfDay == TimeSpan.Zero
+                ? f.ReceiveTo.Value.AddDays(1)
+                : f.ReceiveTo.Value;
+            sb.Append(" AND ReceiveDate < @receiveToExcl");
+            p.Add("receiveToExcl", receiveToExcl.Date, DbType.Date);
         }
     }
 
@@ -558,7 +558,7 @@ public class PivotService : IPivotService
             f.QualityOrderId, f.ArrivalId, f.Status, f.Plant, f.MaterialGroup, f.MajorCategory,
             f.Variety, f.Origin, f.MaterialClass, f.VendorName, f.VendorNo, f.StorageLocation,
             f.ContainerNo, f.BolNo, f.Ebeln, f.SampleScope,
-            f.PoFrom?.ToString("yyyyMMdd"), f.PoTo?.ToString("yyyyMMdd"));
+            "rcv", f.ReceiveFrom?.ToString("yyyyMMdd"), f.ReceiveTo?.ToString("yyyyMMdd"));
         var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(raw));
         return Convert.ToHexString(bytes, 0, 8);
     }

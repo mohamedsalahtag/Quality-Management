@@ -267,13 +267,13 @@
                         <thead class="table-light">
                             <tr>
                                 <th>@Loc["Plant"]</th>
-                                <th class="text-end" title='@Loc["Containers received in this period, by SAP's branch receive date."]'>
+                                <th class="text-end" title='@Loc["Containers received in this period, by SAP's branch receive date — with or without an arrival created."]'>
                                     @Loc["Received"]
                                 </th>
                                 <th class="text-end" title='@Loc["Containers received in this period that have an inspection opened by the end of it."]'>
                                     @Loc["Period Inspection"]
                                 </th>
-                                <th class="text-end" title='@Loc["Received minus Period Inspection: received but not yet inspected."]'>
+                                <th class="text-end" title='@Loc["Received but inspection not finished: not yet inspected, plus inspection pending."]'>
                                     @Loc["Pending Inspection"]
                                 </th>
                                 <th class="text-end" title='@Loc["Period Inspection as a share of Received."]'>
@@ -317,6 +317,10 @@
                                                asp-all-route-data="Bucket(CommitmentBuckets.PendingInspection, row.Plant)"
                                                class="text-reset text-decoration-none border-bottom border-danger-subtle"
                                                title="@Loc["Show the containers still waiting"]">@row.Outstanding</a>
+                                            <div class="small fw-normal text-muted text-nowrap"
+                                                 title="@Loc[CommitmentBuckets.NotYetInspectedLabel] · @Loc[CommitmentBuckets.InProgressLabel]">
+                                                @row.NotYetInspected · @row.InProgress
+                                            </div>
                                         }
                                         else
                                         {

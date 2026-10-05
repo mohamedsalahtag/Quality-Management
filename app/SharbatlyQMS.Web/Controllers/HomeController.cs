@@ -141,7 +141,8 @@ public class HomeController : Controller
             var rows = await _dashboard.GetCommitmentDetailAsync(
                 filter ?? new DashboardFilter(), scope, bucket, null, ct);
             WriteDetailSheet(wb, CommitmentBuckets.Caption(bucket),
-                             CommitmentBuckets.Explain(bucket), rows);
+                             CommitmentBuckets.Explain(bucket), rows,
+                             withPendingStatus: bucket == CommitmentBuckets.PendingInspection);
         }
 
         using var ms = new MemoryStream();
@@ -176,7 +177,7 @@ public class HomeController : Controller
     /// makes the whole column text and Excel then sorts 10 before 9.
     /// </summary>
     private static void WriteDetailSheet(ClosedXML.Excel.XLWorkbook wb, string name,
-        string explanation, IReadOnlyList<CommitmentDetailRow> rows)
+        string explanation, IReadOnlyList<CommitmentDetailRow> rows, bool withPendingStatus = false)
     {
         var ws = wb.Worksheets.Add(name);
 
@@ -190,6 +191,8 @@ public class HomeController : Controller
             "Inspection", "Inspection status",
             "Opened on", "Finished on", "Days to inspection"
         };
+        // The Pending sheet says which half each container is in.
+        if (withPendingStatus) headers = headers.Append("Pending status").ToArray();
         for (var i = 0; i < headers.Length; i++)
         {
             ws.Cell(2, i + 1).Value = headers[i];
@@ -210,12 +213,14 @@ public class HomeController : Controller
             // date-only value would shift a day backwards on the way through
             // ToLocalTime.
             ws.Cell(r,  8).Value = row.ArrivalCreatedAt;
-            ws.Cell(r,  9).Value = row.RecordCreatedAt.ToLocalTime();
+            if (row.RecordCreatedAt.HasValue) ws.Cell(r, 9).Value = row.RecordCreatedAt.Value.ToLocalTime();
             ws.Cell(r, 10).Value = row.QualityOrderNo;
-            ws.Cell(r, 11).Value = row.QoStatus;
+            // Same words as everywhere else: "Finished", not the stored "Closed".
+            ws.Cell(r, 11).Value = row.QoStatus is null ? null : QualityOrderStatus.DisplayName(row.QoStatus);
             if (row.QoCreatedAt.HasValue) ws.Cell(r, 12).Value = row.QoCreatedAt.Value.ToLocalTime();
             if (row.QoClosedAt.HasValue)  ws.Cell(r, 13).Value = row.QoClosedAt.Value.ToLocalTime();
             if (row.DaysToInspection.HasValue) ws.Cell(r, 14).Value = row.DaysToInspection.Value;
+            if (withPendingStatus) ws.Cell(r, 15).Value = row.PendingStatus;
             r++;
         }
 

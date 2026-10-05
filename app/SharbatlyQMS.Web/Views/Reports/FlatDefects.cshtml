@@ -41,13 +41,13 @@
             storageLocation = f.StorageLocation,
             containerNo     = f.ContainerNo,   bolNo     = f.BolNo, ebeln = f.Ebeln,
             sampleScope     = f.SampleScope,
-            poFrom          = FmtDate(f.PoFrom), poTo = FmtDate(f.PoTo) })">
+            receiveFrom     = FmtDate(f.ReceiveFrom), receiveTo = FmtDate(f.ReceiveTo) })">
         <i class="bi bi-file-earmark-excel me-1"></i>@Loc["Download Excel"]
     </a>
 </div>
 
 <p class="text-muted small mb-3">
-    One row per (sample × every catalog defect for the material group). Defaults to the last 30 days of PO Date —
+    One row per (sample × every catalog defect for the material group). Defaults to the last 30 days of Receive Date (goods receipt) —
     widen via the filter card. The Excel export includes <strong>@Loc["all"]</strong> rows (zero-value defects + raw SAP
     columns like Arrival No / STO / Severity that the on-screen preview hides for clarity).
 </p>
@@ -63,14 +63,14 @@
         <div class="card-body">
             <div class="row g-2">
                 <div class="col-md-2">
-                    <label class="form-label small">@Loc["PO date from"]</label>
-                    <input type="date" name="PoFrom" class="form-control form-control-sm"
-                           value="@FmtDate(f.PoFrom)" />
+                    <label class="form-label small">@Loc["Receive date from"]</label>
+                    <input type="date" name="ReceiveFrom" class="form-control form-control-sm"
+                           value="@FmtDate(f.ReceiveFrom)" />
                 </div>
                 <div class="col-md-2">
-                    <label class="form-label small">@Loc["PO date to"]</label>
-                    <input type="date" name="PoTo" class="form-control form-control-sm"
-                           value="@FmtDate(f.PoTo)" />
+                    <label class="form-label small">@Loc["Receive date to"]</label>
+                    <input type="date" name="ReceiveTo" class="form-control form-control-sm"
+                           value="@FmtDate(f.ReceiveTo)" />
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small">@Loc["QO Status"]</label>

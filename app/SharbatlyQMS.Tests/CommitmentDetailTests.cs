@@ -99,13 +99,21 @@ public class CommitmentDetailTests : IClassFixture<QmsAppFactory>
             _out.WriteLine($"total    {total.Count} = backlog {backlog.Count} + on-period + ahead-of-receipt");
 
             // Identity 1, exact: every container received in the period is either
-            // inspected or pending, and never both.
-            Assert.Equal(received.Count, period.Count + pending.Count);
-            var periodIds  = period.Select(r => r.ArrivalId).ToHashSet();
-            var pendingIds = pending.Select(r => r.ArrivalId).ToHashSet();
-            Assert.Empty(periodIds.Intersect(pendingIds));
-            Assert.Equal(received.Select(r => r.ArrivalId).ToHashSet(),
-                         periodIds.Union(pendingIds).ToHashSet());
+            // inspected or not yet inspected, and never both. Pending also holds
+            // the inspections opened but not finished -- those are in Period too.
+            // Keyed on the container, because a goods-received container with no
+            // arrival yet has no arrival id.
+            static string Key(CommitmentDetailRow r) => $"{r.ContainerNo}|{r.BolNo}|{r.Ebeln}|{r.ArrivalId}";
+            var notYet = pending.Where(r => !r.OpenedByEnd).ToList();
+            var inProg = pending.Where(r => r.OpenedByEnd).ToList();
+            Assert.Equal(received.Count, period.Count + notYet.Count);
+            var periodIds  = period.Select(Key).ToHashSet();
+            var notYetIds  = notYet.Select(Key).ToHashSet();
+            Assert.Empty(periodIds.Intersect(notYetIds));
+            Assert.True(inProg.Select(Key).ToHashSet().IsSubsetOf(periodIds),
+                "an inspection pending in the period is missing from Period Inspection");
+            Assert.Equal(received.Select(Key).ToHashSet(),
+                         periodIds.Union(notYetIds).ToHashSet());
 
             // Identity 2: the orders opened in the period partition by WHEN their
             // container was received -- before the period (backlog), in it, or
@@ -116,7 +124,7 @@ public class CommitmentDetailTests : IClassFixture<QmsAppFactory>
             var toEx       = to.AddDays(1);
             var before     = total.Where(r => r.ArrivalCreatedAt.Date <  from.Date).Select(r => r.ArrivalId).ToHashSet();
             var inPeriod   = total.Where(r => r.ArrivalCreatedAt.Date >= from.Date && r.ArrivalCreatedAt.Date < toEx.Date)
-                                  .Select(r => r.ArrivalId).ToHashSet();
+                                  .Select(Key).ToHashSet();
             var ahead      = total.Count - before.Count - inPeriod.Count;
             _out.WriteLine($"         backlog {before.Count}, on-period {inPeriod.Count}, ahead of receipt {ahead}");
 
@@ -134,8 +142,16 @@ public class CommitmentDetailTests : IClassFixture<QmsAppFactory>
         var (_, svc, scope) = await LoadAsync();
         using (scope)
         {
+            // Pending = no inspection yet, or one not finished by the period's end.
             var pending = await DetailAsync(svc, CommitmentBuckets.PendingInspection);
-            Assert.All(pending, r => Assert.Null(r.QualityOrderId));
+            var (_, pTo) = new DashboardFilter { Period = Period }.Resolve();
+            var toUtcEx  = DateTime.SpecifyKind(pTo.AddDays(1), DateTimeKind.Local).ToUniversalTime();
+            Assert.All(pending, r => Assert.True(
+                r.QualityOrderId is null || r.QoStatus != QualityOrderStatus.Closed || r.QoClosedAt >= toUtcEx,
+                $"{r.QualityOrderNo} was finished in the period but is listed as pending."));
+            // A goods-received container with no arrival is in Pending, as "not yet inspected".
+            Assert.All(pending.Where(r => r.ArrivalId is null), r =>
+                Assert.Equal(CommitmentBuckets.NotYetInspectedLabel, r.PendingStatus));
 
             var backlog = await DetailAsync(svc, CommitmentBuckets.BacklogInspected);
             var (from, _) = new DashboardFilter { Period = Period }.Resolve();

@@ -578,8 +578,9 @@
         $scopeCrumb.classList.remove("muted");
         var f = readFilterFromQs();
         var bits = [];
-        if (f.PoFrom || f.PoTo)
-            bits.push("PO " + (f.PoFrom || "…") + " → " + (f.PoTo || "…"));
+        var rFrom = f.ReceiveFrom || f.PoFrom, rTo = f.ReceiveTo || f.PoTo;
+        if (rFrom || rTo)
+            bits.push("Received " + (rFrom || "…") + " → " + (rTo || "…"));
         Object.keys(SCOPE_LABELS).forEach(function (k) {
             if (f[k]) bits.push(SCOPE_LABELS[k] + "=" + f[k]);
         });

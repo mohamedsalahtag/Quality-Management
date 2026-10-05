@@ -1329,6 +1329,31 @@ public class QualityOrderService : IQualityOrderService
         return rows.ToList();
     }
 
+    public async Task<IReadOnlyDictionary<string, decimal>> GetCategoryTolerancesAsync(IEnumerable<string> materialGroups)
+    {
+        var groups = materialGroups.Where(g => !string.IsNullOrWhiteSpace(g))
+                                   .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (groups.Length == 0) return new Dictionary<string, decimal>();
+        using var c = Open();
+        return await LoadCategoryTolerancesAsync(c, groups);
+    }
+
+    private static async Task<IReadOnlyDictionary<string, decimal>> LoadCategoryTolerancesAsync(
+        System.Data.IDbConnection c, string[] groups)
+    {
+        var rows = await c.QueryAsync<DefectCategoryTolerance>(@"
+            SELECT t.category_id    CategoryId,
+                   dc.category_name CategoryName,
+                   t.material_group MaterialGroup,
+                   t.tolerance      Tolerance
+            FROM   qms_defect_category_tolerance t
+            JOIN   qms_defect_category dc ON dc.category_id = t.category_id
+            WHERE  t.tolerance IS NOT NULL AND t.material_group IN @groups",
+            new { groups });
+        return rows.ToDictionary(r => DefectCategoryTolerance.Key(r.MaterialGroup, r.CategoryName),
+                                 r => r.Tolerance!.Value);
+    }
+
     /// <summary>Report unit label per material group (M11). Only configured
     /// groups are returned -- the report defaults everything else to "Pieces",
     /// so an empty table is the normal state, not a missing-data problem.</summary>
@@ -1746,6 +1771,11 @@ public class QualityOrderService : IQualityOrderService
                        sort_order SortOrder, color_hex ColorHex, is_active IsActive
                 FROM   qms_defect_category WHERE is_active = 1"))
             .ToDictionary(x => x.CategoryName, StringComparer.OrdinalIgnoreCase);
+        // 5c) Category tolerances per material group (M39), compared against
+        //     each section's total.
+        var categoryTolerances = distinctGroups.Length == 0
+            ? new Dictionary<string, decimal>()
+            : await LoadCategoryTolerancesAsync(c, distinctGroups);
 
         // 6) Active reading types: per-group rows AND globals (V19+,
         //    material_group IS NULL). A global reading type applies to
@@ -1906,7 +1936,10 @@ public class QualityOrderService : IQualityOrderService
                         CategoryName = d.DefectCategory,
                         ColorHex     = cat?.ColorHex,
                         SortOrder    = cat?.SortOrder ?? 999,
-                        Unit         = groupUnit
+                        Unit         = groupUnit,
+                        Tolerance    = categoryTolerances.TryGetValue(
+                                           DefectCategoryTolerance.Key(g.Key.MaterialGroup, d.DefectCategory), out var catTol)
+                                       ? catTol : null
                     };
                     sectionsByCat[d.DefectCategory] = sec;
                 }
@@ -2165,14 +2198,16 @@ public class QualityOrderService : IQualityOrderService
               AND (@sampleScope   IS NULL OR s.sample_scope      = @sampleScope)
               -- PO-date range. NULL cc.doc_date rows are included so arrivals
               -- whose SAP cache row was deleted / never linked still surface.
-              AND (@poFrom        IS NULL OR cc.doc_date IS NULL OR cc.doc_date >= @poFrom)
-              AND (@poToExcl      IS NULL OR cc.doc_date IS NULL OR cc.doc_date <  @poToExcl)
+              -- Receive date, the same expression as the ReceiveDate column. A
+              -- container with no goods receipt has no date to be in a range.
+              AND (@receiveFrom     IS NULL OR COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date) >= @receiveFrom)
+              AND (@receiveToExcl   IS NULL OR COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date) <  @receiveToExcl)
             ORDER BY a.arrival_id, m.qo_material_id, s.sample_no;";
 
-        DateTime? poToExcl = filter.PoTo.HasValue
-            ? (filter.PoTo.Value.TimeOfDay == TimeSpan.Zero
-                ? filter.PoTo.Value.AddDays(1)
-                : filter.PoTo.Value)
+        DateTime? receiveToExcl = filter.ReceiveTo.HasValue
+            ? (filter.ReceiveTo.Value.TimeOfDay == TimeSpan.Zero
+                ? filter.ReceiveTo.Value.AddDays(1)
+                : filter.ReceiveTo.Value)
             : null;
 
         List<FlatSampleSeed> samples;
@@ -2199,8 +2234,8 @@ public class QualityOrderService : IQualityOrderService
                     bolNo         = string.IsNullOrWhiteSpace(filter.BolNo) ? null : filter.BolNo,
                     ebeln         = string.IsNullOrWhiteSpace(filter.Ebeln) ? null : filter.Ebeln,
                     sampleScope   = string.IsNullOrWhiteSpace(filter.SampleScope) ? null : filter.SampleScope,
-                    poFrom        = filter.PoFrom,
-                    poToExcl
+                    receiveFrom   = filter.ReceiveFrom,
+                    receiveToExcl
                 },
                 commandTimeout: 120,
                 cancellationToken: ct))).ToList();
@@ -2284,6 +2319,20 @@ public class QualityOrderService : IQualityOrderService
                               g => { var r = g.First();
                                      return r.NumericValue?.ToString(System.Globalization.CultureInfo.InvariantCulture)
                                             ?? r.TextValue; });
+            // Same first-occurrence rule, numbers only -- shared by every row of
+            // this sample (read-only), so Excel can write real numeric cells.
+            var sHeaderNums = sampleHeaders[s.SampleId]
+                .Where(h => h.ValueKind == "Numeric" && h.NumericValue.HasValue)
+                .GroupBy(h => h.FieldCode ?? "")
+                .ToDictionary(g => g.Key, g => g.First().NumericValue!.Value);
+            var mHeaderNums = matHeaders[s.QoMaterialId]
+                .Where(h => h.ValueKind == "Numeric" && h.NumericValue.HasValue)
+                .GroupBy(h => h.FieldCode ?? "")
+                .ToDictionary(g => g.Key, g => g.First().NumericValue!.Value);
+            var readingNums = readings[s.SampleId]
+                .Where(r => r.NumericValue.HasValue)
+                .GroupBy(r => r.ReadingTypeCode ?? "")
+                .ToDictionary(g => g.Key, g => g.First().NumericValue!.Value);
 
             foreach (var dc in catalog)
             {
@@ -2364,6 +2413,9 @@ public class QualityOrderService : IQualityOrderService
                     MaterialHeaderValues = new Dictionary<string, string?>(mHeaderBag),
                     SampleHeaderValues   = new Dictionary<string, string?>(sHeaderBag),
                     Readings             = new Dictionary<string, string?>(readingBag),
+                    MaterialHeaderNumbers = mHeaderNums,
+                    SampleHeaderNumbers   = sHeaderNums,
+                    ReadingNumbers        = readingNums,
                 };
             }
         }

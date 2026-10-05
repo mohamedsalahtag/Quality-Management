@@ -118,8 +118,8 @@ public class ArrivalDateNotRecordDateTests : IClassFixture<QmsAppFactory>
         _out.WriteLine($"{x.ArrivalNo}: reported arrival {mine!.ArrivalCreatedAt:yyyy-MM-dd}, " +
                        $"record {mine.RecordCreatedAt:yyyy-MM-dd}, SAP {x.SapArrival:yyyy-MM-dd}");
         Assert.Equal(x.SapArrival.Date, mine.ArrivalCreatedAt.Date);
-        Assert.Equal(x.RecordCreated.Date, mine.RecordCreatedAt.ToLocalTime().Date);
-        Assert.NotEqual(mine.ArrivalCreatedAt.Date, mine.RecordCreatedAt.ToLocalTime().Date);
+        Assert.Equal(x.RecordCreated.Date, mine.RecordCreatedAt!.Value.ToLocalTime().Date);
+        Assert.NotEqual(mine.ArrivalCreatedAt.Date, mine.RecordCreatedAt.Value.ToLocalTime().Date);
     }
 
     /// <summary>

@@ -107,6 +107,12 @@ public class QualityReportData
     /// per-category defect sections + their colours on every sample card.</summary>
     public IReadOnlyList<DefectCategory> Categories { get; set; } = Array.Empty<DefectCategory>();
 
+    /// <summary>Category tolerances (M39) for this report's material groups, keyed
+    /// by <see cref="DefectCategoryTolerance.Key"/>. A sample card's category total
+    /// at or above its value prints in red.</summary>
+    public IReadOnlyDictionary<string, decimal> CategoryTolerances { get; set; }
+        = new Dictionary<string, decimal>();
+
     /// <summary>
     /// Report unit label per `material_group` (qms_material_group_unit), e.g.
     /// "Cartons". Groups with no configured row are simply absent — read it

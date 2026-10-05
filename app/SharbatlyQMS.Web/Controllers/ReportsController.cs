@@ -576,6 +576,7 @@ public class ReportsController : Controller
 
         // Defect category master (V22+) — drives the per-category sections + colours.
         data.Categories = await _qos.GetActiveCategoriesAsync();
+        data.CategoryTolerances = await _qos.GetCategoryTolerancesAsync(distinctGroups);
 
         // Same compact-inline pipeline as the arrival report: pre-resize +
         // JPEG-compress at PDF-generation time so the PDF is self-contained
@@ -987,7 +988,7 @@ public class ReportsController : Controller
     public async Task<IActionResult> FlatDefects(
         [FromQuery] FlatDefectFilter filter, CancellationToken ct = default)
     {
-        ApplyDefaultPoWindow(filter);
+        ApplyDefaultReceiveWindow(filter);
         try
         {
             var rows = new List<FlatDefectRow>();
@@ -1005,24 +1006,25 @@ public class ReportsController : Controller
         catch (Exception ex)
         {
             _log.LogError(ex,
-                "FlatDefects failed. qoId={QoId} arrivalId={ArrId} poFrom={From} poTo={To} status={Status} plant={Plant} matGroup={MatGroup} variety={Var} vendor={Vendor}",
-                filter.QualityOrderId, filter.ArrivalId, filter.PoFrom, filter.PoTo,
+                "FlatDefects failed. qoId={QoId} arrivalId={ArrId} receiveFrom={From} receiveTo={To} status={Status} plant={Plant} matGroup={MatGroup} variety={Var} vendor={Vendor}",
+                filter.QualityOrderId, filter.ArrivalId, filter.ReceiveFrom, filter.ReceiveTo,
                 filter.Status, filter.Plant, filter.MaterialGroup, filter.Variety, filter.VendorName);
             throw;
         }
     }
 
-    // V31 (2026-06-20): default to last 30 days on PO date when the request
-    // has no explicit identity filter and no explicit PO range. Keeps the
-    // initial page load fast and focused on operational data.
-    private static void ApplyDefaultPoWindow(FlatDefectFilter f)
+    // V31 (2026-06-20): default to the last 30 days when the request has no
+    // explicit identity filter and no explicit date range. Keeps the initial
+    // page load fast and focused on operational data. The window is on the
+    // receive date (the branch goods receipt) since 2026-10; it was the PO date.
+    private static void ApplyDefaultReceiveWindow(FlatDefectFilter f)
     {
         bool hasIdentity = f.QualityOrderId.HasValue || f.ArrivalId.HasValue;
-        bool hasPoRange  = f.PoFrom.HasValue || f.PoTo.HasValue;
-        if (hasIdentity || hasPoRange) return;
+        bool hasRange    = f.ReceiveFrom.HasValue || f.ReceiveTo.HasValue;
+        if (hasIdentity || hasRange) return;
         var today = DateTime.UtcNow.Date;
-        f.PoFrom = today.AddDays(-30);
-        f.PoTo   = today;
+        f.ReceiveFrom = today.AddDays(-30);
+        f.ReceiveTo   = today;
     }
 
     [HttpGet]
@@ -1030,7 +1032,7 @@ public class ReportsController : Controller
     public async Task<IActionResult> FlatDefectsExcel(
         [FromQuery] FlatDefectFilter filter, CancellationToken ct = default)
     {
-        ApplyDefaultPoWindow(filter);
+        ApplyDefaultReceiveWindow(filter);
         try
         {
         // ClosedXML streaming pattern -- mirrors AuditController.Export. We
@@ -1199,18 +1201,23 @@ public class ReportsController : Controller
             ws.Cell(rowIdx, col++).Value = (double?)r.DefectPercentage;
             ws.Cell(rowIdx, col++).Value = r.DefectComment;
             // Dynamic columns -- material headers, sample headers, readings.
+            // A value captured as a number (Brix, gross/net weight...) goes in
+            // as a number, so Excel can sum and filter it; anything else as text.
             foreach (var code in matHeaderCodes)
             {
+                if (r.MaterialHeaderNumbers.TryGetValue(code, out var n)) { ws.Cell(rowIdx, col++).Value = (double)n; continue; }
                 r.MaterialHeaderValues.TryGetValue(code, out var v);
                 ws.Cell(rowIdx, col++).Value = v;
             }
             foreach (var code in sampleHeaderCodes)
             {
+                if (r.SampleHeaderNumbers.TryGetValue(code, out var n)) { ws.Cell(rowIdx, col++).Value = (double)n; continue; }
                 r.SampleHeaderValues.TryGetValue(code, out var v);
                 ws.Cell(rowIdx, col++).Value = v;
             }
             foreach (var code in readingCodes)
             {
+                if (r.ReadingNumbers.TryGetValue(code, out var n)) { ws.Cell(rowIdx, col++).Value = (double)n; continue; }
                 r.Readings.TryGetValue(code, out var v);
                 ws.Cell(rowIdx, col++).Value = v;
             }
@@ -1222,7 +1229,7 @@ public class ReportsController : Controller
             // Make the truncation unmissable rather than silently returning a
             // partial file that looks complete.
             ws.Cell(rowIdx, 1).Value =
-                $"NOTE: export truncated at {MaxExportRows:N0} rows. Narrow your filter (e.g. a shorter PO-date range) to get the full result.";
+                $"NOTE: export truncated at {MaxExportRows:N0} rows. Narrow your filter (e.g. a shorter receive-date range) to get the full result.";
             ws.Row(rowIdx).Style.Font.SetBold();
             ws.Row(rowIdx).Style.Font.FontColor = XLColor.Red;
         }
@@ -1244,8 +1251,8 @@ public class ReportsController : Controller
         catch (Exception ex)
         {
             _log.LogError(ex,
-                "FlatDefectsExcel failed. qoId={QoId} arrivalId={ArrId} poFrom={From} poTo={To}",
-                filter.QualityOrderId, filter.ArrivalId, filter.PoFrom, filter.PoTo);
+                "FlatDefectsExcel failed. qoId={QoId} arrivalId={ArrId} receiveFrom={From} receiveTo={To}",
+                filter.QualityOrderId, filter.ArrivalId, filter.ReceiveFrom, filter.ReceiveTo);
             throw;
         }
     }
@@ -1577,8 +1584,8 @@ public class ReportsController : Controller
     private static string FilterSummary(FlatDefectFilter f)
     {
         var bits = new List<string>();
-        if (f.PoFrom.HasValue) bits.Add("PO ≥ " + f.PoFrom.Value.ToString("yyyy-MM-dd"));
-        if (f.PoTo.HasValue)   bits.Add("PO ≤ " + f.PoTo.Value.ToString("yyyy-MM-dd"));
+        if (f.ReceiveFrom.HasValue) bits.Add("Received ≥ " + f.ReceiveFrom.Value.ToString("yyyy-MM-dd"));
+        if (f.ReceiveTo.HasValue)   bits.Add("Received ≤ " + f.ReceiveTo.Value.ToString("yyyy-MM-dd"));
         if (!string.IsNullOrWhiteSpace(f.Status))          bits.Add("Status=" + f.Status);
         if (!string.IsNullOrWhiteSpace(f.Plant))           bits.Add("Plant=" + f.Plant);
         if (!string.IsNullOrWhiteSpace(f.MaterialGroup))   bits.Add("MaterialGroup=" + f.MaterialGroup);

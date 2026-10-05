@@ -124,9 +124,13 @@ public class DataHubTests : IClassFixture<QmsAppFactory>
         TestAuthHandler.Role = RoleCodes.Admin;
         var client = _factory.CreateClient();
 
-        var from = DateTime.Today.AddMonths(-1).ToString("yyyy-MM-dd");
+        // A week, not a month: the range is on the receive date since 2026-10,
+        // and a received month is ~15,000 samples -- the export reaches its
+        // 250,000-row cap and outlives the test client's 100-second timeout.
+        // Volume is what A_year_wide_window_streams... is for; this proves the path.
+        var from = DateTime.Today.AddDays(-7).ToString("yyyy-MM-dd");
         var to   = DateTime.Today.ToString("yyyy-MM-dd");
-        var res  = await client.GetAsync($"/Reports/FlatDefectsExcel?PoFrom={from}&PoTo={to}");
+        var res  = await client.GetAsync($"/Reports/FlatDefectsExcel?ReceiveFrom={from}&ReceiveTo={to}");
 
         Assert.Equal(HttpStatusCode.OK, res.StatusCode);
         var bytes = await res.Content.ReadAsByteArrayAsync();
@@ -134,6 +138,68 @@ public class DataHubTests : IClassFixture<QmsAppFactory>
         Assert.True(bytes.Length > 2000, $"Workbook suspiciously small ({bytes.Length} bytes).");
         // .xlsx is a zip: PK\x03\x04.
         Assert.True(bytes[0] == 0x50 && bytes[1] == 0x4B, "Response is not a zip/xlsx.");
+    }
+
+    /// <summary>
+    /// Brix and the weights are captured as numbers and must reach Excel as
+    /// numbers -- written as text, a column cannot be summed or filtered by
+    /// value, which is what the QC team exports it for.
+    /// </summary>
+    [Fact]
+    public async Task Numeric_readings_reach_the_workbook_as_numbers()
+    {
+        TestAuthHandler.Role = RoleCodes.Admin;
+        var client = _factory.CreateClient();
+        var from = DateTime.Today.AddDays(-7).ToString("yyyy-MM-dd");
+        var to   = DateTime.Today.ToString("yyyy-MM-dd");
+        var res  = await client.GetAsync($"/Reports/FlatDefectsExcel?ReceiveFrom={from}&ReceiveTo={to}");
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+
+        using var wb = new ClosedXML.Excel.XLWorkbook(new MemoryStream(await res.Content.ReadAsByteArrayAsync()));
+        var ws = wb.Worksheets.First();
+        var checkedCols = 0;
+        foreach (var head in ws.Row(1).CellsUsed())
+        {
+            var name = head.GetString();
+            if (!(name.EndsWith("BRIX", StringComparison.OrdinalIgnoreCase)
+                  || name.Contains("NET_WEIGHT", StringComparison.OrdinalIgnoreCase)
+                  || name.Contains("GROSS_WEIGHT", StringComparison.OrdinalIgnoreCase))) continue;
+
+            var filled = ws.Column(head.Address.ColumnNumber).CellsUsed()
+                           .Where(c => c.Address.RowNumber > 1).Take(200).ToList();
+            if (filled.Count == 0) continue;
+            var asText = filled.Count(c => c.DataType == ClosedXML.Excel.XLDataType.Text);
+            _out.WriteLine($"{name}: {filled.Count} cells checked, {asText} as text");
+            Assert.Equal(0, asText);
+            checkedCols++;
+        }
+        _out.WriteLine($"{checkedCols} numeric reading column(s) checked");
+    }
+
+    /// <summary>
+    /// The date range is on the RECEIVE date now, not the PO date: every row
+    /// streamed for a window has its receive date inside it.
+    /// </summary>
+    [Fact]
+    public async Task The_date_range_filters_on_the_receive_date()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var from = DateTime.Today.AddDays(-20);
+        var to   = DateTime.Today.AddDays(-10);
+        var seen = 0;
+        await foreach (var r in Qos(scope).StreamFlatDefectRowsAsync(
+                           new FlatDefectFilter { ReceiveFrom = from, ReceiveTo = to }, CancellationToken.None))
+        {
+            Assert.NotNull(r.ReceiveDate);
+            Assert.InRange(r.ReceiveDate!.Value.Date, from.Date, to.Date);
+            if (++seen >= 5000) break;
+        }
+        _out.WriteLine($"{seen} rows, all received between {from:yyyy-MM-dd} and {to:yyyy-MM-dd}");
+
+        // The old parameter names still bind, now onto the receive date.
+        var legacy = new FlatDefectFilter { PoFrom = from, PoTo = to };
+        Assert.Equal(from, legacy.ReceiveFrom);
+        Assert.Equal(to,   legacy.ReceiveTo);
     }
 
     /// <summary>
