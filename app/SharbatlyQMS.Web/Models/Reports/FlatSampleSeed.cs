@@ -71,6 +71,8 @@ public class FlatSampleSeed
     public DateTime? ArrivalDate      { get; set; }
     public DateTime? ReceiveDate      { get; set; }
     public DateTime? PortArrivalDate  { get; set; }  // M36: the vessel reaching port (SAP Arrival_Date)
+    public long      ArrivalId        { get; set; }  // a.arrival_id -- keys the arrival custom fields
+    public DateTime? DischargeDate    { get; set; }  // ss.discharge_date -- the inspector's vessel discharge date
     // Shipment snapshot (LEFT JOIN qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id)
     public DateTime? LoadingDate      { get; set; }  // M36: ss.sailing_date (SAP's LoadingDate is always empty)
     public DateTime? ShippingDate     { get; set; }  // V31: ss.sailing_date (vessel departure)

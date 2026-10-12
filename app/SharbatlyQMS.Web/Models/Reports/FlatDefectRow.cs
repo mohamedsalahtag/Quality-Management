@@ -26,6 +26,7 @@ public class FlatDefectRow
     public DateTime? LoadingDate     { get; set; }   // M36: ss.sailing_date (SAP's LoadingDate is always empty)
     public DateTime? ShippingDate    { get; set; }   // V31: ss.sailing_date
     public DateTime? PortArrivalDate { get; set; }   // M36: the vessel reaching port (SAP Arrival_Date)
+    public DateTime? DischargeDate   { get; set; }   // ss.discharge_date -- the vessel discharge date the inspector entered
     public DateTime? ArrivalDate     { get; set; }   // SAP Receive_Date's legacy twin -- the branch goods receipt
     public DateTime? ReceiveDate     { get; set; }   // SAP Receive_Date -- the branch goods receipt
     public short?    TransitDays     { get; set; }   // M36: loading -> discharge, SAP's figure as fallback
@@ -100,5 +101,13 @@ public class FlatDefectRow
     public IReadOnlyDictionary<string, decimal> SampleHeaderNumbers   { get; set; } = EmptyNumbers;
     public IReadOnlyDictionary<string, decimal> ReadingNumbers        { get; set; } = EmptyNumbers;
 
+    /// <summary>Arrival custom fields (Admin -> Arrival Fields, e.g. banana
+    /// "Yellow Ripe", "Soft Green/Destroyed") keyed by field NAME, in the
+    /// fields' sort order. One set per arrival, repeated on each of its rows.</summary>
+    public IReadOnlyDictionary<string, string?> ArrivalFields { get; set; } = EmptyText;
+    /// <summary>Typed twin of <see cref="ArrivalFields"/> for the numeric ones.</summary>
+    public IReadOnlyDictionary<string, decimal> ArrivalFieldNumbers { get; set; } = EmptyNumbers;
+
     private static readonly IReadOnlyDictionary<string, decimal> EmptyNumbers = new Dictionary<string, decimal>();
+    private static readonly IReadOnlyDictionary<string, string?> EmptyText    = new Dictionary<string, string?>();
 }

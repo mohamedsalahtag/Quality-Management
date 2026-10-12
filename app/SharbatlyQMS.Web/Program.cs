@@ -86,6 +86,7 @@ builder.Services.AddSingleton<ILabelService, LabelService>();
 builder.Services.AddHostedService<LabelDiscoveryService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<ITimeBarService, TimeBarService>();
+builder.Services.AddScoped<IDefectReportService, DefectReportService>();
 // V34 (2026-06-20): Perspective Analyzer (server-side pivot + saved configs).
 builder.Services.AddScoped<SharbatlyQMS.Web.Services.Reports.IPivotService,
                            SharbatlyQMS.Web.Services.Reports.PivotService>();

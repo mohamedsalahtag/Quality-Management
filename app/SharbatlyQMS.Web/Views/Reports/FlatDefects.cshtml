@@ -185,6 +185,12 @@
     </div>
 }
 
+@{
+    // Arrival custom fields present in this page of rows (banana Yellow Ripe,
+    // Soft Green...), in their configured order.
+    var arrivalFieldNames = Model.SelectMany(r => r.ArrivalFields.Keys)
+                                 .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+}
 <div class="table-responsive small">
     <table class="table table-sm table-bordered table-hover align-middle flat-defects-table">
         <thead class="table-light">
@@ -197,9 +203,11 @@
                 <th class="text-end">@Loc["PO Qty"]</th>
                 <th>@Loc["PO Date"]</th>
                 <th>@Loc["Shipping Date"]</th>
+                <th>@Loc["Vessel Discharge Date"]</th>
                 <th>@Loc["Arrival Date"]</th>
                 <th>@Loc["Receive Date"]</th>
                 <th class="text-end">@Loc["Transit Days"]</th>
+                @foreach (var n in arrivalFieldNames) { <th class="text-end">@n</th> }
                 <th>@Loc["Supplier"]</th>
                 <th>@Loc["QO"]</th>
                 <th>@Loc["Status"]</th>
@@ -237,9 +245,11 @@
                     <td class="text-end">@Fmt.Dec2(r.ArrivalItemQuantity) <small class="text-muted">@r.ArrivalItemUom</small></td>
                     <td>@r.PoDate?.ToString("yyyy-MM-dd")</td>
                     <td>@r.ShippingDate?.ToString("yyyy-MM-dd")</td>
+                    <td>@r.DischargeDate?.ToString("yyyy-MM-dd")</td>
                     <td>@r.ArrivalDate?.ToString("yyyy-MM-dd")</td>
                     <td>@r.ReceiveDate?.ToString("yyyy-MM-dd")</td>
                     <td class="text-end">@r.TransitDays</td>
+                    @foreach (var n in arrivalFieldNames) { <td class="text-end">@r.ArrivalFields.GetValueOrDefault(n)</td> }
                     <td>@r.VendorName</td>
                     <td>@r.QualityOrderNo</td>
                     <td>@r.QoStatusDisplay</td>
@@ -260,8 +270,8 @@
             }
             @if (shown == 0)
             {
-                <tr><td colspan="27" class="text-center text-muted py-3">
-                    No non-zero defect rows for this filter. Try widening the PO-date range or
+                <tr><td colspan="@(28 + arrivalFieldNames.Count)" class="text-center text-muted py-3">
+                    No non-zero defect rows for this filter. Try widening the receive-date range or
                     clearing one of the filters — the Excel export will still include zero-value rows.
                 </td></tr>
             }

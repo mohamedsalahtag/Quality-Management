@@ -1,0 +1,98 @@
+@{
+    ViewData["Title"] = Loc["Defect reports"];
+    var from = ViewBag.From as string;
+    var to   = ViewBag.To as string;
+}
+<link rel="stylesheet" href="~/css/defect-reports.css" asp-append-version="true" />
+
+<div class="dr" id="dr"
+     data-url-data="@Url.Action("Data")"
+     data-url-drill="@Url.Action("DrillExcel")"
+     data-url-qo="@Url.Action("Details", "QualityOrders", new { id = 0 })"
+     data-max-days="@ViewBag.MaxDays">
+    <div class="dr-head">
+        <div>
+            <h1><i class="bi bi-bar-chart-steps me-1"></i>@Loc["Defect reports"]</h1>
+            <p>@Loc["Finished inspections by receive date. Click any number to see the quality orders behind it."]</p>
+        </div>
+        <div class="dr-summary" id="summary"></div>
+    </div>
+
+    <section class="dr-box dr-filters" aria-label="@Loc["Filters"]">
+        <div class="dr-frow">
+            <div class="dr-field"><label for="fFrom">@Loc["Received from"]</label><input type="date" id="fFrom" class="form-control form-control-sm" value="@from"></div>
+            <div class="dr-field"><label for="fTo">@Loc["Received to"]</label><input type="date" id="fTo" class="form-control form-control-sm" value="@to"></div>
+            <div class="dr-field"><label for="fPlant">@Loc["Branch"]</label><select id="fPlant" class="form-select form-select-sm"></select></div>
+            <div class="dr-field"><label for="fSupplier">@Loc["Supplier"]</label><select id="fSupplier" class="form-select form-select-sm"></select></div>
+            <div class="dr-field"><label for="fMajor">@Loc["Major category"]</label><select id="fMajor" class="form-select form-select-sm"></select></div>
+            <div class="dr-field"><label for="fSub">@Loc["Sub-major category"]</label><select id="fSub" class="form-select form-select-sm"></select></div>
+            <div class="dr-field"><label for="fClass">@Loc["Class"]</label><select id="fClass" class="form-select form-select-sm"></select></div>
+            <div class="dr-field"><label for="fCat">@Loc["Defect category"]</label><select id="fCat" class="form-select form-select-sm"></select></div>
+        </div>
+        <div class="dr-fbar">
+            <div class="left">
+                <div class="btn-group btn-group-sm" role="group" aria-label="@Loc["How the percentage is calculated"]">
+                    <button type="button" class="btn btn-primary" id="mQc" aria-pressed="true"
+                            title="@Loc["Defective units ÷ inspected units; a category total adds up its defects (same as the QC report)"]">@Loc["QC report %"]</button>
+                    <button type="button" class="btn btn-outline-primary" id="mXls" aria-pressed="false"
+                            title="@Loc["Plain average of each sample's Defect %, as in the old Excel pivots"]">@Loc["Excel average"]</button>
+                </div>
+                <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="fHide" checked>
+                    <label class="form-check-label small" for="fHide">@Loc["Hide defects that never occurred"]</label>
+                </div>
+                <span class="dr-loading" id="loading" hidden><span class="spinner-border spinner-border-sm me-1"></span>@Loc["Loading…"]</span>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="fReset">@Loc["Reset filters"]</button>
+        </div>
+    </section>
+
+    <div>
+        <div class="dr-tabs" role="tablist" aria-label="@Loc["Reports"]" id="tabs"></div>
+        <section class="dr-box dr-panel" role="tabpanel" id="panel" aria-live="polite"></section>
+    </div>
+
+    <details class="dr-box dr-about">
+        <summary>@Loc["How these numbers are calculated"]</summary>
+        <div class="cols">
+            <div>
+                <h3>@Loc["QC report % (default)"]</h3>
+                <p>@Loc["Defective units divided by inspected units, so a 200-fruit sample weighs more than a 10-fruit one. A category total adds up its defects, exactly like the Total line on the QC report."]</p>
+                <div class="ex" id="exQc"></div>
+            </div>
+            <div>
+                <h3>@Loc["Excel average"]</h3>
+                <p>@Loc["The plain average of every sample's Defect %, which is what the old Excel pivots showed. For a category it averages the defects instead of adding them, so it shrinks as a category has more defects."]</p>
+                <div class="ex" id="exXls"></div>
+            </div>
+            <div>
+                <h3>@Loc["What is included"]</h3>
+                <ul class="ps-3 mb-0">
+                    <li>@Loc["Finished inspections only; a reinspection replaces the inspection it was raised on."]</li>
+                    <li>@Loc["Dated by the branch receive date (SAP goods receipt)."]</li>
+                    <li>@Loc["Weeks run Saturday to Friday."]</li>
+                    <li>@Loc["A blank cell means that defect does not exist for that fruit; 0.00 means it was checked and not found."]</li>
+                </ul>
+            </div>
+        </div>
+    </details>
+    <p class="text-muted small mb-0" id="foot"></p>
+</div>
+
+<div class="dr-scrim" id="scrim" hidden></div>
+<aside class="dr-drawer" id="drawer" hidden aria-modal="true" role="dialog" aria-labelledby="dTitle">
+    <div class="dh">
+        <div><h3 id="dTitle"></h3><div class="sub" id="dSub"></div></div>
+        <button type="button" class="btn-close" id="dClose" aria-label="@Loc["Close"]"></button>
+    </div>
+    <div class="kpis" id="dKpis"></div>
+    <div class="dbody"><table class="orders" id="dTable"></table></div>
+    <div class="df">
+        <span>@Loc["Sorted by highest %."]</span>
+        <a class="btn btn-sm btn-outline-success" id="dExport" href="#"><i class="bi bi-file-earmark-excel me-1"></i>@Loc["Export to Excel"]</a>
+    </div>
+</aside>
+
+@section Scripts {
+    <script src="~/js/defect-reports.js" asp-append-version="true"></script>
+}

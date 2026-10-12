@@ -213,6 +213,19 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-10-12b (Reports → Defect reports)
+
+- New page **Reports → Defect reports** (`/DefectReports`, screen `Reports.Defects`, M40 / V55, seeded Supervisor and above): the five pivots from the QC team's `required reports.xlsx` as tabs — **Per week** (Saturday–Friday weeks), **Per defect & class**, **Per branch & defect**, **Per sub-major**, **Per major** — with one shared filter bar (receive dates, branch, supplier, major, sub-major, class, defect category). Reviewed first as a mockup on live data, then built to match it.
+- **Two figures, toggled:** *QC report %* (default) = defective units ÷ inspected units, a category total adds its defects (the QC report's Total line); *Excel average* = the plain average of each sample's Defect %, the method of the old pivots, which understates a category by its number of defects (Royal Gala Major ≈2.6% vs ≈0.55%).
+- **Scope:** finished (Closed), live (not superseded) orders, dated by the branch receive date; plant-scoped. A window is at most 366 days (`DefectReportService.MaxDays`); the page opens on the last eight weeks.
+- **How it works:** `/DefectReports/Data` returns one compact dataset per window (a row per material line + per-defect totals + each fruit's defect set, which the Excel average needs because every sample stores a row per defect); `wwwroot/js/defect-reports.js` pivots it in the browser, so filters and tabs are instant. Every number opens a panel listing the orders behind it with links to each QC order; **Export to Excel** (`DrillExcel`) rebuilds that list on the server with the same rules (`DefectReportService.DrillAsync` — keep it in step with `openDrill` in the JS). `DefectReportsTests` reconcile the dataset with the database and the drill-down with the page's figure.
+
+### 2026-10-12 (Data Hub: vessel discharge date and arrival fields)
+
+- **Vessel Discharge Date** (`qms_shipment_snapshot.discharge_date`, the date the inspector enters) is a column on the Data Hub preview and in its Excel export, after Shipping Date.
+- **Arrival custom fields** (Admin → Arrival Fields — today banana *Yellow Ripe* and *Soft Green/Destroyed*) are columns on both, under the field's own name, in the fields' sort order. One set per arrival, repeated on each of its rows; numeric ones are numeric cells. Only active fields, as on the arrival's Details page. Loaded in one chunked batch (`GetArrivalFieldBagsAsync`); `FlatDefectRow.ArrivalFields` / `ArrivalFieldNumbers`.
+- Not yet in the Perspective Analyzer (it reads `vw_qms_flat_defects`) or the Report Builder's column picker.
+
 ### 2026-10-05 (seven change requests: report, dashboard, Time Bar, Data Hub, exports, category tolerance)
 
 - **QC report: QC No. on every page.** It is now in the repeating header band (`QualityReportPdfSoft.RenderHeaderBand`, above "Page N / Total"), so the photo appendix and every flowing page carry it; the page-1 reference strip keeps it too.

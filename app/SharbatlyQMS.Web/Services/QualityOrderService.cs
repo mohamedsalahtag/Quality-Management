@@ -2144,6 +2144,8 @@ public class QualityOrderService : IQualityOrderService
                    COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date)  AS ArrivalDate,
                    COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date)  AS ReceiveDate,
                    COALESCE(cc.port_arrival_date, ss.port_arrival_date)          AS PortArrivalDate,
+                   a.arrival_id         AS ArrivalId,
+                   ss.discharge_date    AS DischargeDate,
                    -- SAP's LoadingDate is empty on every row; the loading date
                    -- the business uses is Sailing_Date, so both columns carry it.
                    ss.sailing_date      AS LoadingDate,
@@ -2273,6 +2275,7 @@ public class QualityOrderService : IQualityOrderService
         var matHeaders    = await GetMaterialHeaderValuesBatchAsync(matIds);
         var readings      = await GetReadingsBatchAsync(sampleIds);
         var defects       = await GetDefectsBatchAsync(sampleIds);
+        var arrivalFields = await GetArrivalFieldBagsAsync(samples.Select(s => s.ArrivalId).Distinct().ToList());
 
         // 6: defect catalog per material group. Direct service call -- the
         // result is small per group; if profiling later shows hot calls,
@@ -2351,6 +2354,7 @@ public class QualityOrderService : IQualityOrderService
                     LoadingDate     = s.LoadingDate,
                     ShippingDate    = s.ShippingDate,
                     PortArrivalDate = s.PortArrivalDate,
+                    DischargeDate   = s.DischargeDate,
                     ArrivalDate     = s.ArrivalDate,
                     ReceiveDate     = s.ReceiveDate,
                     TransitDays     = s.TransitDays,
@@ -2413,6 +2417,8 @@ public class QualityOrderService : IQualityOrderService
                     MaterialHeaderValues = new Dictionary<string, string?>(mHeaderBag),
                     SampleHeaderValues   = new Dictionary<string, string?>(sHeaderBag),
                     Readings             = new Dictionary<string, string?>(readingBag),
+                    ArrivalFields         = arrivalFields.TryGetValue(s.ArrivalId, out var af) ? af.Text : NoArrivalText,
+                    ArrivalFieldNumbers   = af.Numbers ?? NoArrivalNumbers,
                     MaterialHeaderNumbers = mHeaderNums,
                     SampleHeaderNumbers   = sHeaderNums,
                     ReadingNumbers        = readingNums,
@@ -2447,6 +2453,55 @@ public class QualityOrderService : IQualityOrderService
                         return kv.Value;
         }
         return null;
+    }
+
+    private sealed class ArrivalFieldValueRow
+    {
+        public long      ArrivalId    { get; set; }
+        public string    FieldName    { get; set; } = "";
+        public string    ValueKind    { get; set; } = "Text";
+        public string?   TextValue    { get; set; }
+        public decimal?  NumericValue { get; set; }
+        public DateTime? DateValue    { get; set; }
+    }
+
+    private static readonly IReadOnlyDictionary<string, string?> NoArrivalText    = new Dictionary<string, string?>();
+    private static readonly IReadOnlyDictionary<string, decimal> NoArrivalNumbers = new Dictionary<string, decimal>();
+
+    /// <summary>
+    /// The arrival custom field values for a set of arrivals, one text bag and
+    /// one numeric bag per arrival, in the fields' sort order. Only ACTIVE
+    /// fields, the same set the arrival's Details page shows.
+    /// </summary>
+    private async Task<Dictionary<long, (IReadOnlyDictionary<string, string?> Text,
+                                         IReadOnlyDictionary<string, decimal>? Numbers)>>
+        GetArrivalFieldBagsAsync(IReadOnlyList<long> arrivalIds)
+    {
+        var result = new Dictionary<long, (IReadOnlyDictionary<string, string?>, IReadOnlyDictionary<string, decimal>?)>();
+        if (arrivalIds.Count == 0) return result;
+        var rows = await QueryByIdChunksAsync<ArrivalFieldValueRow>(@"
+            SELECT v.arrival_id    ArrivalId,
+                   f.field_name    FieldName,
+                   f.value_kind    ValueKind,
+                   v.text_value    TextValue,
+                   v.numeric_value NumericValue,
+                   v.date_value    DateValue
+            FROM   qms_arrival_field_value v
+            JOIN   qms_arrival_field f ON f.field_id = v.field_id
+            WHERE  f.is_active = 1 AND v.arrival_id IN @ids
+            ORDER  BY v.arrival_id, f.sort_order, f.field_name", arrivalIds);
+        foreach (var g in rows.GroupBy(r => r.ArrivalId))
+        {
+            var text = new Dictionary<string, string?>();
+            var nums = new Dictionary<string, decimal>();
+            foreach (var r in g)
+            {
+                text[r.FieldName] = FormatHv(r.ValueKind, r.TextValue, r.NumericValue, r.DateValue);
+                if (r.ValueKind == "Numeric" && r.NumericValue.HasValue) nums[r.FieldName] = r.NumericValue.Value;
+            }
+            result[g.Key] = (text, nums);
+        }
+        return result;
     }
 
     private static string? FormatHv(string? kind, string? text, decimal? num, DateTime? date) => kind switch

@@ -1059,6 +1059,7 @@ public class ReportsController : Controller
             ("PoDate",           "PO Date"),
             ("LoadingDate",      "Loading Date"),
             ("ShippingDate",     "Shipping Date"),
+            ("DischargeDate",    "Vessel Discharge Date"),
             ("ArrivalDate",      "Arrival Date"),
             ("ReceiveDate",      "Receive Date"),
             ("TransitDays",      "Transit Days"),
@@ -1109,6 +1110,8 @@ public class ReportsController : Controller
         var staticPropNames = staticHeaders.Select(x => x.Prop).ToArray();
         var staticLabels    = staticHeaders.Select(x => x.Header).ToArray();
 
+        var arrivalFieldNames = new List<string>();
+        var arrSeen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var matHeaderCodes    = new List<string>();
         var sampleHeaderCodes = new List<string>();
         var readingCodes      = new List<string>();
@@ -1125,13 +1128,14 @@ public class ReportsController : Controller
         await foreach (var r in _qos.StreamFlatDefectRowsAsync(filter, ct))
         {
             if (buffered.Count >= MaxExportRows) { exportTruncated = true; break; }
+            foreach (var k in r.ArrivalFields.Keys)        if (arrSeen.Add(k)) arrivalFieldNames.Add(k);
             foreach (var k in r.MaterialHeaderValues.Keys) if (matSeen.Add(k)) matHeaderCodes.Add(k);
             foreach (var k in r.SampleHeaderValues.Keys)   if (smpSeen.Add(k)) sampleHeaderCodes.Add(k);
             foreach (var k in r.Readings.Keys)             if (rdSeen.Add(k))  readingCodes.Add(k);
             buffered.Add(r);
         }
 
-        WriteHeaderRow(ws, staticLabels, matHeaderCodes, sampleHeaderCodes, readingCodes);
+        WriteHeaderRow(ws, staticLabels, arrivalFieldNames, matHeaderCodes, sampleHeaderCodes, readingCodes);
         int rowIdx = 2;
         // Write a date as a typed date cell (so Excel sorts/filters/pivots it
         // natively) instead of text. Advances the shared col counter.
@@ -1154,6 +1158,7 @@ public class ReportsController : Controller
             SetDate(rowIdx, ref col, r.PoDate);
             SetDate(rowIdx, ref col, r.LoadingDate);
             SetDate(rowIdx, ref col, r.ShippingDate);
+            SetDate(rowIdx, ref col, r.DischargeDate);
             SetDate(rowIdx, ref col, r.ArrivalDate);
             SetDate(rowIdx, ref col, r.ReceiveDate);
             ws.Cell(rowIdx, col++).Value = (int?)r.TransitDays;
@@ -1200,7 +1205,13 @@ public class ReportsController : Controller
             ws.Cell(rowIdx, col++).Value = (double?)r.DefectValue;
             ws.Cell(rowIdx, col++).Value = (double?)r.DefectPercentage;
             ws.Cell(rowIdx, col++).Value = r.DefectComment;
-            // Dynamic columns -- material headers, sample headers, readings.
+            // Dynamic columns -- arrival fields, material headers, sample headers, readings.
+            foreach (var name in arrivalFieldNames)
+            {
+                if (r.ArrivalFieldNumbers.TryGetValue(name, out var n)) { ws.Cell(rowIdx, col++).Value = (double)n; continue; }
+                r.ArrivalFields.TryGetValue(name, out var v);
+                ws.Cell(rowIdx, col++).Value = v;
+            }
             // A value captured as a number (Brix, gross/net weight...) goes in
             // as a number, so Excel can sum and filter it; anything else as text.
             foreach (var code in matHeaderCodes)
@@ -1257,11 +1268,14 @@ public class ReportsController : Controller
         }
     }
 
-    private static void WriteHeaderRow(IXLWorksheet ws, string[] staticHeaders,
+    private static void WriteHeaderRow(IXLWorksheet ws, string[] staticHeaders, List<string> arrivalFieldNames,
         List<string> matHeaderCodes, List<string> sampleHeaderCodes, List<string> readingCodes)
     {
         int col = 1;
         foreach (var h in staticHeaders) ws.Cell(1, col++).Value = h;
+        // Arrival fields under their own names ("Yellow Ripe"): they are the
+        // ones people look for by name, and have no code to prefix.
+        foreach (var n in arrivalFieldNames) ws.Cell(1, col++).Value = n;
         foreach (var c in matHeaderCodes)    ws.Cell(1, col++).Value = "mat_" + c;
         foreach (var c in sampleHeaderCodes) ws.Cell(1, col++).Value = "smp_" + c;
         foreach (var c in readingCodes)      ws.Cell(1, col++).Value = "rd_"  + c;

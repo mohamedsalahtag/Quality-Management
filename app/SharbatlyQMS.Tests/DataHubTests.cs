@@ -157,11 +157,15 @@ public class DataHubTests : IClassFixture<QmsAppFactory>
 
         using var wb = new ClosedXML.Excel.XLWorkbook(new MemoryStream(await res.Content.ReadAsByteArrayAsync()));
         var ws = wb.Worksheets.First();
+        var headers = ws.Row(1).CellsUsed().Select(h => h.GetString()).ToList();
+        Assert.Contains("Vessel Discharge Date", headers);
         var checkedCols = 0;
         foreach (var head in ws.Row(1).CellsUsed())
         {
             var name = head.GetString();
             if (!(name.EndsWith("BRIX", StringComparison.OrdinalIgnoreCase)
+                  || name.Equals("Yellow Ripe", StringComparison.OrdinalIgnoreCase)
+                  || name.StartsWith("Soft Green", StringComparison.OrdinalIgnoreCase)
                   || name.Contains("NET_WEIGHT", StringComparison.OrdinalIgnoreCase)
                   || name.Contains("GROSS_WEIGHT", StringComparison.OrdinalIgnoreCase))) continue;
 
@@ -174,6 +178,39 @@ public class DataHubTests : IClassFixture<QmsAppFactory>
             checkedCols++;
         }
         _out.WriteLine($"{checkedCols} numeric reading column(s) checked");
+    }
+
+    /// <summary>
+    /// Banana arrivals carry their arrival fields (Yellow Ripe, Soft Green...)
+    /// onto every hub row, as numbers, and the vessel discharge date with them.
+    /// </summary>
+    [Fact]
+    public async Task Arrival_fields_and_the_discharge_date_reach_the_hub_rows()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var filter = new FlatDefectFilter
+        {
+            MaterialGroup = "BANANA",
+            ReceiveFrom   = DateTime.Today.AddDays(-60),
+            ReceiveTo     = DateTime.Today
+        };
+        int rows = 0, withFields = 0, withDischarge = 0;
+        await foreach (var r in Qos(scope).StreamFlatDefectRowsAsync(filter, CancellationToken.None))
+        {
+            rows++;
+            if (r.ArrivalFieldNumbers.Count > 0)
+            {
+                withFields++;
+                // Every numeric value has its text twin under the same name.
+                Assert.All(r.ArrivalFieldNumbers.Keys, k => Assert.True(r.ArrivalFields.ContainsKey(k)));
+            }
+            if (r.DischargeDate.HasValue) withDischarge++;
+            if (rows >= 20000) break;
+        }
+        _out.WriteLine($"{rows} banana rows: {withFields} with arrival fields, {withDischarge} with a discharge date");
+        if (rows == 0) return;
+        Assert.True(withFields > 0, "No banana row carried its arrival fields.");
+        Assert.True(withDischarge > 0, "No banana row carried a discharge date.");
     }
 
     /// <summary>
