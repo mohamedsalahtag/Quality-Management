@@ -353,14 +353,15 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
     }
 
     /// <summary>
-    /// Administrator only, refused by the SERVER. Hiding the button leaves the
-    /// POST endpoint reachable by anyone who knows the URL.
+    /// Administrator and QC Manager only (the manager's grant is intended,
+    /// confirmed 2026-10-25), refused by the SERVER for everyone else. Hiding
+    /// the button leaves the POST endpoint reachable by anyone who knows the URL.
     /// </summary>
     [Theory]
-    [InlineData(RoleCodes.Operator)]
-    [InlineData(RoleCodes.Supervisor)]
-    [InlineData(RoleCodes.Manager)]
-    public async Task Only_an_administrator_may_raise_one(string role)
+    [InlineData(RoleCodes.Operator, false)]
+    [InlineData(RoleCodes.Supervisor, false)]
+    [InlineData(RoleCodes.Manager, true)]
+    public async Task Only_an_administrator_or_qc_manager_may_raise_one(string role, bool allowed)
     {
         var (arrivalId, qoId) = await SeedAsync();
         try
@@ -378,17 +379,18 @@ public class ReinspectionInvariantTests : IClassFixture<QmsAppFactory>
                 new FormUrlEncodedContent(new[]
                 {
                     new KeyValuePair<string, string>("__RequestVerificationToken", token),
-                    new KeyValuePair<string, string>("reason", "Trying without permission."),
+                    new KeyValuePair<string, string>("reason", allowed ? "QC Manager reinspection test." : "Trying without permission."),
                 }));
             _out.WriteLine($"{role} -> {(int)res.StatusCode}");
-            Assert.NotEqual(HttpStatusCode.OK, res.StatusCode);
+            if (!allowed) Assert.NotEqual(HttpStatusCode.OK, res.StatusCode);
 
-            // And nothing was created whatever the response looked like.
+            // Refused: nothing was created whatever the response looked like.
+            // Allowed: the reinspection is the second order on the container.
             using var c = Db();
             await c.OpenAsync();
             var orders = await Dapper.SqlMapper.ExecuteScalarAsync<int>(c,
                 "SELECT COUNT(*) FROM qms_quality_order WHERE arrival_id = @arrivalId", new { arrivalId });
-            Assert.Equal(1, orders);
+            Assert.Equal(allowed ? 2 : 1, orders);
         }
         finally { await CleanupAsync(arrivalId); }
     }

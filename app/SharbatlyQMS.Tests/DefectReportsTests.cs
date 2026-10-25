@@ -134,6 +134,62 @@ public class DefectReportsTests : IClassFixture<QmsAppFactory>
         Assert.Equal(3.1, bruising.GetDouble(), 3);
     }
 
+    /// <summary>
+    /// The export as the browser does it: the page's antiforgery token in the
+    /// header the APP is configured with. The first release sent it under
+    /// ASP.NET's default name, the server answered 400, and every export failed
+    /// in production while the formatter tests above all passed.
+    /// </summary>
+    [Theory]
+    [InlineData("xlsx")]
+    [InlineData("pdf")]
+    public async Task The_page_can_export_over_http(string format)
+    {
+        TestAuthHandler.Role = RoleCodes.Admin;
+        var client = _factory.CreateClient();
+        var html = await client.GetStringAsync("/DefectReports");
+        var token = System.Text.RegularExpressions.Regex.Match(
+            html, "name=\"__RequestVerificationToken\"[^>]*value=\"([^\"]+)\"").Groups[1].Value;
+        Assert.False(string.IsNullOrEmpty(token), "The page carries no antiforgery token.");
+
+        var header = _factory.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<
+            Microsoft.AspNetCore.Antiforgery.AntiforgeryOptions>>().Value.HeaderName!;
+        var req = new HttpRequestMessage(HttpMethod.Post, "/DefectReports/Export")
+        {
+            Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(SampleExport(format),
+                new System.Text.Json.JsonSerializerOptions { PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase }),
+                System.Text.Encoding.UTF8, "application/json")
+        };
+        req.Headers.Add(header, token);
+        var res = await client.SendAsync(req);
+        _out.WriteLine($"{format}: {(int)res.StatusCode} via header {header}");
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var bytes = await res.Content.ReadAsByteArrayAsync();
+        Assert.Equal(format == "pdf" ? (byte)'%' : (byte)'P', bytes[0]);
+
+        // And the page script sends the token under that same header name.
+        var js = await client.GetStringAsync("/js/defect-reports.js");
+        Assert.Contains($"\"{header}\": TOKEN", js);
+    }
+
+    /// <summary>
+    /// QuestPDF looks for fonts only in its Lato folder and the Windows font
+    /// folder. Scanning the application folder walked App_Data's ~147,000
+    /// uploads and cached photos, passed QuestPDF's 100,000-file limit and broke
+    /// every PDF in the application after a restart.
+    /// </summary>
+    [Fact]
+    public void Pdf_fonts_are_not_searched_for_in_the_application_folder()
+    {
+        _ = _factory.Services; // startup has run
+        var paths = QuestPDF.Settings.FontDiscoveryPaths.ToList();
+        _out.WriteLine(string.Join(" | ", paths));
+        Assert.DoesNotContain(paths, p => Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar, '/')
+            .Equals(Path.GetFullPath(AppContext.BaseDirectory).TrimEnd(Path.DirectorySeparatorChar, '/'), StringComparison.OrdinalIgnoreCase));
+        Assert.All(paths, p => Assert.DoesNotContain("App_Data", p, StringComparison.OrdinalIgnoreCase));
+        Assert.NotEmpty(paths);
+    }
+
     [Fact]
     public void The_pdf_export_renders()
     {

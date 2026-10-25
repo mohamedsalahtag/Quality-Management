@@ -93,10 +93,12 @@ public class PermissionResolverTests : IClassFixture<QmsAppFactory>
     }
 
     [Fact]
-    public void Only_the_administrator_may_delete_a_quality_order()
+    public void Only_the_administrator_and_the_qc_manager_may_delete_a_quality_order()
     {
+        // The QC Manager was granted this on purpose (confirmed 2026-10-25).
         Assert.True(_perms.RoleHas(RoleCodes.Admin, Perm.Qo.Delete, AccessLevel.Edit, isScreen: false));
-        foreach (var r in new[] { RoleCodes.Manager, RoleCodes.Supervisor, RoleCodes.Operator, RoleCodes.Viewer })
+        Assert.True(_perms.RoleHas(RoleCodes.Manager, Perm.Qo.Delete, AccessLevel.Edit, isScreen: false));
+        foreach (var r in new[] { RoleCodes.Supervisor, RoleCodes.Operator, RoleCodes.Viewer })
             Assert.False(_perms.RoleHas(r, Perm.Qo.Delete, AccessLevel.Edit, isScreen: false));
     }
 

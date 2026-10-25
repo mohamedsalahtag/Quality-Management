@@ -251,6 +251,20 @@ builder.Services.AddAntiforgery(opt =>
 });
 
 QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
+// Fonts come from QuestPDF's bundled Lato folder and the Windows font folder
+// (Calibri) -- nowhere else. By default QuestPDF scans the whole application
+// folder for fonts on first use, and the deploy folder also holds App_Data
+// (uploads and the report photo cache, ~147,000 files by 2026-10-25). Past
+// 100,000 files it refuses to start, so every PDF in the app failed after a
+// restart. Fonts never live in App_Data.
+QuestPDF.Settings.FontDiscoveryPaths.Clear();
+foreach (var fontDir in new[]
+         {
+             Path.Combine(AppContext.BaseDirectory, "LatoFont"),
+             Environment.GetFolderPath(Environment.SpecialFolder.Fonts)
+         })
+    if (!string.IsNullOrEmpty(fontDir) && Directory.Exists(fontDir))
+        QuestPDF.Settings.FontDiscoveryPaths.Add(fontDir);
 
 var app = builder.Build();
 
