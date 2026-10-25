@@ -213,6 +213,12 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-10-25b (incident: every PDF failed after the deploy restart)
+
+- **Cause:** QuestPDF searches `FontDiscoveryPaths` for fonts on first use, and by default that includes the whole application folder. The deploy folder's `App_Data` (uploads + report photo cache) had grown to ~147,000 files, past QuestPDF's 100,000-file limit, so `FontManager` failed to initialise and every PDF (QC report, preview, arrival checklist) returned an error from the 13:18 restart until the 14:45 fix. **Fix:** `Program.cs` limits font discovery to `LatoFont` and `C:\Windows\Fonts`; a test guards it.
+- **Defect reports export** sent its antiforgery token as `RequestVerificationToken`; this app's header is **`X-CSRF-TOKEN`** (`AddAntiforgery` in `Program.cs`) — any fetch/JSON POST must use it. The export is now tested over HTTP with the configured header.
+- QC Manager deleting quality orders and raising reinspections is **intended**; the tests now say so.
+
 ### 2026-10-25 (Defect reports round 2; Arrivals QC filter)
 
 - **Defect reports:** the Excel-average toggle is gone (one figure: defective units ÷ inspected units). **Weeks are ISO 8601, Monday–Sunday, labelled W1–W53** (`DefectReportService.WeekStart`, `isoWeek` in the JS); the page opens on eight such weeks.
