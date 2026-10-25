@@ -475,7 +475,8 @@
         })),
         chart, generated: new Date().toLocaleString()
       };
-      const r = await fetch(URL_EXPORT, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": TOKEN }   // Program.cs: AddAntiforgery HeaderName, body: JSON.stringify(payload) });
+      // X-CSRF-TOKEN: the antiforgery header name set in Program.cs (AddAntiforgery).
+      const r = await fetch(URL_EXPORT, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": TOKEN }, body: JSON.stringify(payload) });
       if (!r.ok) throw new Error(r.status);
       const blob = await r.blob();
       const a = document.createElement("a");
