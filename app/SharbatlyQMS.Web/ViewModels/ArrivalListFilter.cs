@@ -21,6 +21,11 @@ public class ArrivalListFilter
     public string? Bol        { get; set; }
     public string? Po         { get; set; }
     public string? ArrivalNo  { get; set; }
+    /// <summary>Part of the QC order number, live or the inspection it replaced.</summary>
+    public string? QualityOrder { get; set; }
+    /// <summary>The Quality Order column as a filter: "none" (no QC order yet),
+    /// "open" (live order not finished) or "finished". Empty = any.</summary>
+    public string? QcState    { get; set; }
     public string? Material   { get; set; }
     /// <summary>Material master major category, e.g. Apples or Bananas.</summary>
     public string? MatMajor    { get; set; }
@@ -63,6 +68,8 @@ public class ArrivalListFilter
         + (string.IsNullOrWhiteSpace(Bol)        ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Po)         ? 0 : 1)
         + (string.IsNullOrWhiteSpace(ArrivalNo)  ? 0 : 1)
+        + (string.IsNullOrWhiteSpace(QualityOrder) ? 0 : 1)
+        + (string.IsNullOrWhiteSpace(QcState)    ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Material)   ? 0 : 1)
         + (string.IsNullOrWhiteSpace(MatMajor)    ? 0 : 1)
         + (string.IsNullOrWhiteSpace(MatSubMajor) ? 0 : 1)

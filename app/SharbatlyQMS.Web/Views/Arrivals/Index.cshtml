@@ -42,6 +42,7 @@
         AddMany("status", f.Status);    Add("search", f.Search);
         Add("container", f.Container);  Add("bol", f.Bol);
         Add("po", f.Po);                Add("arrivalNo", f.ArrivalNo);
+        Add("qualityOrder", f.QualityOrder); Add("qcState", f.QcState);
         Add("material", f.Material);    AddMany("supplier", f.Supplier);
         AddMany("plant", f.Plant);      AddMany("storageLoc", f.StorageLoc);
         AddMany("createdBy", f.CreatedBy);
@@ -163,6 +164,20 @@
                     <label class="form-label small mb-1">@Loc["Arrival no."]</label>
                     <input type="text" name="arrivalNo" value="@f.ArrivalNo" class="form-control form-control-sm"
                            placeholder='@Loc["ARR-…"]' autocomplete="off" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["Quality Order"]</label>
+                    <input type="text" name="qualityOrder" value="@f.QualityOrder" class="form-control form-control-sm"
+                           placeholder='@Loc["QO-…"]' autocomplete="off" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["QC order state"]</label>
+                    <select name="qcState" class="form-select form-select-sm">
+                        <option value="" selected="@string.IsNullOrEmpty(f.QcState)">@Loc["Any"]</option>
+                        <option value="none" selected="@(f.QcState == "none")">@Loc["No QC order yet"]</option>
+                        <option value="open" selected="@(f.QcState == "open")">@Loc["QC in progress"]</option>
+                        <option value="finished" selected="@(f.QcState == "finished")">@Loc["QC finished"]</option>
+                    </select>
                 </div>
                 <div class="col-12 col-md-4">
                     <label class="form-label small mb-1">@Loc["Material"]</label>
@@ -330,6 +345,7 @@
                                        title="@a.QualityOrderNo">
                                         <i class="bi bi-clipboard-data me-1"></i>@Loc["Open QC"]
                                     </a>
+                                    <div class="small text-muted mt-1"><code>@a.QualityOrderNo</code></div>
                                 }
                                 else if (a.StatusCode == ArrivalStatus.Completed && canEdit)
                                 {

@@ -60,7 +60,18 @@ public class DefectReportService : IDefectReportService
         public string MaterialGroup { get; set; } = "";
         public int Samples { get; set; }
         public decimal Inspected { get; set; }
+        /// <summary>Carton net weight from SAP's material master (kg).</summary>
+        public decimal? PackWeight { get; set; }
+        /// <summary>PO quantity of the line (arrival item), counted once per
+        /// order and arrival line.</summary>
+        public decimal Cartons { get; set; }
+        public string Uom { get; set; } = "";
+        public string PackWeightLabel => PackWeightText(PackWeight);
     }
+
+    /// <summary>"15 kg", "0.25 kg"; the same text the filter offers.</summary>
+    public static string PackWeightText(decimal? w) =>
+        w is > 0 ? $"{w.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} kg" : "(no weight)";
     private sealed record FactRow(long QoMaterialId, int DefectId, decimal Units, decimal PctSum);
     private sealed record GroupDefectRow(string MaterialGroup, int DefectId);
     private sealed record DefectRow(int DefectId, string Name, string Category, string MaterialGroup, int SortOrder);
@@ -81,10 +92,18 @@ public class DefectReportService : IDefectReportService
                ISNULL(COALESCE(NULLIF(m.material_class, N''), mc.class_name), '') AS Class,
                COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date) AS ReceiveDate,
                ISNULL(a.container_no, '')                                AS ContainerNo,
-               ISNULL(m.material_group, '')                              AS MaterialGroup
+               ISNULL(m.material_group, '')                              AS MaterialGroup,
+               NULLIF(ISNULL(NULLIF(m.net_weight, 0), mc.weight), 0)    AS PackWeight,
+               -- PO quantity once per order and arrival line, so two material
+               -- lines raised from one arrival line do not count it twice.
+               CASE WHEN ROW_NUMBER() OVER (PARTITION BY qo.quality_order_id, m.arrival_item_id
+                                            ORDER BY m.qo_material_id) = 1
+                    THEN CAST(ISNULL(ai.quantity, 0) AS DECIMAL(18,3)) ELSE 0 END AS Cartons,
+               ISNULL(ai.uom, '')                                        AS Uom
         INTO   #u
         FROM   qms_quality_order qo
         JOIN   qms_quality_order_material m ON m.quality_order_id = qo.quality_order_id
+        LEFT JOIN qms_arrival_item ai       ON ai.arrival_item_id = m.arrival_item_id
         JOIN   qms_arrival a                ON a.arrival_id = qo.arrival_id
         LEFT JOIN qms_shipment_snapshot ss  ON ss.arrival_id = a.arrival_id
         LEFT JOIN qms_sap_material_cache mc ON mc.material_no = m.material_no
@@ -169,6 +188,10 @@ public class DefectReportService : IDefectReportService
         var subs   = Dict(raw.Units.Select(u => u.Sub));
         var classes= Dict(raw.Units.Select(u => u.Class));
         var groups = Dict(raw.Units.Select(u => u.MaterialGroup));
+        var weights= raw.Units.Select(u => u.PackWeight).Distinct()
+                        .OrderBy(w => w ?? decimal.MaxValue).Select(PackWeightText).Distinct().ToList();
+        var weightIndex = weights.Select((v, i) => (v, i)).ToDictionary(x => x.v, x => x.i);
+        var uoms   = Dict(raw.Units.Select(u => u.Uom));
 
         var unitIndex = new Dictionary<long, int>();
         var units = new List<object[]>(raw.Units.Count);
@@ -180,7 +203,7 @@ public class DefectReportService : IDefectReportService
                 u.QualityOrderId, u.QualityOrderNo, plants.Index[u.Plant], supps.Index[u.Supplier],
                 majors.Index[u.Major], subs.Index[u.Sub], classes.Index[u.Class],
                 u.ReceiveDate.ToString("yyyy-MM-dd"), u.ContainerNo, groups.Index[u.MaterialGroup],
-                u.Samples, u.Inspected
+                u.Samples, u.Inspected, weightIndex[u.PackWeightLabel], u.Cartons, uoms.Index[u.Uom]
             });
         }
 
@@ -203,6 +226,7 @@ public class DefectReportService : IDefectReportService
             To   = to.Date.ToString("yyyy-MM-dd"),
             Plants = plants.Values, Suppliers = supps.Values, Majors = majors.Values,
             Subs = subs.Values, Classes = classes.Values, Groups = groups.Values,
+            PackWeights = weights, Uoms = uoms.Values,
             Units = units,
             Defects = defects.Select(d => new object[] { d.DefectId, d.Name, d.Category, d.MaterialGroup, d.SortOrder }).ToList(),
             GroupDefects = groupDefects.ToDictionary(kv => kv.Key, kv => kv.Value.OrderBy(x => x).ToList()),
@@ -254,7 +278,7 @@ public class DefectReportService : IDefectReportService
             }
             var item = string.IsNullOrEmpty(u.Class) ? u.Sub : $"{u.Sub} · {u.Class}";
             if (!o.Materials.Contains(item)) o.Materials.Add(item);
-            o.Samples += u.Samples; o.Inspected += u.Inspected; o.Defective += units;
+            o.Samples += u.Samples; o.Inspected += u.Inspected; o.Defective += units; o.Cartons += u.Cartons;
             o.PctSum += pct; o.SampleDefectRows += u.Samples * rows;
         }
         var excel = string.Equals(req.Metric, "xls", StringComparison.OrdinalIgnoreCase);
@@ -269,7 +293,8 @@ public class DefectReportService : IDefectReportService
         && (string.IsNullOrEmpty(r.Supplier) || u.Supplier == r.Supplier)
         && (string.IsNullOrEmpty(r.Major)    || u.Major == r.Major)
         && (string.IsNullOrEmpty(r.Sub)      || u.Sub == r.Sub)
-        && (string.IsNullOrEmpty(r.Class)    || u.Class == r.Class);
+        && (string.IsNullOrEmpty(r.Class)    || u.Class == r.Class)
+        && (string.IsNullOrEmpty(r.PackWeight) || u.PackWeightLabel == r.PackWeight);
 
     /// <summary>The row a number sits on, per tab -- same keys the page builds.</summary>
     private static bool InRow(UnitRow u, DefectDrillRequest r)
@@ -277,18 +302,22 @@ public class DefectReportService : IDefectReportService
         if (r.RowKey == "__all") return true;
         return r.Tab switch
         {
-            "week"   => WeekStart(u.ReceiveDate).ToString("yyyy-MM-dd") == r.RowKey,
+            // Week rows may carry a sub-major prefix: "<sub><week>".
+            "week"   => r.RowKey.Contains('')
+                          ? $"{u.Sub}{WeekStart(u.ReceiveDate):yyyy-MM-dd}" == r.RowKey
+                            || $"{u.Sub}__all" == r.RowKey
+                          : WeekStart(u.ReceiveDate).ToString("yyyy-MM-dd") == r.RowKey,
             "class"  => r.RowKey.Contains('\u0002')
                           ? $"{u.Sub}\u0002{(string.IsNullOrEmpty(u.Class) ? "(no class)" : u.Class)}" == r.RowKey
                           : u.Sub == r.RowKey,
-            "branch" => u.Plant == r.RowKey,
+            "branch" => r.RowKey.Contains('') ? $"{u.Plant}{u.Sub}" == r.RowKey : u.Plant == r.RowKey,
             "sub"    => (string.IsNullOrEmpty(u.Sub) ? "(none)" : u.Sub) == r.RowKey,
             _        => (string.IsNullOrEmpty(u.Major) ? "(none)" : u.Major) == r.RowKey
         };
     }
 
-    /// <summary>Weeks run Saturday to Friday.</summary>
-    public static DateTime WeekStart(DateTime d) => d.Date.AddDays(-(((int)d.DayOfWeek + 1) % 7));
+    /// <summary>ISO 8601 weeks: Monday to Sunday, numbered by ISOWeek.</summary>
+    public static DateTime WeekStart(DateTime d) => d.Date.AddDays(-(((int)d.DayOfWeek + 6) % 7));
 }
 
 public class DefectReportDataset
@@ -301,7 +330,11 @@ public class DefectReportDataset
     public List<string> Subs { get; set; } = new();
     public List<string> Classes { get; set; } = new();
     public List<string> Groups { get; set; } = new();
-    /// <summary>[qoId, qoNo, plant#, supplier#, major#, sub#, class#, receive yyyy-MM-dd, container, group#, samples, inspected units]</summary>
+    /// <summary>Pack weight labels ("15 kg"), lightest first.</summary>
+    public List<string> PackWeights { get; set; } = new();
+    public List<string> Uoms { get; set; } = new();
+    /// <summary>[qoId, qoNo, plant#, supplier#, major#, sub#, class#, receive yyyy-MM-dd, container, group#,
+    /// samples, inspected units, pack weight#, cartons (PO qty), uom#]</summary>
     public List<object[]> Units { get; set; } = new();
     /// <summary>[defectId, name, category, material group, sort order]</summary>
     public List<object[]> Defects { get; set; } = new();
@@ -324,6 +357,7 @@ public class DefectDrillRequest
     public string? Major { get; set; }
     public string? Sub { get; set; }
     public string? Class { get; set; }
+    public string? PackWeight { get; set; }
     public string? Cat { get; set; }
     public string Tab { get; set; } = "major";
     public string RowKey { get; set; } = "__all";
@@ -341,6 +375,7 @@ public class DefectDrillRow
     public string ContainerNo { get; set; } = "";
     public List<string> Materials { get; } = new();
     public int Samples { get; set; }
+    public decimal Cartons { get; set; }
     public decimal Inspected { get; set; }
     public decimal Defective { get; set; }
     public decimal PctSum { get; set; }

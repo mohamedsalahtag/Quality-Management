@@ -19,15 +19,18 @@ namespace SharbatlyQMS.Web.Controllers;
 public class DefectReportsController : Controller
 {
     private readonly IDefectReportService _reports;
+    private readonly IDashboardService _dashboard;
     private readonly ILogger<DefectReportsController> _log;
 
-    public DefectReportsController(IDefectReportService reports, ILogger<DefectReportsController> log)
+    public DefectReportsController(IDefectReportService reports, IDashboardService dashboard,
+        ILogger<DefectReportsController> log)
     {
         _reports = reports;
+        _dashboard = dashboard;
         _log = log;
     }
 
-    /// <summary>Opens on the last eight weeks (eight Saturday-to-Friday weeks
+    /// <summary>Opens on the last eight weeks (eight ISO Monday-to-Sunday weeks
     /// ending this week), which covers a typical review without a slow load.</summary>
     public static (DateTime From, DateTime To) DefaultWindow()
     {
@@ -55,6 +58,49 @@ public class DefectReportsController : Controller
         return Json(data);
     }
 
+    /// <summary>
+    /// Containers pending inspection as of the window's last day: received in
+    /// the window (with or without an arrival) and not finished by its end. The
+    /// dashboard's Pending Inspection bucket, so the two pages give one number.
+    /// </summary>
+    [HttpGet]
+    [RequireScreen(Screens.ReportsDefects, Seed.SupervisorOrAbove, "Open the Defect reports")]
+    public async Task<IActionResult> Pending(DateTime? from, DateTime? to, CancellationToken ct)
+    {
+        var (df, dt) = DefaultWindow();
+        var filter = new ViewModels.DashboardFilter
+        {
+            Period = ViewModels.DashboardFilter.Periods.Custom, From = (from ?? df).Date, To = (to ?? dt).Date
+        };
+        var rows = await _dashboard.GetCommitmentDetailAsync(filter, User.GetPlantScope(),
+            ViewModels.CommitmentBuckets.PendingInspection, null, ct);
+        return Json(rows.Select(r => new
+        {
+            plant = r.Plant, supplier = r.VendorName ?? "", container = r.ContainerNo ?? "",
+            received = r.ArrivalCreatedAt.ToString("yyyy-MM-dd"), openedByEnd = r.OpenedByEnd,
+            arrivalId = r.ArrivalId, arrivalNo = r.ArrivalNo, qoId = r.QualityOrderId, qoNo = r.QualityOrderNo
+        }));
+    }
+
+    /// <summary>
+    /// The tab on screen as a presentable Excel or PDF file: headings, period,
+    /// filters, totals, the chart and the table, exactly as the page drew them.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequestSizeLimit(20 * 1024 * 1024)]
+    [RequireScreen(Screens.ReportsDefects, Seed.SupervisorOrAbove, "Open the Defect reports")]
+    public IActionResult Export([FromBody] DefectReportExportRequest req)
+    {
+        if (req is null) return BadRequest();
+        try { DefectReportExporter.Validate(req); }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        var stamp = DateTime.Now.ToString("yyyyMMdd-HHmm");
+        if (string.Equals(req.Format, "pdf", StringComparison.OrdinalIgnoreCase))
+            return File(DefectReportExporter.Pdf(req), "application/pdf", $"defect-report-{stamp}.pdf");
+        return File(DefectReportExporter.Excel(req),
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", $"defect-report-{stamp}.xlsx");
+    }
+
     /// <summary>The orders behind one number, as a workbook.</summary>
     [HttpGet]
     [RequireScreen(Screens.ReportsDefects, Seed.SupervisorOrAbove, "Open the Defect reports")]
@@ -72,8 +118,8 @@ public class DefectReportsController : Controller
                                      : "QC report %: defective units ÷ inspected units.");
         ws.Cell(2, 1).Style.Font.Italic = true;
 
-        var headers = new[] { "QC order", "Received", "Branch", "Supplier", "Container", "Material",
-                              "Samples", "Inspected units", "Defective units", excel ? "Excel average %" : "QC report %" };
+        var headers = new[] { "QC order", "Received", "Branch", "Supplier", "Container", "Material", "Cartons (PO qty)",
+                              "Samples", "Inspected units", "Defective units", excel ? "Excel average %" : "Defect %" };
         for (var i = 0; i < headers.Length; i++)
         {
             ws.Cell(4, i + 1).Value = headers[i];
@@ -89,13 +135,14 @@ public class DefectReportsController : Controller
             ws.Cell(r, 4).Value = o.Supplier;
             ws.Cell(r, 5).Value = o.ContainerNo;
             ws.Cell(r, 6).Value = string.Join(", ", o.Materials);
-            ws.Cell(r, 7).Value = o.Samples;
-            ws.Cell(r, 8).Value = (double)o.Inspected;
-            ws.Cell(r, 9).Value = (double)o.Defective;
+            ws.Cell(r, 7).Value = (double)o.Cartons;
+            ws.Cell(r, 8).Value = o.Samples;
+            ws.Cell(r, 9).Value = (double)o.Inspected;
+            ws.Cell(r, 10).Value = (double)o.Defective;
             if (o.Percent.HasValue)
             {
-                ws.Cell(r, 10).Value = (double)Math.Round(o.Percent.Value, 2);
-                ws.Cell(r, 10).Style.NumberFormat.Format = "0.00";
+                ws.Cell(r, 11).Value = (double)Math.Round(o.Percent.Value, 2);
+                ws.Cell(r, 11).Style.NumberFormat.Format = "0.00";
             }
             r++;
         }

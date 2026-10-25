@@ -213,6 +213,16 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-10-25 (Defect reports round 2; Arrivals QC filter)
+
+- **Defect reports:** the Excel-average toggle is gone (one figure: defective units ÷ inspected units). **Weeks are ISO 8601, Monday–Sunday, labelled W1–W53** (`DefectReportService.WeekStart`, `isoWeek` in the JS); the page opens on eight such weeks.
+- **New dimensions:** *Per week* adds a block per **sub-major** under the overall block (switch "By sub-major"; rows collapsible); *Per branch & defect* opens each branch into its **sub-major** rows. New **Pack weight** filter (carton net weight from the SAP material master, `"15 kg"`).
+- **Cartons (PO qty):** arrival-line PO quantity, counted once per order and arrival line, shown as a total tile (tooltip splits it by unit — mostly CAR, also BNC, PU, PAC…), a column on every row-based tab and a row on the weekly tab.
+- **Pending containers** tile: the dashboard's Pending Inspection bucket for the window (received with or without an arrival, not finished by the last day), filtered by branch and supplier only — it has no material dimension. Click lists them.
+- **Charts** on every tab (Plotly, `wwwroot/lib/plotly`): weekly category-total lines on *Per week*; stacked category totals for the top 20 rows elsewhere. **Trend arrows**: on *Per week* every week cell is compared with the week before (▲ red = higher, ▼ green = lower); the other tabs get a last column comparing the latest week in the period with the one before.
+- **Excel / PDF export of the tab** (`/DefectReports/Export`, `DefectReportExporter`): the page posts its own table model, filters, totals and the chart as a PNG; the server only formats (headings, period, filters, KPI boxes, chart, coloured category headers, A4 landscape PDF with the type shrinking as columns grow). Excel puts the week-on-week change in a cell note and colours the cell. The PDF marks week changes with +/− (the PDF font has no arrow glyphs).
+- **Arrivals list:** filter by the **Quality Order** column — QC order number (live or the one it replaced) and **QC order state** (none yet / in progress / finished, from the live order); the column now also shows the QO number. Written as `IN` lists — a correlated `EXISTS` with the leading-wildcard number search timed out — and the list's count and page queries now run with `OPTION (RECOMPILE)`: one SQL text serves every filter combination, and a plan cached for a call without the number search ran it once per arrival when it was given.
+
 ### 2026-10-12b (Reports → Defect reports)
 
 - New page **Reports → Defect reports** (`/DefectReports`, screen `Reports.Defects`, M40 / V55, seeded Supervisor and above): the five pivots from the QC team's `required reports.xlsx` as tabs — **Per week** (Saturday–Friday weeks), **Per defect & class**, **Per branch & defect**, **Per sub-major**, **Per major** — with one shared filter bar (receive dates, branch, supplier, major, sub-major, class, defect category). Reviewed first as a mockup on live data, then built to match it.

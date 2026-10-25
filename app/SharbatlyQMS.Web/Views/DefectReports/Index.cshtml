@@ -9,14 +9,17 @@
      data-url-data="@Url.Action("Data")"
      data-url-drill="@Url.Action("DrillExcel")"
      data-url-qo="@Url.Action("Details", "QualityOrders", new { id = 0 })"
+     data-url-arrival="@Url.Action("Details", "Arrivals", new { id = 0 })"
+     data-url-pending="@Url.Action("Pending")"
+     data-url-export="@Url.Action("Export")"
      data-max-days="@ViewBag.MaxDays">
     <div class="dr-head">
         <div>
             <h1><i class="bi bi-bar-chart-steps me-1"></i>@Loc["Defect reports"]</h1>
             <p>@Loc["Finished inspections by receive date. Click any number to see the quality orders behind it."]</p>
         </div>
-        <div class="dr-summary" id="summary"></div>
     </div>
+    <span id="drToken" hidden>@Html.AntiForgeryToken()</span>
 
     <section class="dr-box dr-filters" aria-label="@Loc["Filters"]">
         <div class="dr-frow">
@@ -27,16 +30,11 @@
             <div class="dr-field"><label for="fMajor">@Loc["Major category"]</label><select id="fMajor" class="form-select form-select-sm"></select></div>
             <div class="dr-field"><label for="fSub">@Loc["Sub-major category"]</label><select id="fSub" class="form-select form-select-sm"></select></div>
             <div class="dr-field"><label for="fClass">@Loc["Class"]</label><select id="fClass" class="form-select form-select-sm"></select></div>
+            <div class="dr-field"><label for="fWeight">@Loc["Pack weight"]</label><select id="fWeight" class="form-select form-select-sm"></select></div>
             <div class="dr-field"><label for="fCat">@Loc["Defect category"]</label><select id="fCat" class="form-select form-select-sm"></select></div>
         </div>
         <div class="dr-fbar">
             <div class="left">
-                <div class="btn-group btn-group-sm" role="group" aria-label="@Loc["How the percentage is calculated"]">
-                    <button type="button" class="btn btn-primary" id="mQc" aria-pressed="true"
-                            title="@Loc["Defective units ÷ inspected units; a category total adds up its defects (same as the QC report)"]">@Loc["QC report %"]</button>
-                    <button type="button" class="btn btn-outline-primary" id="mXls" aria-pressed="false"
-                            title="@Loc["Plain average of each sample's Defect %, as in the old Excel pivots"]">@Loc["Excel average"]</button>
-                </div>
                 <div class="form-check mb-0">
                     <input class="form-check-input" type="checkbox" id="fHide" checked>
                     <label class="form-check-label small" for="fHide">@Loc["Hide defects that never occurred"]</label>
@@ -47,30 +45,33 @@
         </div>
     </section>
 
+    <div class="dr-kpis" id="summary" aria-label="@Loc["Totals for the selection"]"></div>
+
     <div>
         <div class="dr-tabs" role="tablist" aria-label="@Loc["Reports"]" id="tabs"></div>
-        <section class="dr-box dr-panel" role="tabpanel" id="panel" aria-live="polite"></section>
+        <section class="dr-box dr-panel" role="tabpanel" aria-live="polite">
+            <div id="panel"></div>
+            <div id="chart" class="dr-chart" hidden></div>
+        </section>
     </div>
 
     <details class="dr-box dr-about">
         <summary>@Loc["How these numbers are calculated"]</summary>
         <div class="cols">
             <div>
-                <h3>@Loc["QC report % (default)"]</h3>
+                <h3>@Loc["Defect %"]</h3>
                 <p>@Loc["Defective units divided by inspected units, so a 200-fruit sample weighs more than a 10-fruit one. A category total adds up its defects, exactly like the Total line on the QC report."]</p>
-                <div class="ex" id="exQc"></div>
-            </div>
-            <div>
-                <h3>@Loc["Excel average"]</h3>
-                <p>@Loc["The plain average of every sample's Defect %, which is what the old Excel pivots showed. For a category it averages the defects instead of adding them, so it shrinks as a category has more defects."]</p>
-                <div class="ex" id="exXls"></div>
+                <h3>@Loc["Trend arrows"]</h3>
+                <p>@Loc["▲ red: higher than the week before. ▼ green: lower. ▬ unchanged. On the per-week report each week is compared with the one before it; on the other reports the last column compares the latest week in the period with the week before."]</p>
             </div>
             <div>
                 <h3>@Loc["What is included"]</h3>
                 <ul class="ps-3 mb-0">
                     <li>@Loc["Finished inspections only; a reinspection replaces the inspection it was raised on."]</li>
                     <li>@Loc["Dated by the branch receive date (SAP goods receipt)."]</li>
-                    <li>@Loc["Weeks run Saturday to Friday."]</li>
+                    <li>@Loc["Weeks are ISO weeks: Monday to Sunday, numbered W1–W53."]</li>
+                    <li>@Loc["Cartons are the PO quantity of the inspected lines (mostly cartons; the tooltip splits it by unit)."]</li>
+                    <li>@Loc["Pending containers: received in the period (with or without an arrival) whose inspection was not finished by the last day. Filtered by branch and supplier."]</li>
                     <li>@Loc["A blank cell means that defect does not exist for that fruit; 0.00 means it was checked and not found."]</li>
                 </ul>
             </div>
@@ -94,5 +95,6 @@
 </aside>
 
 @section Scripts {
+    <script src="~/lib/plotly/plotly-basic.min.js" asp-append-version="true"></script>
     <script src="~/js/defect-reports.js" asp-append-version="true"></script>
 }

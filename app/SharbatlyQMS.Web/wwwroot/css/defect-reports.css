@@ -84,3 +84,31 @@
 .dr-drawer table.orders .r { text-align: right; }
 .dr-drawer .df { padding: .65rem 1rem; border-top: 1px solid var(--theme-border, #dee2e6); display: flex; gap: .5rem; flex-wrap: wrap; align-items: center; justify-content: space-between; color: var(--theme-text-muted, #6c757d); font-size: .82rem; }
 @media (prefers-reduced-motion: no-preference) { .dr-drawer { animation: dr-slide .18s ease-out; } @keyframes dr-slide { from { transform: translateX(24px); opacity: .6; } to { transform: none; opacity: 1; } } }
+
+/* KPI strip: period, orders, samples, cartons, pending containers. */
+.dr-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: .6rem; }
+.dr-kpis .kp { background: var(--dr-surface); border: 1px solid var(--dr-border); border-radius: .5rem; padding: .55rem .8rem; text-align: left; color: var(--dr-text); }
+.dr-kpis .kp .l { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--dr-muted); font-weight: 600; }
+.dr-kpis .kp .v { font-size: 1.2rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+.dr-kpis .kp.link { cursor: pointer; border-color: var(--dr-primary); }
+.dr-kpis .kp.link:hover { background: var(--dr-surface-alt); }
+.dr-kpis .kp.link .v { color: var(--dr-primary); }
+
+.dr .ptitle .acts { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; }
+.dr .dr-chart { min-height: 300px; border-top: 1px solid var(--dr-border); padding-top: .5rem; }
+
+/* Trend arrows: up = more defects (bad), down = fewer (good). */
+.dr .tr { font-size: .65rem; margin-right: .25rem; }
+.dr .tr.up { color: var(--bs-danger, #dc3545); }
+.dr .tr.down { color: var(--bs-success, #198754); }
+.dr .tr.flat { color: var(--dr-muted); }
+.dr table.pv td.trend { white-space: nowrap; }
+.dr table.pv td.ctn { color: var(--dr-muted); }
+
+/* Expandable groups (sub-majors under a branch, classes under a sub-major). */
+.dr .tg { border: 0; background: transparent; color: var(--dr-muted); padding: 0 .3rem 0 0; font-size: .8rem; line-height: 1; cursor: pointer; }
+.dr .tg:hover { color: var(--dr-primary); }
+.dr table.pv tr.child.deep th { padding-left: 2.4rem; }
+.dr table.pv tr.sub th, .dr table.pv tr.sub td { font-weight: 700; border-top: 2px solid var(--dr-border); }
+.dr table.pv tr.sub th { background: var(--dr-surface-alt); }
+.dr table.pv tr.info th, .dr table.pv tr.info td { color: var(--dr-muted); font-style: italic; }

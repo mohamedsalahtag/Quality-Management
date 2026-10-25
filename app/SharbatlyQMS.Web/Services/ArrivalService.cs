@@ -119,6 +119,8 @@ public class ArrivalService : IArrivalService
             bol        = Trim(f.Bol),
             po         = Trim(f.Po),
             arrivalNo  = Trim(f.ArrivalNo),
+            qoNo       = Trim(f.QualityOrder),
+            qcState    = f.QcState is "none" or "open" or "finished" ? f.QcState : null,
             material   = Trim(f.Material),
             matMajor    = Trim(f.MatMajor),
             matSubMajor = Trim(f.MatSubMajor),
@@ -131,15 +133,21 @@ public class ArrivalService : IArrivalService
         // Two result sets off one round trip: the total for the pager, then the
         // page itself. The WHERE is shared so the count can never disagree with
         // the rows it is counting.
+        // OPTION (RECOMPILE): one SQL text serves every combination of a dozen
+        // optional filters, and a plan cached for a call without the QC-number
+        // search ran that search once per arrival when it was given (30 s+).
+        // Compiling per call costs milliseconds and fits each call's filters.
         using var grid = await c.QueryMultipleAsync(@"
             SELECT COUNT(*) FROM qms_arrival a
-            WHERE " + ArrivalWhere + @";
+            WHERE " + ArrivalWhere + @"
+            OPTION (RECOMPILE);
         " + ArrivalSelect + @"
             WHERE " + ArrivalWhere + @"
             -- arrival_id breaks ties on created_at so a row can never sit on two
             -- pages, or on none, when several arrivals share a timestamp.
             ORDER BY a.created_at DESC, a.arrival_id DESC
-            OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY", p);
+            OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY
+            OPTION (RECOMPILE)", p);
 
         var total = await grid.ReadFirstAsync<int>();
         var rows  = (await grid.ReadAsync<Arrival>()).ToList();
@@ -160,6 +168,25 @@ public class ArrivalService : IArrivalService
               AND  (@bol        IS NULL OR a.bol_no           LIKE '%' + @bol       + '%')
               AND  (@po         IS NULL OR a.ebeln            LIKE '%' + @po        + '%')
               AND  (@arrivalNo  IS NULL OR a.arrival_no       LIKE '%' + @arrivalNo + '%')
+              -- The Quality Order column as a filter. The number matches the live
+              -- order or one it replaced; the state is the LIVE order's.
+              -- Written as IN lists, not correlated EXISTS: the number is a
+              -- leading-wildcard LIKE, and evaluating it once per arrival timed
+              -- out; one pass over the orders table is instant.
+              AND  (@qoNo IS NULL OR a.arrival_id IN (
+                        SELECT qn.arrival_id FROM qms_quality_order qn
+                        WHERE  qn.status_code <> 'Cancelled'
+                          AND  qn.quality_order_no LIKE '%' + @qoNo + '%'))
+              AND  (@qcState IS NULL
+                    OR (@qcState = 'none' AND a.arrival_id NOT IN (
+                            SELECT qs.arrival_id FROM qms_quality_order qs
+                            WHERE  qs.status_code <> 'Cancelled' AND qs.superseded_at IS NULL))
+                    OR (@qcState = 'finished' AND a.arrival_id IN (
+                            SELECT qs.arrival_id FROM qms_quality_order qs
+                            WHERE  qs.status_code = 'Closed' AND qs.superseded_at IS NULL))
+                    OR (@qcState = 'open' AND a.arrival_id IN (
+                            SELECT qs.arrival_id FROM qms_quality_order qs
+                            WHERE  qs.status_code NOT IN ('Cancelled', 'Closed') AND qs.superseded_at IS NULL)))
               AND  (@storageLocAny = 0 OR a.storage_location IN @storageLocs)
               AND  (@supplierAny   = 0 OR a.vendor_name      IN @suppliers)
               AND  (@createdByAny  = 0 OR a.created_by       IN @createdBys)

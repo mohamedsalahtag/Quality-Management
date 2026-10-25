@@ -35,14 +35,111 @@ public class DefectReportsTests : IClassFixture<QmsAppFactory>
     private static readonly DateTime To   = DateTime.Today;
 
     [Fact]
-    public void Weeks_run_saturday_to_friday()
+    public void Weeks_are_iso_weeks_monday_to_sunday()
     {
-        Assert.Equal(new DateTime(2026, 10, 10), DefectReportService.WeekStart(new DateTime(2026, 10, 10))); // Saturday
-        Assert.Equal(new DateTime(2026, 10, 10), DefectReportService.WeekStart(new DateTime(2026, 10, 16))); // Friday
-        Assert.Equal(new DateTime(2026, 10, 17), DefectReportService.WeekStart(new DateTime(2026, 10, 17)));
+        Assert.Equal(new DateTime(2026, 10, 19), DefectReportService.WeekStart(new DateTime(2026, 10, 19))); // Monday
+        Assert.Equal(new DateTime(2026, 10, 19), DefectReportService.WeekStart(new DateTime(2026, 10, 25))); // Sunday
+        Assert.Equal(new DateTime(2026, 10, 26), DefectReportService.WeekStart(new DateTime(2026, 10, 26)));
+        Assert.Equal(43, System.Globalization.ISOWeek.GetWeekOfYear(new DateTime(2026, 10, 19)));
         var (from, to) = DefectReportsController.DefaultWindow();
-        Assert.Equal(DayOfWeek.Saturday, from.DayOfWeek);
+        Assert.Equal(DayOfWeek.Monday, from.DayOfWeek);
         Assert.Equal(DateTime.Today, to);
+    }
+
+    /// <summary>Pack weight and cartons travel on every line, and the cartons
+    /// are the PO quantity counted once per order and arrival line.</summary>
+    [Fact]
+    public async Task Lines_carry_pack_weight_and_cartons()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IDefectReportService>();
+        var data = await svc.GetDatasetAsync(From, To, PlantScope.All);
+        if (data.Units.Count == 0) return;
+        Assert.All(data.Units, u => Assert.InRange(Convert.ToInt32(u[12]), 0, data.PackWeights.Count - 1));
+        Assert.Contains(data.PackWeights, w => w.EndsWith(" kg"));
+        var cartons = data.Units.Sum(u => Convert.ToDecimal(u[13]));
+
+        using var c = new Microsoft.Data.SqlClient.SqlConnection(
+            scope.ServiceProvider.GetRequiredService<IConfiguration>().GetConnectionString("Default"));
+        var orderIds = data.Units.Select(u => Convert.ToInt64(u[0])).Distinct().ToArray();
+        decimal db = 0;
+        foreach (var chunk in orderIds.Chunk(1000))
+            db += await c.ExecuteScalarAsync<decimal>(@"
+                SELECT ISNULL(SUM(q), 0) FROM (
+                    SELECT DISTINCT m.quality_order_id, m.arrival_item_id, CAST(ISNULL(ai.quantity, 0) AS DECIMAL(18,3)) q
+                    FROM   qms_quality_order_material m
+                    JOIN   qms_arrival_item ai ON ai.arrival_item_id = m.arrival_item_id
+                    WHERE  m.quality_order_id IN @ids
+                      AND  EXISTS (SELECT 1 FROM qms_sample s WHERE s.qo_material_id = m.qo_material_id AND s.is_deleted = 0)) t",
+                new { ids = chunk });
+        _out.WriteLine($"{cartons:N0} cartons on {orderIds.Length} orders; {data.PackWeights.Count} pack weights");
+        Assert.Equal(db, cartons);
+    }
+
+    [Fact]
+    public async Task Pending_containers_match_the_dashboard()
+    {
+        TestAuthHandler.Role = RoleCodes.Admin;
+        var client = _factory.CreateClient();
+        var res = await client.GetAsync($"/DefectReports/Pending?from={From:yyyy-MM-dd}&to={To:yyyy-MM-dd}");
+        Assert.Equal(HttpStatusCode.OK, res.StatusCode);
+        var rows = System.Text.Json.JsonDocument.Parse(await res.Content.ReadAsStringAsync()).RootElement;
+
+        using var scope = _factory.Services.CreateScope();
+        var vm = await scope.ServiceProvider.GetRequiredService<IDashboardService>().GetSummaryAsync(
+            new SharbatlyQMS.Web.ViewModels.DashboardFilter
+            {
+                Period = SharbatlyQMS.Web.ViewModels.DashboardFilter.Periods.Custom, From = From, To = To
+            }, PlantScope.All, CancellationToken.None);
+        _out.WriteLine($"{rows.GetArrayLength()} pending containers");
+        Assert.Equal(vm.Commitment.Sum(x => x.Outstanding), rows.GetArrayLength());
+    }
+
+    private static SharbatlyQMS.Web.Services.DefectReportExportRequest SampleExport(string format) => new()
+    {
+        Format = format, Title = "Defects per branch", Tab = "Per branch & defect", Hint = "One row per branch.",
+        Period = "Received 2026-09-01 to 2026-10-25", Filters = new() { "Major category: Apples" },
+        Kpis = new() { new() { "Orders", "120" }, new() { "Cartons (PO qty)", "45,000" } },
+        RowLabel = "Branch / sub-major",
+        Columns = new()
+        {
+            new() { Group = "Major", Color = "#b02a37", Label = "Bruising", Kind = "defect" },
+            new() { Group = "Major", Color = "#b02a37", Label = "Major total", Kind = "cattot" },
+            new() { Group = "Minor", Color = "#ffc107", Label = "Russeting", Kind = "defect" },
+            new() { Group = "Minor", Color = "#ffc107", Label = "Minor total", Kind = "cattot" },
+            new() { Label = "All defects", Kind = "all" },
+            new() { Label = "Cartons (PO qty)", Kind = "cartons" },
+            new() { Label = "W43 vs W42", Kind = "trend" }
+        },
+        Rows = new()
+        {
+            new() { Label = "Jeddah (JD01)", Level = "grp", Values = new() { 2.5m, 2.5m, 0.4m, 0.4m, 2.9m, 12000m, 0.3m }, Trends = new() { null, null, null, null, null, null, null } },
+            new() { Label = "Apples Royal Gala", Level = "child", Indent = 1, Values = new() { 3.1m, 3.1m, null, null, 3.1m, 8000m, -0.2m }, Trends = new() { 0.4m, null, null, null, null, null, null } },
+            new() { Label = "Grand total", Level = "gt", Values = new() { 2.5m, 2.5m, 0.4m, 0.4m, 2.9m, 12000m, 0.3m }, Trends = new() { null, null, null, null, null, null, null } }
+        },
+        Generated = "2026-10-25 10:00"
+    };
+
+    [Fact]
+    public void The_excel_export_has_headings_and_numeric_cells()
+    {
+        var bytes = SharbatlyQMS.Web.Services.DefectReportExporter.Excel(SampleExport("xlsx"));
+        using var wb = new ClosedXML.Excel.XLWorkbook(new MemoryStream(bytes));
+        var ws = wb.Worksheets.First();
+        Assert.Contains("Defects per branch", ws.Cell(1, 1).GetString());
+        Assert.Contains("2026-09-01", ws.Cell(2, 1).GetString());
+        var label = ws.CellsUsed().First(c => c.GetString() == "Apples Royal Gala");
+        var bruising = ws.Cell(label.Address.RowNumber, 2);
+        Assert.Equal(ClosedXML.Excel.XLDataType.Number, bruising.DataType);
+        Assert.Equal(3.1, bruising.GetDouble(), 3);
+    }
+
+    [Fact]
+    public void The_pdf_export_renders()
+    {
+        var bytes = SharbatlyQMS.Web.Services.DefectReportExporter.Pdf(SampleExport("pdf"));
+        Assert.True(bytes.Length > 1000);
+        Assert.Equal("%PDF", System.Text.Encoding.ASCII.GetString(bytes, 0, 4));
     }
 
     /// <summary>The dataset's totals equal the database's, for finished live orders in the window.</summary>
