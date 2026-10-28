@@ -12,6 +12,11 @@
     // panel filters -- otherwise a bookmarked link shows a short list with no
     // visible reason for it.
     var panelOpen = f.AnyPanelFilter;
+    // The envelope (e-mail the report to the supplier) is its own grant.
+    var canSend   = Perms.Can(Perm.Qo.SendToSupplier);
+    var urlPrepare = Url.Action("PrepareSendFromQo", "Reports");
+    var urlSend    = Url.Action("SendFromQo", "Reports");
+    var urlSave    = Url.Action("SaveSupplierEmailFromQo", "Reports");
     string D(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
 
     // Server-side paging. The list is ~2,000 orders; rendering all of them so
@@ -487,6 +492,23 @@
                                    title="Download Quality Order PDF report">
                                     <i class="bi bi-file-earmark-pdf"></i>
                                 </a>
+                                @* Red envelope, green once the report has been e-mailed to
+                                   the supplier; enabled only for finished orders. The span
+                                   carries the tooltip because a disabled button shows none. *@
+                                @if (canSend)
+                                {
+                                    <span class="d-inline-block ms-1" title="@q.SendReportTitle">
+                                        <button type="button"
+                                                class="btn btn-sm @(q.ReportSentAt.HasValue ? "btn-outline-success" : "btn-outline-danger")"
+                                                data-bs-toggle="modal" data-bs-target="#sendReportModal"
+                                                data-qo-id="@q.QualityOrderId" data-url-prepare="@urlPrepare"
+                                                data-url-send="@urlSend" data-url-save="@urlSave"
+                                                aria-label="@q.SendReportTitle"
+                                                disabled="@(!q.CanSendReport)">
+                                            <i class="bi @(q.ReportSentAt.HasValue ? "bi-envelope-check-fill" : "bi-envelope-fill")"></i>
+                                        </button>
+                                    </span>
+                                }
                             </td>
                         </tr>
                     }
@@ -558,8 +580,17 @@
     }
 </div>
 
+@if (canSend)
+{
+    <partial name="~/Views/QualityOrders/_SendReportModal.cshtml" />
+}
+
 @section Scripts {
     <script src="~/js/list-filter-memory.js" asp-append-version="true"></script>
+    @if (canSend)
+    {
+        <script src="~/js/send-report.js" asp-append-version="true"></script>
+    }
     @* Wires the "rows per page" select; page links are plain <a> reloads. *@
     <script src="~/js/list-pager.js" asp-append-version="true"></script>
 }

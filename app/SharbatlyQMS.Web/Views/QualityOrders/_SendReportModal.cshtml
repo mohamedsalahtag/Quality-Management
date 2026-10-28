@@ -1,0 +1,95 @@
+@* The "Send report to supplier" dialog, shared by the Claims panel, the
+   Quality Order Details page and the Quality Orders list. Which order it sends
+   and which endpoints it calls come from the button that opened it
+   (data-qo-id / data-url-*), so one copy serves every row of the list.
+   Behaviour: wwwroot/js/send-report.js. *@
+<div class="modal fade" id="sendReportModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title"><i class="bi bi-envelope-paper me-1"></i>@Loc["Send report to supplier"]</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                @* Its own token: the dialog also lives on the Quality Orders
+                   list, which has no other form to borrow one from. *@
+                <span id="srm-token" hidden>@Html.AntiForgeryToken()</span>
+                <div id="srm-load" class="text-center py-4 text-muted">
+                    <div class="spinner-border"></div>
+                    <div class="small mt-2">@Loc["Preparing email…"]</div>
+                </div>
+                <form id="srm-form" class="d-none">
+                    <div id="srm-last" class="alert alert-success small d-none">
+                        <i class="bi bi-envelope-check me-1"></i><span id="srm-last-text"></span>
+                    </div>
+                    @* Three states, one banner slot: no address on file (warn),
+                       address remembered in QMS (info), address from SAP (info). *@
+                    <div id="srm-no-email" class="alert alert-warning small d-none">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        No e-mail address is on file for <strong id="srm-supplier-a">@Loc["this supplier"]</strong>.
+                        SAP's vendor master does not carry supplier e-mail addresses, so QMS keeps its own.
+                        Type the address below and tick <em>@Loc["Remember"]</em> to save it for next time.
+                    </div>
+                    <div id="srm-email-qms" class="alert alert-info small d-none">
+                        <i class="bi bi-bookmark-check me-1"></i>
+                        Using the address saved in QMS for <strong id="srm-supplier-b">@Loc["this supplier"]</strong>.
+                        Editing it below and leaving <em>@Loc["Remember"]</em> ticked updates it.
+                    </div>
+                    <div id="srm-email-sap" class="alert alert-info small d-none">
+                        <i class="bi bi-database-check me-1"></i>
+                        @Loc["Address taken from the SAP vendor master."]
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">@Loc["To *"]</label>
+                        <input id="srm-to" name="to" class="form-control" placeholder="supplier@example.com" required />
+                        <div class="form-text">@Loc["Comma- or semicolon-separated for multiple recipients."]</div>
+                        <div class="form-check mt-1">
+                            <input class="form-check-input" type="checkbox" id="srm-remember" checked />
+                            <label class="form-check-label small" for="srm-remember">
+                                @Loc["Remember the first address for this supplier"]
+                                <span class="text-muted">@Loc["(reused next time; CC is never saved)"]</span>
+                            </label>
+                        </div>
+                    </div>
+                    @* Read-only: the send path applies these whatever the box
+                       below says, so showing them as editable would lie. *@
+                    <div class="mb-2 d-none" id="srm-alwayscc-wrap">
+                        <label class="form-label">@Loc["Always CC"]</label>
+                        <div class="form-control bg-body-secondary" id="srm-alwayscc"></div>
+                        <div class="form-text">Set in Parameters &rarr; Mail Template. Copied on every supplier report.</div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">@Loc["CC"]</label>
+                        <input id="srm-cc" name="cc" class="form-control" placeholder='@Loc["optional, comma-separated"]' />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">@Loc["Subject *"]</label>
+                        <input id="srm-subject" name="subject" class="form-control" required />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label">@Loc["Body *"]</label>
+                        <textarea id="srm-body" name="body" class="form-control" rows="8" required></textarea>
+                        <div class="form-text">@Loc["Plain text. The PDF report is attached automatically."]</div>
+                    </div>
+                    <div class="small text-muted mb-2"><i class="bi bi-paperclip me-1"></i><span id="srm-filename">@Loc["report.pdf"]</span> (generated when you press Send)</div>
+
+                    @* Documents already on the order or its arrival. Offered
+                       here so a packing list or certificate can go with the
+                       report without leaving the dialog to find it. *@
+                    <div id="srm-docs-wrap" class="d-none">
+                        <label class="form-label mb-1">@Loc["Also attach"]</label>
+                        <div id="srm-docs" class="border rounded p-2" style="max-height:12rem;overflow:auto"></div>
+                        <div class="form-text d-flex justify-content-between">
+                            <span>@Loc["From this quality order and its arrival."]</span>
+                            <span id="srm-docs-total" class="text-muted"></span>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="button" class="btn btn-info" id="srm-send"><i class="bi bi-send me-1"></i>@Loc["Send"]</button>
+            </div>
+        </div>
+    </div>
+</div>

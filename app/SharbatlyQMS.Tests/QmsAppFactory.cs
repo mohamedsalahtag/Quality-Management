@@ -54,6 +54,13 @@ public class QmsAppFactory : WebApplicationFactory<Program>
             foreach (var d in services.Where(s => s.ServiceType == typeof(IHostedService)).ToList())
                 services.Remove(d);
 
+            // Never send real mail from a test run: the supplier-report tests
+            // exercise the success path, which would e-mail a real supplier.
+            // Sends are recorded instead, for the tests to inspect.
+            foreach (var d in services.Where(s => s.ServiceType == typeof(SharbatlyQMS.Web.Services.IEmailService)).ToList())
+                services.Remove(d);
+            services.AddSingleton<SharbatlyQMS.Web.Services.IEmailService>(RecordingEmailService.Instance);
+
             services.AddAuthentication(o =>
             {
                 o.DefaultAuthenticateScheme = TestAuthHandler.Scheme;

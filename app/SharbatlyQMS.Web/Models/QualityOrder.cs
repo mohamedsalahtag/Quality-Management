@@ -62,6 +62,26 @@ public class QualityOrder
     /// </summary>
     public bool IsFrozen       => IsSuperseded;
 
+    // ---- Latest e-mail of the report to the supplier (M41 qms_qo_report_send) ----
+    public DateTime? ReportSentAt { get; set; }   // UTC
+    public string?   ReportSentBy { get; set; }
+    public string?   ReportSentTo { get; set; }
+
+    /// <summary>The report can be e-mailed to the supplier: finished, and not a
+    /// historical (archived) or superseded copy. The same three gates the send
+    /// endpoints enforce, so a button and the server cannot disagree.</summary>
+    public bool CanSendReport => StatusCode == QualityOrderStatus.Closed && !IsArchived && !IsFrozen;
+
+    /// <summary>Tooltip for the envelope button: why it is disabled, or when
+    /// the report last went out. Shared by the list, Details and Claims.</summary>
+    public string SendReportTitle =>
+        IsFrozen     ? "This inspection was superseded by a reinspection; send the reinspection's report instead."
+        : IsArchived ? "Archived orders are kept as a historical record; their report cannot be sent."
+        : StatusCode != QualityOrderStatus.Closed ? "Available once the inspection is finished."
+        : ReportSentAt is { } at
+            ? $"Sent to {ReportSentTo} by {ReportSentBy} on {DateTime.SpecifyKind(at, DateTimeKind.Utc).ToLocalTime():yyyy-MM-dd HH:mm}. Click to send again."
+            : "Send the report to the supplier";
+
     /// <summary>
     /// Whether a reinspection may be raised against this order. The view hides
     /// the button on this, and the service re-checks every clause inside its

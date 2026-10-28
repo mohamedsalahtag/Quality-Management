@@ -244,6 +244,11 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         // The Summary section we added only renders in claim context with data.
         Assert.Contains("qc-summary", html);
         Assert.Contains("Summary", html, StringComparison.OrdinalIgnoreCase);
+        // The shared send dialog renders on the Claims page too. It is looked up
+        // by full path: this page renders QualityOrders/Details from the
+        // ClaimManagement controller, where a bare partial name is not found
+        // and the whole page failed with a 500.
+        Assert.Contains("id=\"sendReportModal\"", html);
     }
 
     /// <summary>

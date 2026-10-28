@@ -218,6 +218,8 @@ public static class ActionCodes
     /// the container inspected again. Written against the ORIGINAL order; the
     /// reinspection itself is audited as Created.</summary>
     public const string Reinspected  = "Reinspected";
+    /// <summary>The quality report was e-mailed to the supplier (M41 send log).</summary>
+    public const string ReportSent         = "ReportSent";
     public const string Cancelled          = "Cancelled";
 
     // Claim transitions

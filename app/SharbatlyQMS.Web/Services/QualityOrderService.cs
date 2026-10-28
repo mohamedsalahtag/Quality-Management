@@ -53,9 +53,18 @@ public class QualityOrderService : IQualityOrderService
                a.ebeln              Ebeln,
                a.vendor_name        VendorName,
                a.plant              Plant,
-               a.arrival_no         ArrivalNo
+               a.arrival_no         ArrivalNo,
+               rs.sent_at           ReportSentAt,
+               rs.sent_by           ReportSentBy,
+               rs.to_addresses      ReportSentTo
         FROM   qms_quality_order qo
-        LEFT   JOIN qms_arrival  a ON a.arrival_id = qo.arrival_id";
+        LEFT   JOIN qms_arrival  a ON a.arrival_id = qo.arrival_id
+        -- The latest e-mail of the report to the supplier (M41): drives the
+        -- red / green envelope on the list and Details.
+        OUTER  APPLY (SELECT TOP 1 s.sent_at, s.sent_by, s.to_addresses
+                      FROM   qms_qo_report_send s
+                      WHERE  s.quality_order_id = qo.quality_order_id
+                      ORDER  BY s.sent_at DESC, s.send_id DESC) rs";
 
     // Shared WHERE for the list. Kept as a constant so the header query and the
     // materials roll-up query (below) filter to exactly the same set of QOs --

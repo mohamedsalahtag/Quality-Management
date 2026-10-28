@@ -213,6 +213,14 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-10-28 (Send report to supplier from Quality Orders)
+
+- **Envelope button** after the PDF button on every **Quality Orders list** row and on **Quality Order Details**: red envelope, **green once the report has been e-mailed** (tooltip "Sent to … by … on …"; click again to resend). Enabled only when the order can be sent — finished, not archived, not superseded (`QualityOrder.CanSendReport`, the same gates the endpoints enforce).
+- **Own permission** `QualityOrders.Details.SendToSupplier` ("E-mail the quality report to the supplier from Quality Orders"), **Admin by default**; grant it to other roles in Roles & Permissions. Users without it see no envelope. The Claims page keeps `QualityOrders.Details.SendReport` and its own endpoints, and its button now also turns green.
+- **Send log** `qms_qo_report_send` (M41 / V56, applied 2026-10-28): one row per successful send (who, when, to, cc, attachment count) + an audit entry `ReportSent`. `QoSelect` reads the latest send onto every order (`ReportSentAt/By/To`).
+- **One dialog, one send path:** the modal is the partial `Views/QualityOrders/_SendReportModal.cshtml` with `wwwroot/js/send-report.js`; the button that opens it supplies the order id and endpoints (`data-qo-id`, `data-url-prepare/-send/-save`). `ReportsController` routes the Claims endpoints (`PrepareSendQualityReport`, `SendQualityReport`, `SaveSupplierEmail`) and the new ones (`PrepareSendFromQo`, `SendFromQo`, `SaveSupplierEmailFromQo`) through the same private `PrepareSendCore` / `SendCore` / `SaveSupplierEmailCore`.
+- **Test host never sends mail:** `QmsAppFactory` replaces `IEmailService` with `RecordingEmailService`.
+
 ### 2026-10-25b (incident: every PDF failed after the deploy restart)
 
 - **Cause:** QuestPDF searches `FontDiscoveryPaths` for fonts on first use, and by default that includes the whole application folder. The deploy folder's `App_Data` (uploads + report photo cache) had grown to ~147,000 files, past QuestPDF's 100,000-file limit, so `FontManager` failed to initialise and every PDF (QC report, preview, arrival checklist) returned an error from the 13:18 restart until the 14:45 fix. **Fix:** `Program.cs` limits font discovery to `LatoFont` and `C:\Windows\Fonts`; a test guards it.

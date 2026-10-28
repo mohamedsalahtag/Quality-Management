@@ -66,6 +66,9 @@ public static class Perm
         public const string DeleteSample   = Screens.QoDetails + ".DeleteSample";
         public const string Pdf            = Screens.QoDetails + ".Pdf";
         public const string SendReport     = Screens.QoDetails + ".SendReport";
+        /// <summary>The envelope button on the Quality Orders list and Details:
+        /// a separate grant from the Claims page's SendReport, Admin-only by default.</summary>
+        public const string SendToSupplier = Screens.QoDetails + ".SendToSupplier";
     }
 
     public static class Claims

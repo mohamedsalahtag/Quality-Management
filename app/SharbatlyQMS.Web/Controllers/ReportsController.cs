@@ -135,7 +135,16 @@ public class ReportsController : Controller
     /// </summary>
     [HttpGet]
     [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier")]
-    public async Task<IActionResult> PrepareSendQualityReport(long id)
+    public Task<IActionResult> PrepareSendQualityReport(long id) => PrepareSendCore(id);
+
+    /// <summary>The same dialog opened from the envelope button on the Quality
+    /// Orders list and Details. A separate grant from the Claims page's, so the
+    /// two can be given to different roles; the work is identical.</summary>
+    [HttpGet]
+    [RequirePermission(Perm.Qo.SendToSupplier, Seed.AdminOnly, "E-mail the quality report to the supplier from Quality Orders")]
+    public Task<IActionResult> PrepareSendFromQo(long id) => PrepareSendCore(id);
+
+    private async Task<IActionResult> PrepareSendCore(long id)
     {
         var qo = await _qos.GetAsync(id);
         if (qo == null) return NotFound();
@@ -191,6 +200,13 @@ public class ReportsController : Controller
             subject       = Substitute(template.Subject),
             body          = Substitute(template.Body),
             fileName      = $"{qo.QualityOrderNo}-{DateTime.UtcNow:yyyyMMdd-HHmm}.pdf",
+            // The last time this report went out, so a resend is a decision
+            // rather than an accident.
+            lastSent      = qo.ReportSentAt == null ? null : new
+            {
+                at = DateTime.SpecifyKind(qo.ReportSentAt.Value, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+                by = qo.ReportSentBy, to = qo.ReportSentTo
+            },
             // Documents already on this order and on its arrival, so the sender
             // can add a packing list or certificate without leaving the dialog
             // to go and find them.
@@ -212,8 +228,18 @@ public class ReportsController : Controller
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier")]
-    public async Task<IActionResult> SendQualityReport(long id, string to, string? cc, string subject, string body,
+    public Task<IActionResult> SendQualityReport(long id, string to, string? cc, string subject, string body,
         long[]? documentIds = null, CancellationToken ct = default)
+        => SendCore(id, to, cc, subject, body, documentIds, ct);
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Qo.SendToSupplier, Seed.AdminOnly, "E-mail the quality report to the supplier from Quality Orders")]
+    public Task<IActionResult> SendFromQo(long id, string to, string? cc, string subject, string body,
+        long[]? documentIds = null, CancellationToken ct = default)
+        => SendCore(id, to, cc, subject, body, documentIds, ct);
+
+    private async Task<IActionResult> SendCore(long id, string to, string? cc, string subject, string body,
+        long[]? documentIds, CancellationToken ct)
     {
         var qo = await _qos.GetAsync(id);
         if (qo == null) return Json(new { ok = false, error = "Quality Order not found." });
@@ -297,8 +323,41 @@ public class ReportsController : Controller
         if (!ok) return Json(new { ok = false, error = error ?? "Send failed." });
         _log.LogInformation("QO {Qo} report emailed to {To} (cc={Cc}) with {Count} extra document(s): {Docs}",
             qo.QualityOrderNo, string.Join(",", toList), string.Join(",", ccList), picked.Count, string.Join(",", picked));
-        return Json(new { ok = true });
+
+        // Record the send (M41) so the list and Details can show it. The mail has
+        // already gone, so a failure here must not report the send as failed --
+        // it is logged and the envelope simply stays red.
+        var user   = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        var sentAt = DateTime.UtcNow;
+        var toText = Clip(string.Join(", ", toList), 1000);
+        try
+        {
+            using var c = new Microsoft.Data.SqlClient.SqlConnection(_config.GetConnectionString("Default"));
+            await c.OpenAsync(ct);
+            using var tx = c.BeginTransaction();
+            await Dapper.SqlMapper.ExecuteAsync(c, @"
+                INSERT INTO qms_qo_report_send (quality_order_id, sent_at, sent_by, to_addresses, cc_addresses, attachment_count)
+                VALUES (@id, @sentAt, @user, @toText, @ccText, @count)",
+                new { id = qo.QualityOrderId, sentAt, user, toText, ccText = Clip(string.Join(", ", ccList), 1000), count = attachments.Count }, tx);
+            await HttpContext.RequestServices.GetRequiredService<IAuditService>().WriteAsync(c, tx,
+                EntityTypes.QualityOrder, qo.QualityOrderId, ActionCodes.ReportSent, null,
+                new { to = toList, cc = ccList, documents = picked }, user);
+            tx.Commit();
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "QO {Qo}: report was sent but the send could not be recorded.", qo.QualityOrderNo);
+        }
+        return Json(new
+        {
+            ok = true,
+            sentAt = sentAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm"),
+            sentBy = user,
+            to = toText
+        });
     }
+
+    private static string Clip(string s, int max) => s.Length <= max ? s : s[..max];
 
     /// <summary>Total attachment budget for one supplier mail, matching the 25 MB
     /// Exchange accepts inbound by default. The report itself is now held under
@@ -333,7 +392,13 @@ public class ReportsController : Controller
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier")]
-    public async Task<IActionResult> SaveSupplierEmail(string vendorNo, string? email)
+    public Task<IActionResult> SaveSupplierEmail(string vendorNo, string? email) => SaveSupplierEmailCore(vendorNo, email);
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Qo.SendToSupplier, Seed.AdminOnly, "E-mail the quality report to the supplier from Quality Orders")]
+    public Task<IActionResult> SaveSupplierEmailFromQo(string vendorNo, string? email) => SaveSupplierEmailCore(vendorNo, email);
+
+    private async Task<IActionResult> SaveSupplierEmailCore(string vendorNo, string? email)
     {
         if (string.IsNullOrWhiteSpace(vendorNo))
             return Json(new { ok = false, error = "This arrival has no SAP supplier number, so an address cannot be stored against it." });

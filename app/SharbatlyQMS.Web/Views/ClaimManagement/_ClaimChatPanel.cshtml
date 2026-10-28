@@ -159,9 +159,17 @@
                scope). *@
             @if (Model.StatusCode == QualityOrderStatus.Closed && !isArchived)
             {
-                <button type="button" class="btn btn-info"
-                        data-bs-toggle="modal" data-bs-target="#sendReportModal">
-                    <i class="bi bi-envelope-paper me-1"></i>@Loc["Send report to supplier"]
+                @* Claims keep their own grant (Perm.Qo.SendReport) and endpoints;
+                   the shared dialog (_SendReportModal / send-report.js) reads
+                   them from these data attributes. Green once a report has gone. *@
+                <button type="button" class="btn @(Model.ReportSentAt.HasValue ? "btn-success" : "btn-info")"
+                        data-bs-toggle="modal" data-bs-target="#sendReportModal"
+                        title="@Model.SendReportTitle"
+                        data-qo-id="@Model.QualityOrderId"
+                        data-url-prepare="@Url.Action("PrepareSendQualityReport", "Reports")"
+                        data-url-send="@Url.Action("SendQualityReport", "Reports")"
+                        data-url-save="@Url.Action("SaveSupplierEmail", "Reports")">
+                    <i class="bi @(Model.ReportSentAt.HasValue ? "bi-envelope-check-fill" : "bi-envelope-paper") me-1"></i>@Loc["Send report to supplier"]
                 </button>
             }
             @if (isArchived)

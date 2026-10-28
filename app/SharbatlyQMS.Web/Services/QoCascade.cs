@@ -74,6 +74,9 @@ public static class QoCascade
         // qms_report_log FKs to quality_order, so a QO that ever produced a PDF
         // blocks the delete below without this.
         await c.ExecuteAsync("DELETE FROM qms_report_log WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
+        // Report e-mails sent to the supplier (M41). The FK cascades too; this
+        // keeps the list of what a delete removes in one readable place.
+        await c.ExecuteAsync("DELETE FROM qms_qo_report_send WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
 
         var matIds = (await c.QueryAsync<long>(
             "SELECT qo_material_id FROM qms_quality_order_material WHERE quality_order_id IN @qoIds",
