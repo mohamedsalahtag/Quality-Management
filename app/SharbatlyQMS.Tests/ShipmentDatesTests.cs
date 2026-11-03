@@ -121,4 +121,83 @@ public class ShipmentDatesTests
         d.InspectionDate = null;
         Assert.Null(d.TimeBarDays);                // no inspection yet
     }
+
+    // ---- Date checks on saving the arrival ------------------------------------
+
+    private static readonly DateTime Today = new(2026, 11, 3);
+    private static readonly DateTime Loading = new(2026, 9, 16);
+    private static readonly EnteredDates Nothing = new(null, null, null);
+
+    private static IReadOnlyList<string> Check(EnteredDates entered, EnteredDates? stored = null, int daysBeforeLoading = 1) =>
+        ShipmentDates.EnteredDateProblems(Loading, entered, stored ?? Nothing, Today, daysBeforeLoading);
+
+    [Fact]
+    public void The_mistyped_month_that_printed_68_transit_days_is_refused()
+    {
+        // QO-2026-004723: 23/11 and 25/11 typed for 23/10 and 25/10, on 1 Nov.
+        var problems = ShipmentDates.EnteredDateProblems(Loading,
+            new EnteredDates(new DateTime(2026, 11, 23), new DateTime(2026, 10, 31), new DateTime(2026, 11, 25)),
+            Nothing, new DateTime(2026, 11, 1), 1);
+        Assert.Contains(problems, p => p.Contains("Vessel Discharge Date 23/11/2026 is in the future"));
+        Assert.Contains(problems, p => p.Contains("Pull-out Date 25/11/2026 is in the future"));
+        Assert.Contains(problems, p => p.Contains("after the Unloading Date 31/10/2026"));
+
+        // And the corrected dates are accepted, giving the expected 37 days.
+        var discharge = new DateTime(2026, 10, 23);
+        Assert.Empty(ShipmentDates.EnteredDateProblems(Loading,
+            new EnteredDates(discharge, new DateTime(2026, 10, 31), new DateTime(2026, 10, 25)),
+            Nothing, new DateTime(2026, 11, 1), 1));
+        Assert.Equal((short)37, ShipmentDates.TransitDays(Loading, discharge, null));
+    }
+
+    [Fact]
+    public void Discharge_before_loading_follows_the_configured_days()
+    {
+        var oneDayBefore = new EnteredDates(new DateTime(2026, 9, 15), null, null);
+        var twoDaysBefore = new EnteredDates(new DateTime(2026, 9, 14), null, null);
+
+        // The default: SAP's sailing date can run a day behind the real discharge.
+        Assert.Empty(Check(oneDayBefore, daysBeforeLoading: 1));
+        Assert.Contains(Check(twoDaysBefore, daysBeforeLoading: 1),
+            p => p.Contains("more than 1 day(s) before the Loading Date 16/09/2026"));
+
+        // 0 is the strict setting; a wider one lets the two days through.
+        Assert.Contains(Check(oneDayBefore, daysBeforeLoading: 0),
+            p => p.Contains("is before the Loading Date 16/09/2026"));
+        Assert.Empty(Check(twoDaysBefore, daysBeforeLoading: 2));
+    }
+
+    [Fact]
+    public void Pull_out_before_discharge_is_refused()
+        => Assert.Contains(Check(new EnteredDates(new DateTime(2026, 10, 23), null, new DateTime(2026, 10, 22))),
+            p => p.Contains("before the Vessel Discharge Date"));
+
+    [Fact]
+    public void The_same_day_is_allowed_on_every_rule()
+    {
+        Assert.Empty(Check(new EnteredDates(Today, Today, Today)));
+        Assert.Empty(Check(new EnteredDates(Loading, null, null)));
+    }
+
+    [Fact]
+    public void Blank_dates_are_not_problems()
+    {
+        Assert.Empty(Check(Nothing));
+        Assert.Empty(Check(new EnteredDates(new DateTime(2026, 10, 23), null, null)));
+    }
+
+    [Fact]
+    public void A_bad_date_already_on_the_row_does_not_block_an_unrelated_save()
+    {
+        var old = new EnteredDates(new DateTime(2026, 11, 23), new DateTime(2026, 10, 31), new DateTime(2026, 11, 25));
+        Assert.Empty(Check(old, old));
+    }
+
+    [Fact]
+    public void Changing_unloading_is_checked_against_the_stored_discharge()
+    {
+        var old = new EnteredDates(new DateTime(2026, 10, 23), new DateTime(2026, 10, 31), null);
+        var entered = old with { Unloading = new DateTime(2026, 10, 20) };
+        Assert.Contains(Check(entered, old), p => p.Contains("after the Unloading Date 20/10/2026"));
+    }
 }

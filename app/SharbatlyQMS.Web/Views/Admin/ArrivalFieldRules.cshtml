@@ -55,6 +55,29 @@
         </div>
     }
 
+    <div class="card mb-3">
+        <div class="card-header bg-primary text-white">
+            <i class="bi bi-calendar-check me-1"></i>@Loc["Shipment date checks"]
+        </div>
+        <div class="card-body">
+            <label class="form-label fw-semibold" for="dischargeBeforeLoadingDays">
+                @Loc["Days a discharge date may be before the loading date"]
+            </label>
+            <input type="number" min="0" max="7" step="1" required class="form-control" style="max-width:7rem"
+                   id="dischargeBeforeLoadingDays" name="dischargeBeforeLoadingDays"
+                   value="@ViewBag.DischargeBeforeLoadingDays" disabled="@(!canEdit)" />
+            <div class="form-text">
+                @Loc["A vessel cannot discharge a container before it was loaded, so an earlier date is normally a typing mistake. But the loading date comes from SAP (Sailing Date), it can run a day or more behind the real date, and inspectors cannot correct it. This sets how far before the loading date a Vessel Discharge Date is still accepted when saving an arrival; anything earlier is refused."]
+            </div>
+            <ul class="form-text mb-0">
+                <li>@Loc["0 — never before the loading date (strictest)."]</li>
+                <li>@Loc["1 — one day before is accepted (default). Allowed range: 0 to 7."]</li>
+                <li>@Loc["Accepted dates still print 0 transit days, because transit is never shown as negative."]</li>
+                <li>@Loc["Applies only when the date is entered or changed; dates already saved are not rechecked."]</li>
+            </ul>
+        </div>
+    </div>
+
     @if (canEdit)
     {
         <button type="submit" class="btn btn-primary">

@@ -211,6 +211,13 @@ public class SettingsService : ISettingsService
         };
     }
 
+    public async Task<int> GetDischargeBeforeLoadingDaysAsync()
+        => Math.Clamp(ParseInt(await _db.GetConfigAsync(SettingKeys.DischargeBeforeLoadingDays), 1), 0, 7);
+
+    public async Task SaveDischargeBeforeLoadingDaysAsync(int days, int? updatedBy)
+        => await _db.SetConfigAsync(SettingKeys.DischargeBeforeLoadingDays,
+            Math.Clamp(days, 0, 7).ToString(CultureInfo.InvariantCulture), updatedBy);
+
     public async Task SaveAlertConfigAsync(AlertConfig cfg, int? updatedBy)
     {
         await _db.SetConfigAsync(SettingKeys.AlertStaleArrivalDays, cfg.StaleArrivalDays.ToString(CultureInfo.InvariantCulture), updatedBy);

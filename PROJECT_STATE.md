@@ -213,6 +213,13 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-11-03 (Shipment date checks on the arrival)
+- **Why:** QO-2026-004723 printed 68 transit days (should be 37) and a 0-day Time Bar because the inspector typed discharge 23/11 and pull-out 25/11 for 23/10 and 25/10. The report calculation was right; the input was unchecked.
+- **`ArrivalsController.SaveShipment` now refuses** (through `ShipmentDates.EnteredDateProblems`): discharge or pull-out in the future; discharge too far before loading; discharge after unloading; pull-out before discharge. Same day is always allowed, blanks are fine. Refused saves keep nothing and list every reason.
+- **Only dates being changed are checked**, so a bad date already on a row does not block an unrelated edit. Old rows are not corrected or rechecked: about 11 arrivals have discharge after inspection and need correcting by hand.
+- **Configurable:** Parameters → Arrival Field Rules → *Shipment date checks* → "Days a discharge date may be before the loading date" (`Shipment.DischargeBeforeLoadingDays`, default 1, range 0-7, audited). Default is 1 because 12 of the 13 saved rows with discharge before loading were exactly one day before SAP's sailing date, which inspectors cannot correct. No migration: an unset row reads as 1.
+- **Deliberately no rule for pull-out after unloading** (29 saved rows) or for a future unloading date: not requested.
+
 ### 2026-10-28 (Send report to supplier from Quality Orders)
 
 - **Envelope button** after the PDF button on every **Quality Orders list** row and on **Quality Order Details**: red envelope, **green once the report has been e-mailed** (tooltip "Sent to … by … on …"; click again to resend). Enabled only when the order can be sent — finished, not archived, not superseded (`QualityOrder.CanSendReport`, the same gates the endpoints enforce).

@@ -689,7 +689,7 @@ public class ArrivalsController : Controller
 
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Arrivals.SaveShipment, Seed.OperatorOrAbove, "Save shipment details")]
-    public async Task<IActionResult> SaveShipment(ShipmentSnapshot shipment)
+    public async Task<IActionResult> SaveShipment(ShipmentSnapshot shipment, [FromServices] ISettingsService settings)
     {
         if (await EnsureCanReadArrivalAsync(shipment.ArrivalId) is { } block) return block;
         var arrival = await _arrivals.GetAsync(shipment.ArrivalId);
@@ -713,6 +713,15 @@ public class ArrivalsController : Controller
         if (!editable("inspection_point"))  shipment.InspectionPoint = cur.InspectionPoint;
         if (!editable("joint_survey"))      shipment.JointSurvey     = cur.JointSurvey;
         if (!editable("time_bar_exceeded")) shipment.TimeBarExceeded = cur.TimeBarExceeded;
+        var dateProblems = ShipmentDates.EnteredDateProblems(cur.SailingDate,
+            new EnteredDates(shipment.DischargeDate, shipment.UnloadingDate, shipment.PullOutDate),
+            new EnteredDates(cur.DischargeDate, cur.UnloadingDate, cur.PullOutDate),
+            DateTime.Now, await settings.GetDischargeBeforeLoadingDaysAsync());
+        if (dateProblems.Count > 0)
+        {
+            TempData["Error"] = "Shipment details not saved. " + string.Join(" ", dateProblems);
+            return RedirectToAction(nameof(Details), new { id = shipment.ArrivalId });
+        }
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         await _arrivals.SaveShipmentAsync(shipment, user);
         TempData["Success"] = "Shipment details saved.";

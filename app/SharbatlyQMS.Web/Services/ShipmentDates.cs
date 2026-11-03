@@ -45,6 +45,9 @@ namespace SharbatlyQMS.Web.Services;
 ///   Both count to the INSPECTION DATE -- the local day the Quality Order was
 ///   opened -- not to the day QC was finished (2026-09-27, on request).
 /// </summary>
+/// <summary>The shipment dates the inspector types on the arrival.</summary>
+public readonly record struct EnteredDates(DateTime? Discharge, DateTime? Unloading, DateTime? PullOut);
+
 public static class ShipmentDates
 {
     /// <summary>
@@ -86,6 +89,51 @@ public static class ShipmentDates
     /// </summary>
     public static int? TimeBarDays(DateTime? startDate, DateTime? endUtc) =>
         endUtc.HasValue ? DaysToInspection(startDate, ToLocal(endUtc.Value)) : null;
+
+    /// <summary>
+    /// What is wrong with the dates an inspector is saving on the arrival, as
+    /// messages ready to show; empty when they are acceptable. One mistyped month
+    /// (23/11 for 23/10) printed 68 transit days and a 0-day Time Bar on a report
+    /// that goes to the supplier, so these are refused at the door.
+    ///
+    /// A rule only fires when a date it reads is being CHANGED. Older rows already
+    /// break these rules, and someone correcting Joint Survey on one of them must
+    /// not be stopped by a date they did not touch. The same day is always allowed.
+    ///
+    /// <paramref name="daysAllowedBeforeLoading"/> comes from Arrival Field Rules.
+    /// SAP's sailing date can run behind the real discharge: 12 of the 13 saved
+    /// rows with a discharge before loading were exactly one day before it, and
+    /// the inspector cannot correct the SAP date, so a strict rule would leave
+    /// them no true date to enter.
+    /// </summary>
+    public static IReadOnlyList<string> EnteredDateProblems(
+        DateTime? loading, EnteredDates entered, EnteredDates stored, DateTime today,
+        int daysAllowedBeforeLoading)
+    {
+        var discharge = entered.Discharge?.Date;
+        var unloading = entered.Unloading?.Date;
+        var pullOut   = entered.PullOut?.Date;
+        var dischargeChanged = discharge != stored.Discharge?.Date;
+        var unloadingChanged = unloading != stored.Unloading?.Date;
+        var pullOutChanged   = pullOut   != stored.PullOut?.Date;
+
+        var problems = new List<string>();
+        if (dischargeChanged && discharge > today.Date)
+            problems.Add($"Vessel Discharge Date {D(discharge)} is in the future.");
+        if (pullOutChanged && pullOut > today.Date)
+            problems.Add($"Pull-out Date {D(pullOut)} is in the future.");
+        if (dischargeChanged && discharge < loading?.Date.AddDays(-daysAllowedBeforeLoading))
+            problems.Add(daysAllowedBeforeLoading == 0
+                ? $"Vessel Discharge Date {D(discharge)} is before the Loading Date {D(loading)}."
+                : $"Vessel Discharge Date {D(discharge)} is more than {daysAllowedBeforeLoading} day(s) before the Loading Date {D(loading)}.");
+        if ((dischargeChanged || unloadingChanged) && discharge > unloading)
+            problems.Add($"Vessel Discharge Date {D(discharge)} is after the Unloading Date {D(unloading)}.");
+        if ((pullOutChanged || dischargeChanged) && pullOut < discharge)
+            problems.Add($"Pull-out Date {D(pullOut)} is before the Vessel Discharge Date {D(discharge)}.");
+        return problems;
+
+        static string D(DateTime? d) => d!.Value.ToString("dd/MM/yyyy", System.Globalization.CultureInfo.InvariantCulture);
+    }
 
     /// <summary>
     /// UTC-to-local for values read back from <c>datetime2</c> columns, which

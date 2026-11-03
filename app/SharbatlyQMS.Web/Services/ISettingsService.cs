@@ -37,6 +37,12 @@ public interface ISettingsService
     Task SaveTimeBarConfigAsync(TimeBarConfig cfg, int? updatedBy);
     Task SaveAlertConfigAsync(AlertConfig cfg, int? updatedBy);
 
+    // ---- Shipment date checks (Arrival Field Rules) ----
+    /// <summary>How many days before the loading date a discharge date is still
+    /// accepted. Default 1; clamped 0-7.</summary>
+    Task<int> GetDischargeBeforeLoadingDaysAsync();
+    Task SaveDischargeBeforeLoadingDaysAsync(int days, int? updatedBy);
+
     // ---- Report options (QO report) ----
     Task<ReportConfig> GetReportConfigAsync();
     Task SaveReportConfigAsync(ReportConfig cfg, int? updatedBy);
@@ -142,6 +148,8 @@ public static class SettingKeys
     public const string AlertDefectPctYellow  = "alert_defect_pct_yellow";
     // Disk-full alert: email admins when the uploads partition reaches this %.
     public const string AlertDiskFullPercent  = "alert_disk_full_percent";
+    // Shipment date checks: discharge may be this many days before loading.
+    public const string DischargeBeforeLoadingDays = "Shipment.DischargeBeforeLoadingDays";
 
     // Storage — configurable uploads folder + disk-alert bookkeeping.
     public const string StorageUploadsRoot       = "Storage.UploadsRoot";

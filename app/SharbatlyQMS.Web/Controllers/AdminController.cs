@@ -2169,12 +2169,13 @@ public class AdminController : Controller
         var rows = ArrivalFieldRegistry.All
             .Select(f => (Def: f, Policy: policies[f.Key]))
             .ToList();
+        ViewBag.DischargeBeforeLoadingDays = await _settings.GetDischargeBeforeLoadingDaysAsync();
         return View(rows);
     }
 
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Parameters.ArrivalFieldRulesEdit, Seed.ManagerOrAdmin, "Edit Arrival Field Rules")]
-    public async Task<IActionResult> SaveArrivalFieldRules(string[]? mandatory, string[]? editableWhenClosed)
+    public async Task<IActionResult> SaveArrivalFieldRules(string[]? mandatory, string[]? editableWhenClosed, int? dischargeBeforeLoadingDays)
     {
         var arrivals = HttpContext.RequestServices.GetRequiredService<IArrivalService>();
         var mand = new HashSet<string>(mandatory ?? Array.Empty<string>(), StringComparer.OrdinalIgnoreCase);
@@ -2189,7 +2190,13 @@ public class AdminController : Controller
         }).ToList();
         var user = User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value ?? "system";
         await arrivals.SaveArrivalFieldPoliciesAsync(policies, user);
-        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated, null, new { section = "Arrival Field Rules" });
+        var oldDays = await _settings.GetDischargeBeforeLoadingDaysAsync();
+        if (dischargeBeforeLoadingDays.HasValue)
+            await _settings.SaveDischargeBeforeLoadingDaysAsync(dischargeBeforeLoadingDays.Value, GetCurrentUserId());
+        var newDays = await _settings.GetDischargeBeforeLoadingDaysAsync();
+        await AuditAdminAsync(EntityTypes.Configuration, 0, ActionCodes.Updated,
+            new { section = "Arrival Field Rules", dischargeBeforeLoadingDays = oldDays },
+            new { section = "Arrival Field Rules", dischargeBeforeLoadingDays = newDays });
         TempData["Success"] = "Arrival field rules saved.";
         return RedirectToAction(nameof(ArrivalFieldRules));
     }
