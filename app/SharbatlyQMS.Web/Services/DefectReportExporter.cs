@@ -26,6 +26,8 @@ public class DefectReportExportRequest
     public List<DefectReportExportRow> Rows { get; set; } = new();
     /// <summary>data:image/png;base64,... or null.</summary>
     public string? Chart { get; set; }
+    /// <summary>Further charts as data URLs: the per-week report's sub-major trends.</summary>
+    public List<string> Charts { get; set; } = new();
     public string? Generated { get; set; }
 }
 
@@ -50,12 +52,14 @@ public class DefectReportExportRow
 
 public static class DefectReportExporter
 {
-    private const int MaxRows = 5000, MaxColumns = 400;
+    private const int MaxRows = 5000, MaxColumns = 400, MaxCharts = 20;
 
     public static void Validate(DefectReportExportRequest r)
     {
         if (r.Rows.Count > MaxRows || r.Columns.Count > MaxColumns)
             throw new ArgumentException("The report is too large to export; narrow the filters.");
+        if (r.Charts.Count > MaxCharts)
+            throw new ArgumentException("Too many charts to export; narrow the filters.");
     }
 
     private static byte[]? ChartBytes(string? dataUrl)
@@ -210,6 +214,24 @@ public static class DefectReportExporter
         ws.PageSetup.PageOrientation = XLPageOrientation.Landscape;
         ws.PageSetup.FitToPages(1, 0);
 
+        // The trend charts on a sheet of their own, two across, so the table above
+        // does not start twenty screens down.
+        var extra = r.Charts.Select(ChartBytes).Where(b => b != null).ToList();
+        if (extra.Count > 0)
+        {
+            var cs = wb.Worksheets.Add("Trend charts");
+            cs.Cell(1, 1).Value = $"Trend charts — {r.Period}";
+            cs.Cell(1, 1).Style.Font.SetBold().Font.SetFontSize(13);
+            for (var i = 0; i < extra.Count; i++)
+            {
+                using var ms = new MemoryStream(extra[i]!);
+                var pic = cs.AddPicture(ms).MoveTo(cs.Cell(3 + i / 2 * 18, i % 2 == 0 ? 1 : 11));
+                pic.Width = 620; pic.Height = 330;
+            }
+            cs.PageSetup.PageOrientation = XLPageOrientation.Landscape;
+            cs.PageSetup.FitToPages(1, 0);
+        }
+
         using var outStream = new MemoryStream();
         wb.SaveAs(outStream);
         return outStream.ToArray();
@@ -239,6 +261,7 @@ public static class DefectReportExporter
     public static byte[] Pdf(DefectReportExportRequest r)
     {
         var chart = ChartBytes(r.Chart);
+        var extra = r.Charts.Select(ChartBytes).Where(b => b != null).Select(b => b!).ToList();
         var cols = r.Columns.Count;
         // Shrink the type as the table widens so every column fits a landscape page.
         float size = cols > 40 ? 4.5f : cols > 28 ? 5.5f : cols > 18 ? 6.5f : 7.5f;
@@ -342,6 +365,25 @@ public static class DefectReportExporter
                 col.Item().Text("Defect % = defective units ÷ inspected units; a category total adds up its defects. " +
                                 "Week cells marked + rose and − fell on the week before. Finished inspections only, dated by receive date.")
                    .FontSize(6.5f).FontColor("#6c757d");
+
+                if (extra.Count > 0)
+                {
+                    col.Item().PageBreak();
+                    col.Item().Text("Trend charts").Bold().FontSize(11);
+                    for (var i = 0; i < extra.Count; i += 2)
+                    {
+                        var left = extra[i];
+                        var right = i + 1 < extra.Count ? extra[i + 1] : null;
+                        // Two rows to a landscape page.
+                        col.Item().Height(210).Row(rw =>
+                        {
+                            rw.Spacing(6);
+                            rw.RelativeItem().Image(left).FitArea();
+                            if (right != null) rw.RelativeItem().Image(right).FitArea();
+                            else rw.RelativeItem();
+                        });
+                    }
+                }
             });
 
             page.Footer().AlignCenter().Text($"Generated {r.Generated} from Sharbatly QMS").FontSize(6.5f).FontColor("#6c757d");

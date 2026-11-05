@@ -213,6 +213,13 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-11-05 (Report branch fix; sent filter; Defect reports round 3)
+- **Wrong branch on the QC report:** the header's Branch was the creator's account plant, falling back to the order's. 485 of 4,263 finished orders printed another branch (QO-2026-004614: account AH01, order MD01, printed Al Hasa). Now always the order's plant (`QualityReportData.Branch`). PDFs are rebuilt on demand, so old orders correct themselves; mail already sent is not changed.
+- **Plant check across the app:** every other screen reads `qms_arrival.plant` or `COALESCE(override_plant, plant)`. 401 arrivals differ from SAP's plant: 398 are Pending-page plant moves (correct), 3 are August containers with two SAP rows. `defect-reports.js` no longer hard-codes plant names; they come from the code directory (`PlantNames`).
+- **Quality Orders filter "Sent to supplier":** Sent = at least one `qms_qo_report_send` row. Not sent = finished, unarchived, no send row (the red envelopes); orders still being inspected are in neither.
+- **Send dialog:** every document starts ticked. The 25 MB limit on the server still refuses an oversized mail with its message.
+- **Defect reports:** new tab *Per supplier comparison* (sub-major down the side, defects underneath, suppliers across, top 15 by inspected units unless chosen in the Supplier filter). Per sub-major has varieties as second level. Per branch & defect is now sub-major first with branches underneath. Per week adds an all-sub-majors trend chart plus one per sub-major (top 12 by inspected units), also in the exports. All filters are multi-select, including the drill-down workbook (`DefectDrillRequest` takes lists). Keep the row keys in `defect-reports.js` and `DefectReportService.InRow` in step.
+
 ### 2026-11-03 (Shipment date checks on the arrival)
 - **Why:** QO-2026-004723 printed 68 transit days (should be 37) and a 0-day Time Bar because the inspector typed discharge 23/11 and pull-out 25/11 for 23/10 and 25/10. The report calculation was right; the input was unchecked.
 - **`ArrivalsController.SaveShipment` now refuses** (through `ShipmentDates.EnteredDateProblems`): discharge or pull-out in the future; discharge too far before loading; discharge after unloading; pull-out before discharge. Same day is always allowed, blanks are fine. Refused saves keep nothing and list every reason.

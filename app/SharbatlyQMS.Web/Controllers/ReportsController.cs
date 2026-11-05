@@ -527,16 +527,15 @@ public class ReportsController : Controller
         var reportCfg = await _settings.GetReportConfigAsync();
         data.LayoutVersion = reportCfg.LayoutVersion;
 
-        // Who created this quality order, with their branch — shown in the report
-        // header. Branch is the creator's own plant when set, otherwise the
-        // order's plant.
+        // Who created this quality order, for the report header. The branch beside
+        // it is the order's own plant, never the creator's: people inspect at
+        // plants other than the one on their account.
         if (!string.IsNullOrWhiteSpace(qo.CreatedBy))
         {
             var creator = await _db.GetUserByUsernameAsync(qo.CreatedBy);
             data.CreatedByName = string.IsNullOrWhiteSpace(creator?.FullName) ? qo.CreatedBy : creator!.FullName;
-            var branchCode = !string.IsNullOrWhiteSpace(creator?.PlantCode) ? creator!.PlantCode : qo.Plant;
-            data.CreatedByBranch = string.IsNullOrWhiteSpace(branchCode) ? null : _codes.PlantDisplay(branchCode);
         }
+        data.Branch = string.IsNullOrWhiteSpace(qo.Plant) ? null : _codes.PlantDisplay(qo.Plant);
 
         var arrival = await _arrivals.GetAsync(qo.ArrivalId);
         if (arrival != null) data.Arrival = arrival;

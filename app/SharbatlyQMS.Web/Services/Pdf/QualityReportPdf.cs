@@ -137,10 +137,10 @@ public static class QualityReportPdf
                 {
                     t.Span("Created by  ").FontColor(Colors.Grey.Darken1);
                     t.Span(d.CreatedByName!).Bold();
-                    if (!string.IsNullOrWhiteSpace(d.CreatedByBranch))
+                    if (!string.IsNullOrWhiteSpace(d.Branch))
                     {
                         t.Span("  ·  Branch  ").FontColor(Colors.Grey.Darken1);
-                        t.Span(d.CreatedByBranch!).Bold();
+                        t.Span(d.Branch!).Bold();
                     }
                 });
             }

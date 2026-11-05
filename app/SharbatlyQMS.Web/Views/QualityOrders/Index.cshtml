@@ -50,6 +50,7 @@
         AddMany("storageLoc", f.StorageLoc);
         AddMany("openedBy", f.OpenedBy);
         Add("reinspection", f.Reinspection);
+        Add("sent", f.Sent);
         Add("from", D(f.From));           Add("to", D(f.To));
         q.Add($"page={pg}");
         q.Add($"pageSize={size}");
@@ -150,6 +151,12 @@
         "reinspections" => "reinspections",
         "all"           => "all, including superseded",
         _               => null
+    });
+    Active("Sent to supplier", f.Sent switch
+    {
+        "sent"    => "sent",
+        "notsent" => "finished, not sent",
+        _         => null
     });
     Active("From",        D(f.From));
     Active("To",          D(f.To));
@@ -321,6 +328,14 @@
                 @* The badges in the status cell mark these rows, but finding a
                    handful of them by eye in a list hundreds long is the whole
                    difficulty -- so they are filterable too. *@
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["Sent to supplier"]</label>
+                    <select name="sent" class="form-select form-select-sm">
+                        <option value="">@Loc["All"]</option>
+                        <option value="sent" selected="@(f.Sent == "sent")">@Loc["Sent"]</option>
+                        <option value="notsent" selected="@(f.Sent == "notsent")">@Loc["Not sent (finished orders)"]</option>
+                    </select>
+                </div>
                 <div class="col-6 col-md-2">
                     <label class="form-label small mb-1">@Loc["Reinspection"]</label>
                     <select name="reinspection" class="form-select form-select-sm">

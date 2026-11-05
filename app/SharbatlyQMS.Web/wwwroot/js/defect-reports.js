@@ -1,5 +1,5 @@
 // Reports -> Defect reports. Pivots the dataset from /DefectReports/Data in the
-// browser: five tabs, shared filters, a chart per tab, week-on-week trend
+// browser: six tabs, shared multi-select filters, charts, week-on-week trend
 // arrows and a drill panel listing the orders behind any number. Each tab is
 // built as a TABLE MODEL first; the on-screen table, the chart and the Excel /
 // PDF exports are all drawn from that one model, so they cannot disagree.
@@ -13,8 +13,7 @@
   const URL_QO = root.dataset.urlQo.replace(/\/0$/, "/"), URL_ARR = root.dataset.urlArrival.replace(/\/0$/, "/");
   const MAX_DAYS = parseInt(root.dataset.maxDays || "366", 10);
   const TOKEN = (document.querySelector("#drToken input[name=__RequestVerificationToken]") || {}).value || "";
-  const PLANT = { AH01: "Al Hasa", BH01: "Bahrain", BU01: "Buraidah", DB01: "UAE", DM01: "Dammam", JD01: "Jeddah", KH01: "Khamis Mushayt", MD01: "Medinah", MK01: "Makkah", RD01: "Riyadh", TB01: "Tabuk" };
-  const plantName = c => PLANT[c] ? `${PLANT[c]} (${c})` : (c || "(none)");
+  const plantName = c => { const n = D && D.plantNames && D.plantNames[c]; return n && n !== c ? `${n} (${c})` : (c || "(none)"); };
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? "").replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
   const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} } };
@@ -28,8 +27,8 @@
     cats = D.categories.map(c => c.nm);
     catColor = Object.fromEntries(D.categories.map(c => [c.nm, c.col || "#6c757d"]));
     defs = D.defects.map(([id, nm, ct, g, o]) => ({ id, nm, ct, g, o }));
-    units = D.units.map(([q, n, p, v, mj, sm, c, r, k, g, ns, sz, pw, ctn, uom], i) => ({
-      i, q, n, p: D.plants[p], v: D.suppliers[v], mj: D.majors[mj], sm: D.subs[sm], c: D.classes[c], r, k, g: D.groups[g],
+    units = D.units.map(([q, n, p, v, mj, sm, c, r, k, g, ns, sz, pw, ctn, uom, vr], i) => ({
+      i, q, n, p: D.plants[p], v: D.suppliers[v], mj: D.majors[mj], sm: D.subs[sm], c: D.classes[c], vr: D.varieties[vr], r, k, g: D.groups[g],
       ns, sz: +sz, pw: D.packWeights[pw], ctn: +ctn, uom: D.uoms[uom], wk: weekStart(r)
     }));
     factsBy = units.map(() => []);
@@ -58,16 +57,19 @@
   const weekRange = w => `Week ${isoWeek(w)}: Monday ${dm(w)} to Sunday ${dm(addDays(w, 6))}`;
 
   // ---------- state --------------------------------------------------------
-  const S = { plant: "", supplier: "", major: "", sub: "", cls: "", pw: "", cat: "", hide: true, tab: "week", bySub: true };
+  // Every filter holds a list of chosen values; empty means no filter.
+  const S = { plant: [], supplier: [], major: [], sub: [], cls: [], pw: [], cat: [], hide: true, tab: "week", bySub: true };
   const expanded = new Set();
   const TABS = [
     { id: "week",   label: "Per week",            title: "Defects per week", hint: "Defects down the side, ISO weeks (Monday to Sunday) across. Arrows compare each week with the week before." },
     { id: "class",  label: "Per defect & class",  title: "Defects per sub-major category and class", hint: "Each sub-major category with its classes underneath." },
-    { id: "branch", label: "Per branch & defect", title: "Defects per branch and sub-major category", hint: "One row per receiving branch; open a branch to see its sub-major categories." },
-    { id: "sub",    label: "Per sub-major",       title: "Defect categories per sub-major category", hint: "Category totals for every sub-major category." },
+    { id: "branch", label: "Per branch & defect", title: "Defects per sub-major category and branch", hint: "One row per sub-major category; open it to compare the receiving branches underneath." },
+    { id: "supplier", label: "Per supplier comparison", title: "Supplier comparison per sub-major category and defect", hint: "Suppliers side by side, read down each column. Open a sub-major category to see its defects." },
+    { id: "sub",    label: "Per sub-major",       title: "Defect categories per sub-major category and variety", hint: "Category totals for every sub-major category; open it to see its varieties." },
     { id: "major",  label: "Per major",           title: "Defect categories per major category", hint: "Category totals for every major category." }
   ];
-  const needsFruit = t => t === "week" || t === "class" || t === "branch";
+  const needsFruit = t => t === "week" || t === "class" || t === "branch" || t === "supplier";
+  const SUPPLIER_COLS = 15, TREND_CHARTS = 12;
 
   // ---------- filters ------------------------------------------------------
   const FILTERS = [
@@ -79,32 +81,53 @@
     { id: "fWeight", key: "pw", s: "pw", all: "All pack weights", name: "Pack weight", order: () => D.packWeights }
   ];
   function passes(u, skip) {
-    for (const f of FILTERS) if (S[f.s] && skip !== f.s && u[f.key] !== S[f.s]) return false;
+    for (const f of FILTERS) if (S[f.s].length && skip !== f.s && !S[f.s].includes(u[f.key])) return false;
     return true;
+  }
+  const CAT_FILTER = { id: "fCat", s: "cat", all: "All defect categories", name: "Defect category" };
+  const MS = [...FILTERS, CAT_FILTER];
+  const msText = f => v => f.label ? f.label(v) : v;
+  function msSummary(f) {
+    const btn = $(f.id + "-btn"), sel = S[f.s], text = msText(f);
+    btn.textContent = !sel.length ? f.all : sel.length === 1 ? text(sel[0]) : `${sel.length} selected`;
+    btn.title = sel.map(text).join(", ") || f.all;
+  }
+  function msMenu(f, values) {
+    const box = $(f.id), menu = box.querySelector(".dropdown-menu"), text = msText(f);
+    menu.innerHTML = `<div class="d-flex justify-content-between align-items-center mb-1"><span class="small text-muted">${esc(f.name)}</span><button type="button" class="btn btn-sm btn-link p-0" data-ms-clear>Clear</button></div>`
+      + (values.length > 8 ? `<input type="search" class="form-control form-control-sm my-1" data-ms-search placeholder="Search…" aria-label="Search ${esc(f.name)}" autocomplete="off">` : "")
+      + values.map((v, i) => `<div class="form-check" data-ms-row><input class="form-check-input" type="checkbox" id="${f.id}-${i}" value="${esc(v)}"${S[f.s].includes(v) ? " checked" : ""}><label class="form-check-label small" for="${f.id}-${i}">${esc(text(v))}</label></div>`).join("")
+      + (values.length ? "" : `<div class="small text-muted fst-italic">Nothing to choose</div>`);
   }
   function refreshOptions() {
     // Each dropdown lists only what the OTHER filters leave, so it never offers an empty page.
-    for (const f of FILTERS) {
-      const have = new Set(units.filter(u => passes(u, f.s)).map(u => u[f.key]).filter(Boolean));
-      const values = f.order ? f.order().filter(v => have.has(v)) : [...have].sort((a, b) => a.localeCompare(b));
-      $(f.id).innerHTML = `<option value="">${esc(f.all)}</option>` + values.map(v => `<option value="${esc(v)}">${esc(f.label ? f.label(v) : v)}</option>`).join("");
-      $(f.id).value = values.includes(S[f.s]) ? S[f.s] : ""; S[f.s] = $(f.id).value;
+    // A menu that is open is left alone: rebuilding it under the pointer would
+    // lose the search text and the scroll position while someone is ticking.
+    for (const f of MS) {
+      const box = $(f.id);
+      if (!box.firstChild) box.innerHTML = `<button type="button" id="${f.id}-btn" class="btn btn-sm btn-outline-secondary dropdown-toggle w-100 text-start text-truncate" data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"></button><div class="dropdown-menu p-2 dr-ms-menu"></div>`;
+      let values;
+      if (f === CAT_FILTER) values = cats;
+      else {
+        const have = new Set(units.filter(u => passes(u, f.s)).map(u => u[f.key]).filter(Boolean));
+        values = f.order ? f.order().filter(v => have.has(v)) : [...have].sort((a, b) => a.localeCompare(b));
+      }
+      S[f.s] = S[f.s].filter(v => values.includes(v));
+      if (!box.querySelector(".dropdown-menu.show")) msMenu(f, values);
+      msSummary(f);
     }
-    $("fCat").innerHTML = `<option value="">All defect categories</option>` + cats.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("");
-    $("fCat").value = cats.includes(S.cat) ? S.cat : ""; S.cat = $("fCat").value;
   }
   function filterText() {
-    const bits = FILTERS.filter(f => S[f.s]).map(f => `${f.name}: ${f.label ? f.label(S[f.s]) : S[f.s]}`);
-    if (S.cat) bits.push(`Defect category: ${S.cat}`);
+    const bits = MS.filter(f => S[f.s].length).map(f => `${f.name}: ${S[f.s].map(msText(f)).join(", ")}`);
     return bits.length ? bits : ["No filters (everything in the period)"];
   }
+  const catOk = c => !S.cat.length || S.cat.includes(c);
 
   // ---------- engine -------------------------------------------------------
   // A cell is (row key, defect key). Defect keys: "N:<name>", "C:<category>", "T".
   // [defective units, inspected units]; the figure is 100 x units / inspected.
   function compute(unitKeys) {
     const cells = new Map(), used = new Set(), rowsSeen = new Set(), cartons = new Map();
-    const catOk = c => !S.cat || c === S.cat;
     const add = (rk, dk, a, b) => { const key = rk + CELL + dk; let x = cells.get(key); if (!x) { x = [0, 0]; cells.set(key, x); } x[0] += a; x[1] += b; };
     let n = 0, samples = 0, ctn = 0; const orders = new Set(), uom = {};
     for (const u of units) {
@@ -134,7 +157,7 @@
       const dk = key.split(CELL)[1]; if (!dk.startsWith("N:")) continue;
       const nm = dk.slice(2);
       for (const ct of cats) if (nameOrder[ct + "|" + nm] !== undefined) {
-        if (S.cat && ct !== S.cat) continue;
+        if (!catOk(ct)) continue;
         if (S.hide && !res.used.has(ct + "|" + nm)) continue;
         if (!present.has(ct)) present.set(ct, new Set());
         present.get(ct).add(nm);
@@ -145,7 +168,7 @@
   function catAxis(res) {
     const have = new Set();
     for (const key of res.cells.keys()) { const dk = key.split(CELL)[1]; if (dk.startsWith("C:")) have.add(dk.slice(2)); }
-    return cats.filter(c => have.has(c) && (!S.cat || c === S.cat));
+    return cats.filter(c => have.has(c) && catOk(c));
   }
   // The latest week in the filtered data and the one before it, for the trend.
   function lastTwoWeeks() {
@@ -188,7 +211,23 @@
     if (!axis.length) return null;
     const columns = weeks.map(w => ({ group: "", label: weekLabel(w), title: weekRange(w), kind: "week", wk: w }))
       .concat([{ group: "", label: "Whole period", kind: "all", wk: "__all" }]);
+    const { line, block, cartonsRow } = acrossHelpers(res, columns, axis);
     const rows = [];
+    rows.push(cartonsRow(""));
+    rows.push(...block("", null, null));
+    rows.push(line("All defects", null, "", "T", "gt"));
+    if (S.bySub && S.sub.length !== 1) {
+      const subs = [...new Set(res.rows.filter(r => r.includes(SEP_SUBWEEK)).map(r => r.split(SEP_SUBWEEK)[0]))].sort((a, b) => a.localeCompare(b));
+      for (const sm of subs) {
+        const gid = "s:" + sm, prefix = sm + SEP_SUBWEEK;
+        rows.push(line(sm || "(no sub-major)", null, prefix, "T", "sub", { gid }));
+        rows.push(...block(prefix, gid, gid));
+      }
+    }
+    return { columns, rows, rowLabel: "Defect", heat: true, week: true };
+  }
+  // Tables with defects down the side and one thing per column: weeks, suppliers.
+  function acrossHelpers(res, columns, axis) {
     const cartonsRow = prefix => ({ label: "Cartons (PO qty)", level: "info", cells: columns.map(c => ({ v: res.cartons.get(prefix + c.wk) ?? null, kind: "cartons" })) });
     const line = (label, html, prefix, dk, level, extra) => {
       const cells = columns.map((c, i) => {
@@ -206,18 +245,25 @@
       }
       return out;
     };
-    rows.push(cartonsRow(""));
-    rows.push(...block("", null, null));
-    rows.push(line("All defects", null, "", "T", "gt"));
-    if (S.bySub && !S.sub) {
-      const subs = [...new Set(res.rows.filter(r => r.includes(SEP_SUBWEEK)).map(r => r.split(SEP_SUBWEEK)[0]))].sort((a, b) => a.localeCompare(b));
-      for (const sm of subs) {
-        const gid = "s:" + sm, prefix = sm + SEP_SUBWEEK;
-        rows.push(line(sm || "(no sub-major)", null, prefix, "T", "sub", { gid }));
-        rows.push(...block(prefix, gid, gid));
-      }
+    return { line, block, cartonsRow };
+  }
+  // Supplier comparison: sub-major categories down the side with their defects
+  // underneath, one column per supplier. Keys: "<sub-major><SEP><supplier or __all>".
+  function modelSupplier(res, suppliers) {
+    const axis = defectAxis(res);
+    if (!axis.length) return null;
+    const columns = suppliers.map(v => ({ group: "", label: v, title: v, kind: "supplier", wk: v }))
+      .concat([{ group: "", label: "All suppliers", kind: "all", wk: "__all" }]);
+    const { line, block, cartonsRow } = acrossHelpers(res, columns, axis);
+    const rows = [cartonsRow("")];
+    const subs = [...new Set(res.rows.filter(r => r.includes(SEP_SUBWEEK)).map(r => r.split(SEP_SUBWEEK)[0]))].sort((a, b) => a.localeCompare(b));
+    for (const sm of subs) {
+      const gid = "v:" + sm, prefix = sm + SEP_SUBWEEK;
+      rows.push(line(sm || "(no sub-major)", null, prefix, "T", "sub", { gid }));
+      rows.push(...block(prefix, gid, gid));
     }
-    return { columns, rows, rowLabel: "Defect", heat: true, week: true };
+    rows.push(line("All defects", null, "", "T", "gt"));
+    return { columns, rows, rowLabel: "Sub-major / defect", heat: true, supplier: true };
   }
 
   // ---------- rendering ----------------------------------------------------
@@ -230,7 +276,7 @@
     return t > 0 ? `<span class="tr up" title="${esc(title || "")}">▲</span>` : `<span class="tr down" title="${esc(title || "")}">▼</span>`;
   }
   function renderTable(m) {
-    const leafCols = m.columns.map((c, i) => ({ c, i })).filter(x => x.c.kind === "defect" || x.c.kind === "cat" || x.c.kind === "week");
+    const leafCols = m.columns.map((c, i) => ({ c, i })).filter(x => x.c.kind === "defect" || x.c.kind === "cat" || x.c.kind === "week" || x.c.kind === "supplier");
     let max = 0;
     for (const r of m.rows) if (r.level !== "gt" && r.level !== "info") for (const x of leafCols) { const v = r.cells[x.i].v; if (v !== null && v > max) max = v; }
     const grouped = m.columns.some(c => c.kind === "defect");
@@ -246,7 +292,7 @@
           h2 += c.kind === "cattot" ? `<th class="dn tot" style="${catStyle(c.group)};background:var(--cat);color:var(--cat-ink)">${esc(c.label)}</th>` : `<th class="dn" title="${esc(c.label)}">${esc(c.label)}</th>`;
         } else h1 += `<th class="tot" rowspan="2">${esc(c.label)}</th>`;
       } else {
-        const style = c.kind === "cat" ? ` class="cat" style="${catStyle(c.label)}"` : ` class="${c.kind === "all" || c.kind === "cartons" || c.kind === "trend" ? "tot" : ""}"`;
+        const style = c.kind === "cat" ? ` class="cat" style="${catStyle(c.label)}"` : ` class="${c.kind === "all" || c.kind === "cartons" || c.kind === "trend" ? "tot" : c.kind === "supplier" ? "sup" : ""}"`;
         h1 += `<th${style}${c.title ? ` title="${esc(c.title)}"` : ""}>${esc(c.label)}</th>`;
       }
     }
@@ -281,10 +327,22 @@
 
   // ---------- charts (Plotly) ----------------------------------------------
   const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
-  function chartSpec(m) {
-    const ink = css("--theme-text") || "#212529", grid = css("--theme-border") || "#dee2e6";
-    const layout = { margin: { l: 60, r: 20, t: 10, b: 60 }, height: 300, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
+  const chartInk = () => css("--theme-text") || "#212529";
+  function baseLayout() {
+    const ink = chartInk(), grid = css("--theme-border") || "#dee2e6";
+    return { margin: { l: 60, r: 20, t: 10, b: 60 }, height: 300, paper_bgcolor: "rgba(0,0,0,0)", plot_bgcolor: "rgba(0,0,0,0)",
       font: { color: ink, size: 11 }, legend: { orientation: "h", y: -0.25 }, yaxis: { title: "% of inspected units", gridcolor: grid, rangemode: "tozero" }, xaxis: { gridcolor: grid } };
+  }
+  function chartSpec(m) {
+    const ink = chartInk(), layout = baseLayout();
+    if (m.supplier) {
+      // Grouped bars: each sub-major category, one bar per supplier.
+      const cols = m.columns.map((c, i) => ({ c, i })).filter(x => x.c.kind === "supplier");
+      const allIdx = m.columns.findIndex(c => c.kind === "all");
+      const subs = m.rows.filter(r => r.level === "sub").sort((a, b) => (b.cells[allIdx].v ?? 0) - (a.cells[allIdx].v ?? 0)).slice(0, 12);
+      layout.barmode = "group"; layout.height = 360; layout.xaxis.automargin = true; layout.legend.y = -0.35;
+      return { data: cols.map(x => ({ x: subs.map(r => r.label), y: subs.map(r => r.cells[x.i].v), type: "bar", name: x.c.label })), layout };
+    }
     if (m.week) {
       const wcols = m.columns.map((c, i) => ({ c, i })).filter(x => x.c.kind === "week");
       const series = m.rows.filter(r => !r.parent && (r.level === "grp" || r.level === "gt"));
@@ -309,6 +367,47 @@
     const spec = chartSpec(m);
     Plotly.react(el, spec.data, spec.layout, { displayModeBar: false, responsive: true });
   }
+  // Per week: one chart comparing the sub-major categories, then one trend chart
+  // per sub-major category (its defect categories and its total), biggest first.
+  function drawTrends(m, res) {
+    const box = $("charts");
+    if (window.Plotly) box.querySelectorAll(".dr-mini").forEach(el => Plotly.purge(el));
+    box.innerHTML = "";
+    const subs = m && m.week && window.Plotly ? m.rows.filter(r => r.level === "sub") : [];
+    box.hidden = !subs.length;
+    if (!subs.length) return;
+    const inspected = r => (res.cells.get(r.gid.slice(2) + SEP_SUBWEEK + "__all" + CELL + "T") || [0, 0])[1];
+    const ranked = subs.slice().sort((a, b) => inspected(b) - inspected(a));
+    const shown = ranked.slice(0, TREND_CHARTS);
+    const wcols = m.columns.map((c, i) => ({ c, i })).filter(x => x.c.kind === "week");
+    // Week numbers alone on the small charts: with the dates the labels tilt and clip.
+    const xWide = wcols.map(w => `${w.c.label} (${dm(w.c.wk)})`), x = wcols.map(w => w.c.label);
+    const draw = (title, data, wide) => {
+      const el = document.createElement("div");
+      el.className = "dr-mini" + (wide ? " wide" : "");
+      box.appendChild(el);
+      const layout = baseLayout();
+      layout.title = { text: title, font: { size: 13 }, x: 0.01, xanchor: "left" };
+      layout.margin = { l: 45, r: 15, t: 34, b: 50 }; layout.height = wide ? 340 : 280; layout.yaxis.title = ""; layout.legend.y = -0.28;
+      Plotly.react(el, data, layout, { displayModeBar: false, responsive: true });
+    };
+    if (shown.length > 1)
+      draw("All defects % by sub-major category", shown.map(r => ({ x: xWide, y: wcols.map(w => r.cells[w.i].v), type: "scatter", mode: "lines+markers", connectgaps: true, name: r.label })), true);
+    for (const r of shown) {
+      const catLines = m.rows.filter(c => c.parent === r.gid && c.indent !== 2).map(c => ({
+        x, y: wcols.map(w => c.cells[w.i].v), type: "scatter", mode: "lines+markers", connectgaps: true, name: c.label.replace(/ total$/, ""),
+        line: { color: catColor[c.label.replace(/ total$/, "")], width: 2 }
+      }));
+      catLines.push({ x, y: wcols.map(w => r.cells[w.i].v), type: "scatter", mode: "lines+markers", connectgaps: true, name: "All defects", line: { color: chartInk(), width: 3, dash: "dot" } });
+      draw(r.label, catLines, false);
+    }
+    if (ranked.length > shown.length) {
+      const note = document.createElement("p");
+      note.className = "hint wide";
+      note.textContent = `Showing the ${shown.length} sub-major categories with the most inspected units, out of ${ranked.length}. Use the Sub-major filter to choose others.`;
+      box.appendChild(note);
+    }
+  }
 
   // ---------- main render --------------------------------------------------
   const emptyHtml = (msg, extra) => `<div class="empty"><div>${esc(msg)}</div>${extra || ""}</div>`;
@@ -317,12 +416,12 @@
     drillCtx = {}; current = null;
     const tab = TABS.find(t => t.id === S.tab);
     let head = `<div class="ptitle"><div><h2>${tab.title}</h2><span class="hint">${tab.hint}</span></div><div class="acts" id="acts"></div></div>`;
-    if (!D) { $("panel").innerHTML = head; $("chart").hidden = true; return; }
-    if (needsFruit(S.tab) && !S.major) {
+    if (!D) { $("panel").innerHTML = head; $("chart").hidden = true; drawTrends(null); return; }
+    if (needsFruit(S.tab) && !S.major.length) {
       const majors = [...new Set(units.filter(u => passes(u, "major")).map(u => u.mj).filter(Boolean))].sort();
       $("panel").innerHTML = head + emptyHtml("This report lists every defect of one fruit, so pick a major category to start.",
         `<div class="chips">${majors.map(m => `<button type="button" data-major="${esc(m)}">${esc(m)}</button>`).join("")}</div>`);
-      $("chart").hidden = true; updateSummary(null); return;
+      $("chart").hidden = true; drawTrends(null); updateSummary(null); return;
     }
     const tw = lastTwoWeeks();
     const withTrend = (keysFn) => u => { const ks = keysFn(u); if (tw && (u.wk === tw[0] || u.wk === tw[1])) for (const k of ks.slice()) ks.push(k + SEP_SUBWEEK + u.wk); return ks; };
@@ -339,36 +438,51 @@
         k => k === "__all" ? { label: "Grand total", level: "gt" } : k.includes(SEP_CLASS) ? { label: k.split(SEP_CLASS)[1], level: "child", parent: "c:" + k.split(SEP_CLASS)[0] } : { label: k || "(no sub-major)", level: "grp", gid: "c:" + k }, tw);
       if (!classOpened) { for (const s of subs) expanded.add("c:" + s); classOpened = true; }   // opens expanded, like the Excel sheet
     } else if (S.tab === "branch") {
-      res = compute(withTrend(u => [u.p, u.p + SEP_CLASS + u.sm, "__all"]));
+      res = compute(withTrend(u => [u.sm, u.sm + SEP_CLASS + u.p, "__all"]));
       const base = res.rows.filter(r => !r.includes(SEP_SUBWEEK));
-      const plants = base.filter(r => r !== "__all" && !r.includes(SEP_CLASS)).sort();
-      const rows = []; for (const p of plants) { rows.push(p); rows.push(...base.filter(r => r.startsWith(p + SEP_CLASS)).sort((a, b) => a.localeCompare(b))); } rows.push("__all");
-      model = modelUnitRows(res, rows, "Branch / sub-major", true,
-        k => k === "__all" ? { label: "Grand total", level: "gt" } : k.includes(SEP_CLASS) ? { label: k.split(SEP_CLASS)[1] || "(no sub-major)", level: "child", parent: "b:" + k.split(SEP_CLASS)[0] } : { label: plantName(k), level: "grp", gid: "b:" + k }, tw);
+      const subs = base.filter(r => r !== "__all" && !r.includes(SEP_CLASS)).sort((a, b) => a.localeCompare(b));
+      const rows = []; for (const s of subs) { rows.push(s); rows.push(...base.filter(r => r.startsWith(s + SEP_CLASS)).sort((a, b) => plantName(a.split(SEP_CLASS)[1]).localeCompare(plantName(b.split(SEP_CLASS)[1])))); } rows.push("__all");
+      model = modelUnitRows(res, rows, "Sub-major / branch", true,
+        k => k === "__all" ? { label: "Grand total", level: "gt" } : k.includes(SEP_CLASS) ? { label: plantName(k.split(SEP_CLASS)[1]), level: "child", parent: "b:" + k.split(SEP_CLASS)[0] } : { label: k || "(no sub-major)", level: "grp", gid: "b:" + k }, tw);
+    } else if (S.tab === "supplier") {
+      res = compute(u => [u.v, "__all", u.sm + SEP_SUBWEEK + u.v, u.sm + SEP_SUBWEEK + "__all"]);
+      const inspected = k => (res.cells.get(k + CELL + "T") || [0, 0])[1];
+      const ranked = res.rows.filter(r => r !== "__all" && !r.includes(SEP_SUBWEEK)).sort((a, b) => inspected(b) - inspected(a));
+      const shown = S.supplier.length ? ranked : ranked.slice(0, SUPPLIER_COLS);
+      model = modelSupplier(res, shown);
+      if (model && ranked.length > shown.length) model.note = `Showing the ${shown.length} suppliers with the most inspected units, out of ${ranked.length}. Use the Supplier filter to choose others.`;
+    } else if (S.tab === "sub") {
+      res = compute(withTrend(u => [u.sm || "(none)", (u.sm || "(none)") + SEP_CLASS + (u.vr || "(no variety)"), "__all"]));
+      const base = res.rows.filter(r => !r.includes(SEP_SUBWEEK));
+      const subs = base.filter(r => r !== "__all" && !r.includes(SEP_CLASS)).sort((a, b) => a.localeCompare(b));
+      const rows = []; for (const s of subs) { rows.push(s); rows.push(...base.filter(r => r.startsWith(s + SEP_CLASS)).sort((a, b) => a.localeCompare(b))); } rows.push("__all");
+      model = modelUnitRows(res, rows, "Sub-major / variety", false,
+        k => k === "__all" ? { label: "Grand total", level: "gt" } : k.includes(SEP_CLASS) ? { label: k.split(SEP_CLASS)[1], level: "child", parent: "m:" + k.split(SEP_CLASS)[0] } : { label: k, level: "grp", gid: "m:" + k }, tw);
     } else {
-      const key = S.tab === "sub" ? "sm" : "mj";
+      const key = "mj";
       res = compute(withTrend(u => [u[key] || "(none)", "__all"]));
       const rows = [...res.rows.filter(r => r !== "__all" && !r.includes(SEP_SUBWEEK)).sort((a, b) => a.localeCompare(b)), "__all"];
-      model = modelUnitRows(res, rows, S.tab === "sub" ? "Sub-major category" : "Major category", false,
+      model = modelUnitRows(res, rows, "Major category", false,
         k => k === "__all" ? { label: "Grand total", level: "gt" } : { label: k, level: "" }, tw);
     }
     current = model ? { model, res, tab } : null;
     let body;
     if (!res.n) body = emptyHtml("Nothing matches these filters. Widen the dates or clear a filter.");
     else if (!model) body = emptyHtml("No defects were recorded for this selection.");
-    else body = renderTable(model);
+    else body = (model.note ? `<p class="hint mb-0">${esc(model.note)}</p>` : "") + renderTable(model);
     $("panel").innerHTML = head + body;
-    $("acts").innerHTML = (S.tab === "week" ? `<div class="form-check form-switch mb-0 me-2"><input class="form-check-input" type="checkbox" id="fBySub" ${S.bySub ? "checked" : ""} ${S.sub ? "disabled" : ""}><label class="form-check-label small" for="fBySub">By sub-major</label></div>` : "")
+    $("acts").innerHTML = (S.tab === "week" ? `<div class="form-check form-switch mb-0 me-2"><input class="form-check-input" type="checkbox" id="fBySub" ${S.bySub ? "checked" : ""} ${S.sub.length === 1 ? "disabled" : ""}><label class="form-check-label small" for="fBySub">By sub-major</label></div>` : "")
       + (model && model.rows.some(r => r.gid) ? `<button type="button" class="btn btn-sm btn-outline-secondary" id="expAll">Expand all</button><button type="button" class="btn btn-sm btn-outline-secondary" id="colAll">Collapse all</button>` : "")
       + (model ? `<button type="button" class="btn btn-sm btn-outline-success" data-export="xlsx"><i class="bi bi-file-earmark-excel me-1"></i>Excel</button><button type="button" class="btn btn-sm btn-outline-danger" data-export="pdf"><i class="bi bi-file-earmark-pdf me-1"></i>PDF</button>` : "");
     const t = $("panel").querySelector("thead tr"), tbl = $("panel").querySelector("table");
     if (t && tbl) tbl.style.setProperty("--h1", t.getBoundingClientRect().height + "px");
     drawChart(model);
+    drawTrends(model, res);
     updateSummary(res);
   }
 
   // ---------- summary strip ------------------------------------------------
-  function pendingFiltered() { return pending.filter(p => (!S.plant || p.plant === S.plant) && (!S.supplier || p.supplier === S.supplier)); }
+  function pendingFiltered() { return pending.filter(p => (!S.plant.length || S.plant.includes(p.plant)) && (!S.supplier.length || S.supplier.includes(p.supplier))); }
   function updateSummary(res) {
     const range = D ? `${dm(D.from)} – ${dm(D.to)} ${D.to.slice(0, 4)}` : "";
     const pend = pendingFiltered(), notYet = pend.filter(p => !p.openedByEnd).length;
@@ -394,15 +508,21 @@
       return u.wk === rk;
     }
     if (S.tab === "class") return rk.includes(SEP_CLASS) ? (u.sm + SEP_CLASS + (u.c || "(no class)")) === rk : u.sm === rk;
-    if (S.tab === "branch") return rk.includes(SEP_CLASS) ? (u.p + SEP_CLASS + u.sm) === rk : u.p === rk;
-    return (u[S.tab === "sub" ? "sm" : "mj"] || "(none)") === rk;
+    if (S.tab === "branch") return rk.includes(SEP_CLASS) ? (u.sm + SEP_CLASS + u.p) === rk : u.sm === rk;
+    if (S.tab === "supplier") {
+      if (rk.includes(SEP_SUBWEEK)) { const [sm, v] = rk.split(SEP_SUBWEEK); return u.sm === sm && (v === "__all" || u.v === v); }
+      return u.v === rk;
+    }
+    if (S.tab === "sub") return rk.includes(SEP_CLASS) ? ((u.sm || "(none)") + SEP_CLASS + (u.vr || "(no variety)")) === rk : (u.sm || "(none)") === rk;
+    return (u.mj || "(none)") === rk;
   }
   function describe(rk, dk) {
     const what = dk === "T" ? "All defects" : dk.startsWith("C:") ? `${dk.slice(2)} defects` : dk.slice(2);
     let where;
     if (rk === "__all") where = S.tab === "week" ? "Whole period" : "All rows";
     else if (S.tab === "week") { const [a, b] = rk.includes(SEP_SUBWEEK) ? rk.split(SEP_SUBWEEK) : ["", rk]; where = [a, b === "__all" ? "Whole period" : weekRange(b)].filter(Boolean).join(" · "); }
-    else if (S.tab === "branch") { const [p, s] = rk.split(SEP_CLASS); where = [plantName(p), s].filter(Boolean).join(" · "); }
+    else if (S.tab === "branch") { const [s, p] = rk.split(SEP_CLASS); where = [s || "(no sub-major)", p && plantName(p)].filter(Boolean).join(" · "); }
+    else if (S.tab === "supplier") { const [a, b] = rk.includes(SEP_SUBWEEK) ? rk.split(SEP_SUBWEEK) : ["", rk]; where = [a, b === "__all" ? "All suppliers" : b].filter(Boolean).join(" · "); }
     else where = rk.replace(SEP_CLASS, " · ");
     return { what, where };
   }
@@ -415,7 +535,7 @@
   }
   function openDrill(id) {
     const ctx = drillCtx[id]; if (!ctx) return;
-    const { rk, dk } = ctx, catOk = c => !S.cat || c === S.cat;
+    const { rk, dk } = ctx;
     const matches = df => dk === "T" || (dk.startsWith("C:") && df.ct === dk.slice(2)) || (dk.startsWith("N:") && df.nm === dk.slice(2));
     const perQo = new Map();
     for (const u of units) {
@@ -431,7 +551,10 @@
     const sum = k => list.reduce((s, o) => s + o[k], 0);
     const d = describe(rk, dk);
     const context = [d.where, ...filterText().filter(t => !t.startsWith("No filters"))].join(" · ");
-    const q = new URLSearchParams({ From: D.from, To: D.to, Plant: S.plant, Supplier: S.supplier, Major: S.major, Sub: S.sub, Class: S.cls, PackWeight: S.pw, Cat: S.cat, Tab: S.tab, RowKey: rk, DefectKey: dk, Metric: "qc", title: `${d.what} · ${context}` });
+    const q = new URLSearchParams({ From: D.from, To: D.to, Tab: S.tab, RowKey: rk, DefectKey: dk, Metric: "qc", title: `${d.what} · ${context}` });
+    // One pair per value: the server binds each to a list.
+    for (const [name, values] of [["Plant", S.plant], ["Supplier", S.supplier], ["Major", S.major], ["Sub", S.sub], ["Class", S.cls], ["PackWeight", S.pw], ["Cat", S.cat]])
+      for (const v of values) q.append(name, v);
     openDrawer(d.what, context, [
       ["Defect %", sum("sz") ? (100 * sum("val") / sum("sz")).toFixed(2) + "%" : "—"],
       ["Orders", list.length.toLocaleString()],
@@ -439,13 +562,13 @@
       ["Defective units", fmtInt(sum("val"))],
       ["Cartons (PO qty)", fmtInt(sum("ctn"))]
     ], `<thead><tr><th>QC order</th><th>Received</th><th>Branch</th><th>Supplier</th><th>Container</th><th>Material</th><th class="r">Cartons</th><th class="r">Samples</th><th class="r">Inspected</th><th class="r">Defective</th><th class="r">%</th></tr></thead><tbody>` +
-      list.map(o => `<tr><td><a href="${URL_QO}${o.q}" target="_blank" rel="noopener">${esc(o.n)}</a></td><td>${o.r}</td><td>${esc(o.p)}</td><td>${esc(o.v)}</td><td>${esc(o.k)}</td><td>${esc([...o.items].join(", "))}</td><td class="r">${fmtInt(o.ctn)}</td><td class="r">${o.ns}</td><td class="r">${fmtInt(o.sz)}</td><td class="r">${fmtInt(o.val)}</td><td class="r"><b>${o.pct === null ? "—" : o.pct.toFixed(2)}</b></td></tr>`).join("") + `</tbody>`,
+      list.map(o => `<tr><td><a href="${URL_QO}${o.q}" target="_blank" rel="noopener">${esc(o.n)}</a></td><td>${o.r}</td><td>${esc(plantName(o.p))}</td><td>${esc(o.v)}</td><td>${esc(o.k)}</td><td>${esc([...o.items].join(", "))}</td><td class="r">${fmtInt(o.ctn)}</td><td class="r">${o.ns}</td><td class="r">${fmtInt(o.sz)}</td><td class="r">${fmtInt(o.val)}</td><td class="r"><b>${o.pct === null ? "—" : o.pct.toFixed(2)}</b></td></tr>`).join("") + `</tbody>`,
       URL_DRILL + "?" + q.toString());
   }
   function openPending() {
     const list = pendingFiltered().slice().sort((a, b) => a.received.localeCompare(b.received));
     const notYet = list.filter(p => !p.openedByEnd).length;
-    openDrawer("Pending containers", `Received ${dm(D.from)} – ${dm(D.to)}, inspection not finished by ${dm(D.to)}${S.plant ? " · " + plantName(S.plant) : ""}${S.supplier ? " · " + S.supplier : ""}`, [
+    openDrawer("Pending containers", `Received ${dm(D.from)} – ${dm(D.to)}, inspection not finished by ${dm(D.to)}${S.plant.length ? " · " + S.plant.map(plantName).join(", ") : ""}${S.supplier.length ? " · " + S.supplier.join(", ") : ""}`, [
       ["Pending", list.length.toLocaleString()], ["Not yet inspected", notYet.toLocaleString()], ["Inspection pending", (list.length - notYet).toLocaleString()]
     ], `<thead><tr><th>Status</th><th>Received</th><th>Branch</th><th>Supplier</th><th>Container</th><th>Arrival</th><th>QC order</th></tr></thead><tbody>` +
       list.map(p => `<tr><td><span class="badge ${p.openedByEnd ? "bg-info-subtle text-info-emphasis" : "bg-warning-subtle text-warning-emphasis"}">${p.openedByEnd ? "Pending" : "Not yet inspected"}</span></td><td>${p.received}</td><td>${esc(plantName(p.plant))}</td><td>${esc(p.supplier)}</td><td>${esc(p.container)}</td><td>${p.arrivalId ? `<a href="${URL_ARR}${p.arrivalId}" target="_blank" rel="noopener">${esc(p.arrivalNo)}</a>` : `<span class="text-muted">No arrival yet</span>`}</td><td>${p.qoId ? `<a href="${URL_QO}${p.qoId}" target="_blank" rel="noopener">${esc(p.qoNo)}</a>` : ""}</td></tr>`).join("") + `</tbody>`, null);
@@ -462,9 +585,14 @@
       if (window.Plotly && !$("chart").hidden) {
         try { chart = await Plotly.toImage($("chart"), { format: "png", width: 1400, height: 420, scale: 1 }); } catch (e) { chart = null; }
       }
+      const charts = [];
+      if (window.Plotly && !$("charts").hidden)
+        for (const el of $("charts").querySelectorAll(".dr-mini")) {
+          try { charts.push(await Plotly.toImage(el, { format: "png", width: 900, height: 480, scale: 1 })); } catch (e) { /* the table still exports */ }
+        }
       const pend = pendingFiltered();
       const payload = {
-        format, title: tab.title, tab: tab.label, hint: tab.hint,
+        format, title: tab.title, tab: tab.label, hint: [tab.hint, model.note].filter(Boolean).join(" "),
         period: `Received ${D.from} to ${D.to}`, filters: filterText(),
         kpis: [["Orders", res.orders.toLocaleString()], ["Samples", res.samples.toLocaleString()], ["Cartons (PO qty)", Math.round(res.ctn).toLocaleString()], ["Pending containers", pend.length.toLocaleString()]],
         rowLabel: model.rowLabel,
@@ -473,7 +601,7 @@
           label: r.label, level: r.level || "", indent: r.parent ? (r.indent === 2 ? 2 : 1) : (r.level === "child" ? 1 : 0),
           values: r.cells.map(c => c.v === undefined ? null : c.v), trends: r.cells.map(c => c.trend ?? null)
         })),
-        chart, generated: new Date().toLocaleString()
+        chart, charts, generated: new Date().toLocaleString()
       };
       // X-CSRF-TOKEN: the antiforgery header name set in Program.cs (AddAntiforgery).
       const r = await fetch(URL_EXPORT, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-TOKEN": TOKEN }, body: JSON.stringify(payload) });
@@ -516,15 +644,33 @@
   }
 
   // ---------- wiring -------------------------------------------------------
-  function readFilters() {
-    for (const f of FILTERS) S[f.s] = $(f.id).value;
-    S.cat = $("fCat").value; S.hide = $("fHide").checked;
-  }
-  const update = () => { readFilters(); refreshOptions(); render(); };
-  for (const id of [...FILTERS.map(f => f.id), "fCat", "fHide"]) $(id).addEventListener("change", update);
+  const update = () => { S.hide = $("fHide").checked; refreshOptions(); render(); };
+  $("fHide").addEventListener("change", update);
+  const filterBox = document.querySelector(".dr-filters");
+  const msOf = el => { const box = el.closest(".dr-ms"); return box ? MS.find(f => f.id === box.id) : null; };
+  filterBox.addEventListener("change", e => {
+    const f = e.target.type === "checkbox" ? msOf(e.target) : null;
+    if (!f) return;
+    S[f.s] = e.target.checked ? [...S[f.s], e.target.value] : S[f.s].filter(v => v !== e.target.value);
+    update();
+  });
+  filterBox.addEventListener("click", e => {
+    if (!e.target.closest("[data-ms-clear]")) return;
+    const f = msOf(e.target);
+    S[f.s] = [];
+    $(f.id).querySelectorAll("input[type=checkbox]").forEach(c => { c.checked = false; });
+    update();
+  });
+  filterBox.addEventListener("input", e => {
+    if (!e.target.matches("[data-ms-search]")) return;
+    const q = e.target.value.toLowerCase();
+    e.target.closest(".dropdown-menu").querySelectorAll("[data-ms-row]").forEach(r => { r.hidden = !r.textContent.toLowerCase().includes(q); });
+  });
+  // Closed again: bring its list in step with what the other filters now leave.
+  filterBox.addEventListener("hidden.bs.dropdown", () => { refreshOptions(); });
   for (const id of ["fFrom", "fTo"]) $(id).addEventListener("change", load);
   $("fReset").addEventListener("click", () => {
-    for (const id of [...FILTERS.map(f => f.id), "fCat"]) $(id).value = "";
+    for (const f of MS) S[f.s] = [];
     $("fHide").checked = true; update();
   });
   function selectTab(id) { S.tab = id; store.set("defectReports.tab", id); try { history.replaceState(null, "", "#" + id); } catch (e) {} renderTabs(); render(); }
@@ -535,7 +681,7 @@
     selectTab(n.id); $("tab-" + n.id).focus();
   });
   $("panel").addEventListener("click", e => {
-    const m = e.target.closest("[data-major]"); if (m) { $("fMajor").value = m.dataset.major; update(); return; }
+    const m = e.target.closest("[data-major]"); if (m) { S.major = [m.dataset.major]; update(); return; }
     const tg = e.target.closest("[data-toggle]");
     if (tg) {
       const gid = tg.dataset.toggle, open = !expanded.has(gid);

@@ -59,6 +59,14 @@ public class QoListFilter
     /// </summary>
     public string? Reinspection { get; set; }
 
+    /// <summary>
+    /// "sent": the report has been e-mailed to the supplier at least once.
+    /// "notsent": finished, live orders it has not gone out for -- the ones with
+    /// a red envelope, which is the to-do list this filter exists for. An order
+    /// still being inspected has nothing to send, so it is in neither.
+    /// </summary>
+    public string? Sent { get; set; }
+
     // Server-side paging. The list used to ship every order and let the
     // browser page it, which meant rendering ~2,000 rows into 6.6 MB of HTML
     // on every load. Only one page crosses the wire now. Mirrors
@@ -93,6 +101,7 @@ public class QoListFilter
         + (Supplier.Count   == 0 ? 0 : 1)
         + (OpenedBy.Count   == 0 ? 0 : 1)
         + (string.IsNullOrWhiteSpace(Reinspection) ? 0 : 1)
+        + (string.IsNullOrWhiteSpace(Sent) ? 0 : 1)
         + (From.HasValue ? 1 : 0)
         + (To.HasValue   ? 1 : 0);
 

@@ -107,10 +107,10 @@ public static class QualityReportPdfSoft
                     {
                         t.Span(L("Created by") + "  ").FontColor(Muted);
                         t.Span(V(d.CreatedByName)).SemiBold();
-                        if (!string.IsNullOrWhiteSpace(d.CreatedByBranch))
+                        if (!string.IsNullOrWhiteSpace(d.Branch))
                         {
                             t.Span("     " + L("Branch") + "  ").FontColor(Muted);
-                            t.Span(V(d.CreatedByBranch)).SemiBold();
+                            t.Span(V(d.Branch)).SemiBold();
                         }
                     });
             });

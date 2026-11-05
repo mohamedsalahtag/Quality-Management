@@ -5,8 +5,8 @@ using SharbatlyQMS.Web.Models;
 namespace SharbatlyQMS.Web.Services;
 
 /// <summary>
-/// Reports -> Defect reports: the five defect pivots (per week, per defect &amp;
-/// class, per branch &amp; defect, per sub-major, per major).
+/// Reports -> Defect reports: the defect pivots (per week, per defect &amp; class,
+/// per branch &amp; defect, per supplier, per sub-major, per major).
 ///
 /// The page receives one compact dataset per receive-date window and pivots it
 /// in the browser, so every filter and tab is instant. The grain is one
@@ -38,11 +38,13 @@ public class DefectReportService : IDefectReportService
     public const int MaxDays = 366;
 
     private readonly string _cs;
+    private readonly ICodeDescriptionDirectory _codes;
 
-    public DefectReportService(IConfiguration config)
+    public DefectReportService(IConfiguration config, ICodeDescriptionDirectory codes)
     {
         _cs = config.GetConnectionString("Default")
               ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
+        _codes = codes;
     }
 
     private sealed class UnitRow
@@ -55,6 +57,7 @@ public class DefectReportService : IDefectReportService
         public string Major { get; set; } = "";
         public string Sub { get; set; } = "";
         public string Class { get; set; } = "";
+        public string Variety { get; set; } = "";
         public DateTime ReceiveDate { get; set; }
         public string ContainerNo { get; set; } = "";
         public string MaterialGroup { get; set; } = "";
@@ -90,6 +93,7 @@ public class DefectReportService : IDefectReportService
                ISNULL(COALESCE(NULLIF(m.major_category, N''), mc.major_category_desc), '') AS Major,
                ISNULL(mc.sub_major_category, '')                         AS Sub,
                ISNULL(COALESCE(NULLIF(m.material_class, N''), mc.class_name), '') AS Class,
+               ISNULL(COALESCE(NULLIF(m.variety, N''), mc.variety_name), '') AS Variety,
                COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date) AS ReceiveDate,
                ISNULL(a.container_no, '')                                AS ContainerNo,
                ISNULL(m.material_group, '')                              AS MaterialGroup,
@@ -192,6 +196,7 @@ public class DefectReportService : IDefectReportService
                         .OrderBy(w => w ?? decimal.MaxValue).Select(PackWeightText).Distinct().ToList();
         var weightIndex = weights.Select((v, i) => (v, i)).ToDictionary(x => x.v, x => x.i);
         var uoms   = Dict(raw.Units.Select(u => u.Uom));
+        var varieties = Dict(raw.Units.Select(u => u.Variety));
 
         var unitIndex = new Dictionary<long, int>();
         var units = new List<object[]>(raw.Units.Count);
@@ -203,7 +208,8 @@ public class DefectReportService : IDefectReportService
                 u.QualityOrderId, u.QualityOrderNo, plants.Index[u.Plant], supps.Index[u.Supplier],
                 majors.Index[u.Major], subs.Index[u.Sub], classes.Index[u.Class],
                 u.ReceiveDate.ToString("yyyy-MM-dd"), u.ContainerNo, groups.Index[u.MaterialGroup],
-                u.Samples, u.Inspected, weightIndex[u.PackWeightLabel], u.Cartons, uoms.Index[u.Uom]
+                u.Samples, u.Inspected, weightIndex[u.PackWeightLabel], u.Cartons, uoms.Index[u.Uom],
+                varieties.Index[u.Variety]
             });
         }
 
@@ -226,7 +232,11 @@ public class DefectReportService : IDefectReportService
             To   = to.Date.ToString("yyyy-MM-dd"),
             Plants = plants.Values, Suppliers = supps.Values, Majors = majors.Values,
             Subs = subs.Values, Classes = classes.Values, Groups = groups.Values,
-            PackWeights = weights, Uoms = uoms.Values,
+            PackWeights = weights, Uoms = uoms.Values, Varieties = varieties.Values,
+            // From the code directory, so a name changed on the Code Descriptions
+            // screen shows here too, as it does on every other page.
+            PlantNames = _codes.Plants.Select(p => p.Code).Concat(plants.Values).Distinct()
+                .ToDictionary(c => c, c => _codes.PlantDisplay(c)),
             Units = units,
             Defects = defects.Select(d => new object[] { d.DefectId, d.Name, d.Category, d.MaterialGroup, d.SortOrder }).ToList(),
             GroupDefects = groupDefects.ToDictionary(kv => kv.Key, kv => kv.Value.OrderBy(x => x).ToList()),
@@ -249,7 +259,7 @@ public class DefectReportService : IDefectReportService
             .ToDictionary(g => g.Key, g => g.Select(x => defectById.TryGetValue(x.DefectId, out var d) ? d : null)
                                             .Where(d => d != null).Select(d => d!).ToList());
         var factsBy = raw.Facts.ToLookup(f => f.QoMaterialId);
-        bool CatOk(string c) => string.IsNullOrEmpty(req.Cat) || c == req.Cat;
+        bool CatOk(string c) => req.Cat.Count == 0 || req.Cat.Contains(c);
         bool Matches(DefectRow d) =>
             req.DefectKey == "T"
             || (req.DefectKey.StartsWith("C:") && d.Category == req.DefectKey[2..])
@@ -289,12 +299,12 @@ public class DefectReportService : IDefectReportService
     }
 
     private static bool PassesFilters(UnitRow u, DefectDrillRequest r) =>
-        (string.IsNullOrEmpty(r.Plant)    || u.Plant == r.Plant)
-        && (string.IsNullOrEmpty(r.Supplier) || u.Supplier == r.Supplier)
-        && (string.IsNullOrEmpty(r.Major)    || u.Major == r.Major)
-        && (string.IsNullOrEmpty(r.Sub)      || u.Sub == r.Sub)
-        && (string.IsNullOrEmpty(r.Class)    || u.Class == r.Class)
-        && (string.IsNullOrEmpty(r.PackWeight) || u.PackWeightLabel == r.PackWeight);
+        (r.Plant.Count == 0       || r.Plant.Contains(u.Plant))
+        && (r.Supplier.Count == 0 || r.Supplier.Contains(u.Supplier))
+        && (r.Major.Count == 0    || r.Major.Contains(u.Major))
+        && (r.Sub.Count == 0      || r.Sub.Contains(u.Sub))
+        && (r.Class.Count == 0    || r.Class.Contains(u.Class))
+        && (r.PackWeight.Count == 0 || r.PackWeight.Contains(u.PackWeightLabel));
 
     /// <summary>The row a number sits on, per tab -- same keys the page builds.</summary>
     private static bool InRow(UnitRow u, DefectDrillRequest r)
@@ -310,11 +320,20 @@ public class DefectReportService : IDefectReportService
             "class"  => r.RowKey.Contains('\u0002')
                           ? $"{u.Sub}\u0002{(string.IsNullOrEmpty(u.Class) ? "(no class)" : u.Class)}" == r.RowKey
                           : u.Sub == r.RowKey,
-            "branch" => r.RowKey.Contains('') ? $"{u.Plant}{u.Sub}" == r.RowKey : u.Plant == r.RowKey,
-            "sub"    => (string.IsNullOrEmpty(u.Sub) ? "(none)" : u.Sub) == r.RowKey,
+            // Sub-major first, its branches underneath.
+            "branch" => r.RowKey.Contains('\u0002') ? $"{u.Sub}\u0002{u.Plant}" == r.RowKey : u.Sub == r.RowKey,
+            // Supplier comparison: "<sub-major><supplier or __all>", or a supplier alone.
+            "supplier" => r.RowKey.Contains('\u0003')
+                          ? $"{u.Sub}\u0003{u.Supplier}" == r.RowKey || $"{u.Sub}\u0003__all" == r.RowKey
+                          : u.Supplier == r.RowKey,
+            "sub"    => r.RowKey.Contains('\u0002')
+                          ? $"{SubLabel(u)}\u0002{(string.IsNullOrEmpty(u.Variety) ? "(no variety)" : u.Variety)}" == r.RowKey
+                          : SubLabel(u) == r.RowKey,
             _        => (string.IsNullOrEmpty(u.Major) ? "(none)" : u.Major) == r.RowKey
         };
     }
+
+    private static string SubLabel(UnitRow u) => string.IsNullOrEmpty(u.Sub) ? "(none)" : u.Sub;
 
     /// <summary>ISO 8601 weeks: Monday to Sunday, numbered by ISOWeek.</summary>
     public static DateTime WeekStart(DateTime d) => d.Date.AddDays(-(((int)d.DayOfWeek + 6) % 7));
@@ -333,8 +352,11 @@ public class DefectReportDataset
     /// <summary>Pack weight labels ("15 kg"), lightest first.</summary>
     public List<string> PackWeights { get; set; } = new();
     public List<string> Uoms { get; set; } = new();
+    public List<string> Varieties { get; set; } = new();
+    /// <summary>Plant code -> display name.</summary>
+    public Dictionary<string, string> PlantNames { get; set; } = new();
     /// <summary>[qoId, qoNo, plant#, supplier#, major#, sub#, class#, receive yyyy-MM-dd, container, group#,
-    /// samples, inspected units, pack weight#, cartons (PO qty), uom#]</summary>
+    /// samples, inspected units, pack weight#, cartons (PO qty), uom#, variety#]</summary>
     public List<object[]> Units { get; set; } = new();
     /// <summary>[defectId, name, category, material group, sort order]</summary>
     public List<object[]> Defects { get; set; } = new();
@@ -352,13 +374,14 @@ public class DefectDrillRequest
 {
     public DateTime From { get; set; }
     public DateTime To { get; set; }
-    public string? Plant { get; set; }
-    public string? Supplier { get; set; }
-    public string? Major { get; set; }
-    public string? Sub { get; set; }
-    public string? Class { get; set; }
-    public string? PackWeight { get; set; }
-    public string? Cat { get; set; }
+    // Every filter takes several values; empty means no filter.
+    public List<string> Plant { get; set; } = new();
+    public List<string> Supplier { get; set; } = new();
+    public List<string> Major { get; set; } = new();
+    public List<string> Sub { get; set; } = new();
+    public List<string> Class { get; set; } = new();
+    public List<string> PackWeight { get; set; } = new();
+    public List<string> Cat { get; set; } = new();
     public string Tab { get; set; } = "major";
     public string RowKey { get; set; } = "__all";
     public string DefectKey { get; set; } = "T";

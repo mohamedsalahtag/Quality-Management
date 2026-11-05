@@ -75,7 +75,7 @@
                 const row = document.createElement("div");
                 row.className = "form-check";
                 const id = "srm-doc-" + d.id;
-                row.innerHTML = '<input class="form-check-input" type="checkbox" value="' + d.id + '" id="' + id + '"><label class="form-check-label small" for="' + id + '"></label>';
+                row.innerHTML = '<input class="form-check-input" type="checkbox" checked value="' + d.id + '" id="' + id + '"><label class="form-check-label small" for="' + id + '"></label>';
                 const lbl = row.querySelector("label");
                 lbl.textContent = d.name;
                 const meta = document.createElement("span");

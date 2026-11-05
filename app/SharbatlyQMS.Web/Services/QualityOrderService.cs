@@ -106,6 +106,12 @@ public class QualityOrderService : IQualityOrderService
                 OR (@reinspection = 'originals'     AND qo.superseded_at   IS NOT NULL)
                 OR (@reinspection = 'reinspections' AND qo.reinspection_of IS NOT NULL)
                 OR (@reinspection = 'all'))
+          AND  (@sent IS NULL
+                OR (@sent = 'sent' AND EXISTS (
+                        SELECT 1 FROM qms_qo_report_send sn WHERE sn.quality_order_id = qo.quality_order_id))
+                OR (@sent = 'notsent' AND qo.status_code = 'Closed' AND qo.archived_at IS NULL
+                    AND NOT EXISTS (
+                        SELECT 1 FROM qms_qo_report_send sn WHERE sn.quality_order_id = qo.quality_order_id)))
           AND  (@material   IS NULL OR EXISTS (
                     SELECT 1 FROM qms_quality_order_material m2
                     WHERE  m2.quality_order_id = qo.quality_order_id
@@ -174,6 +180,7 @@ public class QualityOrderService : IQualityOrderService
             matMajor    = Trim(f.MatMajor),
             matSubMajor = Trim(f.MatSubMajor),
             reinspection = Trim(f.Reinspection),
+            sent       = Trim(f.Sent),
             fromUtc,
             toUtc,
             offset = (page - 1) * pageSize,

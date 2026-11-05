@@ -181,10 +181,10 @@ public class QualityReportData
     /// the raw username). Shown in the report header.</summary>
     public string? CreatedByName   { get; set; }
 
-    /// <summary>Branch/plant of the user who created the quality order — their own
-    /// plant when they have one, otherwise the order's plant. Shown in the header
-    /// next to the creator's name.</summary>
-    public string? CreatedByBranch { get; set; }
+    /// <summary>Branch of the ORDER: the arrival's plant, the same one the Report
+    /// Location prints. It used to be the creator's own plant, so an inspector
+    /// whose account says Al Hasa printed "Al Hasa" on a Medinah container.</summary>
+    public string? Branch { get; set; }
 
     // Images grouped by owner type/id; the renderer pulls absolute paths from these.
     public List<ImageRef> ArrivalImages { get; set; } = new();

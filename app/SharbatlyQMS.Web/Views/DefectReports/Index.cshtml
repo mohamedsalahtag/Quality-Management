@@ -25,13 +25,13 @@
         <div class="dr-frow">
             <div class="dr-field"><label for="fFrom">@Loc["Received from"]</label><input type="date" id="fFrom" class="form-control form-control-sm" value="@from"></div>
             <div class="dr-field"><label for="fTo">@Loc["Received to"]</label><input type="date" id="fTo" class="form-control form-control-sm" value="@to"></div>
-            <div class="dr-field"><label for="fPlant">@Loc["Branch"]</label><select id="fPlant" class="form-select form-select-sm"></select></div>
-            <div class="dr-field"><label for="fSupplier">@Loc["Supplier"]</label><select id="fSupplier" class="form-select form-select-sm"></select></div>
-            <div class="dr-field"><label for="fMajor">@Loc["Major category"]</label><select id="fMajor" class="form-select form-select-sm"></select></div>
-            <div class="dr-field"><label for="fSub">@Loc["Sub-major category"]</label><select id="fSub" class="form-select form-select-sm"></select></div>
-            <div class="dr-field"><label for="fClass">@Loc["Class"]</label><select id="fClass" class="form-select form-select-sm"></select></div>
-            <div class="dr-field"><label for="fWeight">@Loc["Pack weight"]</label><select id="fWeight" class="form-select form-select-sm"></select></div>
-            <div class="dr-field"><label for="fCat">@Loc["Defect category"]</label><select id="fCat" class="form-select form-select-sm"></select></div>
+            <div class="dr-field"><label for="fPlant-btn">@Loc["Branch"]</label><div id="fPlant" class="dropdown dr-ms"></div></div>
+            <div class="dr-field"><label for="fSupplier-btn">@Loc["Supplier"]</label><div id="fSupplier" class="dropdown dr-ms"></div></div>
+            <div class="dr-field"><label for="fMajor-btn">@Loc["Major category"]</label><div id="fMajor" class="dropdown dr-ms"></div></div>
+            <div class="dr-field"><label for="fSub-btn">@Loc["Sub-major category"]</label><div id="fSub" class="dropdown dr-ms"></div></div>
+            <div class="dr-field"><label for="fClass-btn">@Loc["Class"]</label><div id="fClass" class="dropdown dr-ms"></div></div>
+            <div class="dr-field"><label for="fWeight-btn">@Loc["Pack weight"]</label><div id="fWeight" class="dropdown dr-ms"></div></div>
+            <div class="dr-field"><label for="fCat-btn">@Loc["Defect category"]</label><div id="fCat" class="dropdown dr-ms"></div></div>
         </div>
         <div class="dr-fbar">
             <div class="left">
@@ -52,6 +52,7 @@
         <section class="dr-box dr-panel" role="tabpanel" aria-live="polite">
             <div id="panel"></div>
             <div id="chart" class="dr-chart" hidden></div>
+            <div id="charts" class="dr-minis" hidden></div>
         </section>
     </div>
 
