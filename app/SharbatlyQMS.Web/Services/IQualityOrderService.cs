@@ -67,6 +67,14 @@ public interface IQualityOrderService
     /// </summary>
     Task<(long QoId, string QoNo)> ReinspectAsync(long originalQoId, string reason, string user);
 
+    /// <summary>
+    /// Takes back a reinspection nobody has worked on yet: deletes it, clears
+    /// the original's supersede and puts the claim back. Throws
+    /// <see cref="InvalidOperationException"/> with a message fit to show the
+    /// user when any guard refuses. Returns the original order's id and number.
+    /// </summary>
+    Task<(long QoId, string QoNo)> UndoReinspectionAsync(long reinspectionQoId, string reason, string user);
+
     /// <summary>The reinspection raised against this order, if there is one.</summary>
     Task<QualityOrder?> GetReinspectionOfAsync(long originalQoId);
     Task<(bool ok, string? error)> CancelAsync(long qualityOrderId, string user, string? reason);

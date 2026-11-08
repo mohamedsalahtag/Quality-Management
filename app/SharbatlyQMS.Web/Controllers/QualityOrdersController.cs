@@ -639,6 +639,31 @@ public class QualityOrdersController : Controller
         }
     }
 
+    /// <summary>
+    /// Takes back a reinspection raised by mistake (Reinspect clicked where
+    /// Reopen was meant). Same permission as raising one; the service refuses
+    /// once any work or claim decision exists on the reinspection.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Qo.Reinspect, Seed.AdminOnly, "Raise a reinspection")]
+    public async Task<IActionResult> UndoReinspection(long id, string? reason)
+    {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        try
+        {
+            var (origId, origNo) = await _qos.UndoReinspectionAsync(id, reason ?? "", user);
+            TempData["Success"] = $"Reinspection undone. {origNo} speaks for the container again and can be reopened or sent as usual.";
+            return RedirectToAction(nameof(Details), new { id = origId });
+        }
+        catch (InvalidOperationException ex)
+        {
+            TempData["Error"] = ex.Message;
+            return RedirectToAction(nameof(Details), new { id });
+        }
+    }
+
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Qo.Cancel, Seed.ManagerOrAdmin, "Cancel a quality order")]
     public async Task<IActionResult> Cancel(long id, string? reason)

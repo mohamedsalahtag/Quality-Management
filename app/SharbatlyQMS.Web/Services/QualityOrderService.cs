@@ -597,6 +597,26 @@ public class QualityOrderService : IQualityOrderService
         }
     }
 
+    /// <summary>Owns the transaction for <see cref="ReinspectionOrder.UndoAsync"/>,
+    /// the same split as <see cref="ReinspectAsync"/>.</summary>
+    public async Task<(long QoId, string QoNo)> UndoReinspectionAsync(long reinspectionQoId, string reason, string user)
+    {
+        using var c = Open();
+        await c.OpenAsync();
+        using var tx = c.BeginTransaction();
+        try
+        {
+            var result = await ReinspectionOrder.UndoAsync(c, tx, _audit, reinspectionQoId, reason, user);
+            tx.Commit();
+            return result;
+        }
+        catch
+        {
+            tx.Rollback();
+            throw;
+        }
+    }
+
     public Task<(bool ok, string? error)> CancelAsync(long qoId, string user, string? reason) => Transition(qoId, user, reason, "Cancelled",new[] { "Initial", "Open", "Submitted" });
 
     /// <summary>Audit-readable form of the finish-time claim assessment.</summary>

@@ -404,6 +404,126 @@ public class ReinspectionTests : IClassFixture<QmsAppFactory>
     }
 
     /// <summary>
+    /// Reinspect clicked where Reopen was meant, on an order with no claim: the
+    /// undo leaves the container exactly as before -- one order, not
+    /// superseded, no claim -- and the original can then be reopened.
+    /// </summary>
+    [Fact]
+    public async Task A_mistaken_reinspection_can_be_undone()
+    {
+        var (arrivalId, qoId, _) = await SeedClosedOrderAsync();
+        try
+        {
+            using var scope = _factory.Services.CreateScope();
+            var qos = Qos(scope);
+            var (newId, _) = await qos.ReinspectAsync(qoId, "Meant to reopen.", "test");
+
+            var (backId, _) = await qos.UndoReinspectionAsync(newId, "Clicked the wrong button.", "test");
+            Assert.Equal(qoId, backId);
+
+            using var c = Db();
+            await c.OpenAsync();
+            var counts = await Dapper.SqlMapper.QuerySingleAsync(c, @"
+                SELECT (SELECT COUNT(*) FROM qms_quality_order WHERE arrival_id = @arrivalId) AS Orders,
+                       (SELECT COUNT(*) FROM qms_quality_order
+                         WHERE arrival_id = @arrivalId AND superseded_at IS NOT NULL) AS Superseded,
+                       (SELECT COUNT(*) FROM qms_claim WHERE quality_order_id IN (@qoId, @newId)) AS Claims",
+                new { arrivalId, qoId, newId });
+            _out.WriteLine($"orders {counts.Orders}, superseded {counts.Superseded}, claims {counts.Claims}");
+            Assert.Equal(1, (int)counts.Orders);
+            Assert.Equal(0, (int)counts.Superseded);
+            Assert.Equal(0, (int)counts.Claims);
+
+            var reopen = await qos.ReopenAsync(qoId, "test", "Correcting the report.");
+            Assert.True(reopen.ok, reopen.error);
+        }
+        finally { await CleanupAsync(arrivalId); }
+    }
+
+    /// <summary>
+    /// When the reinspection MOVED an existing claim, the undo moves the same
+    /// row back with the status it had, so the conversation is not lost.
+    /// </summary>
+    [Fact]
+    public async Task Undoing_a_reinspection_moves_the_claim_back()
+    {
+        var (arrivalId, qoId, _) = await SeedClosedOrderAsync();
+        try
+        {
+            using var scope = _factory.Services.CreateScope();
+            var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
+            var raised = await claims.MarkClaimRequestAsync(
+                qoId, "Brix below spec on four pallets.", "qm-user", "QualityManager");
+            Assert.True(raised.ok, raised.error);
+
+            using var c = Db();
+            await c.OpenAsync();
+            var claimId = await Dapper.SqlMapper.ExecuteScalarAsync<long>(c,
+                "SELECT claim_id FROM qms_claim WHERE quality_order_id = @qoId", new { qoId });
+
+            var qos = Qos(scope);
+            var (newId, _) = await qos.ReinspectAsync(qoId, "Meant to reopen.", "test");
+            await qos.UndoReinspectionAsync(newId, "Clicked the wrong button.", "test");
+
+            var claim = await Dapper.SqlMapper.QuerySingleAsync(c,
+                "SELECT claim_id, claim_status FROM qms_claim WHERE quality_order_id = @qoId", new { qoId });
+            _out.WriteLine($"claim {claim.claim_id} back on the original as {claim.claim_status}");
+            Assert.Equal(claimId, (long)claim.claim_id);
+            Assert.Equal(ClaimStatus.ClaimRequest, (string)claim.claim_status);
+
+            var notes = (await Dapper.SqlMapper.QueryAsync<string>(c,
+                "SELECT note_text FROM qms_claim_note WHERE claim_id = @claimId ORDER BY note_id",
+                new { claimId })).ToList();
+            Assert.Contains(notes, n => n.Contains("Brix below spec"));
+            Assert.Contains("was undone", notes.Last());
+        }
+        finally { await CleanupAsync(arrivalId); }
+    }
+
+    /// <summary>
+    /// Once the reinspection has been worked on, or someone has written in the
+    /// conversation it started, undoing would throw that away -- refused, and
+    /// nothing changes.
+    /// </summary>
+    [Fact]
+    public async Task A_reinspection_with_work_on_it_cannot_be_undone()
+    {
+        var (arrivalId, qoId, _) = await SeedClosedOrderAsync();
+        try
+        {
+            using var scope = _factory.Services.CreateScope();
+            var qos = Qos(scope);
+            var (newId, _) = await qos.ReinspectAsync(qoId, "A real reinspection.", "test");
+
+            var notAReinspection = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => qos.UndoReinspectionAsync(qoId, "Wrong order.", "test"));
+            Assert.Contains("not a reinspection", notAReinspection.Message);
+
+            var claims = scope.ServiceProvider.GetRequiredService<IClaimService>();
+            var note = await claims.AddNoteAsync(newId, "Warehouse is ready.", "qm-user", "QualityManager");
+            Assert.True(note.ok, note.error);
+            var commented = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => qos.UndoReinspectionAsync(newId, "Too late now.", "test"));
+            _out.WriteLine($"with a comment -> {commented.Message}");
+            Assert.Contains("written in", commented.Message);
+
+            using var c = Db();
+            await c.OpenAsync();
+            await Dapper.SqlMapper.ExecuteAsync(c,
+                "UPDATE qms_quality_order SET status_code = 'Submitted' WHERE quality_order_id = @newId", new { newId });
+            var submitted = await Assert.ThrowsAsync<InvalidOperationException>(
+                () => qos.UndoReinspectionAsync(newId, "Too late now.", "test"));
+            _out.WriteLine($"submitted -> {submitted.Message}");
+
+            var orders = await Dapper.SqlMapper.ExecuteScalarAsync<int>(c,
+                "SELECT COUNT(*) FROM qms_quality_order WHERE arrival_id = @arrivalId AND superseded_at IS NOT NULL",
+                new { arrivalId });
+            Assert.Equal(1, orders);   // the original is still superseded
+        }
+        finally { await CleanupAsync(arrivalId); }
+    }
+
+    /// <summary>
     /// One reinspection per container, refused by the DATABASE as well as the
     /// service — a second request arriving in the same instant cannot slip past
     /// a C# check.

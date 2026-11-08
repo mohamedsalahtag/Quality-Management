@@ -227,6 +227,187 @@ public static class ReinspectionOrder
     }
 
     /// <summary>
+    /// Takes back a reinspection raised by mistake -- typically Reinspect
+    /// clicked where Reopen was meant. Exactly the inverse of
+    /// <see cref="CreateAsync"/>: the reinspection is deleted, the original
+    /// stops being superseded, and the claim goes back to where it was.
+    ///
+    /// Only while the reinspection is untouched: Initial or Open, nothing
+    /// recorded on it (samples, header values, photos, documents, report PDFs
+    /// or e-mails), and the claim still exactly as the reinspection left it.
+    /// Past that, real work or a real decision would be thrown away, and the
+    /// answer is to finish the reinspection instead.
+    ///
+    /// The claim: if the reinspection CREATED it (the original had none), it is
+    /// deleted -- but only when its sole note is the "Sent for reinspection"
+    /// line, so no one's comment is lost. If the reinspection MOVED it, it moves
+    /// back with the status it had before, read from the Reinspected audit row,
+    /// and a note in the conversation says why.
+    ///
+    /// Returns the original order's id and number.
+    /// </summary>
+    public static async Task<(long QoId, string QoNo)> UndoAsync(
+        SqlConnection c, SqlTransaction tx, IAuditService audit,
+        long reinspectionQoId, string reason, string user)
+    {
+        if (string.IsNullOrWhiteSpace(reason) || reason.Trim().Length < 5)
+            throw new InvalidOperationException(
+                "Say why the reinspection is being undone — the reason is recorded in the audit log.");
+
+        // Locked for the rest of the transaction, so an operator opening it or
+        // adding a sample cannot slip in between these checks and the delete.
+        var re = await c.QuerySingleOrDefaultAsync<UndoCandidate>(@"
+            SELECT quality_order_id QoId,
+                   quality_order_no QoNo,
+                   arrival_id       ArrivalId,
+                   status_code      StatusCode,
+                   reinspection_of  ReinspectionOf
+            FROM   qms_quality_order WITH (UPDLOCK, HOLDLOCK)
+            WHERE  quality_order_id = @reinspectionQoId", new { reinspectionQoId }, tx);
+
+        if (re is null)
+            throw new InvalidOperationException("That quality order no longer exists.");
+        if (re.ReinspectionOf is not { } originalQoId)
+            throw new InvalidOperationException("This order is not a reinspection.");
+        if (re.StatusCode != QualityOrderStatus.Initial && re.StatusCode != QualityOrderStatus.Open)
+            throw new InvalidOperationException(
+                $"Only a reinspection that has not been worked on can be undone — this one is {QualityOrderStatus.DisplayName(re.StatusCode)}.");
+
+        var work = await c.ExecuteScalarAsync<int>(@"
+            SELECT (SELECT COUNT(*) FROM qms_sample WHERE quality_order_id = @reinspectionQoId)
+                 + (SELECT COUNT(*) FROM qms_qo_material_header_value h
+                    JOIN   qms_quality_order_material m ON m.qo_material_id = h.qo_material_id
+                    WHERE  m.quality_order_id = @reinspectionQoId)
+                 + (SELECT COUNT(*) FROM qms_image_link
+                    WHERE (owner_type = 'QualityOrder' AND owner_id = @reinspectionQoId)
+                       OR (owner_type = 'QualityOrderMaterial' AND owner_id IN
+                           (SELECT qo_material_id FROM qms_quality_order_material WHERE quality_order_id = @reinspectionQoId)))
+                 + (SELECT COUNT(*) FROM qms_document WHERE owner_type = 'QualityOrder' AND owner_id = @reinspectionQoId)
+                 + (SELECT COUNT(*) FROM qms_report_log WHERE quality_order_id = @reinspectionQoId)
+                 + (SELECT COUNT(*) FROM qms_qo_report_send WHERE quality_order_id = @reinspectionQoId)",
+            new { reinspectionQoId }, tx);
+        if (work > 0)
+            throw new InvalidOperationException(
+                "Work has already been recorded on this reinspection (samples, values, photos, documents or reports), so it cannot be undone. Finish it instead.");
+
+        var originalNo = await c.ExecuteScalarAsync<string?>(@"
+            SELECT quality_order_no FROM qms_quality_order WITH (UPDLOCK, HOLDLOCK)
+            WHERE  quality_order_id = @originalQoId AND superseded_at IS NOT NULL",
+            new { originalQoId }, tx)
+            ?? throw new InvalidOperationException("The original order is no longer superseded by this reinspection.");
+
+        // ---- The claim ----
+        var claim = await c.QuerySingleOrDefaultAsync<ClaimRow>(@"
+            SELECT claim_id ClaimId, claim_status ClaimStatus, decided_at DecidedAt
+            FROM   qms_claim WHERE quality_order_id = @reinspectionQoId",
+            new { reinspectionQoId }, tx);
+
+        string? restoredStatus = null;
+        if (claim is not null)
+        {
+            if (claim.DecidedAt.HasValue || claim.ClaimStatus != ClaimStatus.Reinspection)
+                throw new InvalidOperationException(
+                    "The claim has moved on since the reinspection was raised, so it cannot be undone.");
+
+            // CreateAsync wrote one Reinspected row against the claim; its old
+            // values say whether the claim existed before and with what status.
+            var oldJson = await c.QueryFirstOrDefaultAsync<string?>(@"
+                SELECT TOP 1 old_values_json FROM qms_audit_log
+                WHERE  entity_type = @entityType AND entity_id = @claimId
+                  AND  action_code = @action
+                  AND  (new_values_json LIKE @key + ',%' OR new_values_json LIKE @key + '}%')
+                ORDER  BY audit_id DESC",
+                new { entityType = EntityTypes.Claim, claimId = claim.ClaimId, action = ActionCodes.Reinspected,
+                      key = $"%\"quality_order_id\":{reinspectionQoId}" }, tx);
+
+            if (string.IsNullOrWhiteSpace(oldJson))
+            {
+                // Created by the reinspection. Drop it with its one automatic
+                // note, unless somebody has written in the conversation since.
+                var otherNotes = await c.ExecuteScalarAsync<int>(@"
+                    SELECT COUNT(*) FROM qms_claim_note
+                    WHERE  claim_id = @claimId AND note_text NOT LIKE @auto",
+                    new { claimId = claim.ClaimId, auto = $"Sent for reinspection as {re.QoNo}.%" }, tx);
+                if (otherNotes > 0)
+                    throw new InvalidOperationException(
+                        "Someone has already written in this reinspection's claim conversation, so it cannot be undone without losing their notes.");
+
+                await c.ExecuteAsync("DELETE FROM qms_claim WHERE claim_id = @claimId",
+                    new { claimId = claim.ClaimId }, tx);   // notes and read markers cascade
+            }
+            else
+            {
+                using (var doc = System.Text.Json.JsonDocument.Parse(oldJson))
+                    if (doc.RootElement.TryGetProperty("claim_status", out var s) && s.ValueKind == System.Text.Json.JsonValueKind.String)
+                        restoredStatus = s.GetString();
+                if (string.IsNullOrEmpty(restoredStatus))
+                    throw new InvalidOperationException(
+                        "The claim's status before the reinspection could not be found, so it cannot be moved back safely.");
+
+                // Back onto the original, keeping its claim_id so the whole
+                // conversation and every read marker follow, as on the way in.
+                await c.ExecuteAsync(@"
+                    UPDATE qms_claim
+                    SET    quality_order_id = @originalQoId,
+                           claim_status     = @restoredStatus,
+                           last_changed_at  = SYSUTCDATETIME(),
+                           last_changed_by  = @user
+                    WHERE  claim_id = @claimId",
+                    new { originalQoId, restoredStatus, user, claimId = claim.ClaimId }, tx);
+
+                await c.ExecuteAsync(@"
+                    INSERT INTO qms_claim_note
+                        (claim_id, note_text, note_kind, status_at_post, created_at, created_by, author_role)
+                    VALUES (@claimId, @note, @kind, @status, SYSUTCDATETIME(), @user, @role)",
+                    new { claimId = claim.ClaimId,
+                          note = $"Reinspection {re.QoNo} was undone; this conversation is back on {originalNo}. {reason.Trim()}",
+                          kind = ClaimNoteKind.StatusChange, status = restoredStatus, user, role = "Admin" }, tx);
+
+                await audit.WriteAsync(c, tx, EntityTypes.Claim, claim.ClaimId, ActionCodes.ReinspectionUndone,
+                    oldValues: new { claim_status = ClaimStatus.Reinspection, quality_order_id = reinspectionQoId },
+                    newValues: new { claim_status = restoredStatus, quality_order_id = originalQoId, reason },
+                    actor: user);
+            }
+        }
+
+        // ---- The orders ----
+        // Audit first, while the row is still there to describe.
+        await audit.WriteAsync(c, tx, EntityTypes.QualityOrder, reinspectionQoId, ActionCodes.Deleted,
+            oldValues: new { quality_order_no = re.QoNo, arrival_id = re.ArrivalId, status_code = re.StatusCode,
+                             reinspection_of = originalQoId },
+            newValues: new { reason = $"Reinspection undone: {reason.Trim()}",
+                             claim = claim is null ? "none" : restoredStatus is null ? "deleted" : "moved back" },
+            actor: user);
+
+        await QoCascade.DeleteAsync(c, tx, new[] { reinspectionQoId });
+
+        // After the delete: UX_qms_quality_order_active_per_arrival allows one
+        // live order per arrival, and until now that was the reinspection.
+        await c.ExecuteAsync(@"
+            UPDATE qms_quality_order
+            SET    superseded_at = NULL,
+                   superseded_by = NULL
+            WHERE  quality_order_id = @originalQoId",
+            new { originalQoId }, tx);
+
+        await audit.WriteAsync(c, tx, EntityTypes.QualityOrder, originalQoId, ActionCodes.ReinspectionUndone,
+            oldValues: new { reinspected_as = re.QoNo },
+            newValues: new { superseded_at = (DateTime?)null, reason },
+            actor: user);
+
+        return (originalQoId, originalNo);
+    }
+
+    private sealed class UndoCandidate
+    {
+        public long   QoId           { get; set; }
+        public string QoNo           { get; set; } = "";
+        public long   ArrivalId      { get; set; }
+        public string StatusCode     { get; set; } = "";
+        public long?  ReinspectionOf { get; set; }
+    }
+
+    /// <summary>
     /// The columns the guards above need, read in one round trip.
     ///
     /// A class with settable properties rather than a record struct: Dapper

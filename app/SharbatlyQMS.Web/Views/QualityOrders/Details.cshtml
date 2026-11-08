@@ -193,7 +193,17 @@
            Initial or Open -- past that it is a signed-off record. The server
            re-checks the role, the status and the typed number regardless of
            whether this button rendered. *@
-        @if (!isClaimContext && Perms.Can(Perm.Qo.Delete)
+        @* A reinspection is never deleted (it holds the claim); while nobody
+           has worked on it, it can be undone instead. The service refuses once
+           samples or other work exist. *@
+        @if (!isClaimContext && Model.IsReinspection && Perms.Can(Perm.Qo.Reinspect)
+             && (Model.StatusCode == QualityOrderStatus.Initial || Model.StatusCode == QualityOrderStatus.Open))
+        {
+            <button type="button" class="btn btn-outline-danger" data-bs-toggle="modal" data-bs-target="#undoReinspectModal">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Undo reinspection"]
+            </button>
+        }
+        @if (!isClaimContext && Perms.Can(Perm.Qo.Delete) && !Model.IsReinspection
              && (Model.StatusCode == QualityOrderStatus.Initial || Model.StatusCode == QualityOrderStatus.Open))
         {
             <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#deleteQoModal">
@@ -943,12 +953,16 @@
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
             <div class="modal-body">
+                <div class="alert alert-warning small py-2">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    @Loc["Only need to correct this report or send it again? Close this and use Reopen or Send to supplier instead."]
+                </div>
                 <p class="small">
                     @Loc["A new quality order is raised for the same container, starting empty. This order is kept in full and still prints, but it stops speaking for the container."]
                 </p>
                 <ul class="small text-muted ps-3">
                     <li>@Loc["The claim and its whole conversation move to the reinspection, which becomes the order that speaks for this container."]</li>
-                    <li>@Loc["A container is reinspected once. This cannot be undone from the application."]</li>
+                    <li>@Loc["A container is reinspected once. A reinspection raised by mistake can be undone only until work is recorded on it."]</li>
                     <li>@Loc["This order is frozen: it stays readable and printable as a reference, but it cannot be reopened, changed, or sent to a supplier."]</li>
                     <li>@Loc["Dashboard and Inspection Time Bar figures follow the reinspection. The container returns to pending inspection until the reinspection is finished, and its inspection clock restarts."]</li>
                 </ul>
@@ -964,6 +978,39 @@
         </form>
     </div>
 </div>
+
+@if (Model.IsReinspection)
+{
+    <div class="modal fade" id="undoReinspectModal" tabindex="-1">
+        <div class="modal-dialog">
+            <form asp-action="UndoReinspection" asp-route-id="@Model.QualityOrderId" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Undo this reinspection"]</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small">
+                        @Loc["For a reinspection raised by mistake. This order is deleted and the original speaks for the container again, as if the reinspection had never been raised."]
+                    </p>
+                    <ul class="small text-muted ps-3">
+                        <li>@Loc["Only possible while nothing has been recorded on this order: no samples, values, photos, documents or reports."]</li>
+                        <li>@Loc["The claim goes back to the original with the status it had before; if the reinspection started it, it is removed."]</li>
+                        <li>@Loc["The original can then be reopened or sent to the supplier as usual."]</li>
+                    </ul>
+                    <label class="form-label">@Loc["Why is it being undone? (required)"]</label>
+                    <textarea name="reason" class="form-control" rows="2" required minlength="5"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>@Loc["Undo reinspection"]
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
 
 @* ---- Send report to supplier modal (visible only when enabled in
        Parameters → Mail Template). Body + subject load from server-side
