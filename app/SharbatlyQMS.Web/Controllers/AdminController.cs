@@ -2343,6 +2343,178 @@ public class AdminController : Controller
         return RedirectToAction(nameof(CodeDescriptions), new { domain });
     }
 
+    // ---- Supplier contacts (M42, Parameters menu) ---------------------
+    //
+    // The suppliers QMS mails quality reports to, each with every address the
+    // report should reach. The send dialog puts all of them in To. Suppliers we
+    // have received a container from are added automatically; the rest come
+    // from the contacts workbook (Import) or are added here by hand.
+    [HttpGet]
+    [RequireScreen(Screens.SupplierContacts, Seed.OperatorOrAbove, "Open Supplier contacts")]
+    public async Task<IActionResult> SupplierContacts(string? status, string? show, string? q,
+        [FromServices] ISupplierContactService suppliers)
+        => await SupplierContactsView(suppliers, status, show, q, null);
+
+    private async Task<IActionResult> SupplierContactsView(ISupplierContactService suppliers,
+        string? status, string? show, string? q, SupplierImportResult? import)
+    {
+        status = status is "all" or "inactive" ? status : "active";
+        show   = show is "with" or "none" or "noemail" ? show : null;
+        await suppliers.EnsureFromArrivalsAsync();
+        ViewBag.Status = status;
+        ViewBag.Show   = show;
+        ViewBag.Query  = q;
+        ViewBag.Import = import;
+        return View(nameof(SupplierContacts), await suppliers.ListAsync(status, show, q));
+    }
+
+    /// <summary>The name SAP has for a vendor number -- the Add dialog fills the
+    /// name from it and warns when SAP does not know the code.</summary>
+    [HttpGet]
+    [RequireScreen(Screens.SupplierContacts, Seed.OperatorOrAbove, "Open Supplier contacts")]
+    public async Task<IActionResult> SupplierSapName(string vendorNo, [FromServices] ISupplierContactService suppliers)
+    {
+        vendorNo = (vendorNo ?? "").Trim();
+        var existing = await suppliers.GetAsync(vendorNo);
+        return Json(new { name = await suppliers.SapNameAsync(vendorNo), onList = existing != null });
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Parameters.SupplierContactsEdit, Seed.AdminOnly, "Edit Supplier contacts")]
+    public async Task<IActionResult> SaveSupplierContact(bool isNew, string vendorNo, string? name, string? origin,
+        string? contactPerson, bool isActive, string? emails, string? status, string? show, string? q,
+        [FromServices] ISupplierContactService suppliers)
+    {
+        vendorNo = (vendorNo ?? "").Trim();
+        IActionResult Back() => RedirectToAction(nameof(SupplierContacts), new { status, show, q });
+
+        if (vendorNo.Length == 0 || vendorNo.Length > 40 || !vendorNo.All(char.IsLetterOrDigit))
+        {
+            TempData["Error"] = "Enter the supplier's SAP vendor number (digits and letters only).";
+            return Back();
+        }
+        var before = await suppliers.GetAsync(vendorNo);
+        if (isNew && before != null)
+        {
+            TempData["Error"] = $"{vendorNo} is already on the list as '{before.Name}'. Edit that row instead.";
+            return Back();
+        }
+        if (!isNew && before == null)
+        {
+            TempData["Error"] = "Supplier not found.";
+            return Back();
+        }
+
+        name = string.IsNullOrWhiteSpace(name) ? await suppliers.SapNameAsync(vendorNo) : name.Trim();
+        if (string.IsNullOrWhiteSpace(name))
+        {
+            TempData["Error"] = $"SAP has no vendor {vendorNo}, so type the supplier's name.";
+            return Back();
+        }
+
+        var (valid, invalid) = SupplierEmails.Parse(emails);
+        if (invalid.Count > 0)
+        {
+            TempData["Error"] = $"'{invalid[0]}' is not a valid e-mail address. Nothing was saved.";
+            return Back();
+        }
+
+        var s = new SupplierContact
+        {
+            VendorNo      = vendorNo,
+            Name          = Clip(name, 200),
+            Origin        = string.IsNullOrWhiteSpace(origin) ? null : Clip(origin.Trim(), 80),
+            ContactPerson = string.IsNullOrWhiteSpace(contactPerson) ? null : Clip(contactPerson.Trim(), 200),
+            IsActive      = isActive
+        };
+        var user = User.FindFirstValue(ClaimTypes.Name) ?? "system";
+        var created = await suppliers.SaveAsync(s, valid, user);
+
+        TempData["Success"] = created
+            ? $"{s.Name} ({vendorNo}) added with {valid.Count} address(es)."
+            : $"{s.Name} ({vendorNo}) saved with {valid.Count} address(es).";
+        await AuditAdminAsync(EntityTypes.Supplier, long.TryParse(vendorNo, out var id) ? id : 0,
+            created ? ActionCodes.Created : ActionCodes.Updated,
+            before == null ? null : new { before.VendorNo, before.Name, before.Origin, before.ContactPerson, before.IsActive, before.Emails },
+            new { s.VendorNo, s.Name, s.Origin, s.ContactPerson, s.IsActive, Emails = valid });
+        return Back();
+
+        static string Clip(string v, int max) => v.Length <= max ? v : v[..max];
+    }
+
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Parameters.SupplierContactsEdit, Seed.AdminOnly, "Edit Supplier contacts")]
+    public async Task<IActionResult> DeleteSupplierContact(string vendorNo, string? status, string? show, string? q,
+        [FromServices] ISupplierContactService suppliers)
+    {
+        var before = await suppliers.GetAsync(vendorNo);
+        var error  = await suppliers.DeleteAsync(vendorNo);
+        if (error != null)
+        {
+            TempData["Error"] = error;
+        }
+        else
+        {
+            TempData["Success"] = $"{before?.Name} ({vendorNo}) removed with its addresses.";
+            await AuditAdminAsync(EntityTypes.Supplier, long.TryParse(vendorNo, out var id) ? id : 0, ActionCodes.Deleted,
+                before == null ? null : new { before.VendorNo, before.Name, before.Emails }, null);
+        }
+        return RedirectToAction(nameof(SupplierContacts), new { status, show, q });
+    }
+
+    /// <summary>
+    /// Loads the supplier contacts workbook. Adds suppliers and addresses and
+    /// never removes any, so running it again is harmless. The rules for which
+    /// rows apply are in <see cref="SupplierImport"/>; the page shows every row
+    /// that was skipped and why, so those can be entered by hand.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequestFormLimits(MultipartBodyLengthLimit = 10 * 1024 * 1024)]
+    [RequirePermission(Perm.Parameters.SupplierContactsEdit, Seed.AdminOnly, "Edit Supplier contacts")]
+    public async Task<IActionResult> SupplierContactsImport(IFormFile? file, [FromServices] ISupplierContactService suppliers)
+    {
+        if (file == null || file.Length == 0)
+        {
+            TempData["Error"] = "No file was chosen.";
+            return RedirectToAction(nameof(SupplierContacts));
+        }
+        if (!Path.GetExtension(file.FileName).Equals(".xlsx", StringComparison.OrdinalIgnoreCase))
+        {
+            TempData["Error"] = "Upload the supplier contacts workbook as an .xlsx file.";
+            return RedirectToAction(nameof(SupplierContacts));
+        }
+
+        List<SupplierImportRow> rows;
+        try
+        {
+            using var stream = file.OpenReadStream();
+            string? error;
+            (rows, error) = SupplierImport.Read(stream);
+            if (error != null)
+            {
+                TempData["Error"] = error;
+                return RedirectToAction(nameof(SupplierContacts));
+            }
+        }
+        catch (Exception ex)
+        {
+            _adminLog.LogWarning(ex, "Supplier contacts import: could not read {File}", file.FileName);
+            TempData["Error"] = "That file could not be read as an Excel workbook.";
+            return RedirectToAction(nameof(SupplierContacts));
+        }
+
+        var user   = User.FindFirstValue(ClaimTypes.Name) ?? "system";
+        var result = await suppliers.ImportAsync(rows, user);
+        await AuditAdminAsync(EntityTypes.Supplier, 0, ActionCodes.Updated, null, new
+        {
+            import = file.FileName, result.SuppliersAdded, result.SuppliersUpdated, result.EmailsAdded,
+            result.RowsApplied, skipped = result.Skipped.Count
+        });
+        // Rendered rather than redirected: the skipped-row list is too long for
+        // TempData, and re-posting the same file is harmless.
+        return await SupplierContactsView(suppliers, "all", null, null, result);
+    }
+
     // ---- Report Units (M11, Parameters menu) --------------------------
     //
     // One unit label per material group, printed by the Quality Order PDF in

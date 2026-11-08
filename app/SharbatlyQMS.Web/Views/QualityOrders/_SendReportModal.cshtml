@@ -22,22 +22,20 @@
                     <div id="srm-last" class="alert alert-success small d-none">
                         <i class="bi bi-envelope-check me-1"></i><span id="srm-last-text"></span>
                     </div>
-                    @* Three states, one banner slot: no address on file (warn),
-                       address remembered in QMS (info), address from SAP (info). *@
+                    @* Two states, one banner slot: no address on file (warn), or
+                       the supplier's addresses from Supplier contacts (info). *@
                     <div id="srm-no-email" class="alert alert-warning small d-none">
                         <i class="bi bi-exclamation-triangle me-1"></i>
                         No e-mail address is on file for <strong id="srm-supplier-a">@Loc["this supplier"]</strong>.
-                        SAP's vendor master does not carry supplier e-mail addresses, so QMS keeps its own.
-                        Type the address below and tick <em>@Loc["Remember"]</em> to save it for next time.
+                        SAP's vendor master does not carry supplier e-mail addresses, so QMS keeps them in
+                        Parameters &rarr; Supplier contacts. Type the address below and tick
+                        <em>@Loc["Remember"]</em> to add it there for next time.
                     </div>
                     <div id="srm-email-qms" class="alert alert-info small d-none">
                         <i class="bi bi-bookmark-check me-1"></i>
-                        Using the address saved in QMS for <strong id="srm-supplier-b">@Loc["this supplier"]</strong>.
-                        Editing it below and leaving <em>@Loc["Remember"]</em> ticked updates it.
-                    </div>
-                    <div id="srm-email-sap" class="alert alert-info small d-none">
-                        <i class="bi bi-database-check me-1"></i>
-                        @Loc["Address taken from the SAP vendor master."]
+                        Sending to every address in Parameters &rarr; Supplier contacts for
+                        <strong id="srm-supplier-b">@Loc["this supplier"]</strong>. Remove any you don't want for this mail;
+                        an address you add is added to the list while <em>@Loc["Remember"]</em> is ticked.
                     </div>
                     <div class="mb-2">
                         <label class="form-label">@Loc["To *"]</label>
@@ -46,7 +44,7 @@
                         <div class="form-check mt-1">
                             <input class="form-check-input" type="checkbox" id="srm-remember" checked />
                             <label class="form-check-label small" for="srm-remember">
-                                @Loc["Remember the first address for this supplier"]
+                                @Loc["Remember new addresses for this supplier"]
                                 <span class="text-muted">@Loc["(reused next time; CC is never saved)"]</span>
                             </label>
                         </div>

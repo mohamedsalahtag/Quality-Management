@@ -1,0 +1,306 @@
+@using SharbatlyQMS.Web.Services
+@model IReadOnlyList<SupplierContact>
+@{
+    ViewData["Title"] = Loc["Supplier contacts"];
+    var status  = ViewBag.Status as string ?? "active";
+    var show    = ViewBag.Show   as string;
+    var query   = ViewBag.Query  as string;
+    var import  = ViewBag.Import as SupplierImportResult;
+    var canEdit = Perms.Can(Perm.Parameters.SupplierContactsEdit);
+}
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h1 class="h3 mb-0">
+        <i class="bi bi-person-lines-fill me-1"></i>Supplier contacts
+        <small class="text-muted fs-6 fw-normal ms-2">
+            Where quality reports are e-mailed — every address here goes in <em>To</em> when a report is sent.
+        </small>
+    </h1>
+    @if (canEdit)
+    {
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#scImport">
+                <i class="bi bi-file-earmark-arrow-up me-1"></i>@Loc["Import from Excel"]
+            </button>
+            <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#scModal" data-mode="create">
+                <i class="bi bi-plus-circle me-1"></i>@Loc["Add supplier"]
+            </button>
+        </div>
+    }
+</div>
+
+@if (import != null)
+{
+    <div class="alert alert-success">
+        <div class="fw-semibold mb-1"><i class="bi bi-check-circle me-1"></i>Import finished</div>
+        @import.RowsApplied row(s) applied: @import.SuppliersAdded supplier(s) added, @import.SuppliersUpdated updated,
+        @import.EmailsAdded new address(es). @import.Skipped.Count row(s) skipped.
+        @if (import.Skipped.Count > 0)
+        {
+            <details class="mt-2">
+                <summary>Skipped rows — enter these by hand if they should receive reports</summary>
+                <div class="table-responsive mt-2">
+                    <table class="table table-sm table-bordered bg-white mb-0">
+                        <thead class="table-light"><tr><th>Row</th><th>Code</th><th>Name</th><th>Reason</th></tr></thead>
+                        <tbody>
+                        @foreach (var s in import.Skipped)
+                        {
+                            <tr><td>@s.RowNo</td><td><code>@s.Code</code></td><td>@s.Name</td><td>@s.Reason</td></tr>
+                        }
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        }
+    </div>
+}
+
+<form method="get" class="row g-2 mb-3">
+    <div class="col-sm-6 col-md-2">
+        <select name="status" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="active"   selected="@(status == "active")">@Loc["Active"]</option>
+            <option value="inactive" selected="@(status == "inactive")">@Loc["Inactive"]</option>
+            <option value="all"      selected="@(status == "all")">@Loc["Active and inactive"]</option>
+        </select>
+    </div>
+    <div class="col-sm-6 col-md-3">
+        <select name="show" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value=""        selected="@(show == null)">@Loc["All suppliers"]</option>
+            <option value="with"    selected="@(show == "with")">@Loc["Containers received"]</option>
+            <option value="none"    selected="@(show == "none")">@Loc["No containers yet"]</option>
+            <option value="noemail" selected="@(show == "noemail")">@Loc["No e-mail address"]</option>
+        </select>
+    </div>
+    <div class="col-md-4">
+        <input type="text" name="q" value="@query" class="form-control form-control-sm"
+               placeholder="Search code, name, origin or address…" autocomplete="off" />
+    </div>
+    <div class="col-md-3 d-flex gap-2">
+        <button type="submit" class="btn btn-outline-secondary btn-sm"><i class="bi bi-search me-1"></i>@Loc["Search"]</button>
+        @if (!string.IsNullOrWhiteSpace(query) || show != null || status != "active")
+        {
+            <a asp-action="SupplierContacts" class="btn btn-outline-secondary btn-sm">@Loc["Clear"]</a>
+        }
+    </div>
+</form>
+
+<div class="card">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0" data-tablekit data-page-size="50">
+            <thead class="table-light">
+                <tr>
+                    <th data-sort>@Loc["SAP code"]</th>
+                    <th data-sort>@Loc["Supplier"]</th>
+                    <th data-sort>@Loc["Origin"]</th>
+                    <th data-sort class="text-end">@Loc["Containers"]</th>
+                    <th data-sort>@Loc["Last arrival"]</th>
+                    <th>@Loc["E-mail addresses"]</th>
+                    <th data-sort>@Loc["Active"]</th>
+                    @if (canEdit) { <th class="text-end" style="width: 110px">@Loc["Actions"]</th> }
+                </tr>
+            </thead>
+            <tbody>
+            @if (Model.Count == 0)
+            {
+                <tr><td colspan="@(canEdit ? 8 : 7)" class="text-center text-muted py-4">@Loc["No supplier matches."]</td></tr>
+            }
+            else
+            {
+                foreach (var s in Model)
+                {
+                    <tr>
+                        <td><code>@s.VendorNo</code></td>
+                        <td>
+                            @s.Name
+                            @if (!string.IsNullOrWhiteSpace(s.ContactPerson))
+                            {
+                                <div class="small text-muted">@s.ContactPerson</div>
+                            }
+                        </td>
+                        <td>@s.Origin</td>
+                        <td class="text-end">@s.Containers</td>
+                        <td class="text-nowrap">
+                            @(s.LastArrival?.ToLocalTime().ToString("yyyy-MM-dd"))
+                        </td>
+                        <td style="max-width: 420px">
+                            @if (s.Emails.Count == 0)
+                            {
+                                <span class="badge bg-warning-subtle text-warning-emphasis">@Loc["No address"]</span>
+                            }
+                            @foreach (var e in s.Emails)
+                            {
+                                <span class="badge bg-light text-dark border fw-normal text-break me-1 mb-1">@e</span>
+                            }
+                        </td>
+                        <td>
+                            @if (s.IsActive)
+                            {
+                                <span class="badge bg-success-subtle text-success-emphasis">@Loc["Yes"]</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis">@Loc["No"]</span>
+                            }
+                        </td>
+                        @if (canEdit)
+                        {
+                            <td class="text-end text-nowrap">
+                                <button type="button" class="btn btn-sm btn-outline-secondary"
+                                        data-bs-toggle="modal" data-bs-target="#scModal"
+                                        data-mode="edit"
+                                        data-code="@s.VendorNo"
+                                        data-name="@s.Name"
+                                        data-origin="@s.Origin"
+                                        data-contact="@s.ContactPerson"
+                                        data-active="@(s.IsActive ? "true" : "false")"
+                                        data-emails="@string.Join("\n", s.Emails)"
+                                        title="Edit">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                @if (s.Containers == 0)
+                                {
+                                    <form asp-action="DeleteSupplierContact" method="post" class="d-inline"
+                                          data-confirm="Remove @s.Name (@s.VendorNo) and its @s.Emails.Count address(es)?"
+                                          data-confirm-danger data-confirm-ok="Remove">
+                                        @Html.AntiForgeryToken()
+                                        <input type="hidden" name="vendorNo" value="@s.VendorNo" />
+                                        <input type="hidden" name="status" value="@status" />
+                                        <input type="hidden" name="show" value="@show" />
+                                        <input type="hidden" name="q" value="@query" />
+                                        <button type="submit" class="btn btn-sm btn-outline-danger" title="Remove">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </form>
+                                }
+                            </td>
+                        }
+                    </tr>
+                }
+            }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@if (canEdit)
+{
+    <div class="modal fade" id="scModal" tabindex="-1">
+        <div class="modal-dialog">
+            <form asp-action="SaveSupplierContact" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="isNew" id="sc-new" value="true" />
+                <input type="hidden" name="status" value="@status" />
+                <input type="hidden" name="show" value="@show" />
+                <input type="hidden" name="q" value="@query" />
+                <div class="modal-header">
+                    <h5 class="modal-title" id="sc-title">@Loc["Add supplier"]</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-5">
+                            <label class="form-label">@Loc["SAP code"]</label>
+                            <input type="text" name="vendorNo" id="sc-code" class="form-control" maxlength="40" required
+                                   autocomplete="off" inputmode="numeric" />
+                        </div>
+                        <div class="col-7">
+                            <label class="form-label">@Loc["Origin"]</label>
+                            <input type="text" name="origin" id="sc-origin" class="form-control" maxlength="80" autocomplete="off" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">@Loc["Supplier name"]</label>
+                            <input type="text" name="name" id="sc-name" class="form-control" maxlength="200" autocomplete="off" />
+                            <div class="form-text" id="sc-sap"></div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">@Loc["Contact person"]</label>
+                            <input type="text" name="contactPerson" id="sc-contact" class="form-control" maxlength="200" autocomplete="off" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">@Loc["E-mail addresses"]</label>
+                            <textarea name="emails" id="sc-emails" class="form-control font-monospace" rows="6"
+                                      placeholder="one address per line"></textarea>
+                            <div class="form-text">One per line (or separated by ; or ,). Every address here receives the quality report.</div>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" name="isActive" id="sc-active" value="true" checked />
+                                <input type="hidden" name="isActive" value="false" />
+                                <label class="form-check-label" for="sc-active">@Loc["Active"]</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-primary">@Loc["Save"]</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal fade" id="scImport" tabindex="-1">
+        <div class="modal-dialog">
+            <form asp-action="SupplierContactsImport" method="post" enctype="multipart/form-data" class="modal-content">
+                @Html.AntiForgeryToken()
+                <div class="modal-header">
+                    <h5 class="modal-title">@Loc["Import from Excel"]</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="file" name="file" accept=".xlsx" class="form-control" required />
+                    <div class="form-text mt-2">
+                        The sheet needs the columns <em>Supplier code</em>, <em>E-mail Address 1</em> and optionally
+                        <em>E-mail Address 2</em>, <em>SUPPLIER NAME</em>, <em>Origin</em>, <em>Contact Person Name</em>.
+                        Addresses are only added, never removed, so importing the same file again changes nothing.
+                        Rows without a code, and codes that appear on more than one row, are skipped and listed.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-upload me-1"></i>@Loc["Import"]</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+@section Scripts {
+<script>
+    (function () {
+        var modal = document.getElementById('scModal');
+        if (!modal) return;
+        var code = document.getElementById('sc-code'), name = document.getElementById('sc-name'),
+            sap = document.getElementById('sc-sap'), isNew = document.getElementById('sc-new');
+
+        // Same show.bs.modal data-* handoff the other Parameters pages use.
+        modal.addEventListener('show.bs.modal', function (ev) {
+            var b = ev.relatedTarget; if (!b) return;
+            var edit = b.getAttribute('data-mode') === 'edit';
+            document.getElementById('sc-title').textContent = edit ? 'Edit supplier' : 'Add supplier';
+            isNew.value = edit ? 'false' : 'true';
+            code.value = edit ? b.getAttribute('data-code') : '';
+            code.readOnly = edit;
+            name.value = edit ? b.getAttribute('data-name') : '';
+            document.getElementById('sc-origin').value  = edit ? (b.getAttribute('data-origin') || '') : '';
+            document.getElementById('sc-contact').value = edit ? (b.getAttribute('data-contact') || '') : '';
+            document.getElementById('sc-emails').value  = edit ? (b.getAttribute('data-emails') || '') : '';
+            document.getElementById('sc-active').checked = edit ? b.getAttribute('data-active') === 'true' : true;
+            sap.textContent = '';
+        });
+
+        // A new code is looked up in SAP: the name is filled in from it, and a
+        // code SAP does not know is pointed out before it is saved.
+        code.addEventListener('change', async function () {
+            if (isNew.value !== 'true' || !code.value.trim()) return;
+            try {
+                var r = await fetch('@Url.Action("SupplierSapName")?vendorNo=' + encodeURIComponent(code.value.trim()));
+                var d = await r.json();
+                if (d.onList) sap.textContent = 'This code is already on the list — edit that row instead.';
+                else if (d.name) { sap.textContent = 'SAP: ' + d.name; if (!name.value) name.value = d.name; }
+                else sap.textContent = 'SAP has no vendor with this code. Check it, or type the name.';
+            } catch (e) { sap.textContent = ''; }
+        });
+    })();
+</script>
+}

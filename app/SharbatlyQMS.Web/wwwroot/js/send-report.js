@@ -128,15 +128,12 @@
             const name = data.supplierName || "this supplier";
             $("srm-supplier-a").textContent = name;
             $("srm-supplier-b").textContent = name;
-            const banners = { none: $("srm-no-email"), qms: $("srm-email-qms"), sap: $("srm-email-sap") };
-            Object.values(banners).forEach(b => b.classList.add("d-none"));
-            const which = !data.emailKnown ? "none" : (data.emailSource === "sap" ? "sap" : "qms");
-            banners[which].classList.remove("d-none");
+            $("srm-no-email").classList.toggle("d-none", !!data.emailKnown);
+            $("srm-email-qms").classList.toggle("d-none", !data.emailKnown);
 
-            // Nothing to store an address against without a vendor number, and
-            // an address coming FROM SAP should not be shadowed by a QMS copy.
+            // Nothing to store an address against without a vendor number.
             const remember = $("srm-remember");
-            const canRemember = !!vendorNo && which !== "sap" && !!opener.dataset.urlSave;
+            const canRemember = !!vendorNo && !!opener.dataset.urlSave;
             remember.checked = canRemember;
             remember.disabled = !canRemember;
             renderDocs(data.documents || []);

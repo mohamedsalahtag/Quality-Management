@@ -72,7 +72,7 @@ builder.Services.AddScoped<IDocumentService, DocumentService>();
 builder.Services.AddScoped<IMaraService, MaraService>();
 // The material master category tree behind the major / sub-major filters.
 builder.Services.AddScoped<IMaterialTaxonomyService, MaterialTaxonomyService>();
-builder.Services.AddScoped<IVendorService, VendorService>();
+builder.Services.AddScoped<ISupplierContactService, SupplierContactService>();
 builder.Services.AddScoped<ICatalogCache, CatalogCache>();
 // M10: SAP code -> friendly name lookup (plants, storage locations, PO types).
 // Singleton, not scoped: views resolve it per table cell, so it holds immutable

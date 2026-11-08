@@ -46,7 +46,7 @@
     var curAct = ViewContext.RouteData.Values["action"] as string ?? "";
     bool NavOn(string ctl) => string.Equals(curCtl, ctl, StringComparison.OrdinalIgnoreCase);
     bool ActOn(string act) => string.Equals(curAct, act, StringComparison.OrdinalIgnoreCase);
-    var paramActions = new[] { "DefectCatalog", "DefectCategories", "ReadingTypes", "SampleHeaders", "ArrivalFields", "ReportUnits", "CodeDescriptions", "MailTemplate" };
+    var paramActions = new[] { "DefectCatalog", "DefectCategories", "ReadingTypes", "SampleHeaders", "ArrivalFields", "ReportUnits", "CodeDescriptions", "MailTemplate", "Notifications", "SupplierContacts" };
     var paramsOn     = NavOn("Admin") && paramActions.Contains(curAct, StringComparer.OrdinalIgnoreCase);
     var adminOn      = (NavOn("Admin") && (ActOn("Settings") || ActOn("Users") || ActOn("ArrivalFieldRules"))) || NavOn("Audit") || NavOn("Security");
 }
@@ -159,22 +159,54 @@
                         @if (canSeeParameters)
                         {
                             @* Parameters: per-material-group catalogs that drive
-                               the sample form (defects + readings). Manager+
-                               can access; Operator and Viewer cannot. *@
+                               the sample form (defects + readings), plus Supplier
+                               contacts. Each item shows only to those who may
+                               open it -- an Operator sees Supplier contacts alone. *@
                             <li class="nav-item dropdown">
                                 <a class="nav-link dropdown-toggle @(paramsOn ? "active" : "")" aria-current="@(paramsOn ? "page" : null)" href="#" data-bs-toggle="dropdown">
                                     <i class="bi bi-sliders2 me-1"></i>@Loc["Parameters"]
                                 </a>
                                 <ul class="dropdown-menu">
-                                    <li><a class="dropdown-item @(ActOn("DefectCatalog") ? "active" : "")" asp-controller="Admin" asp-action="DefectCatalog"><i class="bi bi-list-check me-1"></i>@Loc["Defect Catalog"]</a></li>
-                                    <li><a class="dropdown-item @(ActOn("DefectCategories") ? "active" : "")" asp-controller="Admin" asp-action="DefectCategories"><i class="bi bi-palette me-1"></i>@Loc["Defect Categories"]</a></li>
-                                    <li><a class="dropdown-item @(ActOn("ReadingTypes") ? "active" : "")" asp-controller="Admin" asp-action="ReadingTypes"><i class="bi bi-rulers me-1"></i>@Loc["Reading Types"]</a></li>
-                                    <li><a class="dropdown-item @(ActOn("SampleHeaders") ? "active" : "")" asp-controller="Admin" asp-action="SampleHeaders"><i class="bi bi-card-heading me-1"></i>@Loc["Sample Headers"]</a></li>
-                                    <li><a class="dropdown-item @(ActOn("ArrivalFields") ? "active" : "")" asp-controller="Admin" asp-action="ArrivalFields"><i class="bi bi-input-cursor-text me-1"></i>@Loc["Arrival Fields"]</a></li>
-                                    <li><a class="dropdown-item @(ActOn("ReportUnits") ? "active" : "")" asp-controller="Admin" asp-action="ReportUnits"><i class="bi bi-tags me-1"></i>@Loc["Report Units"]</a></li>
-                                    <li><a class="dropdown-item @(ActOn("CodeDescriptions") ? "active" : "")" asp-controller="Admin" asp-action="CodeDescriptions"><i class="bi bi-translate me-1"></i>@Loc["Code Descriptions"]</a></li>
-                                    <li><a class="dropdown-item @(ActOn("MailTemplate") ? "active" : "")" asp-controller="Admin" asp-action="MailTemplate"><i class="bi bi-envelope-paper me-1"></i>@Loc["Mail Template"]</a></li>
-                                    <li><a class="dropdown-item @(ActOn("Notifications") ? "active" : "")" asp-controller="Admin" asp-action="Notifications"><i class="bi bi-bell me-1"></i>@Loc["Notifications"]</a></li>
+                                    @if (Perms.CanView(Screens.DefectCatalog))
+                                    {
+                                        <li><a class="dropdown-item @(ActOn("DefectCatalog") ? "active" : "")" asp-controller="Admin" asp-action="DefectCatalog"><i class="bi bi-list-check me-1"></i>@Loc["Defect Catalog"]</a></li>
+                                    }
+                                    @if (Perms.CanView(Screens.DefectCategories))
+                                    {
+                                        <li><a class="dropdown-item @(ActOn("DefectCategories") ? "active" : "")" asp-controller="Admin" asp-action="DefectCategories"><i class="bi bi-palette me-1"></i>@Loc["Defect Categories"]</a></li>
+                                    }
+                                    @if (Perms.CanView(Screens.ReadingTypes))
+                                    {
+                                        <li><a class="dropdown-item @(ActOn("ReadingTypes") ? "active" : "")" asp-controller="Admin" asp-action="ReadingTypes"><i class="bi bi-rulers me-1"></i>@Loc["Reading Types"]</a></li>
+                                    }
+                                    @if (Perms.CanView(Screens.SampleHeaders))
+                                    {
+                                        <li><a class="dropdown-item @(ActOn("SampleHeaders") ? "active" : "")" asp-controller="Admin" asp-action="SampleHeaders"><i class="bi bi-card-heading me-1"></i>@Loc["Sample Headers"]</a></li>
+                                    }
+                                    @if (Perms.CanView(Screens.ArrivalFields))
+                                    {
+                                        <li><a class="dropdown-item @(ActOn("ArrivalFields") ? "active" : "")" asp-controller="Admin" asp-action="ArrivalFields"><i class="bi bi-input-cursor-text me-1"></i>@Loc["Arrival Fields"]</a></li>
+                                    }
+                                    @if (Perms.CanView(Screens.ReportUnits))
+                                    {
+                                        <li><a class="dropdown-item @(ActOn("ReportUnits") ? "active" : "")" asp-controller="Admin" asp-action="ReportUnits"><i class="bi bi-tags me-1"></i>@Loc["Report Units"]</a></li>
+                                    }
+                                    @if (Perms.CanView(Screens.CodeDescriptions))
+                                    {
+                                        <li><a class="dropdown-item @(ActOn("CodeDescriptions") ? "active" : "")" asp-controller="Admin" asp-action="CodeDescriptions"><i class="bi bi-translate me-1"></i>@Loc["Code Descriptions"]</a></li>
+                                    }
+                                    @if (Perms.CanView(Screens.MailTemplate))
+                                    {
+                                        <li><a class="dropdown-item @(ActOn("MailTemplate") ? "active" : "")" asp-controller="Admin" asp-action="MailTemplate"><i class="bi bi-envelope-paper me-1"></i>@Loc["Mail Template"]</a></li>
+                                    }
+                                    @if (Perms.CanView(Screens.Notifications))
+                                    {
+                                        <li><a class="dropdown-item @(ActOn("Notifications") ? "active" : "")" asp-controller="Admin" asp-action="Notifications"><i class="bi bi-bell me-1"></i>@Loc["Notifications"]</a></li>
+                                    }
+                                    @if (Perms.CanView(Screens.SupplierContacts))
+                                    {
+                                        <li><a class="dropdown-item @(ActOn("SupplierContacts") ? "active" : "")" asp-controller="Admin" asp-action="SupplierContacts"><i class="bi bi-person-lines-fill me-1"></i>@Loc["Supplier contacts"]</a></li>
+                                    }
                                 </ul>
                             </li>
                         }

@@ -213,6 +213,13 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-11-08 (Supplier contacts)
+- **Parameters → Supplier contacts** (M42: `qms_supplier`, `qms_supplier_email`, screen `Parameters.SupplierContacts`). One row per SAP vendor number, any number of addresses. The send dialog now puts **all** of them in To. It used to hold one address per vendor in `qms_vendor_contact`, saved from the dialog. That lookup never worked: its `SELECT vendor_no` was ambiguous, so the dialog always opened empty. `VendorService` is removed, and `qms_vendor_contact` is left unread after M42 copied its 4 rows.
+- **Who is on the list:** every vendor with an arrival. `SupplierContactService.EnsureFromArrivalsAsync` adds missing ones when the screen or the send dialog opens, rather than in each arrival path. The workbook import adds the rest. A supplier with containers cannot be deleted, because it would come straight back; untick Active instead.
+- **Import rules** (`SupplierImport`, agreed with the user): rows without a code are skipped (54 in the first file), as is every row of a code that appears more than once (63 rows / 19 codes, e.g. 80000575 has 22 farms). A 7-digit `8000xxx` code is read with the missing zero only when SAP knows the result. SAP's name wins over the workbook's. Addresses are only added, so re-importing is harmless. Skipped rows are listed on the page.
+- **Dialog "Remember"** adds every new To address (never CC) and never removes one; removing is done on the screen.
+- **Access:** viewing is Operator+ and editing is Admin (`Parameters.SupplierContacts.Edit`), both grantable. Every Parameters menu item is now guarded by its own screen, since an Operator now sees the menu.
+
 ### 2026-11-05 (Report branch fix; sent filter; Defect reports round 3)
 - **Wrong branch on the QC report:** the header's Branch was the creator's account plant, falling back to the order's. 485 of 4,263 finished orders printed another branch (QO-2026-004614: account AH01, order MD01, printed Al Hasa). Now always the order's plant (`QualityReportData.Branch`). PDFs are rebuilt on demand, so old orders correct themselves; mail already sent is not changed.
 - **Plant check across the app:** every other screen reads `qms_arrival.plant` or `COALESCE(override_plant, plant)`. 401 arrivals differ from SAP's plant: 398 are Pending-page plant moves (correct), 3 are August containers with two SAP rows. `defect-reports.js` no longer hard-codes plant names; they come from the code directory (`PlantNames`).

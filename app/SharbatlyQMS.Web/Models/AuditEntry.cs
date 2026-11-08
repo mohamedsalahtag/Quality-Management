@@ -159,6 +159,8 @@ public static class EntityTypes
     public const string ArrivalField         = "ArrivalField";
     public const string ReportUnit           = "ReportUnit";
     public const string CodeDescription      = "CodeDescription";
+    /// <summary>A supplier and its report addresses (Parameters -> Supplier contacts).</summary>
+    public const string Supplier             = "Supplier";
     /// <summary>Role creation, deletion and permission-grant changes made on the
     /// Security screen. The audit row is the only record of who changed a grant,
     /// so it is written inside the same transaction as the change itself.</summary>
@@ -188,7 +190,7 @@ public static class EntityTypes
     {
         User, Configuration, DefectCatalog, DefectCategory,
         ReadingType, SampleHeaderField, ArrivalField,
-        ReportUnit, CodeDescription, Role, System
+        ReportUnit, CodeDescription, Supplier, Role, System
     };
 
     public static bool IsValid(string? type) =>

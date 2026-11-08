@@ -25,7 +25,7 @@ public class ReportsController : Controller
     private readonly IImageService _images;
     private readonly ISettingsService _settings;
     private readonly IMaraService _mara;
-    private readonly IVendorService _vendors;
+    private readonly ISupplierContactService _suppliers;
     private readonly IEmailService _email;
     private readonly IPivotService _pivot;
     private readonly IPerspectiveService _perspectives;
@@ -45,7 +45,7 @@ public class ReportsController : Controller
 
     public ReportsController(IQualityOrderService qos, IArrivalService arrivals,
         IImageService images, ISettingsService settings, IMaraService mara,
-        IVendorService vendors, IEmailService email,
+        ISupplierContactService suppliers, IEmailService email,
         IPivotService pivot, IPerspectiveService perspectives,
         IReportBuilderExporter reportBuilder,
         IConfiguration config, IWebHostEnvironment env, ILogger<ReportsController> log,
@@ -54,7 +54,7 @@ public class ReportsController : Controller
     {
         _qos = qos; _arrivals = arrivals; _images = images;
         _settings = settings; _mara = mara;
-        _vendors = vendors; _email = email;
+        _suppliers = suppliers; _email = email;
         _pivot = pivot; _perspectives = perspectives;
         _reportBuilder = reportBuilder;
         _config = config; _env = env; _log = log;
@@ -163,9 +163,18 @@ public class ReportsController : Controller
         var arrival = await _arrivals.GetAsync(qo.ArrivalId);
         var template = await _settings.GetQoMailTemplateAsync();
 
-        VendorInfo? vendor = null;
-        if (!string.IsNullOrWhiteSpace(arrival?.VendorNo))
-            vendor = await _vendors.GetAsync(arrival.VendorNo!);
+        // Every address on Parameters -> Supplier contacts goes in To. A
+        // supplier whose first container this is gets added to that list here,
+        // so the address typed now can be remembered against it.
+        var vendorNo = arrival?.VendorNo ?? "";
+        IReadOnlyList<string> supplierEmails = Array.Empty<string>();
+        string? sapName = null;
+        if (!string.IsNullOrWhiteSpace(vendorNo))
+        {
+            await _suppliers.EnsureFromArrivalsAsync();
+            supplierEmails = await _suppliers.GetEmailsAsync(vendorNo);
+            if (string.IsNullOrWhiteSpace(qo.VendorName)) sapName = await _suppliers.SapNameAsync(vendorNo);
+        }
 
         string Substitute(string s) => (s ?? "")
             .Replace("{QO_NO}",     qo.QualityOrderNo)
@@ -175,24 +184,22 @@ public class ReportsController : Controller
             .Replace("{CONTAINER}", qo.ContainerNo ?? "")
             .Replace("{BOL}",       qo.BolNo ?? "")
             .Replace("{PO}",        qo.Ebeln ?? "")
-            .Replace("{SUPPLIER}",  qo.VendorName ?? vendor?.Name ?? "")
-            .Replace("{VENDOR}",    qo.VendorName ?? vendor?.Name ?? "")
+            .Replace("{SUPPLIER}",  qo.VendorName ?? sapName ?? "")
+            .Replace("{VENDOR}",    qo.VendorName ?? sapName ?? "")
             .Replace("{ARRIVAL_NO}", qo.ArrivalNo ?? "")
             .Replace("{TODAY}",     DateTime.Today.ToString("yyyy-MM-dd"));
 
         return Json(new
         {
             ok            = true,
-            to            = vendor?.Email ?? "",
-            supplierName  = qo.VendorName ?? vendor?.Name ?? "",
-            emailKnown    = !string.IsNullOrWhiteSpace(vendor?.Email),
-            // "sap" | "qms" | null -- lets the dialog say WHERE the address came
-            // from instead of just whether one exists. SAP carries no supplier
-            // e-mail today (dbo.SAP_Vendors has none, and ZQC_Data has none), so
-            // in practice this is "qms" or null until a vendor-master feed with
-            // e-mail is configured.
-            emailSource   = vendor?.EmailSource,
-            vendorNo      = arrival?.VendorNo ?? "",
+            to            = string.Join("; ", supplierEmails),
+            supplierName  = qo.VendorName ?? sapName ?? "",
+            emailKnown    = supplierEmails.Count > 0,
+            // "qms" | null -- the dialog says where the addresses came from. SAP
+            // carries no supplier e-mail (dbo.SAP_Vendors has none, and ZQC_Data
+            // has none), so Supplier contacts is the only source.
+            emailSource   = supplierEmails.Count > 0 ? "qms" : null,
+            vendorNo,
             // Shown read-only in the dialog. Deliberately NOT pre-filled into
             // the editable CC box: the send path adds it regardless, and an
             // editable copy would imply the sender can drop it.
@@ -381,11 +388,11 @@ public class ReportsController : Controller
     }
 
     /// <summary>
-    /// Stores the supplier e-mail typed in the send dialog so the next send for
-    /// the same vendor pre-fills it. Needed because there is no SAP source for
-    /// it: dbo.SAP_Vendors has only (VendorId, VendorName) and the ZQC_Data feed
-    /// exposes no e-mail field, so without this the operator retypes the address
-    /// every single time.
+    /// Adds the addresses in the send dialog's To line to the supplier's list on
+    /// Parameters -> Supplier contacts, so the next send pre-fills them. Only
+    /// adds: an address removed from To for one mail stays on the list, because
+    /// removing a contact is a decision for the contacts screen, not a side
+    /// effect of sending.
     ///
     /// Gated on the same permission as sending -- saving an address is part of
     /// the send flow, and anyone who may e-mail a supplier may record where.
@@ -403,17 +410,16 @@ public class ReportsController : Controller
         if (string.IsNullOrWhiteSpace(vendorNo))
             return Json(new { ok = false, error = "This arrival has no SAP supplier number, so an address cannot be stored against it." });
 
-        // Store ONE address, not the operator's whole To line -- the To field
-        // accepts a comma-separated list and CC recipients are per-send, so
-        // saving the raw string would resurrect somebody's ad-hoc CC next time.
-        var first = MailAddresses.Split(email).FirstOrDefault() ?? "";
-        if (first.Length > 0 && !MailboxAddress.TryParse(first, out _))
-            return Json(new { ok = false, error = $"'{first}' is not a valid e-mail address." });
+        // To only -- CC recipients are per-send, so they are never remembered.
+        var (valid, invalid) = SupplierEmails.Parse(email);
+        if (invalid.Count > 0)
+            return Json(new { ok = false, error = $"'{invalid[0]}' is not a valid e-mail address." });
 
-        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
-        await _vendors.SaveEmailAsync(vendorNo, first, user);
-        _log.LogInformation("Supplier e-mail for vendor {Vendor} set to {Email} by {User}", vendorNo, first, user);
-        return Json(new { ok = true, saved = first });
+        var user  = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        var added = await _suppliers.AddEmailsAsync(vendorNo, null, valid, user);
+        _log.LogInformation("{Added} new supplier e-mail(s) for vendor {Vendor} from the send dialog by {User}: {Emails}",
+            added, vendorNo, user, string.Join(", ", valid));
+        return Json(new { ok = true, saved = string.Join("; ", valid), added });
     }
 
     [RequirePermission(Perm.Qo.Pdf, Seed.Everyone, "Download the quality report PDF", ReadOnly = true)]

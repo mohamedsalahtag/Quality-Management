@@ -65,6 +65,7 @@ public static class AuditNarrator
         EntityTypes.ArrivalField         => "Arrival field",
         EntityTypes.ReportUnit           => "Report unit",
         EntityTypes.CodeDescription      => "Code description",
+        EntityTypes.Supplier             => "Supplier",
         EntityTypes.Role                 => "Role",
         EntityTypes.System               => "System",
         _                                => t ?? ""
