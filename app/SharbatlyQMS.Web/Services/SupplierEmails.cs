@@ -47,4 +47,18 @@ public static class SupplierEmails
         }
         return (valid, invalid);
     }
+
+    /// <summary>
+    /// A Sharbatly address (every staff account is on sharbatlyfruit.com).
+    /// Never a supplier's: before the contacts screen existed, the send dialog's
+    /// "remember" tick saved staff addresses typed into To while testing, and
+    /// every later report to those suppliers went back to the staff member.
+    /// Matched on "sharbatly" anywhere in the domain so a typo such as
+    /// sharbatlyfrui.com is caught too.
+    /// </summary>
+    public static bool IsInternal(string email)
+    {
+        var at = email.LastIndexOf('@');
+        return at >= 0 && email[(at + 1)..].Contains("sharbatly", StringComparison.OrdinalIgnoreCase);
+    }
 }

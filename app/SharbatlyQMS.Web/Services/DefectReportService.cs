@@ -29,6 +29,7 @@ public interface IDefectReportService
 {
     Task<DefectReportDataset> GetDatasetAsync(DateTime from, DateTime to, PlantScope scope, CancellationToken ct = default);
     Task<IReadOnlyList<DefectDrillRow>> DrillAsync(DefectDrillRequest req, PlantScope scope, CancellationToken ct = default);
+    Task<IReadOnlyList<BananaRipeRow>> GetBananaRipenessAsync(DateTime from, DateTime to, PlantScope scope, CancellationToken ct = default);
 }
 
 public class DefectReportService : IDefectReportService
@@ -298,6 +299,135 @@ public class DefectReportService : IDefectReportService
         return perQo.Values.OrderByDescending(o => o.Percent ?? -1).ThenByDescending(o => o.ReceiveDate).ToList();
     }
 
+    // ------------------------------------------------------------------
+    // Banana ripeness: one row per banana container, from the two counts the
+    // receiving inspector enters on the arrival (Arrival fields "Yellow Ripe"
+    // and "Soft Green/Destroyed", material group BANANA). Unlike the defect
+    // pivots this is an ARRIVAL measurement, so it does not wait for the
+    // inspection to be finished; containers with neither count are left out.
+    // Matched by field name, not id, because the two databases number them
+    // differently.
+    // ------------------------------------------------------------------
+    private const string BananaSql = @"
+        SELECT a.arrival_id                    AS ArrivalId,
+               a.arrival_no                    AS ArrivalNo,
+               qo.quality_order_id             AS QualityOrderId,
+               qo.quality_order_no             AS QualityOrderNo,
+               COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date) AS ReceiveDate,
+               ISNULL(ss.vessel_name, '')      AS Vessel,
+               ISNULL(a.container_no, '')      AS ContainerNo,
+               ISNULL(a.bol_no, '')            AS BolNo,
+               ISNULL(a.ebeln, '')             AS Po,
+               ISNULL(a.plant, '')             AS Plant,
+               ss.loading_country              AS LoadingCountry,
+               ISNULL(a.vendor_name, '')       AS Supplier,
+               ss.sailing_date                 AS Loading,
+               ss.discharge_date               AS Discharge,
+               ss.pullout_date                 AS PullOut,
+               ss.transit_days                 AS SapTransitDays,
+               b.Qty                           AS ReceivedQty,
+               b.PackWeight                    AS PackWeight,
+               yr.numeric_value                AS YellowRipe,
+               gs.numeric_value                AS GreenSoft
+        FROM   qms_arrival a
+        CROSS APPLY (SELECT SUM(CAST(ISNULL(ai.quantity, 0) AS DECIMAL(18,3))) AS Qty,
+                            MAX(NULLIF(mc.weight, 0)) AS PackWeight
+                     FROM   qms_arrival_item ai
+                     LEFT JOIN qms_sap_material_cache mc ON mc.material_no = ai.material_no
+                     WHERE  ai.arrival_id = a.arrival_id AND ai.material_group = 'BANANA'
+                     HAVING COUNT(*) > 0) b
+        LEFT JOIN qms_shipment_snapshot ss ON ss.arrival_id = a.arrival_id
+        OUTER APPLY (SELECT TOP 1 c2.receive_date FROM qms_sap_container_cache c2
+                     WHERE c2.container_no = a.container_no AND c2.bol_no = a.bol_no AND c2.ebeln = a.ebeln
+                     ORDER BY c2.doc_date DESC, c2.sto) cc
+        OUTER APPLY (SELECT TOP 1 v.numeric_value FROM qms_arrival_field_value v
+                     JOIN qms_arrival_field f ON f.field_id = v.field_id
+                     WHERE v.arrival_id = a.arrival_id AND f.material_group = 'BANANA'
+                       AND f.field_name LIKE N'%Yellow Ripe%') yr
+        OUTER APPLY (SELECT TOP 1 v.numeric_value FROM qms_arrival_field_value v
+                     JOIN qms_arrival_field f ON f.field_id = v.field_id
+                     WHERE v.arrival_id = a.arrival_id AND f.material_group = 'BANANA'
+                       AND (f.field_name LIKE N'%Soft Green%' OR f.field_name LIKE N'%Green Soft%')) gs
+        OUTER APPLY (SELECT TOP 1 q.quality_order_id, q.quality_order_no FROM qms_quality_order q
+                     WHERE q.arrival_id = a.arrival_id AND q.status_code <> 'Cancelled' AND q.superseded_at IS NULL) qo
+        WHERE  COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date) >= @from
+          AND  COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date) <  @toEx
+          AND  (yr.numeric_value IS NOT NULL OR gs.numeric_value IS NOT NULL)
+          AND  (@sUnrestricted = 1 OR a.plant IN @sPlants)
+        ORDER  BY ReceiveDate, a.container_no;";
+
+    private sealed class BananaRaw
+    {
+        public long ArrivalId { get; set; }
+        public string? ArrivalNo { get; set; }
+        public long? QualityOrderId { get; set; }
+        public string? QualityOrderNo { get; set; }
+        public DateTime ReceiveDate { get; set; }
+        public string Vessel { get; set; } = "";
+        public string ContainerNo { get; set; } = "";
+        public string BolNo { get; set; } = "";
+        public string Po { get; set; } = "";
+        public string Plant { get; set; } = "";
+        public string? LoadingCountry { get; set; }
+        public string Supplier { get; set; } = "";
+        public DateTime? Loading { get; set; }
+        public DateTime? Discharge { get; set; }
+        public DateTime? PullOut { get; set; }
+        public short? SapTransitDays { get; set; }
+        public decimal ReceivedQty { get; set; }
+        public decimal? PackWeight { get; set; }
+        public decimal? YellowRipe { get; set; }
+        public decimal? GreenSoft { get; set; }
+    }
+
+    public async Task<IReadOnlyList<BananaRipeRow>> GetBananaRipenessAsync(DateTime from, DateTime to, PlantScope scope, CancellationToken ct = default)
+    {
+        from = from.Date; to = to.Date;
+        if (to < from) (from, to) = (to, from);
+        if ((to - from).TotalDays > MaxDays) from = to.AddDays(-MaxDays);
+
+        using var c = new SqlConnection(_cs);
+        var raw = await c.QueryAsync<BananaRaw>(new CommandDefinition(BananaSql, new
+        {
+            from, toEx = to.AddDays(1),
+            sUnrestricted = scope.Unrestricted, sPlants = scope.QueryPlants
+        }, commandTimeout: 180, cancellationToken: ct));
+
+        return raw.Select(r =>
+        {
+            var transit = ShipmentDates.TransitDays(r.Loading, r.Discharge, r.SapTransitDays);
+            var inPort = BananaDaysInPort(r.Discharge, r.PullOut);
+            var ripe = (r.YellowRipe ?? 0) + (r.GreenSoft ?? 0);
+            return new BananaRipeRow
+            {
+                ArrivalId = r.ArrivalId, ArrivalNo = r.ArrivalNo ?? "",
+                QualityOrderId = r.QualityOrderId, QualityOrderNo = r.QualityOrderNo,
+                Received = r.ReceiveDate.ToString("yyyy-MM-dd"),
+                Vessel = r.Vessel, ContainerNo = r.ContainerNo, BolNo = r.BolNo, Po = r.Po, Plant = r.Plant,
+                Origin = Countries.Display(r.LoadingCountry), Supplier = r.Supplier,
+                Weight = r.PackWeight is > 0 ? PackWeightText(r.PackWeight) : "",
+                ReceivedQty = r.ReceivedQty,
+                TransitDays = transit,
+                DaysInPort = inPort,
+                Age = transit.HasValue && inPort.HasValue ? transit.Value + inPort.Value : null,
+                YellowRipe = r.YellowRipe, GreenSoft = r.GreenSoft,
+                RipePercent = r.ReceivedQty > 0 ? Math.Round(100m * ripe / r.ReceivedQty, 2) : null
+            };
+        }).ToList();
+    }
+
+    /// <summary>
+    /// Days the container stood in port: vessel discharge to pull-out, counting
+    /// both days, as the QC team's banana sheet does (discharged and pulled out
+    /// the next day = 2). Null when either date is missing or they are reversed.
+    /// </summary>
+    public static int? BananaDaysInPort(DateTime? discharge, DateTime? pullOut)
+    {
+        if (!discharge.HasValue || !pullOut.HasValue) return null;
+        var days = (pullOut.Value.Date - discharge.Value.Date).Days;
+        return days < 0 ? null : days + 1;
+    }
+
     private static bool PassesFilters(UnitRow u, DefectDrillRequest r) =>
         (r.Plant.Count == 0       || r.Plant.Contains(u.Plant))
         && (r.Supplier.Count == 0 || r.Supplier.Contains(u.Supplier))
@@ -386,6 +516,36 @@ public class DefectDrillRequest
     public string RowKey { get; set; } = "__all";
     public string DefectKey { get; set; } = "T";
     public string Metric { get; set; } = "qc";
+}
+
+/// <summary>One banana container on the Banana ripeness tab.</summary>
+public class BananaRipeRow
+{
+    public long ArrivalId { get; set; }
+    public string ArrivalNo { get; set; } = "";
+    public long? QualityOrderId { get; set; }
+    public string? QualityOrderNo { get; set; }
+    /// <summary>Branch receive date, yyyy-MM-dd.</summary>
+    public string Received { get; set; } = "";
+    public string Vessel { get; set; } = "";
+    public string ContainerNo { get; set; } = "";
+    public string BolNo { get; set; } = "";
+    public string Po { get; set; } = "";
+    public string Plant { get; set; } = "";
+    public string Origin { get; set; } = "";
+    public string Supplier { get; set; } = "";
+    /// <summary>Carton weight, "13.5 kg".</summary>
+    public string Weight { get; set; } = "";
+    /// <summary>Quantity of the banana lines (cartons).</summary>
+    public decimal ReceivedQty { get; set; }
+    public int? TransitDays { get; set; }
+    public int? DaysInPort { get; set; }
+    /// <summary>Transit days + days in port.</summary>
+    public int? Age { get; set; }
+    public decimal? YellowRipe { get; set; }
+    public decimal? GreenSoft { get; set; }
+    /// <summary>(Yellow ripe + green soft) ÷ received quantity × 100.</summary>
+    public decimal? RipePercent { get; set; }
 }
 
 public class DefectDrillRow

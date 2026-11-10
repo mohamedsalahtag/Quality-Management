@@ -2418,6 +2418,11 @@ public class AdminController : Controller
             TempData["Error"] = $"'{invalid[0]}' is not a valid e-mail address. Nothing was saved.";
             return Back();
         }
+        if (valid.FirstOrDefault(SupplierEmails.IsInternal) is { } own)
+        {
+            TempData["Error"] = $"{own} is a Sharbatly address, not the supplier's. Nothing was saved.";
+            return Back();
+        }
 
         var s = new SupplierContact
         {

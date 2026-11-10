@@ -214,7 +214,9 @@ public class SupplierContactService : ISupplierContactService
         IEnumerable<string> emails, string user)
     {
         var added = 0;
-        foreach (var email in emails.Distinct(StringComparer.OrdinalIgnoreCase))
+        // Last line of defence: callers filter internal addresses with a message,
+        // but none may reach a supplier's list by any path.
+        foreach (var email in emails.Where(e => !SupplierEmails.IsInternal(e)).Distinct(StringComparer.OrdinalIgnoreCase))
             added += await c.ExecuteAsync(@"
                 INSERT INTO qms_supplier_email (vendor_no, email, created_by)
                 SELECT @vendorNo, @email, @user

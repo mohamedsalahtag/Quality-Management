@@ -415,6 +415,9 @@ public class ReportsController : Controller
         if (invalid.Count > 0)
             return Json(new { ok = false, error = $"'{invalid[0]}' is not a valid e-mail address." });
 
+        // Staff addresses in To (a test send, a colleague copied in) still get the
+        // mail; they are just not remembered as the supplier's.
+        valid = valid.Where(e => !SupplierEmails.IsInternal(e)).ToList();
         var user  = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var added = await _suppliers.AddEmailsAsync(vendorNo, null, valid, user);
         _log.LogInformation("{Added} new supplier e-mail(s) for vendor {Vendor} from the send dialog by {User}: {Emails}",

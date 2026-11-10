@@ -54,6 +54,35 @@ public class SupplierContactsTests : IClassFixture<QmsAppFactory>
         Assert.Equal(new[] { "broken@nowhere" }, invalid);
     }
 
+    [Theory]
+    [InlineData("kim.lumbab@sharbatlyfruit.com", true)]
+    [InlineData("ahmed.awad@sharbatlyfrui.com", true)]   // the typo seen on a real CC line
+    [InlineData("qc@mail.sharbatlyfruit.com", true)]
+    [InlineData("sales@camposol.eu", false)]
+    [InlineData("sharbatly.fan@gmail.com", false)]     // the name part does not count
+    public void Staff_addresses_are_recognised(string email, bool internalAddress) =>
+        Assert.Equal(internalAddress, SupplierEmails.IsInternal(email));
+
+    /// <summary>The send dialog's "remember" tick must not save a staff member's
+    /// own address as the supplier's; the external one in the same To is kept.</summary>
+    [Fact]
+    public async Task Remembering_skips_staff_addresses()
+    {
+        var code = "ZZI" + Random.Shared.Next(100000, 999999);
+        using var scope = _factory.Services.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<ISupplierContactService>();
+        try
+        {
+            await svc.AddEmailsAsync(code, "Internal test", new[] { "someone@sharbatlyfruit.com", "ok@example.invalid" }, "test");
+            Assert.Equal(new[] { "ok@example.invalid" }, await svc.GetEmailsAsync(code));
+        }
+        finally
+        {
+            using var c = new SqlConnection(Cs);
+            await c.ExecuteAsync("DELETE FROM qms_supplier WHERE vendor_no = @code", new { code });
+        }
+    }
+
     // ---- import rules -----------------------------------------------------
 
     private static MemoryStream Workbook(params object?[][] rows)

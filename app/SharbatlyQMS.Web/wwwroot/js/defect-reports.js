@@ -9,7 +9,7 @@
   "use strict";
   const root = document.getElementById("dr");
   if (!root) return;
-  const URL_DATA = root.dataset.urlData, URL_DRILL = root.dataset.urlDrill, URL_PENDING = root.dataset.urlPending, URL_EXPORT = root.dataset.urlExport;
+  const URL_DATA = root.dataset.urlData, URL_DRILL = root.dataset.urlDrill, URL_PENDING = root.dataset.urlPending, URL_EXPORT = root.dataset.urlExport, URL_BANANA = root.dataset.urlBanana;
   const URL_QO = root.dataset.urlQo.replace(/\/0$/, "/"), URL_ARR = root.dataset.urlArrival.replace(/\/0$/, "/");
   const MAX_DAYS = parseInt(root.dataset.maxDays || "366", 10);
   const TOKEN = (document.querySelector("#drToken input[name=__RequestVerificationToken]") || {}).value || "";
@@ -20,7 +20,7 @@
   const SEP_CLASS = "\u0002", SEP_SUBWEEK = "\u0003", CELL = "\u0001";
 
   // ---------- model (rebuilt on every load) --------------------------------
-  let D, cats = [], catColor = {}, defs = [], units = [], factsBy = [], groupInfo = {}, nameOrder = {}, pending = [];
+  let D, cats = [], catColor = {}, defs = [], units = [], factsBy = [], groupInfo = {}, nameOrder = {}, pending = [], bananas = [];
   const catInk = hex => { const n = parseInt((hex || "#6c757d").slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255; return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#212529" : "#ffffff"; };
   function build(data) {
     D = data;
@@ -66,7 +66,8 @@
     { id: "branch", label: "Per branch & defect", title: "Defects per sub-major category and branch", hint: "One row per sub-major category; open it to compare the receiving branches underneath." },
     { id: "supplier", label: "Per supplier comparison", title: "Supplier comparison per sub-major category and defect", hint: "Suppliers side by side, read down each column. Open a sub-major category to see its defects." },
     { id: "sub",    label: "Per sub-major",       title: "Defect categories per sub-major category and variety", hint: "Category totals for every sub-major category; open it to see its varieties." },
-    { id: "major",  label: "Per major",           title: "Defect categories per major category", hint: "Category totals for every major category." }
+    { id: "major",  label: "Per major",           title: "Defect categories per major category", hint: "Category totals for every major category." },
+    { id: "banana", label: "Banana ripeness",     title: "Banana ripeness per container", hint: "Yellow Ripe and Green Soft counts entered on the arrival. Ripe % = (Yellow Ripe + Green Soft) ÷ Received Qty. Days in port = vessel discharge to pull-out, both days counted; Age = Transit + Days in port. Branch, Supplier and Pack weight filters apply." }
   ];
   const needsFruit = t => t === "week" || t === "class" || t === "branch" || t === "supplier";
   const SUPPLIER_COLS = 15, TREND_CHARTS = 12;
@@ -409,6 +410,65 @@
     }
   }
 
+  // ---------- banana ripeness ----------------------------------------------
+  // One row per container, not a pivot: its own table, chart and export model
+  // (text columns travel in each row's texts; see DefectReportExporter).
+  const bananaRows = () => bananas.filter(b =>
+    (!S.plant.length || S.plant.includes(b.plant)) && (!S.supplier.length || S.supplier.includes(b.supplier))
+    && (!S.pw.length || S.pw.includes(b.weight)));
+  const BANANA_COLS = [
+    ["Container #", "text", b => b.containerNo], ["BOL #", "text", b => b.bolNo], ["PO #", "text", b => b.po],
+    ["Receiving Branch", "text", b => plantName(b.plant)], ["Origin", "text", b => b.origin], ["Weight", "text", b => b.weight],
+    ["Received Qty", "count", b => b.receivedQty], ["Shipper", "text", b => b.supplier],
+    ["Transit Time", "count", b => b.transitDays], ["Days in Port", "count", b => b.daysInPort], ["Age of Banana", "count", b => b.age],
+    ["Yellow Ripe", "count", b => b.yellowRipe], ["Green Soft", "count", b => b.greenSoft], ["Ripe %", "pct", b => b.ripePercent]
+  ];
+  function bananaTotals(list) {
+    const sum = f => list.reduce((s, b) => s + (+f(b) || 0), 0);
+    const qty = sum(b => b.receivedQty), yr = sum(b => b.yellowRipe), gs = sum(b => b.greenSoft);
+    return { qty, yr, gs, pct: qty > 0 ? 100 * (yr + gs) / qty : null };
+  }
+  function renderBanana(head) {
+    const list = bananaRows(), t = bananaTotals(list);
+    const num = (v, k) => v === null || v === undefined ? "" : k === "pct" ? (+v).toFixed(2) : fmtInt(+v);
+    const model = {
+      rowLabel: "Vessel Name", banana: true,
+      columns: BANANA_COLS.map(([label, kind]) => ({ group: "", label, kind })),
+      rows: list.map(b => ({ label: b.vessel, level: "", cells: BANANA_COLS.map(([, kind, f]) => ({ v: kind === "text" ? null : f(b), t: kind === "text" ? f(b) : null, kind })) }))
+    };
+    model.rows.push({ label: "Total Banana Ripe Qty.", level: "gt", cells: BANANA_COLS.map(([label, kind]) => ({
+      v: label === "Received Qty" ? t.qty : label === "Yellow Ripe" ? t.yr : label === "Green Soft" ? t.gs : label === "Ripe %" ? t.pct : null, t: null, kind })) });
+    current = { model, res: null, tab: TABS.find(x => x.id === "banana"), list, totals: t };
+    let body;
+    if (!list.length) body = emptyHtml(bananas.length ? "No banana containers match these filters." : "No banana containers with ripeness counts were received in this period.");
+    else {
+      const th = `<tr><th class="rowh">Vessel Name</th>${BANANA_COLS.map(([l, k]) => `<th class="${k === "text" ? "" : "tot"}">${esc(l)}</th>`).join("")}</tr>`;
+      const tr = list.map(b => `<tr><th title="${esc(b.vessel)}">${esc(b.vessel || "—")}</th>${BANANA_COLS.map(([l, k, f]) => {
+        if (l === "Container #") return `<td class="na txt"><a href="${URL_ARR}${b.arrivalId}" target="_blank" rel="noopener" title="Arrival ${esc(b.arrivalNo)}">${esc(b.containerNo)}</a></td>`;
+        return k === "text" ? `<td class="na txt">${esc(f(b))}</td>` : `<td class="na${k === "pct" ? " tot" : ""}">${num(f(b), k)}</td>`;
+      }).join("")}</tr>`).join("");
+      const gt = `<tr class="gt"><th>Total Banana Ripe Qty.</th>${model.rows[model.rows.length - 1].cells.map(c => `<td class="na tot">${c.kind === "text" ? "" : num(c.v, c.kind)}</td>`).join("")}</tr>`;
+      body = `<div class="tablewrap"><table class="pv dr-banana"><thead>${th}</thead><tbody>${tr}${gt}</tbody></table></div>`;
+    }
+    $("panel").innerHTML = head + body;
+    $("acts").innerHTML = list.length ? `<button type="button" class="btn btn-sm btn-outline-success" data-export="xlsx"><i class="bi bi-file-earmark-excel me-1"></i>Excel</button><button type="button" class="btn btn-sm btn-outline-danger" data-export="pdf"><i class="bi bi-file-earmark-pdf me-1"></i>PDF</button>` : "";
+    const el = $("chart");
+    if (window.Plotly && list.length) {
+      el.hidden = false;
+      const layout = baseLayout(); layout.barmode = "stack"; layout.xaxis.automargin = true; layout.yaxis.title = "% of received qty";
+      const x = list.map(b => b.containerNo);
+      Plotly.react(el, [
+        { x, y: list.map(b => b.receivedQty > 0 ? 100 * (+b.yellowRipe || 0) / b.receivedQty : null), type: "bar", name: "Yellow Ripe", marker: { color: "#f2c94c" } },
+        { x, y: list.map(b => b.receivedQty > 0 ? 100 * (+b.greenSoft || 0) / b.receivedQty : null), type: "bar", name: "Green Soft", marker: { color: "#6fcf97" } }
+      ], layout, { displayModeBar: false, responsive: true });
+    } else el.hidden = true;
+    drawTrends(null);
+    const range = D ? `${dm(D.from)} – ${dm(D.to)} ${D.to.slice(0, 4)}` : "";
+    $("summary").innerHTML = [["Period", range], ["Containers", list.length.toLocaleString()], ["Received Qty", fmtInt(t.qty)],
+      ["Yellow Ripe + Green Soft", fmtInt(t.yr + t.gs)], ["Ripe %", t.pct === null ? "—" : t.pct.toFixed(2) + "%"]]
+      .map(([l, v]) => `<div class="kp"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
+  }
+
   // ---------- main render --------------------------------------------------
   const emptyHtml = (msg, extra) => `<div class="empty"><div>${esc(msg)}</div>${extra || ""}</div>`;
   let rowLabelOf = k => k;
@@ -417,6 +477,7 @@
     const tab = TABS.find(t => t.id === S.tab);
     let head = `<div class="ptitle"><div><h2>${tab.title}</h2><span class="hint">${tab.hint}</span></div><div class="acts" id="acts"></div></div>`;
     if (!D) { $("panel").innerHTML = head; $("chart").hidden = true; drawTrends(null); return; }
+    if (S.tab === "banana") { renderBanana(head); return; }
     if (needsFruit(S.tab) && !S.major.length) {
       const majors = [...new Set(units.filter(u => passes(u, "major")).map(u => u.mj).filter(Boolean))].sort();
       $("panel").innerHTML = head + emptyHtml("This report lists every defect of one fruit, so pick a major category to start.",
@@ -574,6 +635,15 @@
       list.map(p => `<tr><td><span class="badge ${p.openedByEnd ? "bg-info-subtle text-info-emphasis" : "bg-warning-subtle text-warning-emphasis"}">${p.openedByEnd ? "Pending" : "Not yet inspected"}</span></td><td>${p.received}</td><td>${esc(plantName(p.plant))}</td><td>${esc(p.supplier)}</td><td>${esc(p.container)}</td><td>${p.arrivalId ? `<a href="${URL_ARR}${p.arrivalId}" target="_blank" rel="noopener">${esc(p.arrivalNo)}</a>` : `<span class="text-muted">No arrival yet</span>`}</td><td>${p.qoId ? `<a href="${URL_QO}${p.qoId}" target="_blank" rel="noopener">${esc(p.qoNo)}</a>` : ""}</td></tr>`).join("") + `</tbody>`, null);
   }
   const closeDrill = () => { $("scrim").hidden = true; $("drawer").hidden = true; };
+  // Maximize / restore. Opens at the usual width; once maximized it stays so for
+  // the next number clicked until restored, and the table wraps instead of
+  // scrolling sideways.
+  function setDrawerMax(on) {
+    $("drawer").classList.toggle("max", on);
+    const b = $("dSize"), label = on ? "Restore" : "Maximize";
+    b.setAttribute("aria-pressed", on); b.title = label; b.setAttribute("aria-label", label);
+    b.innerHTML = `<i class="bi ${on ? "bi-arrows-angle-contract" : "bi-arrows-angle-expand"}"></i><span class="ms-1 d-none d-sm-inline">${label}</span>`;
+  }
 
   // ---------- export (Excel / PDF) -----------------------------------------
   async function exportReport(format, btn) {
@@ -591,7 +661,18 @@
           try { charts.push(await Plotly.toImage(el, { format: "png", width: 900, height: 480, scale: 1 })); } catch (e) { /* the table still exports */ }
         }
       const pend = pendingFiltered();
-      const payload = {
+      const payload = model.banana ? {
+        format, title: tab.title, tab: tab.label, hint: tab.hint,
+        period: `Received ${D.from} to ${D.to}`, filters: filterText().filter(f => !/^(Major|Sub-major|Class|Defect)/.test(f)),
+        kpis: [["Containers", current.list.length.toLocaleString()], ["Received Qty", fmtInt(current.totals.qty)],
+               ["Ripe Qty", fmtInt(current.totals.yr + current.totals.gs)], ["Ripe %", current.totals.pct === null ? "—" : current.totals.pct.toFixed(2) + "%"]],
+        rowLabel: model.rowLabel,
+        columns: model.columns.map(c => ({ group: "", label: c.label, color: null, kind: c.kind })),
+        rows: model.rows.map(r => ({ label: r.label, level: r.level, indent: 0,
+          values: r.cells.map(c => c.v === null || c.v === undefined ? null : +c.v), trends: [], texts: r.cells.map(c => c.t ?? null) })),
+        chart, charts: [], generated: new Date().toLocaleString(),
+        footnote: "Banana containers received in the period with Yellow Ripe / Green Soft entered on the arrival. Ripe % = (Yellow Ripe + Green Soft) ÷ Received Qty. Days in port = vessel discharge to pull-out, both days counted; Age = Transit + Days in port."
+      } : {
         format, title: tab.title, tab: tab.label, hint: [tab.hint, model.note].filter(Boolean).join(" "),
         period: `Received ${D.from} to ${D.to}`, filters: filterText(),
         kpis: [["Orders", res.orders.toLocaleString()], ["Samples", res.samples.toLocaleString()], ["Cartons (PO qty)", Math.round(res.ctn).toLocaleString()], ["Pending containers", pend.length.toLocaleString()]],
@@ -626,15 +707,17 @@
     const seq = ++loadSeq;
     $("loading").hidden = false;
     try {
-      const [res, pres] = await Promise.all([
+      const [res, pres, bres] = await Promise.all([
         fetch(`${URL_DATA}?from=${from}&to=${to}`, { headers: { Accept: "application/json" } }),
-        fetch(`${URL_PENDING}?from=${from}&to=${to}`, { headers: { Accept: "application/json" } })
+        fetch(`${URL_PENDING}?from=${from}&to=${to}`, { headers: { Accept: "application/json" } }),
+        fetch(`${URL_BANANA}?from=${from}&to=${to}`, { headers: { Accept: "application/json" } })
       ]);
       if (!res.ok) throw new Error(res.status);
       const data = await res.json();
       const pend = pres.ok ? await pres.json() : [];
+      const ban = bres.ok ? await bres.json() : [];
       if (seq !== loadSeq) return;
-      build(data); pending = pend;
+      build(data); pending = pend; bananas = ban;
       if (data.from !== from) $("fFrom").value = data.from;   // clamped to MAX_DAYS by the server
       refreshOptions(); render();
       $("foot").textContent = `${units.length.toLocaleString()} material lines on finished inspections received ${dm(D.from)} – ${dm(D.to)} (at most ${MAX_DAYS} days). Loaded ${D.generated}.`;
@@ -702,6 +785,9 @@
   $("panel").addEventListener("keydown", e => { if (e.key === "Enter") { const c = e.target.closest("td[data-c]"); if (c) openDrill(c.dataset.c); } });
   $("summary").addEventListener("click", e => { if (e.target.closest("[data-open=pending]") && D) openPending(); });
   $("dClose").addEventListener("click", closeDrill);
+  $("dSize").addEventListener("click", () => setDrawerMax(!$("drawer").classList.contains("max")));
+  // Double-clicking the panel's title bar does the same, as on a desktop window.
+  $("drawer").querySelector(".dh").addEventListener("dblclick", e => { if (!e.target.closest("button")) setDrawerMax(!$("drawer").classList.contains("max")); });
   $("scrim").addEventListener("click", closeDrill);
   document.addEventListener("keydown", e => { if (e.key === "Escape" && !$("drawer").hidden) closeDrill(); });
 

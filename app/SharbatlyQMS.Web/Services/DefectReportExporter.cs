@@ -29,6 +29,9 @@ public class DefectReportExportRequest
     /// <summary>Further charts as data URLs: the per-week report's sub-major trends.</summary>
     public List<string> Charts { get; set; } = new();
     public string? Generated { get; set; }
+    /// <summary>Replaces the defect-% explanation under the table on tabs that
+    /// are not defect pivots (Banana ripeness).</summary>
+    public string? Footnote { get; set; }
 }
 
 public class DefectReportExportColumn
@@ -36,7 +39,8 @@ public class DefectReportExportColumn
     public string Group { get; set; } = "";
     public string Label { get; set; } = "";
     public string? Color { get; set; }
-    /// <summary>defect | cattot | cat | all | week | cartons | trend</summary>
+    /// <summary>defect | cattot | cat | all | week | cartons | trend; and for
+    /// plain listings: text (value in the row's Texts) | count | pct</summary>
     public string Kind { get; set; } = "";
 }
 
@@ -48,6 +52,8 @@ public class DefectReportExportRow
     public int Indent { get; set; }
     public List<decimal?> Values { get; set; } = new();
     public List<decimal?> Trends { get; set; } = new();
+    /// <summary>Cell text for the columns of kind "text", by column index.</summary>
+    public List<string?> Texts { get; set; } = new();
 }
 
 public static class DefectReportExporter
@@ -70,7 +76,10 @@ public static class DefectReportExporter
         catch (FormatException) { return null; }
     }
 
-    private static bool IsCount(string kind) => kind == "cartons";
+    private static bool IsCount(string kind) => kind is "cartons" or "count";
+    private static string? TextAt(DefectReportExportRow r, int i) => i < r.Texts.Count ? r.Texts[i] : null;
+    private const string DefectFootnote = "Defect % = defective units ÷ inspected units; a category total adds up its defects. " +
+                                          "Week cells marked + rose and − fell on the week before. Finished inspections only, dated by receive date.";
     private static bool IsTotal(string kind) => kind is "cattot" or "all" or "cartons" or "trend";
     private static bool IsBold(string level) => level is "grp" or "sub" or "gt";
 
@@ -100,7 +109,9 @@ public static class DefectReportExporter
         row++;
         if (!string.IsNullOrWhiteSpace(r.Hint))
         {
-            ws.Cell(row, 1).Value = r.Hint + " Defect % = defective units ÷ inspected units. ▲ higher than the week before, ▼ lower.";
+            ws.Cell(row, 1).Value = r.Footnote is null
+                ? r.Hint + " Defect % = defective units ÷ inspected units. ▲ higher than the week before, ▼ lower."
+                : r.Hint;
             ws.Cell(row, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.FromHtml("#6c757d"));
             row++;
         }
@@ -178,6 +189,7 @@ public static class DefectReportExporter
                 // The cartons line of the weekly report sits in week columns but is a count.
                 var kind = rr.Level == "info" ? "cartons" : r.Columns[i].Kind;
                 var cell = ws.Cell(row, i + 2);
+                if (kind == "text") { cell.Value = TextAt(rr, i) ?? ""; continue; }
                 var v = rr.Values[i];
                 if (v is null) continue;
                 cell.Value = (double)v.Value;
@@ -206,10 +218,12 @@ public static class DefectReportExporter
             table.Style.Border.SetInsideBorderColor(XLColor.FromHtml("#dee2e6")).Border.SetOutsideBorderColor(XLColor.FromHtml("#adb5bd"));
         }
         ws.Column(1).Width = 34;
-        for (var i = 0; i < r.Columns.Count; i++) ws.Column(i + 2).Width = grouped && r.Columns[i].Kind == "defect" ? 7 : 11;
+        for (var i = 0; i < r.Columns.Count; i++)
+            ws.Column(i + 2).Width = grouped && r.Columns[i].Kind == "defect" ? 7 : r.Columns[i].Kind == "text" ? 18 : 11;
         if (grouped) ws.Row(headTop + 1).Height = 110;
         ws.SheetView.Freeze(firstData - 1, 1);
-        ws.Cell(row + 1, 1).Value = $"Generated {r.Generated} from Sharbatly QMS. Finished inspections only, dated by receive date.";
+        ws.Cell(row + 1, 1).Value = $"Generated {r.Generated} from Sharbatly QMS. " +
+                                    (r.Footnote ?? "Finished inspections only, dated by receive date.");
         ws.Cell(row + 1, 1).Style.Font.SetItalic().Font.SetFontColor(XLColor.FromHtml("#6c757d"));
         ws.PageSetup.PageOrientation = XLPageOrientation.Landscape;
         ws.PageSetup.FitToPages(1, 0);
@@ -348,6 +362,12 @@ public static class DefectReportExporter
                         for (var i = 0; i < r.Columns.Count; i++)
                         {
                             var kind = rr.Level == "info" ? "cartons" : r.Columns[i].Kind;
+                            if (kind == "text")
+                            {
+                                var tx = t.Cell().Element(x => Body(x, fill)).Text(TextAt(rr, i) ?? "");
+                                if (bold) tx.Bold();
+                                continue;
+                            }
                             var v = i < rr.Values.Count ? rr.Values[i] : null;
                             var tr = i < rr.Trends.Count ? rr.Trends[i] : null;
                             t.Cell().Element(x => Body(x, fill)).AlignRight().Text(txt =>
@@ -362,9 +382,7 @@ public static class DefectReportExporter
                         }
                     }
                 });
-                col.Item().Text("Defect % = defective units ÷ inspected units; a category total adds up its defects. " +
-                                "Week cells marked + rose and − fell on the week before. Finished inspections only, dated by receive date.")
-                   .FontSize(6.5f).FontColor("#6c757d");
+                col.Item().Text(r.Footnote ?? DefectFootnote).FontSize(6.5f).FontColor("#6c757d");
 
                 if (extra.Count > 0)
                 {

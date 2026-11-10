@@ -61,7 +61,8 @@ public static class SupplierImport
                     var s = row.Cell(col.Value).GetFormattedString().Trim();
                     return s.Length == 0 ? null : s;
                 }
-                var emails = SupplierEmails.Parse(Text(Col(Email1Header)) + ";" + Text(Col(Email2Header))).Valid;
+                var emails = SupplierEmails.Parse(Text(Col(Email1Header)) + ";" + Text(Col(Email2Header))).Valid
+                                           .Where(e => !SupplierEmails.IsInternal(e)).ToList();
                 var name   = Text(Col(NameHeader));
                 var code   = CodeText(row.Cell(codeCol));
                 if (code.Length == 0 && name == null && emails.Count == 0) continue;   // blank line

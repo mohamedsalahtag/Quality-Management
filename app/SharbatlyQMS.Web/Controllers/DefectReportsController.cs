@@ -58,6 +58,16 @@ public class DefectReportsController : Controller
         return Json(data);
     }
 
+    /// <summary>The Banana ripeness tab: one row per banana container received in
+    /// the window that has its ripeness counts entered on the arrival.</summary>
+    [HttpGet]
+    [RequireScreen(Screens.ReportsDefects, Seed.SupervisorOrAbove, "Open the Defect reports")]
+    public async Task<IActionResult> Banana(DateTime? from, DateTime? to, CancellationToken ct)
+    {
+        var (df, dt) = DefaultWindow();
+        return Json(await _reports.GetBananaRipenessAsync(from ?? df, to ?? dt, User.GetPlantScope(), ct));
+    }
+
     /// <summary>
     /// Containers pending inspection as of the window's last day: received in
     /// the window (with or without an arrival) and not finished by its end. The

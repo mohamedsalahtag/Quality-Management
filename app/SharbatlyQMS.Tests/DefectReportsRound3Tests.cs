@@ -158,4 +158,72 @@ public class DefectReportsRound3Tests : IClassFixture<QmsAppFactory>
         r.Charts = Enumerable.Repeat(png, 21).ToList();
         Assert.Throws<ArgumentException>(() => DefectReportExporter.Validate(r));
     }
+
+    // ---- Banana ripeness -------------------------------------------------
+
+    /// <summary>The QC team's sheet counts both days: discharged on the 19th and
+    /// pulled out on the 20th is 2 days in port (CGMU5146860).</summary>
+    [Theory]
+    [InlineData("2026-10-19", "2026-10-20", 2)]
+    [InlineData("2026-10-10", "2026-10-19", 10)]
+    [InlineData("2026-10-10", "2026-10-10", 1)]
+    [InlineData("2026-10-10", "2026-10-09", null)]
+    public void Days_in_port_count_both_days(string discharge, string pullOut, int? expected) =>
+        Assert.Equal(expected, DefectReportService.BananaDaysInPort(DateTime.Parse(discharge), DateTime.Parse(pullOut)));
+
+    /// <summary>
+    /// The four containers on the QC team's sample sheet, against live data:
+    /// the counts come from the arrival fields, the percentage is
+    /// (yellow + green) ÷ received quantity.
+    /// </summary>
+    [Fact]
+    public async Task Banana_rows_carry_the_arrival_ripeness_counts()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IDefectReportService>();
+        var rows = await svc.GetBananaRipenessAsync(new DateTime(2026, 10, 20), new DateTime(2026, 10, 31), PlantScope.All);
+        var row = rows.FirstOrDefault(r => r.ContainerNo == "CGMU5146860");
+        if (row is null) return;   // a database without that container
+
+        Assert.Equal(54m, row.YellowRipe);
+        Assert.Equal(165m, row.GreenSoft);
+        Assert.True(row.ReceivedQty > 0);
+        Assert.Equal(Math.Round(100m * 219 / row.ReceivedQty, 2), row.RipePercent);
+        Assert.Equal(2, row.DaysInPort);
+        Assert.Equal(row.TransitDays + row.DaysInPort, row.Age);
+        Assert.Equal("Ecuador", row.Origin);
+        Assert.All(rows, r => Assert.True(r.YellowRipe.HasValue || r.GreenSoft.HasValue));
+    }
+
+    [Fact]
+    public async Task The_banana_endpoint_answers()
+    {
+        var client = _factory.CreateClient();
+        var res = await client.GetAsync("/DefectReports/Banana?from=2026-10-20&to=2026-10-31");
+        Assert.Equal(System.Net.HttpStatusCode.OK, res.StatusCode);
+        Assert.Contains("containerNo", await res.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>The Banana tab exports text columns (vessel, container, shipper)
+    /// as text, and its own footnote instead of the defect-% one.</summary>
+    [Fact]
+    public void Text_columns_reach_both_export_formats()
+    {
+        var r = new DefectReportExportRequest
+        {
+            Format = "xlsx", Title = "Banana ripeness per container", Tab = "Banana ripeness", Period = "Received 2026-10-20 to 2026-10-31",
+            RowLabel = "Vessel Name", Footnote = "Ripe % = (Yellow Ripe + Green Soft) ÷ Received Qty.",
+            Columns = { new DefectReportExportColumn { Label = "Container #", Kind = "text" },
+                        new DefectReportExportColumn { Label = "Received Qty", Kind = "count" },
+                        new DefectReportExportColumn { Label = "Ripe %", Kind = "pct" } },
+            Rows = { new DefectReportExportRow { Label = "MSC PANTERA", Values = { null, 1540m, 14.22m }, Texts = { "TTNU8147824", null, null } } },
+            Generated = "now"
+        };
+        using var wb = new ClosedXML.Excel.XLWorkbook(new MemoryStream(DefectReportExporter.Excel(r)));
+        var ws = wb.Worksheet(1);
+        Assert.Contains(ws.CellsUsed(), c => c.GetString() == "TTNU8147824");
+        Assert.Contains(ws.CellsUsed(), c => c.GetString().Contains("Ripe % = (Yellow Ripe"));
+        Assert.DoesNotContain(ws.CellsUsed(), c => c.GetString().Contains("defective units"));
+        Assert.True(DefectReportExporter.Pdf(r).Length > 1000);
+    }
 }

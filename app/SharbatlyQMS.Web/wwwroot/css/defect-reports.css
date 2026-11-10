@@ -124,3 +124,16 @@
 .dr .dr-minis[hidden] { display: none; }
 .dr .dr-mini { min-width: 0; border: 1px solid var(--dr-border); border-radius: .375rem; }
 .dr .dr-minis .wide { grid-column: 1 / -1; }
+/* Banana ripeness: a per-container listing, so text columns read left and the numbers stay dark. */
+.dr table.dr-banana td.txt, .dr table.dr-banana thead th:not(.tot) { text-align: left; }
+.dr table.dr-banana td.na { color: var(--dr-text); }
+/* Drill panel maximized: the whole window, and the orders table wraps its
+   cells so every column fits without scrolling sideways. */
+.dr-drawer { transition: width .18s ease-out; }
+.dr-drawer.max { width: 100%; }
+.dr-drawer .dh { cursor: default; user-select: none; }
+.dr-drawer.max table.orders { table-layout: auto; }
+.dr-drawer.max table.orders th, .dr-drawer.max table.orders td { white-space: normal; overflow-wrap: anywhere; }
+.dr-drawer.max table.orders td.r, .dr-drawer.max table.orders th.r { white-space: nowrap; }
+.dr-drawer.max .kpis { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+@media (prefers-reduced-motion: reduce) { .dr-drawer { transition: none; } }
