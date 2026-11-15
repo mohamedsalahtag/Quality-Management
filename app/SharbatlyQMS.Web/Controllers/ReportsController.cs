@@ -134,14 +134,14 @@ public class ReportsController : Controller
     /// dialog can pre-populate (operator may edit before sending).
     /// </summary>
     [HttpGet]
-    [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier")]
+    [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier", ReadOnly = true)]
     public Task<IActionResult> PrepareSendQualityReport(long id) => PrepareSendCore(id);
 
     /// <summary>The same dialog opened from the envelope button on the Quality
     /// Orders list and Details. A separate grant from the Claims page's, so the
     /// two can be given to different roles; the work is identical.</summary>
     [HttpGet]
-    [RequirePermission(Perm.Qo.SendToSupplier, Seed.AdminOnly, "E-mail the quality report to the supplier from Quality Orders")]
+    [RequirePermission(Perm.Qo.SendToSupplier, Seed.AdminOnly, "E-mail the quality report to the supplier from Quality Orders", ReadOnly = true)]
     public Task<IActionResult> PrepareSendFromQo(long id) => PrepareSendCore(id);
 
     private async Task<IActionResult> PrepareSendCore(long id)
@@ -234,13 +234,13 @@ public class ReportsController : Controller
     /// confirmed in the dialog. Returns JSON for the AJAX caller.
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier")]
+    [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier", ReadOnly = true)]
     public Task<IActionResult> SendQualityReport(long id, string to, string? cc, string subject, string body,
         long[]? documentIds = null, CancellationToken ct = default)
         => SendCore(id, to, cc, subject, body, documentIds, ct);
 
     [HttpPost, ValidateAntiForgeryToken]
-    [RequirePermission(Perm.Qo.SendToSupplier, Seed.AdminOnly, "E-mail the quality report to the supplier from Quality Orders")]
+    [RequirePermission(Perm.Qo.SendToSupplier, Seed.AdminOnly, "E-mail the quality report to the supplier from Quality Orders", ReadOnly = true)]
     public Task<IActionResult> SendFromQo(long id, string to, string? cc, string subject, string body,
         long[]? documentIds = null, CancellationToken ct = default)
         => SendCore(id, to, cc, subject, body, documentIds, ct);
@@ -398,11 +398,11 @@ public class ReportsController : Controller
     /// the send flow, and anyone who may e-mail a supplier may record where.
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
-    [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier")]
+    [RequirePermission(Perm.Qo.SendReport, Seed.OperatorOrAbove, "E-mail the quality report to a supplier", ReadOnly = true)]
     public Task<IActionResult> SaveSupplierEmail(string vendorNo, string? email) => SaveSupplierEmailCore(vendorNo, email);
 
     [HttpPost, ValidateAntiForgeryToken]
-    [RequirePermission(Perm.Qo.SendToSupplier, Seed.AdminOnly, "E-mail the quality report to the supplier from Quality Orders")]
+    [RequirePermission(Perm.Qo.SendToSupplier, Seed.AdminOnly, "E-mail the quality report to the supplier from Quality Orders", ReadOnly = true)]
     public Task<IActionResult> SaveSupplierEmailFromQo(string vendorNo, string? email) => SaveSupplierEmailCore(vendorNo, email);
 
     private async Task<IActionResult> SaveSupplierEmailCore(string vendorNo, string? email)

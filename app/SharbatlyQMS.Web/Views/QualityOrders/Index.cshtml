@@ -13,7 +13,7 @@
     // visible reason for it.
     var panelOpen = f.AnyPanelFilter;
     // The envelope (e-mail the report to the supplier) is its own grant.
-    var canSend   = Perms.Can(Perm.Qo.SendToSupplier);
+    var canSend   = Perms.CanRead(Perm.Qo.SendToSupplier);
     var urlPrepare = Url.Action("PrepareSendFromQo", "Reports");
     var urlSend    = Url.Action("SendFromQo", "Reports");
     var urlSave    = Url.Action("SaveSupplierEmailFromQo", "Reports");

@@ -175,7 +175,7 @@
            Its own permission (Perm.Qo.SendToSupplier); the Claims panel keeps
            Perm.Qo.SendReport. Enabled only while the order can be sent -- the
            server re-checks every condition. *@
-        @if (!isClaimContext && Perms.Can(Perm.Qo.SendToSupplier))
+        @if (!isClaimContext && Perms.CanRead(Perm.Qo.SendToSupplier))
         {
             <span title="@Model.SendReportTitle" class="d-inline-block">
                 <button type="button" class="btn @(Model.ReportSentAt.HasValue ? "btn-outline-success" : "btn-outline-danger")"
@@ -1018,7 +1018,7 @@
 @* Rendered in claim context, where the chat panel's send button targets it.
    The old Parameters -> Mail Template "Enabled" switch that used to gate this
    was removed: it controlled a QO-page button that no longer exists. *@
-@if ((bool?)ViewBag.IsClaimContext == true || Perms.Can(Perm.Qo.SendToSupplier))
+@if ((bool?)ViewBag.IsClaimContext == true || Perms.CanRead(Perm.Qo.SendToSupplier))
 {
     <partial name="~/Views/QualityOrders/_SendReportModal.cshtml" />
 }

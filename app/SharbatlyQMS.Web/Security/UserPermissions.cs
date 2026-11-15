@@ -24,6 +24,12 @@ public interface IUserPermissions
     /// <summary>Holds an action permission.</summary>
     bool Can(string permissionCode);
 
+    /// <summary>Holds a READ-ONLY action permission (one declared with
+    /// <c>ReadOnly = true</c>): the screen need only be at Read, as the endpoint
+    /// itself asks. Using <see cref="Can"/> for these would hide a button the
+    /// server would honour.</summary>
+    bool CanRead(string permissionCode);
+
     /// <summary>May open a screen at all.</summary>
     bool CanView(string screenKey);
 
@@ -106,6 +112,9 @@ public sealed class UserPermissions : IUserPermissions
 
     public bool Can(string permissionCode) =>
         _resolver.RoleHas(_effectiveRole, permissionCode, AccessLevel.Edit, isScreen: false);
+
+    public bool CanRead(string permissionCode) =>
+        _resolver.RoleHas(_effectiveRole, permissionCode, AccessLevel.Read, isScreen: false);
 
     public bool CanView(string screenKey) =>
         _resolver.RoleHas(_effectiveRole, screenKey, AccessLevel.Read, isScreen: true);

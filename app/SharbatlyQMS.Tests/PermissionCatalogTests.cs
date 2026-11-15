@@ -143,6 +143,10 @@ public class PermissionCatalogTests : IClassFixture<QmsAppFactory>
         Assert.Contains(Perm.Qo.Pdf, readOnly);
         Assert.Contains(Perm.Arrivals.ChecklistPdf, readOnly);
         Assert.Contains(Perm.Attachments.Download, readOnly);
+        // E-mailing the finished report changes nothing on the order, so a
+        // role with the order screen read-only can still be given it.
+        Assert.Contains(Perm.Qo.SendToSupplier, readOnly);
+        Assert.Contains(Perm.Qo.SendReport, readOnly);
 
         // An action that changes data must never be flagged read-only, or the
         // editor would leave an edit button pressable on a read-only screen.
