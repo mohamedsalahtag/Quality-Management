@@ -82,6 +82,8 @@ public static class Perm
         public const string Approve          = Screens.Claims + ".Approve";
         public const string Hold             = Screens.Claims + ".Hold";
         public const string AddNote          = Screens.Claims + ".AddNote";
+        /// <summary>Archive / restore finished orders by finished-date range.</summary>
+        public const string Archive          = Screens.Claims + ".Archive";
     }
 
     public static class Attachments

@@ -225,6 +225,9 @@ public static class ActionCodes
     /// it moves back); the reinspection itself is audited as Deleted.</summary>
     public const string ReinspectionUndone = "ReinspectionUndone";
     public const string MaterialRefreshed  = "MaterialRefreshed";
+    /// <summary>Filed in, or taken back out of, the Claims archive.</summary>
+    public const string Archived           = "Archived";
+    public const string Unarchived         = "Unarchived";
     /// <summary>The quality report was e-mailed to the supplier (M41 send log).</summary>
     public const string ReportSent         = "ReportSent";
     public const string Cancelled          = "Cancelled";

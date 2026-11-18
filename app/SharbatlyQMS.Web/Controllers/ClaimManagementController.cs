@@ -61,6 +61,39 @@ public class ClaimManagementController : Controller
         return ListAsync(filter);
     }
 
+    /// <summary>Counts per claim status of the finished orders an archive (or
+    /// restore) over the range would move. Read by the dialog.</summary>
+    [HttpGet]
+    [RequirePermission(Perm.Claims.Archive, Seed.AdminOnly, "Archive / restore claims by date range")]
+    public async Task<IActionResult> ArchivePreview(DateTime from, DateTime to, bool restore,
+        [FromServices] IClaimArchiveService archive)
+    {
+        try { return Json(new { ok = true, buckets = await archive.PreviewAsync(from, to, restore, User.GetPlantScope()) }); }
+        catch (InvalidOperationException ex) { return Json(new { ok = false, error = ex.Message }); }
+    }
+
+    /// <summary>Archives (or restores) the finished orders of the ticked claim
+    /// statuses in the range. Each order keeps its claim decision.</summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Claims.Archive, Seed.AdminOnly, "Archive / restore claims by date range")]
+    public async Task<IActionResult> ArchiveRange(DateTime from, DateTime to, bool restore, string[]? status,
+        string? reason, [FromServices] IClaimArchiveService archive)
+    {
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        try
+        {
+            var n = await archive.ApplyAsync(from, to, status ?? Array.Empty<string>(), restore, reason ?? "", user, User.GetPlantScope());
+            TempData["Success"] = restore
+                ? $"{n} order(s) restored to the Claims list."
+                : $"{n} order(s) archived. They keep their claim status and are on the Archived tab.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            TempData["Error"] = ex.Message;
+        }
+        return restore ? RedirectToAction(nameof(Archived)) : RedirectToAction(nameof(Index));
+    }
+
     private async Task<IActionResult> ListAsync(ClaimListFilter filter)
     {
         // Plant-scoped users can't widen their view: the scope is applied in

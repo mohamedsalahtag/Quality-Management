@@ -138,10 +138,58 @@
         <i class="bi bi-shield-exclamation me-1 text-danger"></i>Claims
         @if (f.Archived)
         {
-            <small class="text-muted fs-6 fw-normal ms-2">Archived &mdash; orders from before the 18 Aug go-live</small>
+            <small class="text-muted fs-6 fw-normal ms-2">Archived &mdash; kept for reference; each order keeps its claim decision</small>
         }
     </h1>
+    @if (Perms.Can(Perm.Claims.Archive))
+    {
+        <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#archiveRangeModal">
+            <i class="bi @(f.Archived ? "bi-box-arrow-up" : "bi-archive") me-1"></i>@(f.Archived ? Loc["Restore by date range"] : Loc["Archive by date range"])
+        </button>
+    }
 </div>
+
+@if (Perms.Can(Perm.Claims.Archive))
+{
+    @* Archive (Claims tab) or restore (Archived tab) every finished order of the
+       ticked claim statuses, by FINISHED date. The preview counts each status so
+       nothing is moved unseen; the server re-selects on submit. *@
+    <div class="modal fade" id="archiveRangeModal" tabindex="-1"
+         data-url-preview="@Url.Action("ArchivePreview")" data-restore="@(f.Archived ? "true" : "false")">
+        <div class="modal-dialog">
+            <form asp-action="ArchiveRange" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="restore" value="@(f.Archived ? "true" : "false")" />
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi @(f.Archived ? "bi-box-arrow-up" : "bi-archive") me-1"></i>@(f.Archived ? Loc["Restore by date range"] : Loc["Archive by date range"])</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted">
+                        @(f.Archived
+                            ? Loc["Archived orders finished in the range go back to the Claims list."]
+                            : Loc["Finished orders in the range move to the Archived tab. They keep their claim status and stay printable, but can no longer be sent to a supplier or changed."])
+                    </p>
+                    <div class="row g-2 mb-2">
+                        <div class="col"><label class="form-label small mb-0">@Loc["Finished from"]</label><input type="date" name="from" id="arFrom" class="form-control form-control-sm" required /></div>
+                        <div class="col"><label class="form-label small mb-0">@Loc["Finished to"]</label><input type="date" name="to" id="arTo" class="form-control form-control-sm" required /></div>
+                    </div>
+                    <div id="arBuckets" class="small text-muted">@Loc["Choose the dates to see what would move."]</div>
+                    <div id="arReasonBox" class="d-none mt-2">
+                        <label class="form-label small mb-0">@Loc["Reason (required)"]</label>
+                        <textarea name="reason" id="arReason" class="form-control form-control-sm" rows="2" required minlength="5"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" id="arApply" class="btn @(f.Archived ? "btn-primary" : "btn-warning")" disabled>
+                        <i class="bi @(f.Archived ? "bi-box-arrow-up" : "bi-archive") me-1"></i><span id="arApplyText">@(f.Archived ? Loc["Restore"] : Loc["Archive"])</span>
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
 
 @* Two lists, two URLs. The active tab is the day-to-day worklist; Archived
    holds the pre-go-live backlog, whatever each order's status. Filters are
@@ -619,4 +667,40 @@
     <script src="~/js/list-filter-memory.js" asp-append-version="true"></script>
     @* Wires the "rows per page" select; page links are plain <a> reloads. *@
     <script src="~/js/list-pager.js" asp-append-version="true"></script>
+    <script>
+        (function () {
+            const modal = document.getElementById('archiveRangeModal');
+            if (!modal) return;
+            const from = document.getElementById('arFrom'), to = document.getElementById('arTo');
+            const box = document.getElementById('arBuckets'), reasonBox = document.getElementById('arReasonBox');
+            const reason = document.getElementById('arReason'), apply = document.getElementById('arApply');
+            const applyText = document.getElementById('arApplyText'), verb = applyText.textContent;
+            const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+            const sync = () => {
+                let n = 0, any = false;
+                box.querySelectorAll('input[name=status]:checked').forEach(c => { n += +c.dataset.count; any = true; });
+                apply.disabled = !any || reason.value.trim().length < 5;
+                applyText.textContent = any ? `${verb} ${n.toLocaleString()} order(s)` : verb;
+            };
+            async function load() {
+                apply.disabled = true; applyText.textContent = verb; reasonBox.classList.add('d-none');
+                if (!from.value || !to.value) { box.textContent = 'Choose the dates to see what would move.'; return; }
+                box.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Counting…';
+                try {
+                    const q = new URLSearchParams({ from: from.value, to: to.value, restore: modal.dataset.restore });
+                    const r = await (await fetch(modal.dataset.urlPreview + '?' + q, { headers: { Accept: 'application/json' } })).json();
+                    if (!r.ok) { box.innerHTML = '<div class="alert alert-warning py-1 mb-0">' + esc(r.error) + '</div>'; return; }
+                    if (!r.buckets.length) { box.innerHTML = '<div class="text-muted">No finished orders in that range.</div>'; return; }
+                    box.innerHTML = '<div class="mb-1 text-body">Tick the claim statuses to move:</div>' + r.buckets.map((b, i) =>
+                        `<div class="form-check"><input class="form-check-input" type="checkbox" name="status" value="${esc(b.status)}" data-count="${b.count}" id="arS${i}">` +
+                        `<label class="form-check-label" for="arS${i}">${esc(b.label)} <span class="badge bg-secondary-subtle text-secondary-emphasis">${b.count.toLocaleString()}</span></label></div>`).join('');
+                    reasonBox.classList.remove('d-none');
+                    box.querySelectorAll('input[name=status]').forEach(c => c.addEventListener('change', sync));
+                } catch (e) { box.innerHTML = '<div class="alert alert-danger py-1 mb-0">Could not count the orders.</div>'; }
+            }
+            from.addEventListener('change', load); to.addEventListener('change', load);
+            reason.addEventListener('input', sync);
+            modal.addEventListener('show.bs.modal', load);
+        })();
+    </script>
 }
