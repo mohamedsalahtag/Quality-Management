@@ -137,6 +137,12 @@ public class DefectReportsRound3Tests : IClassFixture<QmsAppFactory>
         var multi = await svc.DrillAsync(new DefectDrillRequest { From = From, To = To, Tab = "major", RowKey = "__all", DefectKey = "T", Plant = two }, PlantScope.All);
         Assert.All(multi, o => Assert.Contains(o.Plant, two));
         if (d.Plants.Count >= 2) Assert.Equal(2, multi.Select(o => o.Plant).Distinct().Count());
+
+        // Origin: the line's own origin keeps it; an origin nobody has empties the drill.
+        var origin = Name(d.Origins, 16);
+        var byOrigin = await svc.DrillAsync(new DefectDrillRequest { From = From, To = To, Tab = "major", RowKey = "__all", DefectKey = "T", Origin = { origin } }, PlantScope.All);
+        Assert.Contains(byOrigin, o => o.QualityOrderNo == qoNo);
+        Assert.Empty(await svc.DrillAsync(new DefectDrillRequest { From = From, To = To, Tab = "major", RowKey = "__all", DefectKey = "T", Origin = { "Nowhere-land" } }, PlantScope.All));
     }
 
     [Fact]
@@ -159,7 +165,7 @@ public class DefectReportsRound3Tests : IClassFixture<QmsAppFactory>
         Assert.Throws<ArgumentException>(() => DefectReportExporter.Validate(r));
     }
 
-    // ---- Banana ripeness -------------------------------------------------
+    // ---- Banana Arrival Condition ----------------------------------------
 
     /// <summary>The QC team's sheet counts both days: discharged on the 19th and
     /// pulled out on the 20th is 2 days in port (CGMU5146860).</summary>
@@ -188,7 +194,8 @@ public class DefectReportsRound3Tests : IClassFixture<QmsAppFactory>
         Assert.Equal(54m, row.YellowRipe);
         Assert.Equal(165m, row.GreenSoft);
         Assert.True(row.ReceivedQty > 0);
-        Assert.Equal(Math.Round(100m * 219 / row.ReceivedQty, 2), row.RipePercent);
+        Assert.Equal(219m, row.TotalDefect);
+        Assert.Equal(Math.Round(100m * 219 / row.ReceivedQty, 2), row.DefectRate);
         Assert.Equal(2, row.DaysInPort);
         Assert.Equal(row.TransitDays + row.DaysInPort, row.Age);
         Assert.Equal("Ecuador", row.Origin);
@@ -211,18 +218,18 @@ public class DefectReportsRound3Tests : IClassFixture<QmsAppFactory>
     {
         var r = new DefectReportExportRequest
         {
-            Format = "xlsx", Title = "Banana ripeness per container", Tab = "Banana ripeness", Period = "Received 2026-10-20 to 2026-10-31",
-            RowLabel = "Vessel Name", Footnote = "Ripe % = (Yellow Ripe + Green Soft) ÷ Received Qty.",
+            Format = "xlsx", Title = "Banana Arrival Condition per container", Tab = "Banana Arrival Condition", Period = "Received 2026-10-20 to 2026-10-31",
+            RowLabel = "Vessel Name", Footnote = "Defect Rate % = Grand Total Defect ÷ Received Qty.",
             Columns = { new DefectReportExportColumn { Label = "Container #", Kind = "text" },
                         new DefectReportExportColumn { Label = "Received Qty", Kind = "count" },
-                        new DefectReportExportColumn { Label = "Ripe %", Kind = "pct" } },
+                        new DefectReportExportColumn { Label = "Defect Rate %", Kind = "pct" } },
             Rows = { new DefectReportExportRow { Label = "MSC PANTERA", Values = { null, 1540m, 14.22m }, Texts = { "TTNU8147824", null, null } } },
             Generated = "now"
         };
         using var wb = new ClosedXML.Excel.XLWorkbook(new MemoryStream(DefectReportExporter.Excel(r)));
         var ws = wb.Worksheet(1);
         Assert.Contains(ws.CellsUsed(), c => c.GetString() == "TTNU8147824");
-        Assert.Contains(ws.CellsUsed(), c => c.GetString().Contains("Ripe % = (Yellow Ripe"));
+        Assert.Contains(ws.CellsUsed(), c => c.GetString().Contains("Defect Rate % = Grand Total Defect"));
         Assert.DoesNotContain(ws.CellsUsed(), c => c.GetString().Contains("defective units"));
         Assert.True(DefectReportExporter.Pdf(r).Length > 1000);
     }

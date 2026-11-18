@@ -30,7 +30,7 @@ public class DefectReportExportRequest
     public List<string> Charts { get; set; } = new();
     public string? Generated { get; set; }
     /// <summary>Replaces the defect-% explanation under the table on tabs that
-    /// are not defect pivots (Banana ripeness).</summary>
+    /// are not defect pivots (Banana Arrival Condition).</summary>
     public string? Footnote { get; set; }
 }
 

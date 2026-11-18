@@ -59,6 +59,8 @@ public class DefectReportService : IDefectReportService
         public string Sub { get; set; } = "";
         public string Class { get; set; } = "";
         public string Variety { get; set; } = "";
+        /// <summary>Country of origin from SAP's material master.</summary>
+        public string Origin { get; set; } = "";
         public DateTime ReceiveDate { get; set; }
         public string ContainerNo { get; set; } = "";
         public string MaterialGroup { get; set; } = "";
@@ -95,6 +97,7 @@ public class DefectReportService : IDefectReportService
                ISNULL(mc.sub_major_category, '')                         AS Sub,
                ISNULL(COALESCE(NULLIF(m.material_class, N''), mc.class_name), '') AS Class,
                ISNULL(COALESCE(NULLIF(m.variety, N''), mc.variety_name), '') AS Variety,
+               ISNULL(COALESCE(NULLIF(m.origin, N''), mc.origin_name), '') AS Origin,
                COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date) AS ReceiveDate,
                ISNULL(a.container_no, '')                                AS ContainerNo,
                ISNULL(m.material_group, '')                              AS MaterialGroup,
@@ -198,6 +201,7 @@ public class DefectReportService : IDefectReportService
         var weightIndex = weights.Select((v, i) => (v, i)).ToDictionary(x => x.v, x => x.i);
         var uoms   = Dict(raw.Units.Select(u => u.Uom));
         var varieties = Dict(raw.Units.Select(u => u.Variety));
+        var origins = Dict(raw.Units.Select(u => u.Origin));
 
         var unitIndex = new Dictionary<long, int>();
         var units = new List<object[]>(raw.Units.Count);
@@ -210,7 +214,7 @@ public class DefectReportService : IDefectReportService
                 majors.Index[u.Major], subs.Index[u.Sub], classes.Index[u.Class],
                 u.ReceiveDate.ToString("yyyy-MM-dd"), u.ContainerNo, groups.Index[u.MaterialGroup],
                 u.Samples, u.Inspected, weightIndex[u.PackWeightLabel], u.Cartons, uoms.Index[u.Uom],
-                varieties.Index[u.Variety]
+                varieties.Index[u.Variety], origins.Index[u.Origin]
             });
         }
 
@@ -233,7 +237,7 @@ public class DefectReportService : IDefectReportService
             To   = to.Date.ToString("yyyy-MM-dd"),
             Plants = plants.Values, Suppliers = supps.Values, Majors = majors.Values,
             Subs = subs.Values, Classes = classes.Values, Groups = groups.Values,
-            PackWeights = weights, Uoms = uoms.Values, Varieties = varieties.Values,
+            PackWeights = weights, Uoms = uoms.Values, Varieties = varieties.Values, Origins = origins.Values,
             // From the code directory, so a name changed on the Code Descriptions
             // screen shows here too, as it does on every other page.
             PlantNames = _codes.Plants.Select(p => p.Code).Concat(plants.Values).Distinct()
@@ -300,7 +304,7 @@ public class DefectReportService : IDefectReportService
     }
 
     // ------------------------------------------------------------------
-    // Banana ripeness: one row per banana container, from the two counts the
+    // Banana Arrival Condition: one row per banana container, from the two counts the
     // receiving inspector enters on the arrival (Arrival fields "Yellow Ripe"
     // and "Soft Green/Destroyed", material group BANANA). Unlike the defect
     // pivots this is an ARRIVAL measurement, so it does not wait for the
@@ -327,11 +331,13 @@ public class DefectReportService : IDefectReportService
                ss.transit_days                 AS SapTransitDays,
                b.Qty                           AS ReceivedQty,
                b.PackWeight                    AS PackWeight,
+               b.MaterialOrigin                AS MaterialOrigin,
                yr.numeric_value                AS YellowRipe,
                gs.numeric_value                AS GreenSoft
         FROM   qms_arrival a
         CROSS APPLY (SELECT SUM(CAST(ISNULL(ai.quantity, 0) AS DECIMAL(18,3))) AS Qty,
-                            MAX(NULLIF(mc.weight, 0)) AS PackWeight
+                            MAX(NULLIF(mc.weight, 0)) AS PackWeight,
+                            MAX(NULLIF(mc.origin_name, N'')) AS MaterialOrigin
                      FROM   qms_arrival_item ai
                      LEFT JOIN qms_sap_material_cache mc ON mc.material_no = ai.material_no
                      WHERE  ai.arrival_id = a.arrival_id AND ai.material_group = 'BANANA'
@@ -376,6 +382,7 @@ public class DefectReportService : IDefectReportService
         public short? SapTransitDays { get; set; }
         public decimal ReceivedQty { get; set; }
         public decimal? PackWeight { get; set; }
+        public string? MaterialOrigin { get; set; }
         public decimal? YellowRipe { get; set; }
         public decimal? GreenSoft { get; set; }
     }
@@ -404,14 +411,17 @@ public class DefectReportService : IDefectReportService
                 QualityOrderId = r.QualityOrderId, QualityOrderNo = r.QualityOrderNo,
                 Received = r.ReceiveDate.ToString("yyyy-MM-dd"),
                 Vessel = r.Vessel, ContainerNo = r.ContainerNo, BolNo = r.BolNo, Po = r.Po, Plant = r.Plant,
-                Origin = Countries.Display(r.LoadingCountry), Supplier = r.Supplier,
+                // The material master's origin, as the other tabs and the Origin
+                // filter use; the loading port's country only when SAP has none.
+                Origin = !string.IsNullOrWhiteSpace(r.MaterialOrigin) ? r.MaterialOrigin! : Countries.Display(r.LoadingCountry),
+                Supplier = r.Supplier,
                 Weight = r.PackWeight is > 0 ? PackWeightText(r.PackWeight) : "",
                 ReceivedQty = r.ReceivedQty,
                 TransitDays = transit,
                 DaysInPort = inPort,
                 Age = transit.HasValue && inPort.HasValue ? transit.Value + inPort.Value : null,
-                YellowRipe = r.YellowRipe, GreenSoft = r.GreenSoft,
-                RipePercent = r.ReceivedQty > 0 ? Math.Round(100m * ripe / r.ReceivedQty, 2) : null
+                YellowRipe = r.YellowRipe, GreenSoft = r.GreenSoft, TotalDefect = ripe,
+                DefectRate = r.ReceivedQty > 0 ? Math.Round(100m * ripe / r.ReceivedQty, 2) : null
             };
         }).ToList();
     }
@@ -434,7 +444,8 @@ public class DefectReportService : IDefectReportService
         && (r.Major.Count == 0    || r.Major.Contains(u.Major))
         && (r.Sub.Count == 0      || r.Sub.Contains(u.Sub))
         && (r.Class.Count == 0    || r.Class.Contains(u.Class))
-        && (r.PackWeight.Count == 0 || r.PackWeight.Contains(u.PackWeightLabel));
+        && (r.PackWeight.Count == 0 || r.PackWeight.Contains(u.PackWeightLabel))
+        && (r.Origin.Count == 0   || r.Origin.Contains(u.Origin));
 
     /// <summary>The row a number sits on, per tab -- same keys the page builds.</summary>
     private static bool InRow(UnitRow u, DefectDrillRequest r)
@@ -483,10 +494,12 @@ public class DefectReportDataset
     public List<string> PackWeights { get; set; } = new();
     public List<string> Uoms { get; set; } = new();
     public List<string> Varieties { get; set; } = new();
+    /// <summary>Country of origin (material master).</summary>
+    public List<string> Origins { get; set; } = new();
     /// <summary>Plant code -> display name.</summary>
     public Dictionary<string, string> PlantNames { get; set; } = new();
     /// <summary>[qoId, qoNo, plant#, supplier#, major#, sub#, class#, receive yyyy-MM-dd, container, group#,
-    /// samples, inspected units, pack weight#, cartons (PO qty), uom#, variety#]</summary>
+    /// samples, inspected units, pack weight#, cartons (PO qty), uom#, variety#, origin#]</summary>
     public List<object[]> Units { get; set; } = new();
     /// <summary>[defectId, name, category, material group, sort order]</summary>
     public List<object[]> Defects { get; set; } = new();
@@ -511,6 +524,7 @@ public class DefectDrillRequest
     public List<string> Sub { get; set; } = new();
     public List<string> Class { get; set; } = new();
     public List<string> PackWeight { get; set; } = new();
+    public List<string> Origin { get; set; } = new();
     public List<string> Cat { get; set; } = new();
     public string Tab { get; set; } = "major";
     public string RowKey { get; set; } = "__all";
@@ -518,7 +532,7 @@ public class DefectDrillRequest
     public string Metric { get; set; } = "qc";
 }
 
-/// <summary>One banana container on the Banana ripeness tab.</summary>
+/// <summary>One banana container on the Banana Arrival Condition tab.</summary>
 public class BananaRipeRow
 {
     public long ArrivalId { get; set; }
@@ -544,8 +558,10 @@ public class BananaRipeRow
     public int? Age { get; set; }
     public decimal? YellowRipe { get; set; }
     public decimal? GreenSoft { get; set; }
-    /// <summary>(Yellow ripe + green soft) ÷ received quantity × 100.</summary>
-    public decimal? RipePercent { get; set; }
+    /// <summary>Yellow ripe + green soft.</summary>
+    public decimal TotalDefect { get; set; }
+    /// <summary>Total defect ÷ received quantity × 100.</summary>
+    public decimal? DefectRate { get; set; }
 }
 
 public class DefectDrillRow

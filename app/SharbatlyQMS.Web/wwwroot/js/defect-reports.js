@@ -27,8 +27,8 @@
     cats = D.categories.map(c => c.nm);
     catColor = Object.fromEntries(D.categories.map(c => [c.nm, c.col || "#6c757d"]));
     defs = D.defects.map(([id, nm, ct, g, o]) => ({ id, nm, ct, g, o }));
-    units = D.units.map(([q, n, p, v, mj, sm, c, r, k, g, ns, sz, pw, ctn, uom, vr], i) => ({
-      i, q, n, p: D.plants[p], v: D.suppliers[v], mj: D.majors[mj], sm: D.subs[sm], c: D.classes[c], vr: D.varieties[vr], r, k, g: D.groups[g],
+    units = D.units.map(([q, n, p, v, mj, sm, c, r, k, g, ns, sz, pw, ctn, uom, vr, og], i) => ({
+      i, q, n, p: D.plants[p], v: D.suppliers[v], mj: D.majors[mj], sm: D.subs[sm], c: D.classes[c], vr: D.varieties[vr], og: (D.origins || [])[og], r, k, g: D.groups[g],
       ns, sz: +sz, pw: D.packWeights[pw], ctn: +ctn, uom: D.uoms[uom], wk: weekStart(r)
     }));
     factsBy = units.map(() => []);
@@ -58,7 +58,7 @@
 
   // ---------- state --------------------------------------------------------
   // Every filter holds a list of chosen values; empty means no filter.
-  const S = { plant: [], supplier: [], major: [], sub: [], cls: [], pw: [], cat: [], hide: true, tab: "week", bySub: true };
+  const S = { plant: [], supplier: [], major: [], sub: [], cls: [], pw: [], origin: [], cat: [], hide: true, tab: "week", bySub: true };
   const expanded = new Set();
   const TABS = [
     { id: "week",   label: "Per week",            title: "Defects per week", hint: "Defects down the side, ISO weeks (Monday to Sunday) across. Arrows compare each week with the week before." },
@@ -67,7 +67,7 @@
     { id: "supplier", label: "Per supplier comparison", title: "Supplier comparison per sub-major category and defect", hint: "Suppliers side by side, read down each column. Open a sub-major category to see its defects." },
     { id: "sub",    label: "Per sub-major",       title: "Defect categories per sub-major category and variety", hint: "Category totals for every sub-major category; open it to see its varieties." },
     { id: "major",  label: "Per major",           title: "Defect categories per major category", hint: "Category totals for every major category." },
-    { id: "banana", label: "Banana ripeness",     title: "Banana ripeness per container", hint: "Yellow Ripe and Green Soft counts entered on the arrival. Ripe % = (Yellow Ripe + Green Soft) ÷ Received Qty. Days in port = vessel discharge to pull-out, both days counted; Age = Transit + Days in port. Branch, Supplier and Pack weight filters apply." }
+    { id: "banana", label: "Banana Arrival Condition", title: "Banana Arrival Condition per container", hint: "Yellow Ripe and Green Soft counts entered on the arrival. Grand Total Defect = Yellow Ripe + Green Soft; Defect Rate % = Grand Total Defect ÷ Received Qty. Days in port = vessel discharge to pull-out, both days counted; Age = Transit + Days in port. Branch, Supplier, Pack weight and Origin filters apply." }
   ];
   const needsFruit = t => t === "week" || t === "class" || t === "branch" || t === "supplier";
   const SUPPLIER_COLS = 15, TREND_CHARTS = 12;
@@ -79,7 +79,8 @@
     { id: "fMajor", key: "mj", s: "major", all: "All major categories", name: "Major category" },
     { id: "fSub", key: "sm", s: "sub", all: "All sub-major categories", name: "Sub-major category" },
     { id: "fClass", key: "c", s: "cls", all: "All classes", name: "Class" },
-    { id: "fWeight", key: "pw", s: "pw", all: "All pack weights", name: "Pack weight", order: () => D.packWeights }
+    { id: "fWeight", key: "pw", s: "pw", all: "All pack weights", name: "Pack weight", order: () => D.packWeights },
+    { id: "fOrigin", key: "og", s: "origin", all: "All origins", name: "Origin" }
   ];
   function passes(u, skip) {
     for (const f of FILTERS) if (S[f.s].length && skip !== f.s && !S[f.s].includes(u[f.key])) return false;
@@ -410,18 +411,19 @@
     }
   }
 
-  // ---------- banana ripeness ----------------------------------------------
+  // ---------- banana arrival condition -------------------------------------
   // One row per container, not a pivot: its own table, chart and export model
   // (text columns travel in each row's texts; see DefectReportExporter).
   const bananaRows = () => bananas.filter(b =>
     (!S.plant.length || S.plant.includes(b.plant)) && (!S.supplier.length || S.supplier.includes(b.supplier))
-    && (!S.pw.length || S.pw.includes(b.weight)));
+    && (!S.pw.length || S.pw.includes(b.weight)) && (!S.origin.length || S.origin.includes(b.origin)));
   const BANANA_COLS = [
     ["Container #", "text", b => b.containerNo], ["BOL #", "text", b => b.bolNo], ["PO #", "text", b => b.po],
     ["Receiving Branch", "text", b => plantName(b.plant)], ["Origin", "text", b => b.origin], ["Weight", "text", b => b.weight],
     ["Received Qty", "count", b => b.receivedQty], ["Shipper", "text", b => b.supplier],
     ["Transit Time", "count", b => b.transitDays], ["Days in Port", "count", b => b.daysInPort], ["Age of Banana", "count", b => b.age],
-    ["Yellow Ripe", "count", b => b.yellowRipe], ["Green Soft", "count", b => b.greenSoft], ["Ripe %", "pct", b => b.ripePercent]
+    ["Yellow Ripe", "count", b => b.yellowRipe], ["Green Soft", "count", b => b.greenSoft],
+    ["Grand Total Defect", "count", b => b.totalDefect], ["Defect Rate %", "pct", b => b.defectRate]
   ];
   function bananaTotals(list) {
     const sum = f => list.reduce((s, b) => s + (+f(b) || 0), 0);
@@ -436,18 +438,19 @@
       columns: BANANA_COLS.map(([label, kind]) => ({ group: "", label, kind })),
       rows: list.map(b => ({ label: b.vessel, level: "", cells: BANANA_COLS.map(([, kind, f]) => ({ v: kind === "text" ? null : f(b), t: kind === "text" ? f(b) : null, kind })) }))
     };
-    model.rows.push({ label: "Total Banana Ripe Qty.", level: "gt", cells: BANANA_COLS.map(([label, kind]) => ({
-      v: label === "Received Qty" ? t.qty : label === "Yellow Ripe" ? t.yr : label === "Green Soft" ? t.gs : label === "Ripe %" ? t.pct : null, t: null, kind })) });
+    model.rows.push({ label: "Grand Total", level: "gt", cells: BANANA_COLS.map(([label, kind]) => ({
+      v: label === "Received Qty" ? t.qty : label === "Yellow Ripe" ? t.yr : label === "Green Soft" ? t.gs
+         : label === "Grand Total Defect" ? t.yr + t.gs : label === "Defect Rate %" ? t.pct : null, t: null, kind })) });
     current = { model, res: null, tab: TABS.find(x => x.id === "banana"), list, totals: t };
     let body;
-    if (!list.length) body = emptyHtml(bananas.length ? "No banana containers match these filters." : "No banana containers with ripeness counts were received in this period.");
+    if (!list.length) body = emptyHtml(bananas.length ? "No banana containers match these filters." : "No banana containers with Yellow Ripe / Green Soft counts were received in this period.");
     else {
       const th = `<tr><th class="rowh">Vessel Name</th>${BANANA_COLS.map(([l, k]) => `<th class="${k === "text" ? "" : "tot"}">${esc(l)}</th>`).join("")}</tr>`;
       const tr = list.map(b => `<tr><th title="${esc(b.vessel)}">${esc(b.vessel || "—")}</th>${BANANA_COLS.map(([l, k, f]) => {
         if (l === "Container #") return `<td class="na txt"><a href="${URL_ARR}${b.arrivalId}" target="_blank" rel="noopener" title="Arrival ${esc(b.arrivalNo)}">${esc(b.containerNo)}</a></td>`;
         return k === "text" ? `<td class="na txt">${esc(f(b))}</td>` : `<td class="na${k === "pct" ? " tot" : ""}">${num(f(b), k)}</td>`;
       }).join("")}</tr>`).join("");
-      const gt = `<tr class="gt"><th>Total Banana Ripe Qty.</th>${model.rows[model.rows.length - 1].cells.map(c => `<td class="na tot">${c.kind === "text" ? "" : num(c.v, c.kind)}</td>`).join("")}</tr>`;
+      const gt = `<tr class="gt"><th>Grand Total</th>${model.rows[model.rows.length - 1].cells.map(c => `<td class="na tot">${c.kind === "text" ? "" : num(c.v, c.kind)}</td>`).join("")}</tr>`;
       body = `<div class="tablewrap"><table class="pv dr-banana"><thead>${th}</thead><tbody>${tr}${gt}</tbody></table></div>`;
     }
     $("panel").innerHTML = head + body;
@@ -465,7 +468,7 @@
     drawTrends(null);
     const range = D ? `${dm(D.from)} – ${dm(D.to)} ${D.to.slice(0, 4)}` : "";
     $("summary").innerHTML = [["Period", range], ["Containers", list.length.toLocaleString()], ["Received Qty", fmtInt(t.qty)],
-      ["Yellow Ripe + Green Soft", fmtInt(t.yr + t.gs)], ["Ripe %", t.pct === null ? "—" : t.pct.toFixed(2) + "%"]]
+      ["Grand Total Defect", fmtInt(t.yr + t.gs)], ["Defect Rate %", t.pct === null ? "—" : t.pct.toFixed(2) + "%"]]
       .map(([l, v]) => `<div class="kp"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
   }
 
@@ -614,7 +617,7 @@
     const context = [d.where, ...filterText().filter(t => !t.startsWith("No filters"))].join(" · ");
     const q = new URLSearchParams({ From: D.from, To: D.to, Tab: S.tab, RowKey: rk, DefectKey: dk, Metric: "qc", title: `${d.what} · ${context}` });
     // One pair per value: the server binds each to a list.
-    for (const [name, values] of [["Plant", S.plant], ["Supplier", S.supplier], ["Major", S.major], ["Sub", S.sub], ["Class", S.cls], ["PackWeight", S.pw], ["Cat", S.cat]])
+    for (const [name, values] of [["Plant", S.plant], ["Supplier", S.supplier], ["Major", S.major], ["Sub", S.sub], ["Class", S.cls], ["PackWeight", S.pw], ["Origin", S.origin], ["Cat", S.cat]])
       for (const v of values) q.append(name, v);
     openDrawer(d.what, context, [
       ["Defect %", sum("sz") ? (100 * sum("val") / sum("sz")).toFixed(2) + "%" : "—"],
@@ -665,13 +668,13 @@
         format, title: tab.title, tab: tab.label, hint: tab.hint,
         period: `Received ${D.from} to ${D.to}`, filters: filterText().filter(f => !/^(Major|Sub-major|Class|Defect)/.test(f)),
         kpis: [["Containers", current.list.length.toLocaleString()], ["Received Qty", fmtInt(current.totals.qty)],
-               ["Ripe Qty", fmtInt(current.totals.yr + current.totals.gs)], ["Ripe %", current.totals.pct === null ? "—" : current.totals.pct.toFixed(2) + "%"]],
+               ["Grand Total Defect", fmtInt(current.totals.yr + current.totals.gs)], ["Defect Rate %", current.totals.pct === null ? "—" : current.totals.pct.toFixed(2) + "%"]],
         rowLabel: model.rowLabel,
         columns: model.columns.map(c => ({ group: "", label: c.label, color: null, kind: c.kind })),
         rows: model.rows.map(r => ({ label: r.label, level: r.level, indent: 0,
           values: r.cells.map(c => c.v === null || c.v === undefined ? null : +c.v), trends: [], texts: r.cells.map(c => c.t ?? null) })),
         chart, charts: [], generated: new Date().toLocaleString(),
-        footnote: "Banana containers received in the period with Yellow Ripe / Green Soft entered on the arrival. Ripe % = (Yellow Ripe + Green Soft) ÷ Received Qty. Days in port = vessel discharge to pull-out, both days counted; Age = Transit + Days in port."
+        footnote: "Banana containers received in the period with Yellow Ripe / Green Soft entered on the arrival. Grand Total Defect = Yellow Ripe + Green Soft; Defect Rate % = Grand Total Defect ÷ Received Qty. Days in port = vessel discharge to pull-out, both days counted; Age = Transit + Days in port."
       } : {
         format, title: tab.title, tab: tab.label, hint: [tab.hint, model.note].filter(Boolean).join(" "),
         period: `Received ${D.from} to ${D.to}`, filters: filterText(),

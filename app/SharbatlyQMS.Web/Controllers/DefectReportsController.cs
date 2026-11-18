@@ -58,7 +58,7 @@ public class DefectReportsController : Controller
         return Json(data);
     }
 
-    /// <summary>The Banana ripeness tab: one row per banana container received in
+    /// <summary>The Banana Arrival Condition tab: one row per banana container received in
     /// the window that has its ripeness counts entered on the arrival.</summary>
     [HttpGet]
     [RequireScreen(Screens.ReportsDefects, Seed.SupervisorOrAbove, "Open the Defect reports")]
