@@ -32,6 +32,8 @@ public class DefectReportExportRequest
     /// <summary>Replaces the defect-% explanation under the table on tabs that
     /// are not defect pivots (Banana Arrival Condition).</summary>
     public string? Footnote { get; set; }
+    /// <summary>The page the export came from, printed before the title.</summary>
+    public string TitlePrefix { get; set; } = "Defect reports";
 }
 
 public class DefectReportExportColumn
@@ -96,7 +98,7 @@ public static class DefectReportExporter
         ws.Style.Font.FontSize = 10;
 
         var row = 1;
-        ws.Cell(row, 1).Value = $"Defect reports — {r.Title}";
+        ws.Cell(row, 1).Value = $"{r.TitlePrefix} — {r.Title}";
         ws.Cell(row, 1).Style.Font.SetBold().Font.SetFontSize(15);
         row++;
         ws.Cell(row, 1).Value = r.Period;
@@ -291,7 +293,7 @@ public static class DefectReportExporter
             {
                 h.Item().Row(rw =>
                 {
-                    rw.RelativeItem().Text($"Defect reports — {r.Title}").Bold().FontSize(14);
+                    rw.RelativeItem().Text($"{r.TitlePrefix} — {r.Title}").Bold().FontSize(14);
                     rw.ConstantItem(200).AlignRight().Text(t =>
                     {
                         t.Span("Page ").FontColor("#6c757d"); t.CurrentPageNumber(); t.Span(" / ").FontColor("#6c757d"); t.TotalPages();

@@ -1,0 +1,9 @@
+/* KPI reports: the Defect reports styles (defect-reports.css) plus the team
+   comparison tints and sortable headings. Tints mix into the surface colour so
+   they follow light and dark themes. */
+.kpi table.kpi-table thead th.sortable { cursor: pointer; user-select: none; white-space: normal; min-width: 90px; }
+.kpi table.kpi-table thead th.sortable:hover { color: var(--dr-primary); }
+.kpi table.kpi-table td.kpi-good { background: color-mix(in oklab, #54a24b 22%, var(--dr-surface)); }
+.kpi table.kpi-table td.kpi-bad  { background: color-mix(in oklab, #e45756 22%, var(--dr-surface)); }
+.kpi table.kpi-table td.txt { text-align: left; }
+.dr-drawer table.orders td.num, .dr-drawer table.orders th.num { text-align: right; }

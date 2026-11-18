@@ -99,6 +99,7 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         // Time Bar: each URL drives a different branch of the one shared WHERE
         // clause, so a typo fails here rather than in front of a manager.
         "/TimeBar",
+        "/KpiReports",
         "/TimeBar?stage=Pending",
         "/TimeBar?stage=QC&status=Closed",
         "/TimeBar?stage=Arrival",

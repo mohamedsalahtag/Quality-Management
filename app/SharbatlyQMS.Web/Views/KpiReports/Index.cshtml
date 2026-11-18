@@ -1,0 +1,101 @@
+@{
+    ViewData["Title"] = Loc["KPI reports"];
+    var from = ViewBag.From as string;
+    var to   = ViewBag.To as string;
+}
+<link rel="stylesheet" href="~/css/defect-reports.css" asp-append-version="true" />
+<link rel="stylesheet" href="~/css/kpi-reports.css" asp-append-version="true" />
+
+<div class="dr kpi" id="dr"
+     data-url-data="@Url.Action("Data")"
+     data-url-drill="@Url.Action("Drill")"
+     data-url-export="@Url.Action("Export")"
+     data-url-qo="@Url.Action("Details", "QualityOrders", new { id = 0 })"
+     data-url-arrival="@Url.Action("Details", "Arrivals", new { id = 0 })"
+     data-max-days="@ViewBag.MaxDays">
+    <div class="dr-head">
+        <div>
+            <h1><i class="bi bi-speedometer2 me-1"></i>@Loc["KPI reports"]</h1>
+            <p>@Loc["Performance per user, compared with the team. Click any figure to see the orders behind it."]</p>
+        </div>
+    </div>
+    <span id="drToken" hidden>@Html.AntiForgeryToken()</span>
+
+    <section class="dr-box dr-filters" aria-label="@Loc["Filters"]">
+        <div class="dr-frow">
+            <div class="dr-field"><label for="fFrom">@Loc["Actions from"]</label><input type="date" id="fFrom" class="form-control form-control-sm" value="@from"></div>
+            <div class="dr-field"><label for="fTo">@Loc["Actions to"]</label><input type="date" id="fTo" class="form-control form-control-sm" value="@to"></div>
+            <div class="dr-field"><label for="fPlant-btn">@Loc["Branch"]</label><div id="fPlant" class="dropdown dr-ms"></div></div>
+            <div class="dr-field"><label for="fRole-btn">@Loc["Role"]</label><div id="fRole" class="dropdown dr-ms"></div></div>
+            <div class="dr-field"><label for="fUser-btn">@Loc["User"]</label><div id="fUser" class="dropdown dr-ms"></div></div>
+        </div>
+        <div class="dr-fbar">
+            <div class="left">
+                <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="fActive" checked>
+                    <label class="form-check-label small" for="fActive">@Loc["Only users with figures on this tab"]</label>
+                </div>
+                <span class="dr-loading" id="loading" hidden><span class="spinner-border spinner-border-sm me-1"></span>@Loc["Loading…"]</span>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline-secondary" id="fReset">@Loc["Reset filters"]</button>
+        </div>
+    </section>
+
+    <div class="dr-kpis" id="summary" aria-label="@Loc["Totals for the selection"]"></div>
+
+    <div>
+        <div class="dr-tabs" role="tablist" aria-label="@Loc["KPI areas"]" id="tabs"></div>
+        <section class="dr-box dr-panel" role="tabpanel" aria-live="polite">
+            <div id="panel"></div>
+            <div id="chart" class="dr-chart" hidden></div>
+        </section>
+    </div>
+
+    <details class="dr-box dr-about">
+        <summary>@Loc["How each KPI is measured"]</summary>
+        <div class="cols">
+            <div>
+                <h3>@Loc["Who gets the credit"]</h3>
+                <ul class="ps-3 mb-0">
+                    <li>@Loc["Every figure is dated by when the action happened, in the chosen period."]</li>
+                    <li>@Loc["A step's time belongs to whoever completed it: opened → submitted to the submitter, submitted → finished to the finisher, finished → e-mailed to the sender."]</li>
+                    <li>@Loc["A send-back counts against whoever submitted; a reopen or a later reinspection against whoever finished."]</li>
+                    <li>@Loc["Readings corrected counts saves that really changed a reading or defect already saved."]</li>
+                    <li>@Loc["Weight typing slips are Gross/Net weights above 3× or below ⅓ of the carton weight."]</li>
+                </ul>
+            </div>
+            <div>
+                <h3>@Loc["Comparing with the team"]</h3>
+                <ul class="ps-3 mb-0">
+                    <li>@Loc["Times show the median (the middle value); the average is in the tooltip."]</li>
+                    <li>@Loc["Team rows give the median and average of the users shown."]</li>
+                    <li>@Loc["Green: at least 25% better than the team median. Red: at least 25% worse. Figures based on fewer than 5 cases are not coloured."]</li>
+                    <li>@Loc["Only actions on orders and arrivals of your branches are counted."]</li>
+                </ul>
+            </div>
+        </div>
+    </details>
+    <p class="text-muted small mb-0" id="foot"></p>
+</div>
+
+<div class="dr-scrim" id="scrim" hidden></div>
+<aside class="dr-drawer" id="drawer" hidden aria-modal="true" role="dialog" aria-labelledby="dTitle">
+    <div class="dh">
+        <div><h3 id="dTitle"></h3><div class="sub" id="dSub"></div></div>
+        <div class="d-flex align-items-center gap-1">
+            <button type="button" class="btn btn-sm btn-outline-secondary dr-size" id="dSize" aria-pressed="false"
+                    title="@Loc["Maximize"]" aria-label="@Loc["Maximize"]">
+                <i class="bi bi-arrows-angle-expand"></i><span class="ms-1 d-none d-sm-inline">@Loc["Maximize"]</span>
+            </button>
+            <button type="button" class="btn-close ms-1" id="dClose" aria-label="@Loc["Close"]"></button>
+        </div>
+    </div>
+    <div class="kpis" id="dKpis"></div>
+    <div class="dbody"><table class="orders" id="dTable"></table></div>
+    <div class="df"><span>@Loc["Newest first."]</span></div>
+</aside>
+
+@section Scripts {
+    <script src="~/lib/plotly/plotly-basic.min.js" asp-append-version="true"></script>
+    <script src="~/js/kpi-reports.js" asp-append-version="true"></script>
+}

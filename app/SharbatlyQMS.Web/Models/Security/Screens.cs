@@ -39,6 +39,8 @@ public static class Screens
     public const string ReportsBuilder     = "Reports.Builder";
     /// <summary>The five defect pivots as tabs, with drill-down (M40).</summary>
     public const string ReportsDefects     = "Reports.Defects";
+    /// <summary>Performance per user: volume, speed, quality, claims (M43).</summary>
+    public const string ReportsKpi         = "Reports.Kpi";
 
     // ---- Parameters ----
     public const string DefectCatalog      = "Parameters.DefectCatalog";
@@ -71,7 +73,7 @@ public static class Screens
         Dashboard, Attachments,
         ArrivalsPending, ArrivalsIndex, ArrivalsSearch, ArrivalsDetails,
         QoIndex, QoDetails, Claims, TimeBar,
-        ReportsDataHub, ReportsBuilder, ReportsDefects,
+        ReportsDataHub, ReportsBuilder, ReportsDefects, ReportsKpi,
         DefectCatalog, DefectCategories, ReadingTypes, SampleHeaders,
         ArrivalFields, ArrivalFieldRules, ReportUnits, CodeDescriptions, MailTemplate,
         Notifications, SupplierContacts,
@@ -93,7 +95,7 @@ public static class Screens
     };
 
     /// <summary>Screens whose nav entries live in the Reports dropdown.</summary>
-    public static readonly string[] ReportsGroup = { ReportsDataHub, ReportsBuilder, ReportsDefects, TimeBar };
+    public static readonly string[] ReportsGroup = { ReportsDataHub, ReportsBuilder, ReportsDefects, ReportsKpi, TimeBar };
 
     /// <summary>
     /// The screen an action permission belongs to: everything before its last
