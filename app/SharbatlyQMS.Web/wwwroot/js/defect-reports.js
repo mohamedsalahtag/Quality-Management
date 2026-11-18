@@ -9,7 +9,7 @@
   "use strict";
   const root = document.getElementById("dr");
   if (!root) return;
-  const URL_DATA = root.dataset.urlData, URL_DRILL = root.dataset.urlDrill, URL_PENDING = root.dataset.urlPending, URL_EXPORT = root.dataset.urlExport, URL_BANANA = root.dataset.urlBanana;
+  const URL_DATA = root.dataset.urlData, URL_DRILL = root.dataset.urlDrill, URL_PENDING = root.dataset.urlPending, URL_EXPORT = root.dataset.urlExport, URL_BANANA = root.dataset.urlBanana, URL_NETWEIGHT = root.dataset.urlNetweight;
   const URL_QO = root.dataset.urlQo.replace(/\/0$/, "/"), URL_ARR = root.dataset.urlArrival.replace(/\/0$/, "/");
   const MAX_DAYS = parseInt(root.dataset.maxDays || "366", 10);
   const TOKEN = (document.querySelector("#drToken input[name=__RequestVerificationToken]") || {}).value || "";
@@ -20,7 +20,7 @@
   const SEP_CLASS = "\u0002", SEP_SUBWEEK = "\u0003", CELL = "\u0001";
 
   // ---------- model (rebuilt on every load) --------------------------------
-  let D, cats = [], catColor = {}, defs = [], units = [], factsBy = [], groupInfo = {}, nameOrder = {}, pending = [], bananas = [];
+  let D, cats = [], catColor = {}, defs = [], units = [], factsBy = [], groupInfo = {}, nameOrder = {}, pending = [], bananas = [], weights = [];
   const catInk = hex => { const n = parseInt((hex || "#6c757d").slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255; return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#212529" : "#ffffff"; };
   function build(data) {
     D = data;
@@ -67,7 +67,8 @@
     { id: "supplier", label: "Per supplier comparison", title: "Supplier comparison per sub-major category and defect", hint: "Suppliers side by side, read down each column. Open a sub-major category to see its defects." },
     { id: "sub",    label: "Per sub-major",       title: "Defect categories per sub-major category and variety", hint: "Category totals for every sub-major category; open it to see its varieties." },
     { id: "major",  label: "Per major",           title: "Defect categories per major category", hint: "Category totals for every major category." },
-    { id: "banana", label: "Banana Arrival Condition", title: "Banana Arrival Condition per container", hint: "Yellow Ripe and Green Soft counts entered on the arrival. Grand Total Defect = Yellow Ripe + Green Soft; Defect Rate % = Grand Total Defect ÷ Received Qty. Days in port = vessel discharge to pull-out, both days counted; Age = Transit + Days in port. Branch, Supplier, Pack weight and Origin filters apply." }
+    { id: "banana", label: "Banana Arrival Condition", title: "Banana Arrival Condition per container", hint: "Yellow Ripe and Green Soft counts entered on the arrival. Grand Total Defect = Yellow Ripe + Green Soft; Defect Rate % = Grand Total Defect ÷ Received Qty. Days in port = vessel discharge to pull-out, both days counted; Age = Transit + Days in port. Branch, Supplier, Pack weight and Origin filters apply." },
+    { id: "net", label: "Net Weight", title: "Net weight per container", hint: "Average of the Gross Weight and Net Weight readings on finished inspections, one row per container and product line. A reading above 3× or below ⅓ of the carton weight is treated as a typing slip: left out of the averages and counted under Left out. Totals are weighted by reading. Every filter except Defect category applies." }
   ];
   const needsFruit = t => t === "week" || t === "class" || t === "branch" || t === "supplier";
   const SUPPLIER_COLS = 15, TREND_CHARTS = 12;
@@ -472,6 +473,82 @@
       .map(([l, v]) => `<div class="kp"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
   }
 
+  // ---------- net weight ---------------------------------------------------
+  // One row per container and product line; like the banana tab, its own
+  // table and export model. Totals are reading-weighted (sum ÷ count), never
+  // an average of the row averages.
+  const netRows = () => weights.filter(w =>
+    (!S.plant.length || S.plant.includes(w.plant)) && (!S.supplier.length || S.supplier.includes(w.supplier))
+    && (!S.major.length || S.major.includes(w.major)) && (!S.sub.length || S.sub.includes(w.sub))
+    && (!S.cls.length || S.cls.includes(w.class)) && (!S.pw.length || S.pw.includes(w.weight))
+    && (!S.origin.length || S.origin.includes(w.origin)));
+  const NET_COLS = [
+    ["Container #", "text", w => w.containerNo], ["BOL #", "text", w => w.bolNo], ["PO #", "text", w => w.po],
+    ["Receiving Branch", "text", w => plantName(w.plant)], ["Major Category", "text", w => w.major], ["Sub-major Category", "text", w => w.sub],
+    ["Variety", "text", w => w.variety], ["Class", "text", w => w.class], ["Origin", "text", w => w.origin], ["Weight", "text", w => w.weight],
+    ["Received Qty", "count", w => w.receivedQty], ["Shipper", "text", w => w.supplier],
+    ["Transit Time", "count", w => w.transitDays], ["Days in Port", "count", w => w.daysInPort],
+    ["Avg Gross Weight (kg)", "kg", w => w.avgGross], ["Avg Net Weight (kg)", "kg", w => w.avgNet], ["Left out", "count", w => w.leftOut]
+  ];
+  function netTotals(list) {
+    const sum = f => list.reduce((s, w) => s + (+f(w) || 0), 0);
+    const gn = sum(w => w.grossCount), nn = sum(w => w.netCount);
+    return { qty: sum(w => w.receivedQty), gross: gn ? sum(w => w.grossSum) / gn : null, net: nn ? sum(w => w.netSum) / nn : null,
+             left: sum(w => w.leftOut), containers: new Set(list.map(w => w.containerNo)).size };
+  }
+  function renderNet(head) {
+    const list = netRows(), t = netTotals(list);
+    const num = (v, k) => v === null || v === undefined ? "" : k === "kg" ? (+v).toFixed(2) : fmtInt(+v);
+    const model = {
+      rowLabel: "Vessel Name", banana: true,
+      columns: NET_COLS.map(([label, kind]) => ({ group: "", label, kind: kind === "kg" ? "pct" : kind })),
+      rows: list.map(w => ({ label: w.vessel, level: "", cells: NET_COLS.map(([, kind, f]) => ({ v: kind === "text" ? null : f(w), t: kind === "text" ? f(w) : null, kind })) }))
+    };
+    model.rows.push({ label: "Grand Total", level: "gt", cells: NET_COLS.map(([label, kind]) => ({
+      v: label === "Received Qty" ? t.qty : label === "Avg Gross Weight (kg)" ? t.gross : label === "Avg Net Weight (kg)" ? t.net : label === "Left out" ? t.left : null, t: null, kind })) });
+    current = { model, res: null, tab: TABS.find(x => x.id === "net"), list, totals: t };
+    let body;
+    if (!list.length) body = emptyHtml(weights.length ? "No containers match these filters." : "No finished inspections with Gross / Net weight readings were received in this period.");
+    else {
+      const th = `<tr><th class="rowh">Vessel Name</th>${NET_COLS.map(([l, k]) => `<th class="${k === "text" ? "" : "tot"}">${esc(l)}</th>`).join("")}</tr>`;
+      const tr = list.map(w => `<tr><th title="${esc(w.vessel)}">${esc(w.vessel || "—")}</th>${NET_COLS.map(([l, k, f]) => {
+        if (l === "Container #") return `<td class="na txt"><a href="${URL_QO}${w.qualityOrderId}" target="_blank" rel="noopener" title="QC order ${esc(w.qualityOrderNo)}">${esc(w.containerNo)}</a></td>`;
+        if (l === "Left out") return `<td class="na">${w.leftOut ? `<span class="badge bg-warning-subtle text-warning-emphasis" title="Readings left out of the averages as typing slips">${fmtInt(w.leftOut)}</span>` : ""}</td>`;
+        return k === "text" ? `<td class="na txt">${esc(f(w))}</td>` : `<td class="na${k === "kg" ? " tot" : ""}">${num(f(w), k)}</td>`;
+      }).join("")}</tr>`).join("");
+      const gt = `<tr class="gt"><th>Grand Total</th>${model.rows[model.rows.length - 1].cells.map(c => `<td class="na tot">${c.kind === "text" ? "" : num(c.v, c.kind)}</td>`).join("")}</tr>`;
+      body = `<div class="tablewrap"><table class="pv dr-banana"><thead>${th}</thead><tbody>${tr}${gt}</tbody></table></div>`;
+    }
+    $("panel").innerHTML = head + body;
+    $("acts").innerHTML = list.length ? `<button type="button" class="btn btn-sm btn-outline-success" data-export="xlsx"><i class="bi bi-file-earmark-excel me-1"></i>Excel</button><button type="button" class="btn btn-sm btn-outline-danger" data-export="pdf"><i class="bi bi-file-earmark-pdf me-1"></i>PDF</button>` : "";
+    // Chart: average net weight against the carton weight, per sub-major and
+    // pack weight -- the question the tab exists to answer.
+    const el = $("chart");
+    if (window.Plotly && list.length) {
+      const by = new Map();
+      for (const w of list) {
+        if (!w.netCount) continue;
+        const k = `${w.sub || w.major || "(none)"} · ${w.weight}`;
+        const g = by.get(k) || { s: 0, n: 0 }; g.s += +w.netSum; g.n += w.netCount; by.set(k, g);
+      }
+      const keys = [...by.keys()].sort((a, b) => a.localeCompare(b));
+      el.hidden = !keys.length;
+      if (keys.length) {
+        const layout = baseLayout(); layout.xaxis.automargin = true; layout.yaxis.title = "kg";
+        Plotly.react(el, [
+          { x: keys, y: keys.map(k => +(by.get(k).s / by.get(k).n).toFixed(2)), type: "bar", name: "Avg net weight", marker: { color: "#4c78a8" } },
+          { x: keys, y: keys.map(k => parseFloat(k.split(" · ").pop()) || null), type: "scatter", mode: "markers", name: "Carton weight", marker: { color: "#e45756", size: 9, symbol: "line-ew-open", line: { width: 3 } } }
+        ], layout, { displayModeBar: false, responsive: true });
+      }
+    } else el.hidden = true;
+    drawTrends(null);
+    const range = D ? `${dm(D.from)} – ${dm(D.to)} ${D.to.slice(0, 4)}` : "";
+    $("summary").innerHTML = [["Period", range], ["Containers", t.containers.toLocaleString()], ["Received Qty", fmtInt(t.qty)],
+      ["Avg Gross Weight", t.gross === null ? "—" : t.gross.toFixed(2) + " kg"], ["Avg Net Weight", t.net === null ? "—" : t.net.toFixed(2) + " kg"],
+      ["Readings left out", fmtInt(t.left)]]
+      .map(([l, v]) => `<div class="kp"><div class="l">${l}</div><div class="v">${v}</div></div>`).join("");
+  }
+
   // ---------- main render --------------------------------------------------
   const emptyHtml = (msg, extra) => `<div class="empty"><div>${esc(msg)}</div>${extra || ""}</div>`;
   let rowLabelOf = k => k;
@@ -481,6 +558,7 @@
     let head = `<div class="ptitle"><div><h2>${tab.title}</h2><span class="hint">${tab.hint}</span></div><div class="acts" id="acts"></div></div>`;
     if (!D) { $("panel").innerHTML = head; $("chart").hidden = true; drawTrends(null); return; }
     if (S.tab === "banana") { renderBanana(head); return; }
+    if (S.tab === "net") { renderNet(head); return; }
     if (needsFruit(S.tab) && !S.major.length) {
       const majors = [...new Set(units.filter(u => passes(u, "major")).map(u => u.mj).filter(Boolean))].sort();
       $("panel").innerHTML = head + emptyHtml("This report lists every defect of one fruit, so pick a major category to start.",
@@ -664,17 +742,24 @@
           try { charts.push(await Plotly.toImage(el, { format: "png", width: 900, height: 480, scale: 1 })); } catch (e) { /* the table still exports */ }
         }
       const pend = pendingFiltered();
+      const net = tab.id === "net";
       const payload = model.banana ? {
         format, title: tab.title, tab: tab.label, hint: tab.hint,
-        period: `Received ${D.from} to ${D.to}`, filters: filterText().filter(f => !/^(Major|Sub-major|Class|Defect)/.test(f)),
-        kpis: [["Containers", current.list.length.toLocaleString()], ["Received Qty", fmtInt(current.totals.qty)],
-               ["Grand Total Defect", fmtInt(current.totals.yr + current.totals.gs)], ["Defect Rate %", current.totals.pct === null ? "—" : current.totals.pct.toFixed(2) + "%"]],
+        period: `Received ${D.from} to ${D.to}`, filters: filterText().filter(f => !(net ? /^Defect/ : /^(Major|Sub-major|Class|Defect)/).test(f)),
+        kpis: net
+          ? [["Containers", current.totals.containers.toLocaleString()], ["Received Qty", fmtInt(current.totals.qty)],
+             ["Avg Gross Weight", current.totals.gross === null ? "—" : current.totals.gross.toFixed(2) + " kg"],
+             ["Avg Net Weight", current.totals.net === null ? "—" : current.totals.net.toFixed(2) + " kg"], ["Readings left out", fmtInt(current.totals.left)]]
+          : [["Containers", current.list.length.toLocaleString()], ["Received Qty", fmtInt(current.totals.qty)],
+             ["Grand Total Defect", fmtInt(current.totals.yr + current.totals.gs)], ["Defect Rate %", current.totals.pct === null ? "—" : current.totals.pct.toFixed(2) + "%"]],
         rowLabel: model.rowLabel,
         columns: model.columns.map(c => ({ group: "", label: c.label, color: null, kind: c.kind })),
         rows: model.rows.map(r => ({ label: r.label, level: r.level, indent: 0,
           values: r.cells.map(c => c.v === null || c.v === undefined ? null : +c.v), trends: [], texts: r.cells.map(c => c.t ?? null) })),
         chart, charts: [], generated: new Date().toLocaleString(),
-        footnote: "Banana containers received in the period with Yellow Ripe / Green Soft entered on the arrival. Grand Total Defect = Yellow Ripe + Green Soft; Defect Rate % = Grand Total Defect ÷ Received Qty. Days in port = vessel discharge to pull-out, both days counted; Age = Transit + Days in port."
+        footnote: net
+          ? "Finished inspections received in the period with Gross / Net Weight readings, one row per container and product line. Averages leave out readings above 3× or below ⅓ of the carton weight (typing slips), counted under Left out; totals are weighted by reading."
+          : "Banana containers received in the period with Yellow Ripe / Green Soft entered on the arrival. Grand Total Defect = Yellow Ripe + Green Soft; Defect Rate % = Grand Total Defect ÷ Received Qty. Days in port = vessel discharge to pull-out, both days counted; Age = Transit + Days in port."
       } : {
         format, title: tab.title, tab: tab.label, hint: [tab.hint, model.note].filter(Boolean).join(" "),
         period: `Received ${D.from} to ${D.to}`, filters: filterText(),
@@ -710,17 +795,19 @@
     const seq = ++loadSeq;
     $("loading").hidden = false;
     try {
-      const [res, pres, bres] = await Promise.all([
+      const [res, pres, bres, wres] = await Promise.all([
         fetch(`${URL_DATA}?from=${from}&to=${to}`, { headers: { Accept: "application/json" } }),
         fetch(`${URL_PENDING}?from=${from}&to=${to}`, { headers: { Accept: "application/json" } }),
-        fetch(`${URL_BANANA}?from=${from}&to=${to}`, { headers: { Accept: "application/json" } })
+        fetch(`${URL_BANANA}?from=${from}&to=${to}`, { headers: { Accept: "application/json" } }),
+        fetch(`${URL_NETWEIGHT}?from=${from}&to=${to}`, { headers: { Accept: "application/json" } })
       ]);
       if (!res.ok) throw new Error(res.status);
       const data = await res.json();
       const pend = pres.ok ? await pres.json() : [];
       const ban = bres.ok ? await bres.json() : [];
+      const wts = wres.ok ? await wres.json() : [];
       if (seq !== loadSeq) return;
-      build(data); pending = pend; bananas = ban;
+      build(data); pending = pend; bananas = ban; weights = wts;
       if (data.from !== from) $("fFrom").value = data.from;   // clamped to MAX_DAYS by the server
       refreshOptions(); render();
       $("foot").textContent = `${units.length.toLocaleString()} material lines on finished inspections received ${dm(D.from)} – ${dm(D.to)} (at most ${MAX_DAYS} days). Loaded ${D.generated}.`;

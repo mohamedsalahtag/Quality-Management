@@ -193,7 +193,7 @@ public static class DefectReportExporter
                 var v = rr.Values[i];
                 if (v is null) continue;
                 cell.Value = (double)v.Value;
-                cell.Style.NumberFormat.Format = kind == "cartons" ? "#,##0" : kind == "trend" ? "+0.00;-0.00;0.00" : "0.00";
+                cell.Style.NumberFormat.Format = IsCount(kind) ? "#,##0" : kind == "trend" ? "+0.00;-0.00;0.00" : "0.00";
                 if (kind == "trend") cell.Style.Font.SetFontColor(v > 0 ? XLColor.FromHtml("#dc3545") : XLColor.FromHtml("#198754"));
                 var t = i < rr.Trends.Count ? rr.Trends[i] : null;
                 // Week-on-week: the cell turns red when it rose, green when it fell,

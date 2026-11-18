@@ -233,4 +233,41 @@ public class DefectReportsRound3Tests : IClassFixture<QmsAppFactory>
         Assert.DoesNotContain(ws.CellsUsed(), c => c.GetString().Contains("defective units"));
         Assert.True(DefectReportExporter.Pdf(r).Length > 1000);
     }
+
+    // ---- Net Weight -------------------------------------------------------
+
+    /// <summary>Averages are the kept readings' sum ÷ count, every kept reading
+    /// sits inside the slip band of the carton weight, and a container with a
+    /// 1591.8 kg typo on a 13.5 kg carton does not drag its average to 100 kg.</summary>
+    [Fact]
+    public async Task Net_weight_rows_average_the_kept_readings_only()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var svc = scope.ServiceProvider.GetRequiredService<IDefectReportService>();
+        var rows = await svc.GetNetWeightAsync(DateTime.Today.AddDays(-60), DateTime.Today, PlantScope.All);
+        if (rows.Count == 0) return;
+
+        Assert.All(rows, r =>
+        {
+            Assert.True(r.GrossCount + r.NetCount + r.LeftOut > 0);
+            if (r.NetCount > 0) Assert.Equal(Math.Round(r.NetSum / r.NetCount, 3), r.AvgNet);
+            else Assert.Null(r.AvgNet);
+            if (r.GrossCount > 0) Assert.Equal(Math.Round(r.GrossSum / r.GrossCount, 3), r.AvgGross);
+            var pw = decimal.TryParse(r.Weight.Replace(" kg", ""), System.Globalization.NumberStyles.Number,
+                                      System.Globalization.CultureInfo.InvariantCulture, out var w) ? w : (decimal?)null;
+            if (pw is > 0 && r.AvgNet is { } net)
+                Assert.InRange(net, pw.Value / DefectReportService.WeightSlipFactor, pw.Value * DefectReportService.WeightSlipFactor);
+        });
+        Assert.Equal(rows.Count, rows.Select(r => (r.QualityOrderId, r.Major, r.Sub, r.Variety, r.Class, r.Origin, r.Weight)).Distinct().Count());
+    }
+
+    [Fact]
+    public async Task The_net_weight_endpoint_answers()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add(TestAuthHandler.RoleHeader, SharbatlyQMS.Web.Models.Security.RoleCodes.Admin);
+        var res = await client.GetAsync($"/DefectReports/NetWeight?from={DateTime.Today.AddDays(-14):yyyy-MM-dd}&to={DateTime.Today:yyyy-MM-dd}");
+        Assert.Equal(System.Net.HttpStatusCode.OK, res.StatusCode);
+        Assert.StartsWith("[", (await res.Content.ReadAsStringAsync()).TrimStart());
+    }
 }

@@ -30,6 +30,7 @@ public interface IDefectReportService
     Task<DefectReportDataset> GetDatasetAsync(DateTime from, DateTime to, PlantScope scope, CancellationToken ct = default);
     Task<IReadOnlyList<DefectDrillRow>> DrillAsync(DefectDrillRequest req, PlantScope scope, CancellationToken ct = default);
     Task<IReadOnlyList<BananaRipeRow>> GetBananaRipenessAsync(DateTime from, DateTime to, PlantScope scope, CancellationToken ct = default);
+    Task<IReadOnlyList<NetWeightRow>> GetNetWeightAsync(DateTime from, DateTime to, PlantScope scope, CancellationToken ct = default);
 }
 
 public class DefectReportService : IDefectReportService
@@ -438,6 +439,141 @@ public class DefectReportService : IDefectReportService
         return days < 0 ? null : days + 1;
     }
 
+    // ------------------------------------------------------------------
+    // Net Weight: average Gross / Net weight readings per container and
+    // product line, from finished inspections (the same orders as the defect
+    // pivots). A reading above 3x or below a third of the carton weight is a
+    // typing slip (1591.8 for 15.918) and is left out of the averages but
+    // COUNTED, so the row says how many were dropped. Lines without a carton
+    // weight keep every reading.
+    // ------------------------------------------------------------------
+    public const decimal WeightSlipFactor = 3m;
+
+    private const string NetWeightSql = @"
+        WITH lines AS (
+            SELECT qo.quality_order_id, qo.quality_order_no, a.arrival_id, a.arrival_no,
+                   ISNULL(a.container_no, '') AS container_no, ISNULL(a.bol_no, '') AS bol_no,
+                   ISNULL(a.ebeln, '') AS ebeln, ISNULL(a.plant, '') AS plant, ISNULL(a.vendor_name, '') AS supplier,
+                   ISNULL(ss.vessel_name, '') AS vessel, ss.loading_country, ss.sailing_date, ss.discharge_date,
+                   ss.pullout_date, ss.transit_days,
+                   COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date) AS rcv,
+                   ISNULL(COALESCE(NULLIF(m.major_category, N''), mc.major_category_desc), '') AS major,
+                   ISNULL(mc.sub_major_category, '') AS sub,
+                   ISNULL(COALESCE(NULLIF(m.variety, N''), mc.variety_name), '') AS variety,
+                   ISNULL(COALESCE(NULLIF(m.material_class, N''), mc.class_name), '') AS cls,
+                   ISNULL(COALESCE(NULLIF(m.origin, N''), mc.origin_name), '') AS origin,
+                   NULLIF(ISNULL(NULLIF(m.net_weight, 0), mc.weight), 0) AS pw,
+                   m.qo_material_id,
+                   CASE WHEN ROW_NUMBER() OVER (PARTITION BY qo.quality_order_id, m.arrival_item_id
+                                                ORDER BY m.qo_material_id) = 1
+                        THEN CAST(ISNULL(ai.quantity, 0) AS DECIMAL(18,3)) ELSE 0 END AS qty
+            FROM   qms_quality_order qo
+            JOIN   qms_quality_order_material m ON m.quality_order_id = qo.quality_order_id
+            LEFT JOIN qms_arrival_item ai       ON ai.arrival_item_id = m.arrival_item_id
+            JOIN   qms_arrival a                ON a.arrival_id = qo.arrival_id
+            LEFT JOIN qms_shipment_snapshot ss  ON ss.arrival_id = a.arrival_id
+            LEFT JOIN qms_sap_material_cache mc ON mc.material_no = m.material_no
+            OUTER APPLY (SELECT TOP 1 c2.receive_date FROM qms_sap_container_cache c2
+                         WHERE c2.container_no = a.container_no AND c2.bol_no = a.bol_no AND c2.ebeln = a.ebeln
+                         ORDER BY c2.doc_date DESC, c2.sto) cc
+            WHERE  qo.status_code = 'Closed' AND qo.superseded_at IS NULL
+              AND  COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date) >= @from
+              AND  COALESCE(cc.receive_date, ss.receive_date, ss.arrival_date) <  @toEx
+              AND  (@sUnrestricted = 1 OR a.plant IN @sPlants)
+        )
+        SELECT l.quality_order_id AS QualityOrderId, MAX(l.quality_order_no) AS QualityOrderNo,
+               MAX(l.arrival_id) AS ArrivalId, MAX(l.arrival_no) AS ArrivalNo,
+               MAX(l.rcv) AS ReceiveDate, MAX(l.vessel) AS Vessel, l.container_no AS ContainerNo,
+               MAX(l.bol_no) AS BolNo, MAX(l.ebeln) AS Po, MAX(l.plant) AS Plant, MAX(l.supplier) AS Supplier,
+               MAX(l.loading_country) AS LoadingCountry, MAX(l.sailing_date) AS Loading,
+               MAX(l.discharge_date) AS Discharge, MAX(l.pullout_date) AS PullOut, MAX(l.transit_days) AS SapTransitDays,
+               l.major AS Major, l.sub AS Sub, l.variety AS Variety, l.cls AS Class, l.origin AS Origin, l.pw AS PackWeight,
+               SUM(l.qty) AS ReceivedQty,
+               SUM(r.gs) AS GrossSum, SUM(r.gn) AS GrossCount, SUM(r.ns) AS NetSum, SUM(r.nn) AS NetCount,
+               SUM(r.bad) AS LeftOut
+        FROM   lines l
+        CROSS APPLY (
+            SELECT SUM(CASE WHEN sr.reading_type_code = 'GROSS_WEIGHT' AND k.ok = 1 THEN sr.numeric_value END) AS gs,
+                   SUM(CASE WHEN sr.reading_type_code = 'GROSS_WEIGHT' AND k.ok = 1 THEN 1 ELSE 0 END)  AS gn,
+                   SUM(CASE WHEN sr.reading_type_code = 'NET_WEIGHT'   AND k.ok = 1 THEN sr.numeric_value END) AS ns,
+                   SUM(CASE WHEN sr.reading_type_code = 'NET_WEIGHT'   AND k.ok = 1 THEN 1 ELSE 0 END)  AS nn,
+                   SUM(CASE WHEN k.ok = 0 THEN 1 ELSE 0 END) AS bad,
+                   COUNT(*) AS n
+            FROM   qms_sample s
+            JOIN   qms_sample_reading sr ON sr.sample_id = s.sample_id
+            CROSS APPLY (SELECT CASE WHEN l.pw IS NULL
+                                       OR (sr.numeric_value <= l.pw * @slip AND sr.numeric_value >= l.pw / @slip)
+                                     THEN 1 ELSE 0 END AS ok) k
+            WHERE  s.qo_material_id = l.qo_material_id AND s.is_deleted = 0
+              AND  sr.reading_type_code IN ('GROSS_WEIGHT', 'NET_WEIGHT') AND sr.numeric_value IS NOT NULL
+        ) r
+        WHERE  r.n > 0
+        GROUP  BY l.quality_order_id, l.container_no, l.major, l.sub, l.variety, l.cls, l.origin, l.pw
+        ORDER  BY MAX(l.rcv), l.container_no, l.sub, l.variety, l.cls;";
+
+    private sealed class NetWeightRaw
+    {
+        public long QualityOrderId { get; set; }
+        public string QualityOrderNo { get; set; } = "";
+        public long ArrivalId { get; set; }
+        public string? ArrivalNo { get; set; }
+        public DateTime ReceiveDate { get; set; }
+        public string Vessel { get; set; } = "";
+        public string ContainerNo { get; set; } = "";
+        public string BolNo { get; set; } = "";
+        public string Po { get; set; } = "";
+        public string Plant { get; set; } = "";
+        public string Supplier { get; set; } = "";
+        public string? LoadingCountry { get; set; }
+        public DateTime? Loading { get; set; }
+        public DateTime? Discharge { get; set; }
+        public DateTime? PullOut { get; set; }
+        public short? SapTransitDays { get; set; }
+        public string Major { get; set; } = "";
+        public string Sub { get; set; } = "";
+        public string Variety { get; set; } = "";
+        public string Class { get; set; } = "";
+        public string Origin { get; set; } = "";
+        public decimal? PackWeight { get; set; }
+        public decimal ReceivedQty { get; set; }
+        public decimal? GrossSum { get; set; }
+        public int GrossCount { get; set; }
+        public decimal? NetSum { get; set; }
+        public int NetCount { get; set; }
+        public int LeftOut { get; set; }
+    }
+
+    public async Task<IReadOnlyList<NetWeightRow>> GetNetWeightAsync(DateTime from, DateTime to, PlantScope scope, CancellationToken ct = default)
+    {
+        from = from.Date; to = to.Date;
+        if (to < from) (from, to) = (to, from);
+        if ((to - from).TotalDays > MaxDays) from = to.AddDays(-MaxDays);
+
+        using var c = new SqlConnection(_cs);
+        var raw = await c.QueryAsync<NetWeightRaw>(new CommandDefinition(NetWeightSql, new
+        {
+            from, toEx = to.AddDays(1), slip = WeightSlipFactor,
+            sUnrestricted = scope.Unrestricted, sPlants = scope.QueryPlants
+        }, commandTimeout: 180, cancellationToken: ct));
+
+        return raw.Select(r => new NetWeightRow
+        {
+            QualityOrderId = r.QualityOrderId, QualityOrderNo = r.QualityOrderNo,
+            ArrivalId = r.ArrivalId, ArrivalNo = r.ArrivalNo ?? "",
+            Received = r.ReceiveDate.ToString("yyyy-MM-dd"),
+            Vessel = r.Vessel, ContainerNo = r.ContainerNo, BolNo = r.BolNo, Po = r.Po, Plant = r.Plant,
+            Major = r.Major, Sub = r.Sub, Variety = r.Variety, Class = r.Class,
+            Origin = !string.IsNullOrWhiteSpace(r.Origin) ? r.Origin : Countries.Display(r.LoadingCountry),
+            Weight = PackWeightText(r.PackWeight), ReceivedQty = r.ReceivedQty, Supplier = r.Supplier,
+            TransitDays = ShipmentDates.TransitDays(r.Loading, r.Discharge, r.SapTransitDays),
+            DaysInPort = BananaDaysInPort(r.Discharge, r.PullOut),
+            GrossSum = r.GrossSum ?? 0, GrossCount = r.GrossCount, NetSum = r.NetSum ?? 0, NetCount = r.NetCount,
+            AvgGross = r.GrossCount > 0 ? Math.Round((r.GrossSum ?? 0) / r.GrossCount, 3) : null,
+            AvgNet   = r.NetCount   > 0 ? Math.Round((r.NetSum ?? 0) / r.NetCount, 3) : null,
+            LeftOut = r.LeftOut
+        }).ToList();
+    }
+
     private static bool PassesFilters(UnitRow u, DefectDrillRequest r) =>
         (r.Plant.Count == 0       || r.Plant.Contains(u.Plant))
         && (r.Supplier.Count == 0 || r.Supplier.Contains(u.Supplier))
@@ -562,6 +698,43 @@ public class BananaRipeRow
     public decimal TotalDefect { get; set; }
     /// <summary>Total defect ÷ received quantity × 100.</summary>
     public decimal? DefectRate { get; set; }
+}
+
+/// <summary>One container and product line on the Net Weight tab.</summary>
+public class NetWeightRow
+{
+    public long QualityOrderId { get; set; }
+    public string QualityOrderNo { get; set; } = "";
+    public long ArrivalId { get; set; }
+    public string ArrivalNo { get; set; } = "";
+    /// <summary>Branch receive date, yyyy-MM-dd.</summary>
+    public string Received { get; set; } = "";
+    public string Vessel { get; set; } = "";
+    public string ContainerNo { get; set; } = "";
+    public string BolNo { get; set; } = "";
+    public string Po { get; set; } = "";
+    public string Plant { get; set; } = "";
+    public string Major { get; set; } = "";
+    public string Sub { get; set; } = "";
+    public string Variety { get; set; } = "";
+    public string Class { get; set; } = "";
+    public string Origin { get; set; } = "";
+    /// <summary>Carton weight, "13.5 kg" -- the Pack weight filter's text.</summary>
+    public string Weight { get; set; } = "";
+    public decimal ReceivedQty { get; set; }
+    public string Supplier { get; set; } = "";
+    public int? TransitDays { get; set; }
+    public int? DaysInPort { get; set; }
+    /// <summary>Sums and counts of the readings kept, so totals can be
+    /// weighted by reading rather than averaged averages.</summary>
+    public decimal GrossSum { get; set; }
+    public int GrossCount { get; set; }
+    public decimal NetSum { get; set; }
+    public int NetCount { get; set; }
+    public decimal? AvgGross { get; set; }
+    public decimal? AvgNet { get; set; }
+    /// <summary>Readings left out of the averages as typing slips.</summary>
+    public int LeftOut { get; set; }
 }
 
 public class DefectDrillRow

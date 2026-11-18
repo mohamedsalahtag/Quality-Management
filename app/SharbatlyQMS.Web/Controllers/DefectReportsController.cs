@@ -68,6 +68,16 @@ public class DefectReportsController : Controller
         return Json(await _reports.GetBananaRipenessAsync(from ?? df, to ?? dt, User.GetPlantScope(), ct));
     }
 
+    /// <summary>The Net Weight tab: average Gross / Net weight readings per
+    /// container and product line on finished inspections received in the window.</summary>
+    [HttpGet]
+    [RequireScreen(Screens.ReportsDefects, Seed.SupervisorOrAbove, "Open the Defect reports")]
+    public async Task<IActionResult> NetWeight(DateTime? from, DateTime? to, CancellationToken ct)
+    {
+        var (df, dt) = DefaultWindow();
+        return Json(await _reports.GetNetWeightAsync(from ?? df, to ?? dt, User.GetPlantScope(), ct));
+    }
+
     /// <summary>
     /// Containers pending inspection as of the window's last day: received in
     /// the window (with or without an arrival) and not finished by its end. The
