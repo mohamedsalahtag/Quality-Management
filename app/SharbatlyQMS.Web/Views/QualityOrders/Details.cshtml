@@ -161,6 +161,16 @@
                 <i class="bi bi-arrow-repeat me-1"></i>@Loc["Reinspect"]
             </button>
         }
+        @* SAP regraded the container after the inspection: move the lines to
+           SAP's codes so the report prints the new grade. The service refuses
+           anything but another grade of the same goods. *@
+        @if (!isClaimContext && Perms.Can(Perm.Qo.RefreshMaterials) && !Model.IsFrozen && !Model.IsArchived
+             && Model.StatusCode != QualityOrderStatus.Cancelled)
+        {
+            <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#refreshMaterialsModal">
+                <i class="bi bi-arrow-repeat me-1"></i>@Loc["Refresh materials from SAP"]
+            </button>
+        }
         @if (!isClaimContext)
         {
             <button type="button" class="btn btn-outline-info" data-bs-toggle="modal" data-bs-target="#reportPreviewModal">
@@ -1012,6 +1022,39 @@
     </div>
 }
 
+@if (!isClaimContext && Perms.Can(Perm.Qo.RefreshMaterials) && !Model.IsFrozen && !Model.IsArchived
+     && Model.StatusCode != QualityOrderStatus.Cancelled)
+{
+    <div class="modal fade" id="refreshMaterialsModal" tabindex="-1"
+         data-url-preview="@Url.Action("RefreshMaterialsPreview", new { id = Model.QualityOrderId })">
+        <div class="modal-dialog modal-xl">
+            <form asp-action="RefreshMaterials" asp-route-id="@Model.QualityOrderId" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-arrow-repeat me-1"></i>@Loc["Refresh materials from SAP"]</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small text-muted mb-2">
+                        @Loc["For a container SAP regraded after the inspection. Only another grade of the same goods (same fruit, variety, origin, size and weight) can be taken; samples, defects, status and dates are not touched."]
+                    </p>
+                    <div id="rmBody"><div class="text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>@Loc["Asking SAP…"]</div></div>
+                    <div id="rmReason" class="d-none mt-3">
+                        <label class="form-label">@Loc["Why are the materials being changed? (required)"]</label>
+                        <textarea name="reason" class="form-control" rows="2" required minlength="5"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" id="rmApply" class="btn btn-primary" disabled>
+                        <i class="bi bi-check2 me-1"></i>@Loc["Apply"]
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
 @* ---- Send report to supplier modal (visible only when enabled in
        Parameters → Mail Template). Body + subject load from server-side
        template via PrepareSendQualityReport AJAX. ---- *@
@@ -1076,6 +1119,70 @@
 }
 
 @section Scripts {
+<script>
+    // ---- Refresh materials from SAP: the preview is fetched each time the
+    //      dialog opens, so it always shows what SAP says now. The server
+    //      re-runs the same preview on Apply and refuses if it no longer agrees.
+    (function () {
+        const modal = document.getElementById('refreshMaterialsModal');
+        if (!modal) return;
+        const body = document.getElementById('rmBody');
+        const reasonBox = document.getElementById('rmReason');
+        const apply = document.getElementById('rmApply');
+        const esc = s => String(s ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+        const qty = q => q == null ? '' : Number(q).toLocaleString();
+
+        modal.addEventListener('show.bs.modal', async () => {
+            body.innerHTML = '<div class="text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>Asking SAP…</div>';
+            reasonBox.classList.add('d-none');
+            apply.disabled = true;
+            let p;
+            try {
+                const res = await fetch(modal.dataset.urlPreview, { headers: { 'Accept': 'application/json' } });
+                if (!res.ok) throw new Error('HTTP ' + res.status);
+                p = await res.json();
+            } catch (e) {
+                body.innerHTML = '<div class="alert alert-danger mb-0">Could not load the preview (' + esc(e.message) + ').</div>';
+                return;
+            }
+            let html = '';
+            if (p.message) html += '<div class="alert ' + (p.mode === 'none' ? 'alert-secondary' : 'alert-warning') + ' small">' + esc(p.message) + '</div>';
+            if (p.reportSent && p.mode !== 'none')
+                html += '<div class="alert alert-danger small"><i class="bi bi-exclamation-triangle me-1"></i>The report was already e-mailed to the supplier with the old grade. Send it again after refreshing.</div>';
+            if (p.mode === 'sap' || p.mode === 'manual') {
+                html += '<div class="table-responsive"><table class="table table-sm align-middle small"><thead><tr>' +
+                        '<th>Item</th><th class="text-end">Qty</th><th>Now</th><th>Grade now</th><th>' + (p.mode === 'sap' ? 'In SAP' : 'New grade') + '</th></tr></thead><tbody>';
+                for (const l of p.lines) {
+                    let target;
+                    if (p.mode === 'sap') {
+                        target = l.newNo
+                            ? '<input type="hidden" name="pick_' + l.qoMaterialId + '" value="' + esc(l.newNo) + '">' +
+                              '<span class="badge bg-success-subtle text-success-emphasis">' + esc(l.newGrade) + '</span> <code>' + esc(l.newNo) + '</code><div class="text-muted">' + esc(l.newDesc) + '</div>'
+                            : '<span class="text-muted">unchanged</span>';
+                    } else if (l.options.length) {
+                        target = '<select class="form-select form-select-sm rm-pick" name="pick_' + l.qoMaterialId + '"><option value="">Keep ' + esc(l.oldGrade) + '</option>' +
+                                 l.options.map(o => '<option value="' + esc(o.no) + '">' + esc(o.grade) + ' — ' + esc(o.no) + (o.brand ? ' (' + esc(o.brand) + ')' : '') + '</option>').join('') +
+                                 '</select>';
+                    } else {
+                        target = '<span class="text-muted">no other grade</span>';
+                    }
+                    html += '<tr><td>' + esc(l.ebelp) + '</td><td class="text-end">' + qty(l.quantity) + '</td>' +
+                            '<td><code>' + esc(l.oldNo) + '</code><div class="text-muted">' + esc(l.oldDesc) + '</div></td>' +
+                            '<td>' + esc(l.oldGrade) + '</td><td>' + target + '</td></tr>';
+                }
+                html += '</tbody></table></div>';
+            }
+            body.innerHTML = html;
+            if (p.mode === 'sap') { reasonBox.classList.remove('d-none'); apply.disabled = false; }
+            if (p.mode === 'manual') {
+                reasonBox.classList.remove('d-none');
+                const sync = () => { apply.disabled = ![...body.querySelectorAll('.rm-pick')].some(s => s.value); };
+                body.querySelectorAll('.rm-pick').forEach(s => s.addEventListener('change', sync));
+                sync();
+            }
+        });
+    })();
+</script>
 <script>
     // ---- QC report preview popup: build the report PDF fresh every time the
     //      modal opens (and on Refresh), so it always reflects the latest saved

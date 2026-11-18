@@ -224,6 +224,7 @@ public static class ActionCodes
     /// was done on it. Written against the original order (and the claim, when
     /// it moves back); the reinspection itself is audited as Deleted.</summary>
     public const string ReinspectionUndone = "ReinspectionUndone";
+    public const string MaterialRefreshed  = "MaterialRefreshed";
     /// <summary>The quality report was e-mailed to the supplier (M41 send log).</summary>
     public const string ReportSent         = "ReportSent";
     public const string Cancelled          = "Cancelled";

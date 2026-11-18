@@ -70,6 +70,7 @@ builder.Services.AddScoped<IImageService, ImageService>();
 // because documents are stored outside wwwroot and served only via an authenticated action.
 builder.Services.AddScoped<IDocumentService, DocumentService>();
 builder.Services.AddScoped<IMaraService, MaraService>();
+builder.Services.AddScoped<IMaterialRefreshService, MaterialRefreshService>();
 // The material master category tree behind the major / sub-major filters.
 builder.Services.AddScoped<IMaterialTaxonomyService, MaterialTaxonomyService>();
 builder.Services.AddScoped<ISupplierContactService, SupplierContactService>();

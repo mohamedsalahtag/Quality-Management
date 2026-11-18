@@ -69,6 +69,10 @@ public static class Perm
         /// <summary>The envelope button on the Quality Orders list and Details:
         /// a separate grant from the Claims page's SendReport, Admin-only by default.</summary>
         public const string SendToSupplier = Screens.QoDetails + ".SendToSupplier";
+        /// <summary>Swaps an order's material codes for the ones SAP holds after
+        /// a regrade (or, when SAP no longer lists the container, for a sibling
+        /// that differs only in grade). Admin-only by default.</summary>
+        public const string RefreshMaterials = Screens.QoDetails + ".RefreshMaterials";
     }
 
     public static class Claims

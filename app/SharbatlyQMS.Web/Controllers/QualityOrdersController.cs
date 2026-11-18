@@ -664,6 +664,52 @@ public class QualityOrdersController : Controller
         }
     }
 
+    /// <summary>
+    /// What a material refresh would change: SAP's current codes for the
+    /// container, or -- when SAP no longer lists it -- the other grades of the
+    /// same goods to choose from. Read by the refresh dialog.
+    /// </summary>
+    [HttpGet]
+    [RequirePermission(Perm.Qo.RefreshMaterials, Seed.AdminOnly, "Refresh an order's materials after SAP regrades them")]
+    public async Task<IActionResult> RefreshMaterialsPreview(long id,
+        [FromServices] IMaterialRefreshService refresh, CancellationToken ct)
+    {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+        return Json(await refresh.PreviewAsync(id, ct));
+    }
+
+    /// <summary>
+    /// Applies a material refresh. Admin-only by default; the service re-runs
+    /// the preview and refuses anything that is not the same goods in another
+    /// grade, so a hidden button is not the only guard.
+    /// </summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Qo.RefreshMaterials, Seed.AdminOnly, "Refresh an order's materials after SAP regrades them")]
+    public async Task<IActionResult> RefreshMaterials(long id, string? reason,
+        [FromServices] IMaterialRefreshService refresh, CancellationToken ct)
+    {
+        if (await EnsureCanReadQoAsync(id) is { } block) return block;
+
+        var picks = new Dictionary<long, string>();
+        foreach (var (key, value) in Request.Form)
+            if (key.StartsWith("pick_", StringComparison.Ordinal)
+                && long.TryParse(key.AsSpan(5), out var qoMaterialId)
+                && !string.IsNullOrWhiteSpace(value.ToString()))
+                picks[qoMaterialId] = value.ToString().Trim();
+
+        var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
+        try
+        {
+            var n = await refresh.ApplyAsync(id, picks, reason ?? "", user, ct);
+            TempData["Success"] = $"{n} material line(s) updated. The QC report now prints the new grade.";
+        }
+        catch (InvalidOperationException ex)
+        {
+            TempData["Error"] = ex.Message;
+        }
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Qo.Cancel, Seed.ManagerOrAdmin, "Cancel a quality order")]
     public async Task<IActionResult> Cancel(long id, string? reason)
