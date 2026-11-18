@@ -700,7 +700,7 @@ public class BananaRipeRow
     public decimal? DefectRate { get; set; }
 }
 
-/// <summary>One container and product line on the Net Weight tab.</summary>
+/// <summary>One container and product line on the AVG Weight tab.</summary>
 public class NetWeightRow
 {
     public long QualityOrderId { get; set; }

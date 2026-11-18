@@ -68,7 +68,7 @@ public class DefectReportsController : Controller
         return Json(await _reports.GetBananaRipenessAsync(from ?? df, to ?? dt, User.GetPlantScope(), ct));
     }
 
-    /// <summary>The Net Weight tab: average Gross / Net weight readings per
+    /// <summary>The AVG Weight tab: average Gross / Net weight readings per
     /// container and product line on finished inspections received in the window.</summary>
     [HttpGet]
     [RequireScreen(Screens.ReportsDefects, Seed.SupervisorOrAbove, "Open the Defect reports")]

@@ -68,7 +68,7 @@
     { id: "sub",    label: "Per sub-major",       title: "Defect categories per sub-major category and variety", hint: "Category totals for every sub-major category; open it to see its varieties." },
     { id: "major",  label: "Per major",           title: "Defect categories per major category", hint: "Category totals for every major category." },
     { id: "banana", label: "Banana Arrival Condition", title: "Banana Arrival Condition per container", hint: "Yellow Ripe and Green Soft counts entered on the arrival. Grand Total Defect = Yellow Ripe + Green Soft; Defect Rate % = Grand Total Defect ÷ Received Qty. Days in port = vessel discharge to pull-out, both days counted; Age = Transit + Days in port. Branch, Supplier, Pack weight and Origin filters apply." },
-    { id: "net", label: "Net Weight", title: "Net weight per container", hint: "Average of the Gross Weight and Net Weight readings on finished inspections, one row per container and product line. A reading above 3× or below ⅓ of the carton weight is treated as a typing slip: left out of the averages and counted under Left out. Totals are weighted by reading. Every filter except Defect category applies." }
+    { id: "net", label: "AVG Weight", title: "AVG weight per container", hint: "Average of the Gross Weight and Net Weight readings on finished inspections, one row per container and product line. A reading above 3× or below ⅓ of the carton weight is treated as a typing slip: left out of the averages and counted under Left out. Totals are weighted by reading. Every filter except Defect category applies." }
   ];
   const needsFruit = t => t === "week" || t === "class" || t === "branch" || t === "supplier";
   const SUPPLIER_COLS = 15, TREND_CHARTS = 12;
