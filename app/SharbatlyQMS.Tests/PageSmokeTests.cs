@@ -77,6 +77,11 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         "/Surveys",
         "/Surveys?status=Open&status=Confirm&source=Arrival&milestone=awaitingqo&from=2026-07-01&to=2026-12-31",
         "/Surveys?search=a&plant=JD01&supplier=x&milestone=withclaim&page=2&pageSize=25",
+        "/Surveys?milestone=awaitingschedule",
+        "/Surveys?milestone=awaitingattendance",
+        "/Surveys?milestone=awaitinginspection",
+        // Parameters -> Survey committees (M46).
+        "/SurveyCommittees",
         "/Surveys/Export?status=Pass",
         // The bell's own page and the dropdown's feed (M45).
         "/Inbox",

@@ -34,6 +34,15 @@ public interface ISurveyRecipients
         SqlConnection c, SqlTransaction tx, string permissionCode, string? plant);
 
     Task<Recipient?> ByUsernameAsync(SqlConnection c, SqlTransaction tx, string? username);
+
+    /// <summary>Internal committee members by user id, with the address their
+    /// account holds NOW -- so a member whose e-mail changes is still reached.
+    /// Inactive accounts are left out.</summary>
+    Task<IReadOnlyList<Recipient>> ByUserIdsAsync(SqlConnection c, SqlTransaction tx, IEnumerable<int> userIds);
+
+    /// <summary>Which of these users hold a role that can open the Surveys
+    /// page -- so a notice can lead somewhere they are allowed to go.</summary>
+    Task<IReadOnlyList<int>> WhoCanOpenSurveysAsync(SqlConnection c, SqlTransaction tx, IEnumerable<int> userIds);
 }
 
 public class SurveyRecipients : ISurveyRecipients
@@ -74,5 +83,30 @@ public class SurveyRecipients : ISurveyRecipients
             SELECT u.UserId, u.Username, u.FullName AS DisplayName, u.Email
             FROM   qms.AppUser u
             WHERE  u.Username = @username AND u.IsActive = 1", new { username }, tx);
+    }
+
+    public async Task<IReadOnlyList<Recipient>> ByUserIdsAsync(SqlConnection c, SqlTransaction tx, IEnumerable<int> userIds)
+    {
+        var ids = userIds.Distinct().ToArray();
+        if (ids.Length == 0) return Array.Empty<Recipient>();
+        return (await c.QueryAsync<Recipient>(@"
+            SELECT u.UserId, u.Username, u.FullName AS DisplayName, u.Email
+            FROM   qms.AppUser u
+            WHERE  u.UserId IN @ids AND u.IsActive = 1", new { ids }, tx)).ToList();
+    }
+
+    public async Task<IReadOnlyList<int>> WhoCanOpenSurveysAsync(SqlConnection c, SqlTransaction tx, IEnumerable<int> userIds)
+    {
+        var ids = userIds.Distinct().ToArray();
+        if (ids.Length == 0) return Array.Empty<int>();
+        return (await c.QueryAsync<int>(@"
+            SELECT u.UserId
+            FROM   qms.AppUser u
+            JOIN   qms_role r ON r.role_code = u.RoleCode
+            WHERE  u.UserId IN @ids
+              AND  (r.is_super = 1
+                    OR EXISTS (SELECT 1 FROM qms_role_permission rp
+                               WHERE rp.role_code = u.RoleCode AND rp.permission_code = @screen))",
+            new { ids, screen = Screens.Surveys }, tx)).ToList();
     }
 }

@@ -63,6 +63,8 @@ public static class Screens
     /// <summary>The suppliers QMS mails quality reports to, each with its
     /// addresses (M42). Operators may look; editing is Admin by default.</summary>
     public const string SupplierContacts   = "Parameters.SupplierContacts";
+    /// <summary>Who sits on a survey committee, per branch (M46).</summary>
+    public const string SurveyCommittees   = "Parameters.SurveyCommittees";
 
     // ---- Admin ----
     public const string AdminSettings      = "Admin.Settings";
@@ -82,7 +84,7 @@ public static class Screens
         ReportsDataHub, ReportsBuilder, ReportsDefects, ReportsKpi,
         DefectCatalog, DefectCategories, ReadingTypes, SampleHeaders,
         ArrivalFields, ArrivalFieldRules, ReportUnits, CodeDescriptions, MailTemplate,
-        Notifications, SupplierContacts,
+        Notifications, SupplierContacts, SurveyCommittees,
         AdminSettings, AdminUsers, AdminAuditLog, AdminSecurity, AdminLabels
     };
 
@@ -91,7 +93,7 @@ public static class Screens
     {
         DefectCatalog, DefectCategories, ReadingTypes, SampleHeaders,
         ArrivalFields, ReportUnits, CodeDescriptions, MailTemplate, Notifications,
-        SupplierContacts
+        SupplierContacts, SurveyCommittees
     };
 
     /// <summary>Screens whose nav entries live in the Admin dropdown.</summary>

@@ -1157,6 +1157,20 @@ public class ArrivalService : IArrivalService
             WHERE  entity_type = 'Survey'
               AND  entity_id IN (SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId);",
             new { arrivalId }, tx);
+        // What the committee recorded (M46), children first: attendance hangs
+        // off both the appointment and the member, so it goes before either.
+        await c.ExecuteAsync(@"
+            DELETE t FROM qms_survey_attendance t
+            JOIN   qms_survey_appointment ap ON ap.appointment_id = t.appointment_id
+            WHERE  ap.survey_id IN (SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId);
+            DELETE FROM qms_survey_appointment
+            WHERE  survey_id IN (SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId);
+            DELETE FROM qms_survey_member
+            WHERE  survey_id IN (SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId);
+            DELETE FROM qms_document
+            WHERE  owner_type = 'Survey'
+              AND  owner_id IN (SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId);",
+            new { arrivalId }, tx);
         await c.ExecuteAsync("DELETE FROM qms_survey                WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
 
         await c.ExecuteAsync("DELETE FROM qms_arrival_sap_snapshot  WHERE arrival_id=@arrivalId", new { arrivalId }, tx);

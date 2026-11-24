@@ -37,6 +37,21 @@
         "request_comments"  => "Comments",
         "decision_comments" => "Decision comments",
         "source_code"       => "Requested from",
+        "committee"         => "Committee",
+        "members"           => "Members",
+        "planned_at"        => "Planned for",
+        "location"          => "Location",
+        "surveyor"          => "Surveyor",
+        "reason"            => "Reason",
+        "actual_at"         => "Actual time",
+        "surveyor_attended" => "Surveyor attended",
+        "present"           => "Present",
+        "absent"            => "Absent",
+        "inspection_date"   => "Inspection date",
+        "findings"          => "Findings",
+        "category"          => "Kind",
+        "files"             => "Files",
+        "file"              => "File",
         _                   => null   // identifiers and status are already in the title
     };
 }
@@ -229,6 +244,8 @@
             </div>
         </div>
     </div>
+
+    <partial name="_Committee" model="Model" />
 
     <div class="col-12">
         <div class="card">

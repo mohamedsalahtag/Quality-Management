@@ -18,6 +18,7 @@
     var modal     = new bootstrap.Modal(modalEl);
     var reasonEl  = document.getElementById("surveyRequestReason");
     var commentEl = document.getElementById("surveyRequestComments");
+    var filesEl   = document.getElementById("surveyRequestFiles");
     var errorEl   = document.getElementById("surveyRequestError");
     var submitEl  = document.getElementById("surveyRequestSubmit");
     var spinner   = submitEl.querySelector(".spinner-border");
@@ -111,6 +112,8 @@
         else fd.append("arrivalId", modalEl.getAttribute("data-arrival-id"));
         fd.append("reason", reasonEl.value.trim());
         fd.append("comments", commentEl.value.trim());
+        if (filesEl && filesEl.files)
+            for (var i = 0; i < filesEl.files.length; i++) fd.append("files", filesEl.files[i]);
         fd.append("__RequestVerificationToken", token);
 
         fetch(modalEl.getAttribute("data-url"), { method: "POST", body: fd, credentials: "same-origin" })

@@ -17,11 +17,14 @@ public class SurveyService : ISurveyService
     private readonly IQualityOrderService _qos;
     private readonly ISurveyClaimSync _claimSync;
     private readonly ISurveyNotifier _notifier;
+    private readonly ISurveyCommitteeService _committee;
     private readonly ILogger<SurveyService> _log;
 
     public SurveyService(IConfiguration config, IAuditService audit, IQualityOrderService qos,
-        ISurveyClaimSync claimSync, ISurveyNotifier notifier, ILogger<SurveyService> log)
+        ISurveyClaimSync claimSync, ISurveyNotifier notifier, ISurveyCommitteeService committee,
+        ILogger<SurveyService> log)
     {
+        _committee = committee;
         _cs = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
         _audit = audit;
@@ -85,11 +88,35 @@ public class SurveyService : ISurveyService
                cl.claim_id          AS ClaimId,
                cl.claim_status      AS ClaimStatus,
                cl.created_at        AS ClaimCreatedAt,
+               s.committee_id            AS CommitteeId,
+               s.committee_name          AS CommitteeName,
+               s.committee_assigned_at   AS CommitteeAssignedAt,
+               s.committee_assigned_by   AS CommitteeAssignedBy,
+               ap.appointment_id         AS AppointmentId,
+               ap.planned_at             AS PlannedAt,
+               ap.schedule_confirmed_at  AS ScheduleConfirmedAt,
+               ap.actual_at              AS ActualAt,
+               ap.surveyor_attended      AS VisitSurveyorAttended,
+               ap.attendance_entered_at  AS AttendanceEnteredAt,
+               s.surveyor_attended       AS SurveyorAttended,
+               s.shipment_inspected      AS ShipmentInspected,
+               s.inspection_date         AS InspectionDate,
+               s.inspection_start_time   AS InspectionStartTime,
+               s.inspection_end_time     AS InspectionEndTime,
+               s.inspection_observations AS InspectionObservations,
+               s.inspection_findings     AS InspectionFindings,
+               s.inspection_damage       AS InspectionDamage,
+               s.inspection_comments     AS InspectionComments,
+               s.inspection_confirmed_at AS InspectionConfirmedAt,
+               s.inspection_confirmed_by AS InspectionConfirmedBy,
                COUNT(*) OVER ()     AS TotalCount
         FROM   qms_survey s
         JOIN   qms_arrival a ON a.arrival_id = s.arrival_id
         LEFT   JOIN qms_shipment_snapshot sh ON sh.arrival_id = a.arrival_id
         LEFT   JOIN qms_quality_order sq ON sq.quality_order_id = s.source_qo_id
+        -- The appointment that still stands (a reschedule supersedes the old
+        -- row). At most one per survey: UX_qms_survey_appointment_current.
+        LEFT   JOIN qms_survey_appointment ap ON ap.survey_id = s.survey_id AND ap.superseded_at IS NULL
         OUTER  APPLY (
             SELECT TOP 1 q.quality_order_id, q.quality_order_no, q.status_code, q.archived_at
             FROM   qms_quality_order q
@@ -127,6 +154,16 @@ public class SurveyService : ISurveyService
 
     private const string ClaimRequestStatuses = "('ClaimRequest', 'ClaimRequestApproved', 'HoldClaim')";
 
+    // The milestones, written once so the list filter and the indicator tiles
+    // cannot drift apart. Each is derived from the survey and what is linked
+    // to it; none is a status. They need `s`, `qo`, `cl` and `ap` in scope, and
+    // @localNow for "the appointment's time has passed".
+    private const string IsAwaitingQcOrder    = "(s.status_code = 'Confirm' AND qo.quality_order_id IS NULL)";
+    private const string IsWithClaim          = "(s.status_code = 'Confirm' AND cl.claim_status IN " + ClaimRequestStatuses + ")";
+    private const string IsAwaitingSchedule   = "(s.status_code = 'Confirm' AND ap.appointment_id IS NULL)";
+    private const string IsAwaitingAttendance = "(s.status_code = 'Confirm' AND ap.appointment_id IS NOT NULL AND ap.attendance_entered_at IS NULL AND ap.planned_at <= @localNow)";
+    private const string IsAwaitingInspection = "(s.status_code = 'Confirm' AND ap.surveyor_attended = 1 AND s.inspection_confirmed_at IS NULL)";
+
     public async Task<SurveyBrief?> GetBriefForArrivalAsync(long arrivalId)
     {
         using var c = Open();
@@ -162,8 +199,7 @@ public class SurveyService : ISurveyService
         var plants    = FilterValues.Many(f.Plant);
         var suppliers = FilterValues.Many(f.Supplier);
         var source    = f.Source is SurveySource.Arrival or SurveySource.QualityOrder ? f.Source : null;
-        var milestone = f.Milestone is SurveyMilestone.AwaitingQcOrder or SurveyMilestone.WithClaim
-            ? f.Milestone : null;
+        var milestone = SurveyMilestone.All.Contains(f.Milestone) ? f.Milestone : null;
 
         // The date boxes are the reader's LOCAL days; requested_at is UTC.
         DateTime? fromUtc = f.From.HasValue
@@ -182,10 +218,11 @@ public class SurveyService : ISurveyService
               AND (@fromUtc IS NULL OR s.requested_at >= @fromUtc)
               AND (@toUtc   IS NULL OR s.requested_at <  @toUtc)
               AND (@milestone IS NULL
-                   OR (@milestone = 'awaitingqo' AND s.status_code = 'Confirm'
-                       AND qo.quality_order_id IS NULL)
-                   OR (@milestone = 'withclaim'  AND s.status_code = 'Confirm'
-                       AND cl.claim_status IN " + ClaimRequestStatuses + @"))
+                   OR (@milestone = 'awaitingqo'         AND " + IsAwaitingQcOrder    + @")
+                   OR (@milestone = 'withclaim'          AND " + IsWithClaim          + @")
+                   OR (@milestone = 'awaitingschedule'   AND " + IsAwaitingSchedule   + @")
+                   OR (@milestone = 'awaitingattendance' AND " + IsAwaitingAttendance + @")
+                   OR (@milestone = 'awaitinginspection' AND " + IsAwaitingInspection + @"))
               AND (@search IS NULL OR
                    s.survey_no         LIKE '%' + @search + '%' OR
                    a.arrival_no        LIKE '%' + @search + '%' OR
@@ -208,6 +245,8 @@ public class SurveyService : ISurveyService
             plants    = FilterValues.ForIn(plants),    plantAny    = plants.Count    > 0,
             suppliers = FilterValues.ForIn(suppliers), supplierAny = suppliers.Count > 0,
             source, milestone, fromUtc, toUtc,
+            // Appointments are local wall-clock times, so "now" is too.
+            localNow = DateTime.Now,
             search = string.IsNullOrWhiteSpace(f.Search) ? null : f.Search.Trim()
         });
         return rows.ToList();
@@ -221,13 +260,14 @@ public class SurveyService : ISurveyService
                    ISNULL(SUM(CASE WHEN s.status_code = 'Open'    THEN 1 ELSE 0 END), 0) AS [Open],
                    ISNULL(SUM(CASE WHEN s.status_code = 'Confirm' THEN 1 ELSE 0 END), 0) AS Confirmed,
                    ISNULL(SUM(CASE WHEN s.status_code = 'Pass'    THEN 1 ELSE 0 END), 0) AS Passed,
-                   ISNULL(SUM(CASE WHEN s.status_code = 'Confirm' AND qo.quality_order_id IS NULL
-                                   THEN 1 ELSE 0 END), 0)                          AS AwaitingQcOrder,
-                   ISNULL(SUM(CASE WHEN s.status_code = 'Confirm'
-                                    AND cl.claim_status IN " + ClaimRequestStatuses + @"
-                                   THEN 1 ELSE 0 END), 0)                          AS WithClaim
+                   ISNULL(SUM(CASE WHEN " + IsAwaitingQcOrder    + @" THEN 1 ELSE 0 END), 0) AS AwaitingQcOrder,
+                   ISNULL(SUM(CASE WHEN " + IsWithClaim          + @" THEN 1 ELSE 0 END), 0) AS WithClaim,
+                   ISNULL(SUM(CASE WHEN " + IsAwaitingSchedule   + @" THEN 1 ELSE 0 END), 0) AS AwaitingSchedule,
+                   ISNULL(SUM(CASE WHEN " + IsAwaitingAttendance + @" THEN 1 ELSE 0 END), 0) AS AwaitingAttendance,
+                   ISNULL(SUM(CASE WHEN " + IsAwaitingInspection + @" THEN 1 ELSE 0 END), 0) AS AwaitingInspection
             FROM   qms_survey s
             JOIN   qms_arrival a ON a.arrival_id = s.arrival_id
+            LEFT   JOIN qms_survey_appointment ap ON ap.survey_id = s.survey_id AND ap.superseded_at IS NULL
             OUTER  APPLY (
                 SELECT TOP 1 q.quality_order_id
                 FROM   qms_quality_order q
@@ -237,7 +277,7 @@ public class SurveyService : ISurveyService
             ) qo
             LEFT   JOIN qms_claim cl ON cl.quality_order_id = qo.quality_order_id
             WHERE  (@sUnrestricted = 1 OR a.plant IN @sPlants)",
-            new { sUnrestricted = scope.Unrestricted, sPlants = scope.QueryPlants });
+            new { sUnrestricted = scope.Unrestricted, sPlants = scope.QueryPlants, localNow = DateTime.Now });
     }
 
     public async Task<SurveyFilterOptions> GetFilterOptionsAsync(PlantScope scope)
@@ -479,6 +519,18 @@ public class SurveyService : ISurveyService
             actor: user);
 
         await _notifier.DecidedAsync(c, tx, surveyId, user);
+
+        // Confirming hands the survey to its branch's committee: the members
+        // are copied onto it here, in the same transaction. No committee
+        // configured is not a reason to refuse the decision -- the page says
+        // so and offers "Assign committee" once one exists.
+        if (confirm)
+        {
+            var plant = await c.ExecuteScalarAsync<string?>(@"
+                SELECT a.plant FROM qms_survey s JOIN qms_arrival a ON a.arrival_id = s.arrival_id
+                WHERE  s.survey_id = @surveyId", new { surveyId }, tx);
+            await _committee.AssignAsync(c, tx, surveyId, plant, user);
+        }
 
         tx.Commit();
 

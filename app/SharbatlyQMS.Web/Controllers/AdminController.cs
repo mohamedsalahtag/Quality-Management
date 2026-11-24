@@ -394,6 +394,10 @@ public class AdminController : Controller
             // Their notices point at records this purge removes.
             ("notification",           "DELETE FROM qms_notification"),
             ("mail_outbox",            "DELETE FROM qms_mail_outbox"),
+            // The committee CONFIGURATION is master data and is kept.
+            ("survey_attendance",      "DELETE FROM qms_survey_attendance"),
+            ("survey_appointment",     "DELETE FROM qms_survey_appointment"),
+            ("survey_member",          "DELETE FROM qms_survey_member"),
             ("survey",                 "DELETE FROM qms_survey"),
             ("quality_order",          "DELETE FROM qms_quality_order"),
             ("arrival_checklist",      "DELETE FROM qms_arrival_checklist"),
@@ -421,6 +425,7 @@ public class AdminController : Controller
             "qms_quality_order_material","qms_quality_order",
             "qms_claim_read_marker","qms_claim_note","qms_claim","qms_qo_report_send","qms_survey",
             "qms_notification","qms_mail_outbox",
+            "qms_survey_attendance","qms_survey_appointment","qms_survey_member",
             "qms_arrival_checklist","qms_arrival_item","qms_arrival_sap_snapshot",
             "qms_shipment_snapshot","qms_arrival",
             "qms_image_link","qms_image_asset",

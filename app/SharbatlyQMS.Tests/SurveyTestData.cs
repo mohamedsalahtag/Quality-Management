@@ -23,8 +23,14 @@ internal static class SurveyTestData
     /// <summary>An arrival with one line and a shipment snapshot, optionally
     /// carrying one quality order in the given status. <paramref name="rejected"/>
     /// marks that order as a rejection order (finished, potential claim).</summary>
+    /// <summary>A branch code no real branch uses, for tests that set up
+    /// their own committee: nothing configured for a real branch can match it.</summary>
+    public const string TestPlant      = "ZT98";
+    /// <summary>A second one, kept without a committee of its own.</summary>
+    public const string TestPlantBare  = "ZT97";
+
     public static async Task<(long ArrivalId, long? QoId, string Tag)> SeedAsync(
-        QmsAppFactory factory, string arrivalStatus, string? qoStatus, bool rejected = false)
+        QmsAppFactory factory, string arrivalStatus, string? qoStatus, bool rejected = false, string plant = "JD01")
     {
         var tag = $"TESTSV{Guid.NewGuid():N}".Substring(0, 12).ToUpperInvariant();
         using var c = Db(factory);
@@ -35,8 +41,8 @@ internal static class SurveyTestData
                 (arrival_no, source_system, bol_no, container_no, ebeln,
                  vendor_no, vendor_name, plant, status_code, created_at, created_by)
             VALUES (@tag, 'TEST', @tag, @tag, '4700000000',
-                 'V1', 'Test vendor', 'JD01', @arrivalStatus, SYSUTCDATETIME(), 'test');
-            SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", new { tag, arrivalStatus });
+                 'V1', 'Test vendor', @plant, @arrivalStatus, SYSUTCDATETIME(), 'test');
+            SELECT CAST(SCOPE_IDENTITY() AS BIGINT);", new { tag, arrivalStatus, plant });
 
         await c.ExecuteAsync(@"
             INSERT INTO qms_arrival_item (arrival_id, ebeln, ebelp, material_no, material_desc, material_group)
@@ -75,11 +81,47 @@ internal static class SurveyTestData
     {
         using var c = Db(factory);
         await c.OpenAsync();
+
+        // Files a test attached to the survey: remove them from disk before
+        // the rows that say where they are.
+        using (var scope = factory.Services.CreateScope())
+        {
+            var docs = scope.ServiceProvider.GetRequiredService<SharbatlyQMS.Web.Services.IDocumentService>();
+            var surveyIds = (await c.QueryAsync<long>(
+                "SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId", new { arrivalId })).ToList();
+            // Every row, removed ones included: removing an attachment in the
+            // application keeps its file, and a test must not leave one behind.
+            // (An empty IN list is not valid SQL here, hence the guard.)
+            var paths = surveyIds.Count == 0 ? new List<string>() : (await c.QueryAsync<string>(@"
+                SELECT storage_path FROM qms_document
+                WHERE  owner_type = 'Survey' AND owner_id IN @surveyIds", new { surveyIds })).ToList();
+            foreach (var stored in paths)
+            {
+                var path = docs.ResolveAbsolutePath(new SharbatlyQMS.Web.ViewModels.DocumentInfo { StoragePath = stored });
+                try
+                {
+                    if (path == null) continue;
+                    if (File.Exists(path)) File.Delete(path);
+                    var dir = Path.GetDirectoryName(path);
+                    if (dir != null && Directory.Exists(dir) && !Directory.EnumerateFileSystemEntries(dir).Any())
+                        Directory.Delete(dir);
+                }
+                catch { /* best effort */ }
+            }
+        }
+
         await c.ExecuteAsync(@"
             DECLARE @qos TABLE (id BIGINT);
             INSERT INTO @qos SELECT quality_order_id FROM qms_quality_order WHERE arrival_id = @arrivalId;
             DECLARE @surveys TABLE (id BIGINT);
             INSERT INTO @surveys SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId;
+
+            DELETE t FROM qms_survey_attendance t
+              JOIN qms_survey_appointment ap ON ap.appointment_id = t.appointment_id
+             WHERE ap.survey_id IN (SELECT id FROM @surveys);
+            DELETE FROM qms_survey_appointment WHERE survey_id IN (SELECT id FROM @surveys);
+            DELETE FROM qms_survey_member WHERE survey_id IN (SELECT id FROM @surveys);
+            DELETE FROM qms_document WHERE owner_type = 'Survey' AND owner_id IN (SELECT id FROM @surveys);
 
             IF OBJECT_ID('qms_notification') IS NOT NULL
                 DELETE FROM qms_notification
@@ -105,5 +147,14 @@ internal static class SurveyTestData
             DELETE FROM qms_shipment_snapshot WHERE arrival_id = @arrivalId;
             DELETE FROM qms_arrival_item WHERE arrival_id = @arrivalId;
             DELETE FROM qms_arrival WHERE arrival_id = @arrivalId;", new { arrivalId });
+    }
+
+    /// <summary>Removes every committee a test set up for the test branches.
+    /// Members go with their committee (cascade).</summary>
+    public static async Task CleanupCommitteesAsync(QmsAppFactory factory)
+    {
+        using var c = Db(factory);
+        await c.ExecuteAsync(
+            "DELETE FROM qms_survey_committee WHERE plant IN (@a, @b)", new { a = TestPlant, b = TestPlantBare });
     }
 }

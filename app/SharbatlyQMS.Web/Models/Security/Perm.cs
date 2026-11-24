@@ -98,6 +98,23 @@ public static class Perm
         public const string Export  = Screens.Surveys + ".Export";
         /// <summary>Send a survey e-mail again from its notification log.</summary>
         public const string Notify  = Screens.Surveys + ".Notify";
+
+        // ---- What a confirmed survey's committee does (M46). One person or
+        //      team acts for the whole committee: nobody is asked to log in
+        //      and confirm their own attendance, and external members cannot.
+        /// <summary>Keep the appointment: save, confirm the schedule, reschedule,
+        /// and assign the committee where none was configured at confirmation.</summary>
+        public const string Schedule          = Screens.Surveys + ".Schedule";
+        /// <summary>Record who attended, on behalf of every participant.</summary>
+        public const string Attendance        = Screens.Surveys + ".Attendance";
+        /// <summary>Confirm a recorded attendance, which then locks it.</summary>
+        public const string ConfirmAttendance = Screens.Surveys + ".ConfirmAttendance";
+        /// <summary>The QC officer's confirmation that the surveyor really
+        /// inspected the shipment. Not a claim approval.</summary>
+        public const string ConfirmInspection = Screens.Surveys + ".ConfirmInspection";
+        /// <summary>Upload or remove a survey's attachments. Viewing them comes
+        /// with the screen.</summary>
+        public const string Attachments       = Screens.Surveys + ".Attachments";
     }
 
     public static class Attachments
@@ -152,6 +169,7 @@ public static class Perm
         public const string MailTemplateEdit     = Screens.MailTemplate     + ".Edit";
         public const string NotificationsEdit    = Screens.Notifications    + ".Edit";
         public const string SupplierContactsEdit = Screens.SupplierContacts + ".Edit";
+        public const string SurveyCommitteesEdit = Screens.SurveyCommittees + ".Edit";
     }
 
     public static class Admin

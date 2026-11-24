@@ -2,7 +2,7 @@
 
 > **For any AI agent (Claude Code, OpenAI Codex, Cursor, ChatGPT, GitHub Copilot, ...) picking up this project: read this file first.** It captures the live state of the QMS web application — what is built, where it runs, the decisions that shaped it, and the files that contain the authoritative truth.
 
-Last updated: **2026-09-26** (one meaning per shipment date: SAP receive date refreshed on every sweep, one Time Bar basis for page + report, transit = loading → discharge — see §8).
+Last updated: **2026-11-24** (Survey management: request, decide, automatic claim step, notifications, committee — see §8).
 
 ---
 
@@ -212,6 +212,29 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 ---
 
 ## 8. Decisions log (newest first)
+
+### 2026-11-24 (Survey management — M44, M45, M46)
+- **What it is:** the internal, confidential record of a container that may need a formal survey. Built from `new featurs.md` (written by another AI with no access to the app) after checking every assumption in it against the code. The approved plan and the gap analysis are in `C:\Users\mohamed.tag\.claude\plans\1-if-a-container-vast-catmull.md`. **Built in three commits on `review-fixes`; not deployed at the time of writing.**
+- **Decisions the user took that differ from the prompt:** claim approval stays ONE decision by the Claim Manager (no three-team sign-off); notifications are e-mail plus a new in-app bell; the arrival's existing **Joint Survey** Yes/No field IS the request (it was a placeholder for this feature); the survey wins over a manual marking unless the Claim Manager has decided; the Finish dialog no longer asks Potential Claim / No Potential Claim; an order finished with no confirmed survey is marked Passed QC automatically.
+- **One survey per arrival, for good** (`UQ_qms_survey_arrival`). The survey is keyed to the ARRIVAL, not the order, so a reinspected container keeps its survey; the order that counts is looked up as the arrival's live one. Three statuses only (`Open`, `Confirm`, `Pass`); scheduling, attendance and inspection are facts about a confirmed survey, never statuses. A decision cannot be changed.
+- **Request:** Joint Survey = Yes on the arrival opens a dialog (reason required); the quality order has a **Potential Survey** button that opens the same one. Both end in `SurveyService.RequestAsync`. `ArrivalsController.SaveShipment` refuses a Yes that did not come through the dialog and keeps Yes once a survey exists. 614 arrivals already answered Yes before this (153 in the last 30 days): left as history, no survey rows.
+- **Claim step (`SurveyClaimSync`)** runs after Finish and after a survey decision, in its own transaction, safe to repeat and to race: confirmed survey → Claim Notification Request; none or passed → Passed QC; open → settled at the decision. It never overrides a decided claim or a request a manager raised by hand. Rejected containers are not auto-passed. Automatic rows are written by `system`. **Consequence:** "Pending" on the Claims page now means "awaiting a survey decision", rejected containers, and orders finished before go-live; the KPI columns "claim requests raised" and "Passed QC" no longer measure people.
+- **Quality order:** confirming creates the order when the completed arrival has none; for a draft arrival it is created on Complete (`SurveyService.AfterArrivalCompletedAsync`). A failed follow-up is stored on the survey (`followup_error`) with a **Retry** button; the decision stands.
+- **Notifications (M45):** `qms_notification` is the bell (`InboxController`, always allowed, own rows only). `qms_mail_outbox` holds survey e-mail written in the event's transaction and sent by `MailOutboxWorker` every 30 s; retried after 1, 5, 15 and 60 minutes, then `Failed` with **Send now** on the survey page. Recipients come from permission + branch (`SurveyRecipients`); the Administrator role is left out of those lists. Existing mail (supplier report, finish notice) does not use the outbox.
+- **Committee (M46):** Parameters → Survey committees, one active committee per branch plus a default. Members are internal (a user) or external (no account). Confirming copies the members onto the survey (`qms_survey_member`), so later setup changes never rewrite history. Appointments are rows (`qms_survey_appointment`); a reschedule adds one and supersedes the old, each with its own attendance. The QC officer's inspection confirmation is separate and final. External people get the appointment only: no survey number, no link, no internal comments.
+- **Confidentiality:** `QualityReportData` carries no survey field, and the **Joint Survey line was removed from the QC report**. Survey files are `qms_document` rows with owner `Survey`, images allowed, served only by `SurveysController`; `DocumentsController` refuses that owner. They are never arrival photos (which print in the report) and never offered in the supplier mail dialog.
+- **Permissions:** screen `Surveys` (not levelled, so `Surveys.Request` works for an inspector who cannot open the page) with `.Request`, `.Decide`, `.Schedule`, `.Attendance`, `.ConfirmAttendance`, `.ConfirmInspection`, `.Attachments`, `.Export`, `.Notify`; screen `Parameters.SurveyCommittees` with `.Edit`. There is no Insurance role: create one on Admin → Security if needed.
+- **Tests run on the live database**, so the test host swaps in stand-in recipients and parks its mail in 2099 (`SurveyTestDoubles`), where the deployed worker never picks it up. Never call `DispatchDueAsync` from a test: on the live table it would process real messages through the recording mail service.
+- **Deploy:** apply M44, M45 and M46 first (screen rows must exist before the binaries start). If `qms_survey` is still empty, restart `seq_qms_survey_no` at 1 so the first real survey is SRV-…-000001 (the tests used numbers).
+- **Not done / out of scope:** three-team claim sign-off, rule-based surveys (`method_code` reserves `RuleBased`), reopening a decision, re-assigning a committee, survey KPIs, backfilling old Joint Survey answers.
+
+### 2026-11 (catch-up: changes made before the survey work, not logged at the time)
+- **Send to supplier without Edit** (`ab701b8e`): the send endpoints are `ReadOnly`, so the grant no longer needs the Quality Orders screen at Edit. `IUserPermissions.CanRead` added for read-only checks in views.
+- **Refresh materials from SAP** (`a3bdb87a`): Admin-only action on a quality order that swaps material codes for the ones SAP holds after a regrade, with a manual fallback.
+- **Defect reports:** Banana Arrival Condition tab (renamed from Banana ripeness; Defect Rate %, Grand Total Defect), Origin filter (`711b849a`); AVG Weight tab (`0c7df370`, `e1707e63`); filter "Only containers over tolerance" using the QC report's own red-line rule (`1e3b6304`).
+- **Claims:** archive / restore by finished-date range with ticked statuses, Admin only (`2b48cc11`).
+- **Reports → KPI reports** (`690f26bf`, M43): performance per user, event-based, 5-minute cache.
+- **Reading type DOWNGRADE** now displays as sum ÷ sum of sample size × 100 % (`sum_over_size`), changed in data with an audit row.
 
 ### 2026-11-08 (Supplier contacts)
 - **Parameters → Supplier contacts** (M42: `qms_supplier`, `qms_supplier_email`, screen `Parameters.SupplierContacts`). One row per SAP vendor number, any number of addresses. The send dialog now puts **all** of them in To. It used to hold one address per vendor in `qms_vendor_contact`, saved from the dialog. That lookup never worked: its `SELECT vendor_no` was ambiguous, so the dialog always opened empty. `VendorService` is removed, and `qms_vendor_contact` is left unread after M42 copied its 4 rows.

@@ -62,6 +62,7 @@ builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IMailOutbox, MailOutbox>();
 builder.Services.AddScoped<ISurveyRecipients, SurveyRecipients>();
 builder.Services.AddScoped<ISurveyNotifier, SurveyNotifier>();
+builder.Services.AddScoped<ISurveyCommitteeService, SurveyCommitteeService>();
 builder.Services.AddScoped<IAuditContext, AuditContext>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IPermissionLogService, PermissionLogService>();

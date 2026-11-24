@@ -50,7 +50,12 @@
                 <textarea id="surveyRequestReason" class="form-control form-control-sm mb-2" rows="2" maxlength="500"
                           placeholder="@Loc["For example: mould on several pallets, cartons wet and collapsed"]"></textarea>
                 <label class="form-label small mb-0" for="surveyRequestComments">@Loc["Additional comments"]</label>
-                <textarea id="surveyRequestComments" class="form-control form-control-sm" rows="2" maxlength="2000"></textarea>
+                <textarea id="surveyRequestComments" class="form-control form-control-sm mb-2" rows="2" maxlength="2000"></textarea>
+                @* Kept with the survey, not as arrival photos: arrival photos
+                   are printed in the supplier's QC report. *@
+                <label class="form-label small mb-0" for="surveyRequestFiles">@Loc["Photographs or documents (optional)"]</label>
+                <input type="file" id="surveyRequestFiles" class="form-control form-control-sm" multiple
+                       accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.msg,.eml,.zip,.jpg,.jpeg,.png,.gif,.bmp,.webp" />
 
                 <div class="small text-muted mt-2">
                     <i class="bi bi-info-circle me-1"></i>@Loc["The survey is internal. It goes to the people who decide surveys, and the QC process carries on as normal."]

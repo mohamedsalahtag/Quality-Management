@@ -51,10 +51,15 @@
     // of them is a status: a survey behind any of these chips is still Confirmed.
     var milestones = new (string Value, string Label)[]
     {
-        ("",                              "All"),
-        (SurveyMilestone.AwaitingQcOrder, "Confirmed, no QC order yet"),
-        (SurveyMilestone.WithClaim,       "Confirmed, with claim request"),
+        ("",                                 "All"),
+        (SurveyMilestone.AwaitingSchedule,   "Awaiting scheduling"),
+        (SurveyMilestone.AwaitingAttendance, "Awaiting attendance recording"),
+        (SurveyMilestone.AwaitingInspection, "Awaiting QC inspection confirmation"),
+        (SurveyMilestone.AwaitingQcOrder,    "No QC order yet"),
+        (SurveyMilestone.WithClaim,          "With claim request"),
     };
+    // Appointment times are local wall-clock times, shown as typed.
+    string Local(DateTime? d) => d?.ToString("yyyy-MM-dd HH:mm") ?? "—";
 
     // requested_at, decided_at and updated_at are UTC, and Dapper returns them
     // with Kind=Unspecified, so the conversion is explicit.
@@ -117,13 +122,30 @@
         </a>
     </div>
     <div class="col-6 col-md-2">
+        <a class="srv-tile" asp-action="Index" asp-route-milestone="@SurveyMilestone.WithClaim">
+            <div class="n">@counts.WithClaim</div><div class="t">@Loc["Confirmed, with claim request"]</div>
+        </a>
+    </div>
+    <div class="col-6 col-md-2">
         <a class="srv-tile" asp-action="Index" asp-route-milestone="@SurveyMilestone.AwaitingQcOrder">
             <div class="n">@counts.AwaitingQcOrder</div><div class="t">@Loc["Confirmed, no QC order yet"]</div>
         </a>
     </div>
+    @* What a confirmed survey is still waiting for. Worked out from its
+       appointment and inspection records -- none of these is a status. *@
     <div class="col-6 col-md-2">
-        <a class="srv-tile" asp-action="Index" asp-route-milestone="@SurveyMilestone.WithClaim">
-            <div class="n">@counts.WithClaim</div><div class="t">@Loc["Confirmed, with claim request"]</div>
+        <a class="srv-tile" asp-action="Index" asp-route-milestone="@SurveyMilestone.AwaitingSchedule">
+            <div class="n">@counts.AwaitingSchedule</div><div class="t">@Loc["Confirmed, awaiting scheduling"]</div>
+        </a>
+    </div>
+    <div class="col-6 col-md-2">
+        <a class="srv-tile" asp-action="Index" asp-route-milestone="@SurveyMilestone.AwaitingAttendance">
+            <div class="n">@counts.AwaitingAttendance</div><div class="t">@Loc["Confirmed, awaiting attendance recording"]</div>
+        </a>
+    </div>
+    <div class="col-6 col-md-2">
+        <a class="srv-tile" asp-action="Index" asp-route-milestone="@SurveyMilestone.AwaitingInspection">
+            <div class="n">@counts.AwaitingInspection</div><div class="t">@Loc["Confirmed, awaiting QC inspection confirmation"]</div>
         </a>
     </div>
 </div>
@@ -268,6 +290,10 @@
                     <th data-col-key="reason">@Loc["Reason"]</th>
                     <th data-sort data-col-key="decidedby" data-col-off>@Loc["Decided by"]</th>
                     <th data-sort data-col-key="decidedat" data-col-off>@Loc["Decided"]</th>
+                    <th data-sort data-col-key="committee">@Loc["Committee"]</th>
+                    <th data-sort data-col-key="planned">@Loc["Planned survey"]</th>
+                    <th data-sort data-col-key="attended" data-col-off>@Loc["Actual attendance"]</th>
+                    <th data-sort data-col-key="inspected">@Loc["Inspection conducted"]</th>
                     <th data-sort data-col-key="qostatus">@Loc["QC order status"]</th>
                     <th data-sort data-col-key="claim">@Loc["Claim"]</th>
                     <th data-sort data-col-key="updated" data-col-off>@Loc["Last updated"]</th>
@@ -277,7 +303,7 @@
             <tbody>
                 @if (!Model.Any())
                 {
-                    <tr><td colspan="20" class="text-center text-muted py-4">
+                    <tr><td colspan="24" class="text-center text-muted py-4">
                         @(f.Any ? Loc["No surveys match the current filters."] : Loc["No survey has been requested yet. A survey is requested by answering Joint Survey = Yes on an arrival, or with Potential Survey on a quality order."])
                     </td></tr>
                 }
@@ -338,6 +364,26 @@
                             <td class="srv-reason small">@r.RequestReason</td>
                             <td>@Txt(r.DecidedBy)</td>
                             <td>@TsUtc(r.DecidedAt)</td>
+                            <td>@Txt(r.CommitteeName)</td>
+                            <td>
+                                @Local(r.PlannedAt)
+                                @if (r.PlannedAt.HasValue && !r.ScheduleConfirmedAt.HasValue)
+                                {
+                                    <span class="badge bg-warning text-dark" title="@Loc["The schedule is not confirmed yet, so the participants have not been told."]">@Loc["draft"]</span>
+                                }
+                            </td>
+                            <td>
+                                @Local(r.ActualAt)
+                                @if (r.VisitSurveyorAttended == false)
+                                {
+                                    <span class="badge bg-danger">@Loc["surveyor absent"]</span>
+                                }
+                            </td>
+                            <td>
+                                @if (r.InspectionConfirmed) { <span class="badge bg-success">@Loc["Yes"]</span> }
+                                else if (r.IsConfirmed) { <span class="text-muted">@Loc["No"]</span> }
+                                else { <span class="text-muted">—</span> }
+                            </td>
                             <td>
                                 @if (r.QualityOrderId.HasValue)
                                 {

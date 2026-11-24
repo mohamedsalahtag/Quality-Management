@@ -163,6 +163,8 @@ public static class EntityTypes
     public const string CodeDescription      = "CodeDescription";
     /// <summary>A supplier and its report addresses (Parameters -> Supplier contacts).</summary>
     public const string Supplier             = "Supplier";
+    /// <summary>A configured survey committee and its members (Parameters -> Survey committees).</summary>
+    public const string SurveyCommittee      = "SurveyCommittee";
     /// <summary>Role creation, deletion and permission-grant changes made on the
     /// Security screen. The audit row is the only record of who changed a grant,
     /// so it is written inside the same transaction as the change itself.</summary>
@@ -192,7 +194,7 @@ public static class EntityTypes
     {
         User, Configuration, DefectCatalog, DefectCategory,
         ReadingType, SampleHeaderField, ArrivalField,
-        ReportUnit, CodeDescription, Supplier, Role, System
+        ReportUnit, CodeDescription, Supplier, SurveyCommittee, Role, System
     };
 
     public static bool IsValid(string? type) =>
@@ -243,6 +245,16 @@ public static class ActionCodes
     // Survey decisions (the request itself is audited as Created)
     public const string SurveyConfirmed    = "SurveyConfirmed";
     public const string SurveyPassed       = "SurveyPassed";
+    // What a confirmed survey's committee does (M46). None of these is a status.
+    public const string SurveyCommitteeAssigned   = "SurveyCommitteeAssigned";
+    public const string SurveyScheduled           = "SurveyScheduled";
+    public const string SurveyScheduleConfirmed   = "SurveyScheduleConfirmed";
+    public const string SurveyRescheduled         = "SurveyRescheduled";
+    public const string SurveyAttendanceRecorded  = "SurveyAttendanceRecorded";
+    public const string SurveyAttendanceConfirmed = "SurveyAttendanceConfirmed";
+    public const string SurveyInspectionConfirmed = "SurveyInspectionConfirmed";
+    public const string SurveyAttachmentAdded     = "SurveyAttachmentAdded";
+    public const string SurveyAttachmentRemoved   = "SurveyAttachmentRemoved";
 
     // Material size overrides
     public const string Override           = "Override";
@@ -258,6 +270,9 @@ public static class ActionCodes
         Opened, Submitted, CancelSubmit, Closed, Reopened, Cancelled,
         ClaimRequest, PassedQC, Approved, Hold,
         SurveyConfirmed, SurveyPassed,
+        SurveyCommitteeAssigned, SurveyScheduled, SurveyScheduleConfirmed, SurveyRescheduled,
+        SurveyAttendanceRecorded, SurveyAttendanceConfirmed, SurveyInspectionConfirmed,
+        SurveyAttachmentAdded, SurveyAttachmentRemoved,
         Override, OverrideCleared,
         PasswordReset, Purged
     };

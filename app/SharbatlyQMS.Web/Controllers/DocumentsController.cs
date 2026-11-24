@@ -169,6 +169,11 @@ public class DocumentsController : Controller
     {
         if (!DocumentService.IsValidOwnerType(ownerType))
             return BadRequest("Unknown document owner type.");
+        // Survey attachments are confidential and have their own, narrower
+        // permissions. They are handled by SurveysController only; this
+        // controller's grants (upload for operators, download for everyone)
+        // must never reach them.
+        if (ownerType == DocumentService.SurveyOwner) return NotFound();
 
         switch (ownerType)
         {
@@ -200,6 +205,8 @@ public class DocumentsController : Controller
     {
         if (!DocumentService.IsValidOwnerType(ownerType))
             return BadRequest("Unknown document owner type.");
+        // See GateEditAsync: a survey's files are never served from here.
+        if (ownerType == DocumentService.SurveyOwner) return NotFound();
 
         return ownerType switch
         {

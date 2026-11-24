@@ -272,6 +272,52 @@ Two figures are worked out from those dates and are the same on every screen, th
 3. Open a claim → review the supplier copy, the photos, the defect summary.
 4. Click **Approve**, **Hold** or **Close** as required. Each click is captured in the audit log.
 
+### Surveys (Claims → Survey tab)
+
+- **Route:** `/Surveys`
+- **Who uses it:** Managers, Claim Managers and Site administrators
+- **What it's for:** One list of every container put forward for a survey, and where each one stands.
+- **Screenshot:** `screenshots/surveys-index.png`
+
+**How to use it**
+1. Open **Claims** from the top menu, then click the **Survey** tab. A yellow number on the tab is how many surveys are waiting for a decision.
+2. The tiles at the top count the surveys by where they stand. Click a tile to see only those.
+3. Use the search box, the status buttons (**Open**, **Confirmed**, **Passed**) or **Filters** to narrow the list.
+4. Click a survey number to open it.
+5. Click **Export to Excel** to save the list you are looking at.
+
+> **Tip** — A survey has only three statuses: **Open** (waiting for a decision), **Confirmed** (a survey is needed) and **Passed** (not needed). "Awaiting scheduling" and the like are progress markers on a confirmed survey, not statuses.
+
+### Survey details
+
+- **Route:** `/Surveys/Details/{id}`
+- **Who uses it:** Managers, Claim Managers and Site administrators
+- **What it's for:** Everything about one survey: why it was asked for, the decision, the committee, the appointment, who attended, the inspection, the attachments and the history.
+- **Screenshot:** `screenshots/surveys-details.png`
+
+**How to use it**
+1. Read **General information** and **Shipment** to see what was asked, and for which container.
+2. **QC inspection** lists the results at or over tolerance on the quality order, the same lines the QC report prints in red.
+3. If the survey is **Open** and you are allowed to decide it, use **Confirm survey** or **Pass survey** at the top.
+4. Once the survey is confirmed, the **Committee**, **Survey appointment**, **Committee attendance** and **Survey inspection** sections can be used.
+5. **Attachments** holds the surveyor's report, photographs and other files.
+6. **Notification log** lists the e-mails sent for this survey. **History** shows who did what, and when.
+
+> **Warning** — Surveys are internal and confidential. Nothing on this page is printed on the QC report or sent to the supplier.
+
+### Notifications (the bell)
+
+- **Route:** `/Inbox`
+- **Who uses it:** Everyone
+- **What it's for:** Your own notices, for example a survey waiting for your decision.
+- **Screenshot:** `screenshots/inbox-index.png`
+
+**How to use it**
+1. Look at the **bell** at the top right. A red number means you have unread notices.
+2. Click the bell to see the newest ones.
+3. Click a notice to go to what it is about. Opening it marks it as read.
+4. Click **See all notifications** for the full list. **Mark all as read** clears the number.
+
 ### Data hub (Flat defects)
 
 - **Route:** `/Reports/FlatDefects`
@@ -372,6 +418,22 @@ Two figures are worked out from those dates and are the same on every screen, th
 2. Use the placeholders listed on the right (e.g. `{{QO_NUMBER}}`, `{{VENDOR_NAME}}`).
 3. Toggle **Enabled** to allow operators to send.
 4. **Save**.
+
+### Parameters → Survey committees
+
+- **Route:** `/SurveyCommittees`
+- **Who uses it:** Site administrators
+- **Admin only:** yes
+- **What it's for:** Setting who sits on the survey committee for each branch.
+- **Screenshot:** `screenshots/surveycommittees-index.png`
+
+**How to use it**
+1. Open **Parameters → Survey committees**.
+2. Click **New committee**. Give it a name and choose its **Branch**, or leave **Default** so it serves every branch without a committee of its own. Click **Save**.
+3. Click **Add member**. Choose **Internal** (a QMS user) or **External** (somebody with no account: type the name, organisation and e-mail). Pick the **Role on the committee** and click **Save**.
+4. Tick **Gets e-mail** and **Gets notices in the bell** as each member prefers. An external member can only get e-mail, and only the appointment.
+
+> **For Admins** — One active committee per branch, plus one active default. Managers and Claim Managers can open this page but only an administrator can change it (`Parameters.SurveyCommittees.Edit`). Changing a committee never changes a survey that is already confirmed: each survey keeps its own copy of the members from the moment it was confirmed. An external member gets no account and no access.
 
 ### Audit log
 
@@ -477,7 +539,7 @@ Two figures are worked out from those dates and are the same on every screen, th
 **Steps**
 1. Open a **Submitted** Quality Order.
 2. Review every sample and the operator's note.
-3. If everything is good, click **Finish** — the QO becomes **Closed** and the supplier email button unlocks.
+3. If everything is good, click **Finish** — the QO becomes **Closed** and the supplier email button unlocks. The dialog shows the **Claim assessment** that will be recorded. It comes from the container's survey, so you do not choose it.
 4. If something needs fixing, click **Cancel submission** — the QO goes back to **Open** so the operator can edit.
 
 **What you'll see next:** Either an email button you can use to send the supplier report, or the operator picks the QO back up.
@@ -512,6 +574,94 @@ Two figures are worked out from those dates and are the same on every screen, th
 5. As decisions are taken, **Approve**, **Hold** or **Close** the claim. Each action is audited.
 
 **What you'll see next:** the claim appears in the list with its status badge and the supplier sees only the agreed copy.
+
+> **Tip** — Most finished orders are now marked automatically. A **Confirmed** survey raises a claim notification request. An order with no survey, or with a passed one, is marked **Passed QC**. A manager can still change that by hand until the Claim Manager decides.
+
+### Requesting a survey
+
+- **Who:** Operators and above
+- **Screenshot:** `screenshots/arrivals-details.png`
+
+Ask for a survey when a container looks bad enough that an independent surveyor may be needed. You can ask at either of two moments.
+
+**Steps (on the arrival)**
+1. Open the arrival and go to the **Shipment** tab.
+2. Under **Joint Survey**, choose **YES**. A dialog opens.
+3. Type **why a survey is needed**. Add comments and photographs if you have them.
+4. Click **Request survey**.
+
+**Steps (on the quality order)**
+1. Open the quality order.
+2. Click **Potential Survey** at the top.
+3. The dialog lists the results at or over tolerance. Type why a survey is needed.
+4. Click **Request survey**.
+
+**What you'll see next:** on the arrival, Joint Survey is locked at **YES** with the survey number beside it. On the quality order, a red **UNDER SURVEY** banner appears. Carry on with the inspection as normal: a survey never stops it.
+
+> **Warning** — A container can have only one survey, and a request cannot be taken back. Choose **NO** if no survey is needed.
+
+> **Tip** — Requesting a survey is now how you flag a possible claim. The Finish dialog no longer asks about it.
+
+> **For Admins** — Requesting needs `Surveys.Request` (Operator and above by default). It does not need the Surveys page, so an inspector can ask without being able to open the confidential survey. Photographs given in the dialog are stored with the survey, not as arrival photos, because arrival photos are printed in the supplier's QC report.
+
+### Deciding a survey (Confirm or Pass)
+
+- **Who:** Managers and Claim Managers
+- **Screenshot:** `screenshots/surveys-details.png`
+
+**Steps**
+1. Open **Claims**, click the **Survey** tab, and click an **Open** survey. You can also click the notice in your bell.
+2. Read the reason, the shipment and the QC results.
+3. Click **Confirm survey** if a formal survey is needed.
+4. Click **Pass survey** if it is not, and type the reason.
+
+**What you'll see next**
+- **Confirmed:** the committee for the branch is assigned and told. If the quality order is already finished, a claim notification request is raised on it straight away. If not, it is raised when the order is finished.
+- **Passed:** the red banner disappears from the quality order. A finished order is marked **Passed QC**.
+
+> **Warning** — A decision cannot be changed afterwards.
+
+> **For Admins** — Deciding needs `Surveys.Decide`. Being able to open the Surveys page does not give it. If the completed arrival has no quality order when a survey is confirmed, one is created; for a draft arrival it is created when the arrival is completed. If a follow-up step fails, the survey page shows a warning with a **Retry** button and the decision still stands.
+
+### Scheduling the survey and recording attendance
+
+- **Who:** Managers and Claim Managers
+- **Screenshot:** `screenshots/surveys-details.png`
+
+These steps are only available for a **Confirmed** survey.
+
+**Steps**
+1. Open the survey. Under **Survey appointment**, click **Schedule**.
+2. Enter the date, time, place and the surveyor's details. Click **Save**.
+3. Click **Confirm schedule**. This is what tells the committee and the surveyor.
+4. After the visit, go to **Committee attendance**. Say whether the surveyor attended, and mark each member **Present**, **Absent** or **Not recorded**.
+5. Click **Save attendance**.
+6. Click **Confirm attendance** to lock the record.
+7. If the surveyor did not come, click **Reschedule**, give the reason and enter the new date.
+
+**What you'll see next:** the survey stays **Confirmed** all the way through. Earlier appointments stay on the page under **Earlier appointments**.
+
+> **Tip** — One person records attendance for everybody. Committee members do not sign in to confirm their own, and external members have no account.
+
+> **For Admins** — Separate permissions: `Surveys.Schedule`, `Surveys.Attendance` and `Surveys.ConfirmAttendance`. External members and the surveyor named on the appointment receive the date, time, place, container number and instructions only: no survey number, no link and no internal comments.
+
+### Confirming the survey inspection (QC)
+
+- **Who:** Managers (the QC officer)
+- **Screenshot:** `screenshots/surveys-details.png`
+
+**Steps**
+1. Open the confirmed survey and go to **Survey inspection**.
+2. Answer **Surveyor attended** and **Shipment inspected**. Both must be **Yes**.
+3. Enter the date and the start time, and write what was found.
+4. Add photographs and the surveyor's report under **Attachments**.
+5. Click **Confirm survey inspection**.
+
+**What you'll see next:** the section shows **Inspection conducted — confirmed** with your name. It cannot be changed.
+
+> **Tip** — This only confirms that the inspection happened. It does not approve the claim, and the survey stays **Confirmed**.
+
+> **For Admins** — Needs `Surveys.ConfirmInspection` (Manager and Admin by default). To let a supervisor do it, grant that permission and the Surveys screen to the role on **Admin → Security**. Attachments need `Surveys.Attachments` to add or remove; seeing them comes with the Surveys screen.
 
 ### Using the data hub
 
@@ -658,6 +808,31 @@ A Manager or SiteAdmin can preview the app as another role. The real role is sto
 
 The data hub + Perspective Analyzer is packaged under `data-hub-pack/` for reuse on future projects. If you start a new ASP.NET Core app that needs a pivot-style reporting layer, paste `data-hub-pack/INSTALL_PROMPT.md` into a fresh Claude Code session and follow it. The pack is self-contained and includes the Plotly bundle, the analyzer JS, the SQL view template and the ClosedXML export builder.
 
+### Survey management setup
+
+Survey management needs three things before it is used.
+
+1. **Database:** apply `M44__survey_core.sql`, `M45__notifications_and_mail_outbox.sql` and `M46__survey_committee.sql` to `Sharbatly_MIS` before deploying the binaries. The screen rows they add must exist when the application starts.
+2. **Committees:** set up at least a **Default** committee under **Parameters → Survey committees**. Without one, a confirmed survey shows "No committee is assigned" and offers **Assign committee** once one exists.
+3. **Roles:** check the survey permissions on **Admin → Security**. There is no Insurance role by default. Create one there (its code must start with `Qc`) and grant it the Surveys screen if insurance staff need to open surveys.
+
+| Permission | What it allows | Default |
+|---|---|---|
+| Surveys (screen) | Open the Survey tab and a survey | Manager, Claim Manager, Admin |
+| `Surveys.Request` | Ask for a survey | Operator and above |
+| `Surveys.Decide` | Confirm or Pass | Manager, Claim Manager, Admin |
+| `Surveys.Schedule` | Appointment, reschedule, assign committee | Manager, Claim Manager, Admin |
+| `Surveys.Attendance` | Record attendance | Manager, Claim Manager, Admin |
+| `Surveys.ConfirmAttendance` | Confirm and lock attendance | Manager, Claim Manager, Admin |
+| `Surveys.ConfirmInspection` | QC officer's inspection confirmation | Manager, Admin |
+| `Surveys.Attachments` | Add or remove attachments | Manager, Claim Manager, Admin |
+| `Surveys.Export` | Export the list to Excel | Manager, Claim Manager, Admin |
+| `Surveys.Notify` | Send a survey e-mail again | Manager, Claim Manager, Admin |
+
+**Notifications.** Survey e-mails are written to `qms_mail_outbox` with the event and sent by a background worker every 30 seconds. A failed message is retried after 1, 5, 15 and 60 minutes, then marked **Failed**; **Send now** on the survey's **Notification log** sends it again. Links in the e-mails use **Site URL** from **Admin → Settings → SMTP**. People are chosen by permission and branch; administrators are left out of those lists so they are not sent every notice.
+
+**Confidentiality.** Nothing about a survey is in the QC report or the supplier e-mail. The **Joint Survey** line was removed from the report. Survey files are stored as documents with owner `Survey` and are served only from the survey page.
+
 ## 6. Troubleshooting & FAQ
 
 **I can't sign in — it says invalid credentials.**
@@ -693,6 +868,21 @@ You need Manager or SiteAdmin. Open the closed QO and click **Reopen**, type a s
 **How do I run a migration on the shared database?**
 `app\SharbatlyQMS.Migrate\bin\Release\net9.0\SharbatlyQMS.Migrate.exe apply "<connection-string>" "app\db\V35__your-new-migration.sql"`. The tool prints each statement and the file is idempotent so a re-run is safe. Don't apply migrations on the dev box first — the database is shared.
 
+**I chose Joint Survey = YES by mistake.**
+A survey request cannot be taken back. Tell a manager or the claim manager: they can **Pass** the survey with the reason "requested by mistake". The red banner then disappears and the inspection carries on as normal.
+
+**The Finish dialog no longer asks "Potential Claim / No Potential Claim".**
+That is correct. The answer now comes from the container's survey. A confirmed survey means a potential claim, and no survey (or a passed one) means none. If a container should be claimed, request a survey before finishing.
+
+**I requested a survey but I can't open it.**
+Surveys are confidential. Inspectors can request one and can see its number and status on the arrival and the quality order, but only managers and claim managers can open it.
+
+**The survey says "No committee is assigned to this survey".**
+No committee was set up for that branch when the survey was confirmed. Ask the administrator to set one up under **Parameters → Survey committees**, then click **Assign committee** on the survey.
+
+**A survey e-mail shows "Failed" in the Notification log.**
+The mail server refused it five times. Open the survey, find the message under **Notification log** and click **Send now**. If it fails again, tell IT.
+
 ## 7. Glossary
 
 - **Arrival** — One container that has been opened in QMS, with checklist + material lines + Quality Order link.
@@ -707,6 +897,7 @@ You need Manager or SiteAdmin. Open the closed QO and click **Reopen**, type a s
 - **Drill filter** — A "include-only" filter you add inside the Perspective analyzer to limit the pivot to specific values.
 - **Ebeln** — SAP purchase-order number.
 - **Finish** — Supervisor action that closes a Submitted Quality Order.
+- **Joint Survey** — The Yes/No answer on an arrival's Shipment tab. Choosing Yes requests a survey for the container.
 - **MARA** — SAP material-master table; the source for material codes, descriptions, categories.
 - **Material group** — SAP grouping of similar materials; drives which defects and reading types apply.
 - **Material header** — Per-QO fields about the material in this shipment (pack type, brand, variety, etc.).
@@ -729,7 +920,10 @@ You need Manager or SiteAdmin. Open the closed QO and click **Reopen**, type a s
 - **Submit / Finish** — The two-stage workflow: operator submits a QO for review, supervisor finishes it.
 - **Supervisor** — The role that reviews submitted QOs. Above Operator, below Manager.
 - **Inspection Time Bar** — Days from the receive date to the inspection date (the day the Quality Order was opened). Measures our own speed. The same number on the Inspection Time Bar page and in the Data Hub. Not printed on the QC report.
+- **Survey** — The internal record of a container that may need an independent surveyor. It is requested, then **Confirmed** or **Passed**. One per container.
+- **Survey committee** — The people told about a confirmed survey and expected at it, set per branch under Parameters → Survey committees.
 - **Time Bar** — Days from the discharge date to the inspection date. Used for supplier claims, and printed on the QC report.
 - **Transit days** — Days from the loading date to the discharge date; SAP's estimate until the discharge date is entered.
+- **Under Survey** — The red banner on a quality order while its container's survey is Open or Confirmed.
 - **Vessel arrival date** — The day the vessel reached our port, from SAP. Not the same as the receive date, which can be a week or more later.
 - **View-As** — Manager/SiteAdmin feature for previewing the app as another role for testing.

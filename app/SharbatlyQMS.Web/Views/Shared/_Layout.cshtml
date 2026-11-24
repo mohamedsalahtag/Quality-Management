@@ -47,7 +47,8 @@
     bool NavOn(string ctl) => string.Equals(curCtl, ctl, StringComparison.OrdinalIgnoreCase);
     bool ActOn(string act) => string.Equals(curAct, act, StringComparison.OrdinalIgnoreCase);
     var paramActions = new[] { "DefectCatalog", "DefectCategories", "ReadingTypes", "SampleHeaders", "ArrivalFields", "ReportUnits", "CodeDescriptions", "MailTemplate", "Notifications", "SupplierContacts" };
-    var paramsOn     = NavOn("Admin") && paramActions.Contains(curAct, StringComparer.OrdinalIgnoreCase);
+    var paramsOn     = (NavOn("Admin") && paramActions.Contains(curAct, StringComparer.OrdinalIgnoreCase))
+                       || NavOn("SurveyCommittees");
     var adminOn      = (NavOn("Admin") && (ActOn("Settings") || ActOn("Users") || ActOn("ArrivalFieldRules"))) || NavOn("Audit") || NavOn("Security");
 }
 <!DOCTYPE html>
@@ -213,6 +214,10 @@
                                     @if (Perms.CanView(Screens.SupplierContacts))
                                     {
                                         <li><a class="dropdown-item @(ActOn("SupplierContacts") ? "active" : "")" asp-controller="Admin" asp-action="SupplierContacts"><i class="bi bi-person-lines-fill me-1"></i>@Loc["Supplier contacts"]</a></li>
+                                    }
+                                    @if (Perms.CanView(Screens.SurveyCommittees))
+                                    {
+                                        <li><a class="dropdown-item @(NavOn("SurveyCommittees") ? "active" : "")" asp-controller="SurveyCommittees" asp-action="Index"><i class="bi bi-people me-1"></i>@Loc["Survey committees"]</a></li>
                                     }
                                 </ul>
                             </li>

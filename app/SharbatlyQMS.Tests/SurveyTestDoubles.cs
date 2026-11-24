@@ -33,6 +33,25 @@ public sealed class TestSurveyRecipients : ISurveyRecipients
         Task.FromResult(username == RequesterName
             ? new Recipient(RequesterId, RequesterName, "Survey Test Requester", null)
             : null);
+
+    /// <summary>
+    /// An internal committee member is "resolved" to a stand-in: a user id
+    /// nobody holds and an address that cannot be delivered. This matters
+    /// even when the member is a real account -- or when the live database has
+    /// a real committee that a test's survey picks up: the notice must still
+    /// land in nobody's bell.
+    /// </summary>
+    public Task<IReadOnlyList<Recipient>> ByUserIdsAsync(SqlConnection c, SqlTransaction tx, IEnumerable<int> userIds) =>
+        Task.FromResult<IReadOnlyList<Recipient>>(userIds.Distinct()
+            .Select(id => new Recipient(StandIn(id), "member" + id, "Committee Member " + id, MemberAddress(id))).ToList());
+
+    public static int StandIn(int userId) => -100000 - Math.Abs(userId);
+    public static string MemberAddress(int userId) => $"survey-test-member{Math.Abs(userId)}@example.invalid";
+
+    /// <summary>Members with an even id "can open" the Surveys page, odd ones
+    /// cannot, so both link targets are exercised.</summary>
+    public Task<IReadOnlyList<int>> WhoCanOpenSurveysAsync(SqlConnection c, SqlTransaction tx, IEnumerable<int> userIds) =>
+        Task.FromResult<IReadOnlyList<int>>(userIds.Where(id => id % 2 == 0).Distinct().Select(StandIn).ToList());
 }
 
 /// <summary>

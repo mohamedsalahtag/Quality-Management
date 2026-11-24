@@ -35,7 +35,23 @@ public class DocumentService : IDocumentService
     // "..\.."). Anything not in this set is rejected before touching the disk.
     public static readonly HashSet<string> AllowedOwnerTypes = new(StringComparer.Ordinal)
     {
-        "Arrival", "QualityOrder", "Sample"
+        "Arrival", "QualityOrder", "Sample", SurveyOwner
+    };
+
+    /// <summary>
+    /// A survey's attachments (M46). They live here, not in the photo store,
+    /// for the same reason invoices do: a photo is a static file anyone with
+    /// the link can open, and arrival photos are printed in the supplier's QC
+    /// report. A survey file must be neither. They are served only by
+    /// SurveysController; the general DocumentsController refuses this owner.
+    /// </summary>
+    public const string SurveyOwner = "Survey";
+
+    /// <summary>Photographs are accepted for a survey only -- everywhere else
+    /// a photo belongs in the photo store.</summary>
+    public static readonly HashSet<string> SurveyImageExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp"
     };
 
     public static bool IsValidOwnerType(string? ownerType) =>
@@ -131,7 +147,8 @@ public class DocumentService : IDocumentService
                 continue;
             }
             var ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-            if (!AllowedExtensions.Contains(ext))
+            if (!AllowedExtensions.Contains(ext)
+                && !(ownerType == SurveyOwner && SurveyImageExtensions.Contains(ext)))
             {
                 rejected.Add($"{file.FileName} — file type not allowed");
                 continue;
@@ -277,6 +294,11 @@ public class DocumentService : IDocumentService
             ".msg"  => "application/vnd.ms-outlook",
             ".eml"  => "message/rfc822",
             ".zip"  => "application/zip",
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png"  => "image/png",
+            ".gif"  => "image/gif",
+            ".bmp"  => "image/bmp",
+            ".webp" => "image/webp",
             _       => "application/octet-stream"
         };
 

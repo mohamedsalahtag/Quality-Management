@@ -1,0 +1,340 @@
+@using SharbatlyQMS.Web.Models
+@model IReadOnlyList<SurveyCommittee>
+@{
+    ViewData["Title"] = Loc["Survey committees"];
+    var users   = ViewBag.Users as IReadOnlyList<CommitteeUserOption> ?? Array.Empty<CommitteeUserOption>();
+    var canEdit = Perms.Can(Perm.Parameters.SurveyCommitteesEdit);
+    string Txt(string? v) => string.IsNullOrWhiteSpace(v) ? "—" : v;
+}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <div>
+        <h1 class="h3 mb-1"><i class="bi bi-people me-1"></i>@Loc["Survey committees"]</h1>
+        <p class="text-muted mb-0 small">
+            @Loc["Who sits on the committee when a survey is confirmed. One active committee per branch; the default serves any branch without its own."]
+        </p>
+    </div>
+    @if (canEdit)
+    {
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#committeeModal"
+                data-id="0" data-name="" data-description="" data-plant="" data-active="true">
+            <i class="bi bi-plus-lg me-1"></i>@Loc["New committee"]
+        </button>
+    }
+</div>
+
+<div class="alert alert-secondary py-2 small">
+    <i class="bi bi-info-circle me-1"></i>
+    @Loc["Changing a committee here never changes a survey that is already confirmed: each survey keeps its own copy of the members. An external member gets no account and no access to QMS."]
+</div>
+
+@if (Model.Count == 0)
+{
+    <div class="card card-body text-muted">
+        @Loc["No committee is set up yet. Until one is, a confirmed survey has no committee and shows a warning."]
+    </div>
+}
+
+@foreach (var k in Model)
+{
+    <div class="card mb-3 @(k.IsActive ? "" : "opacity-75")">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <span class="fw-semibold">@k.CommitteeName</span>
+                <span class="badge bg-light text-dark border ms-2">
+                    @(string.IsNullOrWhiteSpace(k.Plant) ? Loc["Default — every branch without its own"] : Codes.PlantLabel(k.Plant))
+                </span>
+                @if (!k.IsActive) { <span class="badge bg-secondary ms-1">@Loc["Inactive"]</span> }
+                @if (!string.IsNullOrWhiteSpace(k.Description)) { <div class="small text-muted">@k.Description</div> }
+            </div>
+            @if (canEdit)
+            {
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#memberModal"
+                            data-committee="@k.CommitteeId" data-id="0" data-type="@ParticipantType.Internal" data-user=""
+                            data-name="" data-department="" data-organisation="" data-role="@CommitteeRole.Other"
+                            data-email="" data-phone="" data-bell="true" data-mail="true" data-expected="true"
+                            data-active="true" data-sort="@((k.Members.Count + 1) * 10)">
+                        <i class="bi bi-person-plus me-1"></i>@Loc["Add member"]
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#committeeModal"
+                            data-id="@k.CommitteeId" data-name="@k.CommitteeName" data-description="@k.Description"
+                            data-plant="@k.Plant" data-active="@(k.IsActive ? "true" : "false")">
+                        <i class="bi bi-pencil me-1"></i>@Loc["Edit"]
+                    </button>
+                    <form asp-action="DeleteCommittee" asp-route-id="@k.CommitteeId" method="post"
+                          data-confirm="@Loc["Delete this committee and its members? Surveys already confirmed keep their own copy."]"
+                          data-confirm-title="@Loc["Delete committee"]" data-confirm-ok="@Loc["Delete"]" data-confirm-danger>
+                        @Html.AntiForgeryToken()
+                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                    </form>
+                </div>
+            }
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>@Loc["Member"]</th>
+                        <th>@Loc["Type"]</th>
+                        <th>@Loc["Role on the committee"]</th>
+                        <th>@Loc["Department / organisation"]</th>
+                        <th>@Loc["E-mail"]</th>
+                        <th>@Loc["Phone"]</th>
+                        <th class="text-center" title="@Loc["Gets notices in the bell"]"><i class="bi bi-bell"></i></th>
+                        <th class="text-center" title="@Loc["Gets e-mail"]"><i class="bi bi-envelope"></i></th>
+                        <th class="text-center">@Loc["Expected to attend"]</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @if (k.Members.Count == 0)
+                    {
+                        <tr><td colspan="10" class="text-muted text-center py-3">@Loc["No members yet."]</td></tr>
+                    }
+                    @foreach (var m in k.Members)
+                    {
+                        <tr class="@(m.IsActive ? "" : "text-muted")">
+                            <td>@m.MemberName @if (!m.IsActive) { <span class="badge bg-secondary ms-1">@Loc["Inactive"]</span> }</td>
+                            <td>@Loc[m.IsInternal ? "Internal" : "External"]</td>
+                            <td>@Loc[CommitteeRole.Label(m.CommitteeRole)]</td>
+                            <td>@Txt(m.IsInternal ? m.Department : m.Organisation)</td>
+                            <td>@Txt(m.Email)</td>
+                            <td>@Txt(m.Phone)</td>
+                            <td class="text-center">@(m.NotifyInApp ? "✓" : "")</td>
+                            <td class="text-center">@(m.NotifyEmail ? "✓" : "")</td>
+                            <td class="text-center">@(m.ExpectedAttendance ? "✓" : "")</td>
+                            <td class="text-end text-nowrap">
+                                @if (canEdit)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#memberModal"
+                                            data-committee="@k.CommitteeId" data-id="@m.MemberId" data-type="@m.ParticipantType"
+                                            data-user="@m.UserId" data-name="@m.MemberName" data-department="@m.Department"
+                                            data-organisation="@m.Organisation" data-role="@m.CommitteeRole" data-email="@m.Email"
+                                            data-phone="@m.Phone" data-bell="@(m.NotifyInApp ? "true" : "false")"
+                                            data-mail="@(m.NotifyEmail ? "true" : "false")"
+                                            data-expected="@(m.ExpectedAttendance ? "true" : "false")"
+                                            data-active="@(m.IsActive ? "true" : "false")" data-sort="@m.SortOrder">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    <form asp-action="DeleteMember" asp-route-id="@m.MemberId" method="post" class="d-inline"
+                                          data-confirm="@Loc["Remove this member from the committee?"]"
+                                          data-confirm-title="@Loc["Remove member"]" data-confirm-ok="@Loc["Remove"]" data-confirm-danger>
+                                        @Html.AntiForgeryToken()
+                                        <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                    </form>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@if (canEdit)
+{
+    <div class="modal fade" id="committeeModal" tabindex="-1">
+        <div class="modal-dialog">
+            <form asp-action="SaveCommittee" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="CommitteeId" id="kId" />
+                <div class="modal-header">
+                    <h5 class="modal-title">@Loc["Committee"]</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small mb-0" for="kName">@Loc["Name"]</label>
+                        <input class="form-control form-control-sm" name="CommitteeName" id="kName" maxlength="120" required />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-0" for="kPlant">@Loc["Branch"]</label>
+                        <select class="form-select form-select-sm" name="Plant" id="kPlant">
+                            <option value="">@Loc["Default — every branch without its own"]</option>
+                            @foreach (var p in Codes.Plants)
+                            {
+                                <option value="@p.Code">@Codes.PlantLabel(p.Code)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small mb-0" for="kDescription">@Loc["Description"]</label>
+                        <textarea class="form-control form-control-sm" name="Description" id="kDescription" rows="2" maxlength="500"></textarea>
+                    </div>
+                    <div class="form-check">
+                        <input type="hidden" name="IsActive" value="false" />
+                        <input class="form-check-input" type="checkbox" name="IsActive" id="kActive" value="true" />
+                        <label class="form-check-label" for="kActive">@Loc["Active"]</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-primary">@Loc["Save"]</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div class="modal fade" id="memberModal" tabindex="-1">
+        <div class="modal-dialog">
+            <form asp-action="SaveMember" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <input type="hidden" name="MemberId" id="mId" />
+                <input type="hidden" name="CommitteeId" id="mCommittee" />
+                <input type="hidden" name="SortOrder" id="mSort" />
+                <div class="modal-header">
+                    <h5 class="modal-title">@Loc["Committee member"]</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-2">
+                        <label class="form-label small mb-0 d-block">@Loc["Type"]</label>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <input type="radio" class="btn-check" name="ParticipantType" id="mTypeInt" value="@ParticipantType.Internal" />
+                            <label class="btn btn-outline-secondary" for="mTypeInt">@Loc["Internal — a QMS user"]</label>
+                            <input type="radio" class="btn-check" name="ParticipantType" id="mTypeExt" value="@ParticipantType.External" />
+                            <label class="btn btn-outline-secondary" for="mTypeExt">@Loc["External — no account"]</label>
+                        </div>
+                    </div>
+                    <div class="mb-2" data-member-internal>
+                        <label class="form-label small mb-0" for="mUser">@Loc["User"]</label>
+                        <select class="form-select form-select-sm" name="UserId" id="mUser">
+                            <option value="">@Loc["Choose a user…"]</option>
+                            @foreach (var u in users)
+                            {
+                                <option value="@u.UserId" data-department="@u.Department">
+                                    @(string.IsNullOrWhiteSpace(u.FullName) ? u.Username : u.FullName) (@u.Username)@(string.IsNullOrWhiteSpace(u.Email) ? " — " + Loc["no e-mail"] : "")
+                                </option>
+                            }
+                        </select>
+                        <div class="form-text">@Loc["Name and e-mail come from the user's account."]</div>
+                    </div>
+                    <div data-member-external>
+                        <div class="mb-2">
+                            <label class="form-label small mb-0" for="mName">@Loc["Name"]</label>
+                            <input class="form-control form-control-sm" name="MemberName" id="mName" maxlength="120" />
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-0" for="mOrganisation">@Loc["Organisation"]</label>
+                            <input class="form-control form-control-sm" name="Organisation" id="mOrganisation" maxlength="120" />
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small mb-0" for="mEmail">@Loc["E-mail"]</label>
+                            <input type="email" class="form-control form-control-sm" name="Email" id="mEmail" maxlength="256" />
+                        </div>
+                    </div>
+                    <div class="row g-2 mb-2">
+                        <div class="col">
+                            <label class="form-label small mb-0" for="mRole">@Loc["Role on the committee"]</label>
+                            <select class="form-select form-select-sm" name="CommitteeRole" id="mRole">
+                                @foreach (var r in CommitteeRole.All)
+                                {
+                                    <option value="@r">@Loc[CommitteeRole.Label(r)]</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col" data-member-internal>
+                            <label class="form-label small mb-0" for="mDepartment">@Loc["Department"]</label>
+                            <input class="form-control form-control-sm" name="Department" id="mDepartment" maxlength="120" />
+                        </div>
+                        <div class="col">
+                            <label class="form-label small mb-0" for="mPhone">@Loc["Phone"]</label>
+                            <input class="form-control form-control-sm" name="Phone" id="mPhone" maxlength="40" />
+                        </div>
+                    </div>
+                    @* A hidden "false" before each box: an unticked checkbox posts
+                       nothing, and the binder would then leave the model's default. *@
+                    <div class="form-check" data-member-internal>
+                        <input type="hidden" name="NotifyInApp" value="false" />
+                        <input class="form-check-input" type="checkbox" name="NotifyInApp" id="mBell" value="true" />
+                        <label class="form-check-label" for="mBell">@Loc["Gets notices in the bell"]</label>
+                    </div>
+                    <div class="form-check">
+                        <input type="hidden" name="NotifyEmail" value="false" />
+                        <input class="form-check-input" type="checkbox" name="NotifyEmail" id="mMail" value="true" />
+                        <label class="form-check-label" for="mMail">@Loc["Gets e-mail"] <span class="text-muted small" data-member-external>@Loc["(the appointment only)"]</span></label>
+                    </div>
+                    <div class="form-check">
+                        <input type="hidden" name="ExpectedAttendance" value="false" />
+                        <input class="form-check-input" type="checkbox" name="ExpectedAttendance" id="mExpected" value="true" />
+                        <label class="form-check-label" for="mExpected">@Loc["Expected to attend the survey"]</label>
+                    </div>
+                    <div class="form-check">
+                        <input type="hidden" name="IsActive" value="false" />
+                        <input class="form-check-input" type="checkbox" name="IsActive" id="mActive" value="true" />
+                        <label class="form-check-label" for="mActive">@Loc["Active"]</label>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-primary">@Loc["Save"]</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}
+
+@section Scripts {
+    <script>
+        (function () {
+            function val(id, v) { var e = document.getElementById(id); if (e) e.value = v == null ? "" : v; }
+            function chk(id, v) { var e = document.getElementById(id); if (e) e.checked = v === "true"; }
+
+            var km = document.getElementById("committeeModal");
+            if (km) km.addEventListener("show.bs.modal", function (ev) {
+                var b = ev.relatedTarget; if (!b) return;
+                val("kId", b.getAttribute("data-id"));
+                val("kName", b.getAttribute("data-name"));
+                val("kDescription", b.getAttribute("data-description"));
+                val("kPlant", b.getAttribute("data-plant"));
+                chk("kActive", b.getAttribute("data-active"));
+            });
+
+            var mm = document.getElementById("memberModal");
+            if (!mm) return;
+            var intRadio = document.getElementById("mTypeInt"), extRadio = document.getElementById("mTypeExt");
+            // Internal and external members fill in different fields; the ones
+            // that do not apply are hidden AND disabled so they are not posted.
+            function sync() {
+                var internal = intRadio.checked;
+                mm.querySelectorAll("[data-member-internal]").forEach(function (el) {
+                    el.hidden = !internal;
+                    el.querySelectorAll("input,select").forEach(function (i) { i.disabled = !internal; });
+                });
+                mm.querySelectorAll("[data-member-external]").forEach(function (el) {
+                    el.hidden = internal;
+                    el.querySelectorAll("input,select").forEach(function (i) { i.disabled = internal; });
+                });
+            }
+            intRadio.addEventListener("change", sync);
+            extRadio.addEventListener("change", sync);
+            mm.addEventListener("show.bs.modal", function (ev) {
+                var b = ev.relatedTarget; if (!b) return;
+                val("mId", b.getAttribute("data-id"));
+                val("mCommittee", b.getAttribute("data-committee"));
+                val("mSort", b.getAttribute("data-sort"));
+                var internal = b.getAttribute("data-type") !== "@ParticipantType.External";
+                intRadio.checked = internal; extRadio.checked = !internal;
+                val("mUser", b.getAttribute("data-user"));
+                val("mName", b.getAttribute("data-name"));
+                val("mOrganisation", b.getAttribute("data-organisation"));
+                val("mEmail", b.getAttribute("data-email"));
+                val("mDepartment", b.getAttribute("data-department"));
+                val("mPhone", b.getAttribute("data-phone"));
+                val("mRole", b.getAttribute("data-role"));
+                chk("mBell", b.getAttribute("data-bell"));
+                chk("mMail", b.getAttribute("data-mail"));
+                chk("mExpected", b.getAttribute("data-expected"));
+                chk("mActive", b.getAttribute("data-active"));
+                sync();
+            });
+            // Picking a user offers their department.
+            document.getElementById("mUser").addEventListener("change", function () {
+                var o = this.options[this.selectedIndex];
+                var d = document.getElementById("mDepartment");
+                if (o && d && !d.value) d.value = o.getAttribute("data-department") || "";
+            });
+        })();
+    </script>
+}

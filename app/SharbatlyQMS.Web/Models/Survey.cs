@@ -116,6 +116,37 @@ public class Survey
     public string?   ClaimStatus    { get; set; }
     public DateTime? ClaimCreatedAt { get; set; }
 
+    // ---- Committee (M46): assigned when the survey is confirmed ----
+    public int?      CommitteeId         { get; set; }
+    public string?   CommitteeName       { get; set; }
+    public DateTime? CommitteeAssignedAt { get; set; }
+    public string?   CommitteeAssignedBy { get; set; }
+
+    // ---- The appointment that still stands, if any. Milestones, never statuses.
+    public long?     AppointmentId        { get; set; }
+    /// <summary>Local wall-clock time, as typed.</summary>
+    public DateTime? PlannedAt            { get; set; }
+    public DateTime? ScheduleConfirmedAt  { get; set; }
+    public DateTime? ActualAt             { get; set; }
+    /// <summary>Whether the surveyor came to that appointment.</summary>
+    public bool?     VisitSurveyorAttended{ get; set; }
+    public DateTime? AttendanceEnteredAt  { get; set; }
+
+    // ---- The QC officer's confirmation that the shipment was inspected ----
+    public bool?     SurveyorAttended       { get; set; }
+    public bool?     ShipmentInspected      { get; set; }
+    public DateTime? InspectionDate         { get; set; }
+    public TimeSpan? InspectionStartTime    { get; set; }
+    public TimeSpan? InspectionEndTime      { get; set; }
+    public string?   InspectionObservations { get; set; }
+    public string?   InspectionFindings     { get; set; }
+    public string?   InspectionDamage       { get; set; }
+    public string?   InspectionComments     { get; set; }
+    public DateTime? InspectionConfirmedAt  { get; set; }
+    public string?   InspectionConfirmedBy  { get; set; }
+
+    public bool InspectionConfirmed => InspectionConfirmedAt.HasValue;
+
     public bool IsOpen        => StatusCode == SurveyStatus.Open;
     public bool IsConfirmed   => StatusCode == SurveyStatus.Confirm;
     public bool IsUnderSurvey => SurveyStatus.IsUnderSurvey(StatusCode);
@@ -137,6 +168,17 @@ public static class SurveyMilestone
     public const string AwaitingQcOrder = "awaitingqo";
     /// <summary>Confirmed, and a claim request exists on its quality order.</summary>
     public const string WithClaim       = "withclaim";
+    /// <summary>Confirmed, and no appointment has been made.</summary>
+    public const string AwaitingSchedule   = "awaitingschedule";
+    /// <summary>Confirmed, the appointment's time has passed, and nobody has
+    /// recorded who came.</summary>
+    public const string AwaitingAttendance = "awaitingattendance";
+    /// <summary>Confirmed, the surveyor came, and the QC officer has not yet
+    /// confirmed the shipment was inspected.</summary>
+    public const string AwaitingInspection = "awaitinginspection";
+
+    public static readonly string[] All =
+        { AwaitingQcOrder, WithClaim, AwaitingSchedule, AwaitingAttendance, AwaitingInspection };
 }
 
 public class SurveyListFilter
@@ -178,6 +220,9 @@ public class SurveyCounts
     public int Passed          { get; set; }
     public int AwaitingQcOrder { get; set; }
     public int WithClaim       { get; set; }
+    public int AwaitingSchedule   { get; set; }
+    public int AwaitingAttendance { get; set; }
+    public int AwaitingInspection { get; set; }
 }
 
 /// <summary>

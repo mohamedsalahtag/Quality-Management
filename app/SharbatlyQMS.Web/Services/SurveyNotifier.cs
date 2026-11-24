@@ -27,6 +27,21 @@ public interface ISurveyNotifier
     Task DecidedAsync(SqlConnection c, SqlTransaction tx, long surveyId, string actor);
     /// <summary>The claim step raised a claim request: the people who review claims.</summary>
     Task ClaimRaisedAsync(SqlConnection c, SqlTransaction tx, long surveyId);
+
+    // ---- Committee events (M46). Members are told according to their own
+    //      bell / e-mail preferences. An external member has no account, so
+    //      never a bell entry and never a link into the application.
+
+    /// <summary>The committee was copied onto a confirmed survey: its internal members.</summary>
+    Task CommitteeAssignedAsync(SqlConnection c, SqlTransaction tx, long surveyId, string actor);
+    /// <summary>An appointment was confirmed or replaced: every member, and the
+    /// surveyor named on it. External people get the appointment only.</summary>
+    Task ScheduledAsync(SqlConnection c, SqlTransaction tx, long surveyId, long appointmentId, bool rescheduled, string actor);
+    /// <summary>Attendance was recorded: internal members; and, if the surveyor
+    /// did not come, the people who schedule.</summary>
+    Task AttendanceRecordedAsync(SqlConnection c, SqlTransaction tx, long surveyId, long appointmentId, string actor);
+    /// <summary>The QC officer confirmed the inspection: the insurance and claims members.</summary>
+    Task InspectionConfirmedAsync(SqlConnection c, SqlTransaction tx, long surveyId, string actor);
 }
 
 public static class SurveyEvents
@@ -35,6 +50,12 @@ public static class SurveyEvents
     public const string Confirmed   = "SurveyConfirmed";
     public const string Passed      = "SurveyPassed";
     public const string ClaimRaised = "SurveyClaimRaised";
+    public const string CommitteeAssigned   = "SurveyCommitteeAssigned";
+    public const string Scheduled           = "SurveyScheduled";
+    public const string Rescheduled         = "SurveyRescheduled";
+    public const string AttendanceRecorded  = "SurveyAttendanceRecorded";
+    public const string SurveyorAbsent      = "SurveySurveyorAbsent";
+    public const string InspectionConfirmed = "SurveyInspectionConfirmed";
 }
 
 public class SurveyNotifier : ISurveyNotifier
@@ -215,6 +236,229 @@ public class SurveyNotifier : ISurveyNotifier
                 });
         });
 
+    // ---- Committee events ------------------------------------------------
+
+    private sealed class Member
+    {
+        public string  ParticipantType { get; set; } = "";
+        public int?    UserId          { get; set; }
+        public string  MemberName      { get; set; } = "";
+        public string  CommitteeRole   { get; set; } = "";
+        public string? Email           { get; set; }
+        public bool    NotifyInApp     { get; set; }
+        public bool    NotifyEmail     { get; set; }
+        public bool IsInternal => ParticipantType == Models.ParticipantType.Internal && UserId.HasValue;
+    }
+
+    private static async Task<List<Member>> MembersAsync(SqlConnection c, SqlTransaction tx, long surveyId) =>
+        (await c.QueryAsync<Member>(@"
+            SELECT participant_type AS ParticipantType, user_id AS UserId, member_name AS MemberName,
+                   committee_role AS CommitteeRole, email AS Email,
+                   notify_in_app AS NotifyInApp, notify_email AS NotifyEmail
+            FROM   qms_survey_member WHERE survey_id = @surveyId", new { surveyId }, tx)).ToList();
+
+    private sealed class Visit
+    {
+        public long      AppointmentId    { get; set; }
+        public DateTime  PlannedAt        { get; set; }
+        public string?   Location         { get; set; }
+        public string?   SurveyCompany    { get; set; }
+        public string?   SurveyorName     { get; set; }
+        public string?   SurveyorEmail    { get; set; }
+        public string?   Instructions     { get; set; }
+        public string?   SupersedeReason  { get; set; }
+        public bool?     SurveyorAttended { get; set; }
+    }
+
+    private static Task<Visit?> VisitAsync(SqlConnection c, SqlTransaction tx, long appointmentId) =>
+        c.QuerySingleOrDefaultAsync<Visit>(@"
+            SELECT appointment_id AS AppointmentId, planned_at AS PlannedAt, location AS Location,
+                   survey_company AS SurveyCompany, surveyor_name AS SurveyorName, surveyor_email AS SurveyorEmail,
+                   instructions AS Instructions, surveyor_attended AS SurveyorAttended
+            FROM   qms_survey_appointment WHERE appointment_id = @appointmentId", new { appointmentId }, tx)!;
+
+    /// <summary>
+    /// Bell targets for internal members. A member whose role cannot open the
+    /// Surveys page is sent to the arrival instead -- a notice that leads to
+    /// "access denied" tells them nothing.
+    /// </summary>
+    private async Task<List<NotificationTarget>> BellTargetsAsync(SqlConnection c, SqlTransaction tx,
+        Ctx x, IEnumerable<Member> members, string? actor)
+    {
+        var ids = members.Where(m => m.IsInternal && m.NotifyInApp).Select(m => m.UserId!.Value).Distinct().ToList();
+        if (ids.Count == 0) return new List<NotificationTarget>();
+        var people = await _recipients.ByUserIdsAsync(c, tx, ids);
+        var canOpen = (await _recipients.WhoCanOpenSurveysAsync(c, tx, ids)).ToHashSet();
+        return people.Where(p => !Same(p.Username, actor))
+            .Select(p => new NotificationTarget(p.UserId,
+                canOpen.Contains(p.UserId) ? "/Surveys/Details/" + x.SurveyId : "/Arrivals/Details/" + x.ArrivalId))
+            .ToList();
+    }
+
+    /// <summary>Addresses for internal members who take e-mail: the one their
+    /// account holds now, not the one copied when the committee was set up.</summary>
+    private async Task<List<Recipient>> MailTargetsAsync(SqlConnection c, SqlTransaction tx,
+        IEnumerable<Member> members, string? actor)
+    {
+        var ids = members.Where(m => m.IsInternal && m.NotifyEmail).Select(m => m.UserId!.Value).Distinct().ToList();
+        if (ids.Count == 0) return new List<Recipient>();
+        return (await _recipients.ByUserIdsAsync(c, tx, ids))
+            .Where(p => p.CanBeMailed && !Same(p.Username, actor)).ToList();
+    }
+
+    public Task CommitteeAssignedAsync(SqlConnection c, SqlTransaction tx, long surveyId, string actor) =>
+        GuardedAsync(tx, "committee assigned", surveyId, async () =>
+        {
+            var x = await LoadAsync(c, tx, surveyId);
+            if (x == null) return;
+            var members = await MembersAsync(c, tx, surveyId);
+
+            var title = $"You are on the committee for survey {x.SurveyNo}";
+            var targets = await BellTargetsAsync(c, tx, x, members, actor);
+            if (targets.Count > 0)
+                await _bell.AddAsync(c, tx, new AppNotification
+                {
+                    EventCode = SurveyEvents.CommitteeAssigned, Title = title,
+                    Body = $"The survey for {What(x)} was confirmed by {x.DecidedBy}. An appointment will follow.",
+                    EntityType = EntityTypes.Survey, EntityId = x.SurveyId,
+                    DedupeKey = $"survey:{x.SurveyId}:committee"
+                }, targets);
+
+            var link = await AbsoluteAsync("/Surveys/Details/" + x.SurveyId);
+            foreach (var r in await MailTargetsAsync(c, tx, members, actor))
+                await _outbox.EnqueueAsync(c, tx, new OutboxMail
+                {
+                    EventCode = SurveyEvents.CommitteeAssigned, EntityType = EntityTypes.Survey, EntityId = x.SurveyId,
+                    ToAddress = r.Email!, ToName = r.DisplayName ?? r.Username,
+                    Subject = $"Survey {x.SurveyNo} confirmed - {What(x)}",
+                    BodyHtml = Mail(title,
+                        "A survey was confirmed and you are on its committee. The appointment will be sent separately.",
+                        Rows(x, ("Requested by", x.RequestedBy), ("Reason", x.RequestReason), ("Confirmed by", x.DecidedBy ?? "")),
+                        "Open the survey", link),
+                    DedupeKey = $"survey:{x.SurveyId}:committee:{r.Email!.Trim().ToLowerInvariant()}"
+                });
+        });
+
+    public Task ScheduledAsync(SqlConnection c, SqlTransaction tx, long surveyId, long appointmentId,
+        bool rescheduled, string actor) =>
+        GuardedAsync(tx, "scheduled", surveyId, async () =>
+        {
+            var x = await LoadAsync(c, tx, surveyId);
+            var v = await VisitAsync(c, tx, appointmentId);
+            if (x == null || v == null) return;
+            var members = await MembersAsync(c, tx, surveyId);
+            var code = rescheduled ? SurveyEvents.Rescheduled : SurveyEvents.Scheduled;
+            var when = v.PlannedAt.ToString("dddd d MMMM yyyy 'at' HH:mm", System.Globalization.CultureInfo.InvariantCulture);
+            var title = rescheduled
+                ? $"Survey {x.SurveyNo} was rescheduled to {when}"
+                : $"Survey {x.SurveyNo} is scheduled for {when}";
+            var key = $"survey:{x.SurveyId}:appt:{v.AppointmentId}";
+
+            var targets = await BellTargetsAsync(c, tx, x, members, actor);
+            if (targets.Count > 0)
+                await _bell.AddAsync(c, tx, new AppNotification
+                {
+                    EventCode = code, Title = title,
+                    Body = What(x) + (string.IsNullOrWhiteSpace(v.Location) ? "" : " at " + v.Location) + ".",
+                    EntityType = EntityTypes.Survey, EntityId = x.SurveyId, DedupeKey = key
+                }, targets);
+
+            var link = await AbsoluteAsync("/Surveys/Details/" + x.SurveyId);
+            foreach (var r in await MailTargetsAsync(c, tx, members, actor))
+                await _outbox.EnqueueAsync(c, tx, new OutboxMail
+                {
+                    EventCode = code, EntityType = EntityTypes.Survey, EntityId = x.SurveyId,
+                    ToAddress = r.Email!, ToName = r.DisplayName ?? r.Username,
+                    Subject = title + " - " + What(x),
+                    BodyHtml = Mail(title, "The survey appointment for this container.",
+                        Rows(x, ("When", when), ("Where", v.Location ?? ""), ("Survey company", v.SurveyCompany ?? ""),
+                             ("Surveyor", v.SurveyorName ?? ""), ("Instructions", v.Instructions ?? "")),
+                        "Open the survey", link),
+                    DedupeKey = key + ":" + r.Email!.Trim().ToLowerInvariant()
+                });
+
+            // External people: the appointment and nothing else. No survey
+            // number, no link, no decision comments, no internal comments --
+            // only what they need to turn up at the right container.
+            var organiser = await _recipients.ByUsernameAsync(c, tx, actor);
+            var contact = organiser == null ? ""
+                : (organiser.DisplayName ?? organiser.Username) + (organiser.CanBeMailed ? " <" + organiser.Email + ">" : "");
+            var external = members.Where(m => !m.IsInternal && m.NotifyEmail && !string.IsNullOrWhiteSpace(m.Email))
+                .Select(m => (Address: m.Email!.Trim(), Name: (string?)m.MemberName)).ToList();
+            if (!string.IsNullOrWhiteSpace(v.SurveyorEmail))
+                external.Add((v.SurveyorEmail!.Trim(), v.SurveyorName));
+            foreach (var e in external.GroupBy(e => e.Address.ToLowerInvariant()).Select(g => g.First()))
+                await _outbox.EnqueueAsync(c, tx, new OutboxMail
+                {
+                    EventCode = code, EntityType = EntityTypes.Survey, EntityId = x.SurveyId,
+                    ToAddress = e.Address, ToName = e.Name,
+                    Subject = (rescheduled ? "Survey appointment changed: " : "Survey appointment: ")
+                            + when + (string.IsNullOrWhiteSpace(x.ContainerNo) ? "" : " - container " + x.ContainerNo),
+                    BodyHtml = Mail(rescheduled ? "The survey appointment has changed" : "Survey appointment",
+                        "You are expected at the following survey.",
+                        new List<(string, string)>
+                        {
+                            ("When", when), ("Where", v.Location ?? ""), ("Container", x.ContainerNo ?? ""),
+                            ("Instructions", v.Instructions ?? ""), ("Contact", contact)
+                        }.Where(r => !string.IsNullOrWhiteSpace(r.Item2)).ToList(),
+                        "", "", internalFooter: false),
+                    DedupeKey = key + ":ext:" + e.Address.ToLowerInvariant()
+                });
+        });
+
+    public Task AttendanceRecordedAsync(SqlConnection c, SqlTransaction tx, long surveyId, long appointmentId, string actor) =>
+        GuardedAsync(tx, "attendance", surveyId, async () =>
+        {
+            var x = await LoadAsync(c, tx, surveyId);
+            var v = await VisitAsync(c, tx, appointmentId);
+            if (x == null || v == null) return;
+            var absent = v.SurveyorAttended == false;
+
+            var targets = await BellTargetsAsync(c, tx, x, await MembersAsync(c, tx, surveyId), actor);
+            if (targets.Count > 0)
+                await _bell.AddAsync(c, tx, new AppNotification
+                {
+                    EventCode = SurveyEvents.AttendanceRecorded,
+                    Title = $"Attendance recorded for survey {x.SurveyNo}",
+                    Body = (absent ? "The surveyor did not attend. " : "The surveyor attended. ") + What(x) + ".",
+                    EntityType = EntityTypes.Survey, EntityId = x.SurveyId,
+                    DedupeKey = $"survey:{x.SurveyId}:appt:{v.AppointmentId}:attendance"
+                }, targets);
+
+            if (!absent) return;
+            // A no-show needs somebody to arrange another visit.
+            var schedulers = (await _recipients.WithPermissionAsync(c, tx, Perm.Surveys.Schedule, x.Plant))
+                .Where(r => !Same(r.Username, actor)).ToList();
+            if (schedulers.Count > 0)
+                await _bell.AddAsync(c, tx, new AppNotification
+                {
+                    EventCode = SurveyEvents.SurveyorAbsent,
+                    Title = $"The surveyor did not attend survey {x.SurveyNo}",
+                    Body = What(x) + ". The survey needs to be rescheduled.",
+                    EntityType = EntityTypes.Survey, EntityId = x.SurveyId,
+                    DedupeKey = $"survey:{x.SurveyId}:appt:{v.AppointmentId}:absent"
+                }, schedulers.Select(s => new NotificationTarget(s.UserId, "/Surveys/Details/" + x.SurveyId)));
+        });
+
+    public Task InspectionConfirmedAsync(SqlConnection c, SqlTransaction tx, long surveyId, string actor) =>
+        GuardedAsync(tx, "inspection", surveyId, async () =>
+        {
+            var x = await LoadAsync(c, tx, surveyId);
+            if (x == null) return;
+            var members = (await MembersAsync(c, tx, surveyId))
+                .Where(m => m.CommitteeRole is CommitteeRole.Insurance or CommitteeRole.Claims);
+            var targets = await BellTargetsAsync(c, tx, x, members, actor);
+            if (targets.Count == 0) return;
+            await _bell.AddAsync(c, tx, new AppNotification
+            {
+                EventCode = SurveyEvents.InspectionConfirmed,
+                Title = $"Survey inspection confirmed for {x.SurveyNo}",
+                Body = $"{actor} confirmed that the surveyor inspected {What(x)}.",
+                EntityType = EntityTypes.Survey, EntityId = x.SurveyId,
+                DedupeKey = $"survey:{x.SurveyId}:inspection"
+            }, targets);
+        });
+
     // ---- The mail itself ------------------------------------------------
 
     private async Task<string> AbsoluteAsync(string relative)
@@ -243,7 +487,7 @@ public class SurveyNotifier : ISurveyNotifier
     // Inline colours and a table layout, like the finish notice: Outlook
     // ignores most of flex and grid and drops <style> blocks.
     private static string Mail(string title, string intro, List<(string Label, string Value)> rows,
-        string buttonText, string link)
+        string buttonText, string link, bool internalFooter = true)
     {
         static string H(string? s) => WebUtility.HtmlEncode(s ?? "");
         var sb = new StringBuilder();
@@ -261,7 +505,8 @@ public class SurveyNotifier : ISurveyNotifier
                 + "<td style=\"background:#0b5ed7;border-radius:6px\">"
                 + $"<a href=\"{H(link)}\" style=\"display:block;padding:10px 18px;color:#fff;text-decoration:none;font-weight:600;font-size:14px\">{H(buttonText)} &rarr;</a>"
                 + "</td></tr></table>");
-        sb.Append("<p style=\"margin:16px 0 0;font-size:12px;color:#7b8794\">Internal and confidential. Please do not forward this message outside the company.</p>");
+        if (internalFooter)
+            sb.Append("<p style=\"margin:16px 0 0;font-size:12px;color:#7b8794\">Internal and confidential. Please do not forward this message outside the company.</p>");
         sb.Append("</div>");
         return sb.ToString();
     }

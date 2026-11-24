@@ -24,7 +24,7 @@ namespace SharbatlyQMS.Web.Controllers;
 /// the caller's branches against the arrival's.
 /// </summary>
 [Authorize]
-public class SurveysController : Controller
+public partial class SurveysController : Controller
 {
     /// <summary>Most rows one Excel export will carry.</summary>
     private const int MaxExportRows = 5000;
@@ -36,12 +36,15 @@ public class SurveysController : Controller
     private readonly IAuditService _audit;
     private readonly IUserPermissions _me;
     private readonly IMailOutbox _outbox;
+    private readonly ISurveyCommitteeService _committee;
+    private readonly IDocumentService _docs;
 
     public SurveysController(ISurveyService surveys, IArrivalService arrivals, IQualityOrderService qos,
-        IMaraService mara, IAuditService audit, IUserPermissions me, IMailOutbox outbox)
+        IMaraService mara, IAuditService audit, IUserPermissions me, IMailOutbox outbox,
+        ISurveyCommitteeService committee, IDocumentService docs)
     {
         _surveys = surveys; _arrivals = arrivals; _qos = qos; _mara = mara; _audit = audit; _me = me;
-        _outbox = outbox;
+        _outbox = outbox; _committee = committee; _docs = docs;
     }
 
     private string CurrentUser => User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
@@ -76,7 +79,8 @@ public class SurveysController : Controller
             "Survey number", "Status", "Requested from", "Arrival number", "QC order number", "Container",
             "BOL", "PO", "Supplier", "Products", "Country of origin", "Branch", "Receive date",
             "Requested by", "Requested at", "Reason", "Comments", "Decided by", "Decided at",
-            "Decision comments", "QC order status", "Claim status", "Last updated"
+            "Decision comments", "Committee", "Planned survey", "Actual attendance", "Surveyor attended",
+            "Inspection conducted", "QC order status", "Claim status", "Last updated"
         };
         for (var i = 0; i < heads.Length; i++) ws.Cell(1, i + 1).Value = heads[i];
         ws.Row(1).Style.Font.Bold = true;
@@ -106,6 +110,12 @@ public class SurveysController : Controller
             Put(s.DecidedBy);
             Put(LocalStamp(s.DecidedAt));
             Put(s.DecisionComments);
+            Put(s.CommitteeName);
+            // Appointment times are local wall-clock times, as typed.
+            Put(s.PlannedAt?.ToString("yyyy-MM-dd HH:mm"));
+            Put(s.ActualAt?.ToString("yyyy-MM-dd HH:mm"));
+            Put(s.VisitSurveyorAttended switch { true => "Yes", false => "No", _ => "" });
+            Put(s.IsConfirmed ? (s.InspectionConfirmed ? "Yes" : "No") : "");
             Put(s.QualityOrderId.HasValue ? QualityOrderStatus.DisplayName(s.QualityOrderStatus) : "Not created");
             Put(s.ClaimStatus == null ? "" : ClaimStatus.Label(s.ClaimStatus));
             Put(LocalStamp(s.UpdatedAt));
@@ -147,6 +157,17 @@ public class SurveysController : Controller
         ViewBag.History = await _audit.GetForRecordAsync(EntityTypes.Survey, id);
         // The delivery log: every e-mail this survey caused, sent or not.
         ViewBag.Mails   = await _outbox.ListForEntityAsync(EntityTypes.Survey, id);
+
+        // The committee side (M46). Attendance is shown for the appointment
+        // that still stands; superseded ones keep theirs as history.
+        var appointments = await _committee.GetAppointmentsAsync(id);
+        var current = appointments.FirstOrDefault(a => a.IsCurrent);
+        ViewBag.Appointments = appointments;
+        ViewBag.Members      = await _committee.GetMembersAsync(id, current?.AppointmentId);
+        ViewBag.Documents    = await _docs.ListAsync(DocumentService.SurveyOwner, id);
+        // A confirmed survey with no committee: is one configured NOW?
+        ViewBag.CommitteeConfigured = survey.IsConfirmed && !survey.CommitteeId.HasValue
+            && await _committee.FindForPlantAsync(survey.Plant) != null;
         return View(survey);
     }
 
@@ -236,8 +257,9 @@ public class SurveysController : Controller
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Surveys.Request, Seed.OperatorOrAbove, "Request a survey")]
+    [RequestSizeLimit(100L * 1024 * 1024)]
     public async Task<IActionResult> RequestSurvey(long? arrivalId, long? qualityOrderId,
-        string? reason, string? comments)
+        string? reason, string? comments, List<IFormFile>? files = null)
     {
         string source;
         if (qualityOrderId.HasValue)
@@ -263,6 +285,21 @@ public class SurveysController : Controller
         var res = await _surveys.RequestAsync(arrivalId.Value, source, qualityOrderId, reason, comments, CurrentUser);
         if (!res.Ok) return Json(new { ok = false, error = res.Error });
 
+        // Evidence chosen in the dialog is kept WITH THE SURVEY -- not as
+        // arrival photos, which print in the supplier's QC report. Asking for
+        // the survey is what entitles the requester to attach it; it is only
+        // stored for a survey this request created.
+        var notSaved = new List<string>();
+        if (!res.AlreadyExisted && files is { Count: > 0 })
+        {
+            var (saved, rejected) = await _docs.UploadAsync(DocumentService.SurveyOwner, res.SurveyId!.Value,
+                SurveyDocCategory.Request, files, CurrentUser);
+            notSaved.AddRange(rejected);
+            if (saved > 0)
+                await _audit.WriteAsync(EntityTypes.Survey, res.SurveyId.Value, ActionCodes.SurveyAttachmentAdded,
+                    null, new { category = SurveyDocCategory.Request, files = saved }, CurrentUser);
+        }
+
         var canView = _me.CanView(Screens.Surveys);
         return Json(new
         {
@@ -273,9 +310,10 @@ public class SurveysController : Controller
             statusLabel = SurveyStatus.Label(res.StatusCode),
             // Only someone who may open the page is handed its address.
             url         = canView ? Url.Action(nameof(Details), new { id = res.SurveyId }) : null,
-            message     = res.AlreadyExisted
+            message     = (res.AlreadyExisted
                 ? $"A survey was already requested for this container: {res.SurveyNo} ({SurveyStatus.Label(res.StatusCode)})."
-                : $"Survey {res.SurveyNo} requested. It is now waiting for a decision."
+                : $"Survey {res.SurveyNo} requested. It is now waiting for a decision.")
+                + (notSaved.Count > 0 ? " Not attached: " + string.Join("; ", notSaved) : "")
         });
     }
 
