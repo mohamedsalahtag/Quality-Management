@@ -48,16 +48,29 @@ public class SurveyCommitteesController : Controller
     [RequirePermission(Perm.Parameters.SurveyCommitteesEdit, Seed.AdminOnly, "Edit survey committees")]
     public async Task<IActionResult> SaveCommittee(SurveyCommittee committee)
     {
-        var isNew = committee.CommitteeId == 0;
-        var result = await _committee.SaveCommitteeAsync(committee, CurrentUser);
-        // A committee is a name until it has people: after creating one, the
-        // page comes back with the Add member dialog open for it.
-        if (result.ok && isNew)
+        if (committee.CommitteeId != 0)
+            return Done(await _committee.SaveCommitteeAsync(committee, CurrentUser), "Committee saved.");
+
+        // New: the dialog carries the members too -- QMS users picked from
+        // the list and outside people typed by name.
+        var (ok, error, added, notAdded) = await _committee.CreateWithMembersAsync(committee, CurrentUser);
+        if (!ok)
         {
-            TempData["Success"] = "Committee saved. Now add its members.";
-            return RedirectToAction(nameof(Index), new { addMemberTo = committee.CommitteeId });
+            TempData["Error"] = error;
+            return RedirectToAction(nameof(Index));
         }
-        return Done(result, "Committee saved.");
+        if (notAdded.Count > 0)
+            TempData["Error"] = "The committee was saved, but these members could not be added: "
+                              + string.Join("; ", notAdded) + ". Add them with Add member.";
+        else
+            TempData["Success"] = added == 0
+                ? "Committee saved. Now add its members."
+                : $"Committee saved with {added} member{(added == 1 ? "" : "s")}.";
+        // A committee is a name until it has people: saved with nobody on it,
+        // the page comes back with the Add member dialog open for it.
+        return added == 0 && notAdded.Count == 0
+            ? RedirectToAction(nameof(Index), new { addMemberTo = committee.CommitteeId })
+            : RedirectToAction(nameof(Index));
     }
 
     [HttpPost, ValidateAntiForgeryToken]

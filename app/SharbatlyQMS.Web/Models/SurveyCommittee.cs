@@ -188,6 +188,9 @@ public class CommitteeUserOption
     public string? Email      { get; set; }
     public string? Department { get; set; }
     public string? RoleName   { get; set; }
+    /// <summary>The user's role can open the Surveys page (or is the
+    /// administrator role). The picker lists these users first.</summary>
+    public bool    CanOpenSurveys { get; set; }
 }
 
 /// <summary>Document categories offered for a survey's attachments.</summary>

@@ -237,6 +237,82 @@ public class SurveyCommitteeTests : IClassFixture<QmsAppFactory>, IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_new_committee_is_saved_with_the_users_picked_and_the_outside_people_typed()
+    {
+        var admin = Client(RoleCodes.Admin);
+
+        // The dialog itself offers both kinds of member, and the user list
+        // puts the people who can open Surveys first.
+        var page = await admin.GetStringAsync("/SurveyCommittees");
+        foreach (var expected in new[] { "id=\"kRowInternal\"", "id=\"kRowExternal\"", "Add a QMS user",
+                     "Add an outside person", "Users with access to Surveys", "Committee name" })
+            Assert.Contains(expected, page);
+
+        var users = await Committee(svc => svc.ListUsersAsync());
+        Assert.True(users.Single(u => u.UserId == QmsAppFactory.AdminUserId).CanOpenSurveys);
+        // Everybody active is offered; the ones with access come before the rest.
+        var firstWithout = users.ToList().FindIndex(u => !u.CanOpenSurveys);
+        if (firstWithout >= 0) Assert.DoesNotContain(users.Skip(firstWithout), u => u.CanOpenSurveys);
+
+        var fields = new List<KeyValuePair<string, string>>
+        {
+            new("__RequestVerificationToken", await TokenAsync(admin, "/SurveyCommittees")),
+            new("CommitteeId", "0"), new("CommitteeName", "Picked committee"), new("Plant", Plant), new("IsActive", "true"),
+            // a QMS user
+            new("Members[0].ParticipantType", ParticipantType.Internal),
+            new("Members[0].UserId", QmsAppFactory.AdminUserId.ToString()),
+            new("Members[0].CommitteeRole", CommitteeRole.QC),
+            // a row left empty
+            new("Members[1].ParticipantType", ParticipantType.Internal),
+            new("Members[1].UserId", ""),
+            new("Members[1].CommitteeRole", CommitteeRole.Other),
+            // the same user again
+            new("Members[2].ParticipantType", ParticipantType.Internal),
+            new("Members[2].UserId", QmsAppFactory.AdminUserId.ToString()),
+            new("Members[2].CommitteeRole", CommitteeRole.Claims),
+            // an outside person
+            new("Members[3].ParticipantType", ParticipantType.External),
+            new("Members[3].MemberName", "Outside Surveyor"),
+            new("Members[3].Organisation", "Survey Co"),
+            new("Members[3].Email", ExternalMail),
+            new("Members[3].CommitteeRole", CommitteeRole.Surveyor),
+            // an outside person whose address is wrong
+            new("Members[4].ParticipantType", ParticipantType.External),
+            new("Members[4].MemberName", "Bad Address"),
+            new("Members[4].Email", "not-an-address"),
+            new("Members[4].CommitteeRole", CommitteeRole.Insurance),
+        };
+        var created = await admin.PostAsync("/SurveyCommittees/SaveCommittee", new FormUrlEncodedContent(fields));
+        Assert.Equal(HttpStatusCode.Redirect, created.StatusCode);
+        // Members came with it, so there is no "now add the members" step.
+        Assert.EndsWith("/SurveyCommittees", created.Headers.Location!.OriginalString);
+
+        var k = (await Committee(svc => svc.ListCommitteesAsync())).Single(x => x.Plant == Plant);
+        Assert.Equal("Picked committee", k.CommitteeName);
+        Assert.Equal(2, k.Members.Count);
+
+        var user = k.Members.Single(m => m.IsInternal);
+        Assert.Equal(QmsAppFactory.AdminUserId, user.UserId);
+        Assert.Equal(CommitteeRole.QC, user.CommitteeRole);          // the first pick, not the repeat
+        Assert.False(string.IsNullOrWhiteSpace(user.MemberName));    // from the account
+        Assert.True(user.NotifyInApp);
+        Assert.True(user.ExpectedAttendance);
+
+        var outside = k.Members.Single(m => !m.IsInternal);
+        Assert.Equal("Outside Surveyor", outside.MemberName);
+        Assert.Equal("Survey Co", outside.Organisation);
+        Assert.Equal(ExternalMail, outside.Email);
+        Assert.Equal(CommitteeRole.Surveyor, outside.CommitteeRole);
+        Assert.False(outside.NotifyInApp);                           // no account, no bell
+        Assert.True(user.SortOrder < outside.SortOrder);
+
+        // The refused row is named, not silently dropped.
+        var after = await admin.GetStringAsync("/SurveyCommittees");
+        Assert.Contains("Bad Address", after);
+        Assert.Contains("could not be added", after);
+    }
+
+    [Fact]
     public async Task Only_an_administrator_can_change_the_committee_setup()
     {
         var perms = _factory.Services.GetRequiredService<IPermissionResolver>();

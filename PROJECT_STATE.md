@@ -213,6 +213,11 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-11-24 (Survey committees: the New committee dialog carries the members)
+- **Why:** the user opened **New committee** twice and both times read its single name field as "a member is added by name only". Leading into **Add member** after the save (the fix earlier the same day) did not help, because they never pressed Save.
+- **What changed:** the New committee dialog has a **Members** section with one user row already open. **Add a QMS user** adds a picker of application users plus the role on the committee; **Add an outside person** adds name, organisation, e-mail and role. Rows are numbered at submit (`Members[i].X`) and bound to `SurveyCommittee.Members`. `SurveyCommitteeService.CreateWithMembersAsync` saves the committee, then each member on its own: an empty row is skipped, a user picked twice is added once, a refused row is named in the message and the rest still save. Editing a committee still changes only its name, branch and description; members are managed on the card.
+- **Who is offered:** every active user, with those whose role can open the Surveys page (or is Administrator) in a first group, "Users with access to Surveys". The user asked to pick from "users who have access to survey"; the others are still listed, in a second group, because a member without that access is still notified (without a link) and on the day only Administrators and Managers held the Surveys screen (14 of 67 users). Not enforced on the server.
+
 ### 2026-11-24 (Finish asks for the claim assessment again — reverses part of the survey decisions)
 - **Why:** a few hours after go-live the user asked for it back "for now": some quality orders must be raised as potential claims with no survey. In the 60 days before, 1,606 of 2,864 finished orders were finished as Potential Claim and managers picked about 100 of them to raise, so the pick is a wide net for a manager and not a claim in itself.
 - **Rule now (`SurveyClaimSync.PotentialClaimFor(surveyStatus, answer)`):** a CONFIRMED survey makes the order a potential claim whatever was picked, and is the only finish that needs no pick. Otherwise the flag is the finisher's answer. `CloseAsync` refuses a finish with no answer unless the survey is confirmed.

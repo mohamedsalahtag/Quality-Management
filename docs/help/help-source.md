@@ -429,11 +429,11 @@ Two figures are worked out from those dates and are the same on every screen, th
 
 **How to use it**
 1. Open **Parameters → Survey committees**.
-2. Click **New committee**. Give it a name and choose its **Branch**, or leave **Default** so it serves every branch without a committee of its own. Click **Save**. This dialog only names the committee: its people are added next.
-3. The **Committee member** dialog opens by itself for the new committee. For an existing committee, click **Add member** on its card.
-4. Under **Type**, choose **Internal — QMS user** to pick somebody from the list of users, or **External — outside person** to type a name, organisation and e-mail for somebody with no account. Pick the **Role on the committee** and click **Save**.
-5. Click **Add member** again for each further person. A committee can mix internal and external members.
-6. Tick **Gets e-mail** and **Gets notices in the bell** as each member prefers. An external member can only get e-mail, and only the appointment.
+2. Click **New committee**. Type the **Committee name** and choose its **Branch**, or leave **Default** so it serves every branch without a committee of its own.
+3. Under **Members**, pick the people who use QMS: choose a user in the list, then that member's role on the committee in the box beside it. Users who can open the Surveys page are listed first. Click **Add a QMS user** for each further user.
+4. Click **Add an outside person** for somebody with no account, and type the name, organisation and e-mail. A committee can mix both kinds.
+5. Click **Save**. The committee appears as a card with its members. To change the committee later, use **Add member**, the pencil or the bin on that card.
+6. Click the pencil on a member to add a phone number and to tick **Gets e-mail** and **Gets notices in the bell** as that member prefers. An external member can only get e-mail, and only the appointment.
 
 > **For Admins** — One active committee per branch, plus one active default. Managers and Claim Managers can open this page but only an administrator can change it (`Parameters.SurveyCommittees.Edit`). Changing a committee never changes a survey that is already confirmed: each survey keeps its own copy of the members from the moment it was confirmed. An external member gets no account and no access.
 

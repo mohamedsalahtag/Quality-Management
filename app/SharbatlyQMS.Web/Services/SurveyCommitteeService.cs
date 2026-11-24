@@ -24,9 +24,19 @@ public interface ISurveyCommitteeService
     /// <summary>Creates (id 0) or updates. A new committee's id is set on
     /// <paramref name="committee"/>.</summary>
     Task<(bool ok, string? error)> SaveCommitteeAsync(SurveyCommittee committee, string user);
+    /// <summary>The New committee dialog: the committee and the members
+    /// picked with it (<see cref="SurveyCommittee.Members"/>). The committee
+    /// is saved first and each member is then added on its own, so one bad
+    /// row does not lose the rest: <c>notAdded</c> names what was refused and
+    /// why. A row left empty is not a member, and a user picked twice is
+    /// added once.</summary>
+    Task<(bool ok, string? error, int added, IReadOnlyList<string> notAdded)> CreateWithMembersAsync(
+        SurveyCommittee committee, string user);
     Task<(bool ok, string? error)> DeleteCommitteeAsync(int committeeId, string user);
     Task<(bool ok, string? error)> SaveMemberAsync(SurveyCommitteeMember member, string user);
     Task<(bool ok, string? error)> DeleteMemberAsync(int memberId, string user);
+    /// <summary>Every active application user, those whose role can open the
+    /// Surveys page first.</summary>
     Task<IReadOnlyList<CommitteeUserOption>> ListUsersAsync();
 
     // ---- Assignment ----
@@ -175,6 +185,34 @@ public class SurveyCommitteeService : ISurveyCommitteeService
         }
     }
 
+    public async Task<(bool ok, string? error, int added, IReadOnlyList<string> notAdded)> CreateWithMembersAsync(
+        SurveyCommittee k, string user)
+    {
+        var members = k.Members ?? new List<SurveyCommitteeMember>();
+        k.CommitteeId = 0;
+        var saved = await SaveCommitteeAsync(k, user);
+        if (!saved.ok) return (false, saved.error, 0, Array.Empty<string>());
+
+        var notAdded = new List<string>();
+        var picked = new HashSet<int>();
+        int added = 0, sort = 0;
+        foreach (var m in members)
+        {
+            var isInternal = m.ParticipantType == ParticipantType.Internal;
+            // A row left empty is not a member; a user picked twice is one member.
+            if (isInternal ? m.UserId == null : string.IsNullOrWhiteSpace(m.MemberName)) continue;
+            if (isInternal && !picked.Add(m.UserId!.Value)) continue;
+
+            m.MemberId = 0;
+            m.CommitteeId = k.CommitteeId;
+            m.SortOrder = sort += 10;
+            var (ok, error) = await SaveMemberAsync(m, user);
+            if (ok) added++;
+            else notAdded.Add((isInternal ? "user " + m.UserId : m.MemberName.Trim()) + " (" + error + ")");
+        }
+        return (true, null, added, notAdded);
+    }
+
     public async Task<(bool ok, string? error)> DeleteCommitteeAsync(int committeeId, string user)
     {
         using var c = Open();
@@ -281,11 +319,19 @@ public class SurveyCommitteeService : ISurveyCommitteeService
     public async Task<IReadOnlyList<CommitteeUserOption>> ListUsersAsync()
     {
         using var c = Open();
+        // "Can open Surveys" as the notifier reads it: the administrator
+        // role, or a role holding the Surveys screen.
         return (await c.QueryAsync<CommitteeUserOption>(@"
-            SELECT UserId, Username, FullName, Email, Department, RoleName
-            FROM   qms.AppUser
-            WHERE  IsActive = 1
-            ORDER  BY FullName, Username")).ToList();
+            SELECT u.UserId, u.Username, u.FullName, u.Email, u.Department, u.RoleName,
+                   CAST(CASE WHEN r.is_super = 1 OR EXISTS (
+                                 SELECT 1 FROM qms_role_permission rp
+                                 WHERE  rp.role_code = u.RoleCode AND rp.permission_code = @screen)
+                             THEN 1 ELSE 0 END AS BIT) AS CanOpenSurveys
+            FROM   qms.AppUser u
+            LEFT   JOIN qms_role r ON r.role_code = u.RoleCode
+            WHERE  u.IsActive = 1
+            ORDER  BY CanOpenSurveys DESC, u.FullName, u.Username",
+            new { screen = Models.Security.Screens.Surveys })).ToList();
     }
 
     // ================= Assignment =================
