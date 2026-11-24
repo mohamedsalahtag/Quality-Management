@@ -11,11 +11,12 @@
         <h1 class="h3 mb-1"><i class="bi bi-people me-1"></i>@Loc["Survey committees"]</h1>
         <p class="text-muted mb-0 small">
             @Loc["Who sits on the committee when a survey is confirmed. One active committee per branch; the default serves any branch without its own."]
+            @Loc["A member is either an existing QMS user or an outside person added by name."]
         </p>
     </div>
     @if (canEdit)
     {
-        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#committeeModal"
+        <button type="button" class="btn btn-primary text-nowrap flex-shrink-0 ms-3" data-bs-toggle="modal" data-bs-target="#committeeModal"
                 data-id="0" data-name="" data-description="" data-plant="" data-active="true">
             <i class="bi bi-plus-lg me-1"></i>@Loc["New committee"]
         </button>
@@ -50,6 +51,7 @@
             {
                 <div class="d-flex gap-2">
                     <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#memberModal"
+                            data-add-member="@k.CommitteeId"
                             data-committee="@k.CommitteeId" data-id="0" data-type="@ParticipantType.Internal" data-user=""
                             data-name="" data-department="" data-organisation="" data-role="@CommitteeRole.Other"
                             data-email="" data-phone="" data-bell="true" data-mail="true" data-expected="true"
@@ -89,7 +91,10 @@
                 <tbody>
                     @if (k.Members.Count == 0)
                     {
-                        <tr><td colspan="10" class="text-muted text-center py-3">@Loc["No members yet."]</td></tr>
+                        <tr><td colspan="10" class="text-muted text-center py-3">
+                            @Loc["No members yet."]
+                            @if (canEdit) { <span>@Loc["Use Add member to pick an existing QMS user, or to add an outside person by name."]</span> }
+                        </td></tr>
                     }
                     @foreach (var m in k.Members)
                     {
@@ -167,6 +172,9 @@
                         <input class="form-check-input" type="checkbox" name="IsActive" id="kActive" value="true" />
                         <label class="form-check-label" for="kActive">@Loc["Active"]</label>
                     </div>
+                    <div class="form-text mt-2">
+                        <i class="bi bi-people me-1"></i>@Loc["Members are added after you save, with Add member: an existing QMS user, or an outside person by name."]
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
@@ -192,9 +200,9 @@
                         <label class="form-label small mb-0 d-block">@Loc["Type"]</label>
                         <div class="btn-group btn-group-sm" role="group">
                             <input type="radio" class="btn-check" name="ParticipantType" id="mTypeInt" value="@ParticipantType.Internal" />
-                            <label class="btn btn-outline-secondary" for="mTypeInt">@Loc["Internal — a QMS user"]</label>
+                            <label class="btn btn-outline-secondary" for="mTypeInt">@Loc["Internal — QMS user"]</label>
                             <input type="radio" class="btn-check" name="ParticipantType" id="mTypeExt" value="@ParticipantType.External" />
-                            <label class="btn btn-outline-secondary" for="mTypeExt">@Loc["External — no account"]</label>
+                            <label class="btn btn-outline-secondary" for="mTypeExt">@Loc["External — outside person"]</label>
                         </div>
                     </div>
                     <div class="mb-2" data-member-internal>
@@ -329,6 +337,13 @@
                 chk("mActive", b.getAttribute("data-active"));
                 sync();
             });
+            // Straight after a committee is created the page comes back with
+            // ?addMemberTo=<id>: open the Add member dialog for that committee.
+            var addTo = new URLSearchParams(window.location.search).get("addMemberTo");
+            if (addTo && /^[0-9]+$/.test(addTo)) {
+                var addBtn = document.querySelector('[data-add-member="' + addTo + '"]');
+                if (addBtn) addBtn.click();
+            }
             // Picking a user offers their department.
             document.getElementById("mUser").addEventListener("change", function () {
                 var o = this.options[this.selectedIndex];

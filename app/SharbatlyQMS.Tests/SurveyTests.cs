@@ -582,6 +582,7 @@ public class SurveyTests : IClassFixture<QmsAppFactory>
                 deleted = true;
             }
             Assert.Null(await StatusAsync(res.SurveyId!.Value));
+            await SurveyTestData.ForgetSurveyAuditAsync(_factory, res.SurveyId!.Value);
         }
         finally { if (!deleted) await CleanupAsync(arrivalId); }
     }

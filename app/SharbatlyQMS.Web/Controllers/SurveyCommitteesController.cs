@@ -46,8 +46,19 @@ public class SurveyCommitteesController : Controller
 
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Parameters.SurveyCommitteesEdit, Seed.AdminOnly, "Edit survey committees")]
-    public async Task<IActionResult> SaveCommittee(SurveyCommittee committee) =>
-        Done(await _committee.SaveCommitteeAsync(committee, CurrentUser), "Committee saved.");
+    public async Task<IActionResult> SaveCommittee(SurveyCommittee committee)
+    {
+        var isNew = committee.CommitteeId == 0;
+        var result = await _committee.SaveCommitteeAsync(committee, CurrentUser);
+        // A committee is a name until it has people: after creating one, the
+        // page comes back with the Add member dialog open for it.
+        if (result.ok && isNew)
+        {
+            TempData["Success"] = "Committee saved. Now add its members.";
+            return RedirectToAction(nameof(Index), new { addMemberTo = committee.CommitteeId });
+        }
+        return Done(result, "Committee saved.");
+    }
 
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Parameters.SurveyCommitteesEdit, Seed.AdminOnly, "Edit survey committees")]

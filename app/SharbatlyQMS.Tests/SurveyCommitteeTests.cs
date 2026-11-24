@@ -209,6 +209,34 @@ public class SurveyCommitteeTests : IClassFixture<QmsAppFactory>, IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_new_committee_leads_straight_into_adding_its_members()
+    {
+        var admin = Client(RoleCodes.Admin);
+        async Task<HttpResponseMessage> PostAsync(params (string k, string v)[] fields) =>
+            await admin.PostAsync("/SurveyCommittees/SaveCommittee", new FormUrlEncodedContent(
+                fields.Select(f => new KeyValuePair<string, string>(f.k, f.v)).Append(
+                    new KeyValuePair<string, string>("__RequestVerificationToken", await TokenAsync(admin, "/SurveyCommittees")))));
+
+        var created = await PostAsync(("CommitteeId", "0"), ("CommitteeName", "Posted committee"), ("Plant", Plant), ("IsActive", "true"));
+        Assert.Equal(HttpStatusCode.Redirect, created.StatusCode);
+        var k = (await Committee(svc => svc.ListCommitteesAsync())).Single(x => x.Plant == Plant);
+        Assert.EndsWith("/SurveyCommittees?addMemberTo=" + k.CommitteeId, created.Headers.Location!.OriginalString);
+
+        // The page carries the button the script opens, the picker of QMS users
+        // and the fields for an outside person: a member can be either.
+        var html = await admin.GetStringAsync(created.Headers.Location!.OriginalString);
+        Assert.Contains("data-add-member=\"" + k.CommitteeId + "\"", html);
+        Assert.Contains("name=\"UserId\"", html);
+        Assert.Contains("name=\"MemberName\"", html);
+        Assert.Contains("value=\"" + QmsAppFactory.AdminUserId + "\"", html);
+
+        // Editing an existing committee just comes back to the list.
+        var edited = await PostAsync(("CommitteeId", k.CommitteeId.ToString()), ("CommitteeName", "Renamed"), ("Plant", Plant), ("IsActive", "true"));
+        Assert.EndsWith("/SurveyCommittees", edited.Headers.Location!.OriginalString);
+        Assert.Equal("Renamed", (await Committee(svc => svc.ListCommitteesAsync())).Single(x => x.CommitteeId == k.CommitteeId).CommitteeName);
+    }
+
+    [Fact]
     public async Task Only_an_administrator_can_change_the_committee_setup()
     {
         var perms = _factory.Services.GetRequiredService<IPermissionResolver>();
@@ -841,6 +869,7 @@ public class SurveyCommitteeTests : IClassFixture<QmsAppFactory>, IAsyncLifetime
                      + (SELECT COUNT(*) FROM qms_survey_appointment WHERE survey_id = @id)
                      + (SELECT COUNT(*) FROM qms_notification WHERE entity_type = 'Survey' AND entity_id = @id)
                      + (SELECT COUNT(*) FROM qms_mail_outbox WHERE entity_type = 'Survey' AND entity_id = @id)", new { id }));
+            await SurveyTestData.ForgetSurveyAuditAsync(_factory, id);
         }
         finally { if (!deleted) await CleanupAsync(arrivalId); }
     }

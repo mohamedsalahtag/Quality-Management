@@ -21,6 +21,8 @@ public interface ISurveyCommitteeService
 {
     // ---- Configuration (Parameters -> Survey committees) ----
     Task<IReadOnlyList<SurveyCommittee>> ListCommitteesAsync();
+    /// <summary>Creates (id 0) or updates. A new committee's id is set on
+    /// <paramref name="committee"/>.</summary>
     Task<(bool ok, string? error)> SaveCommitteeAsync(SurveyCommittee committee, string user);
     Task<(bool ok, string? error)> DeleteCommitteeAsync(int committeeId, string user);
     Task<(bool ok, string? error)> SaveMemberAsync(SurveyCommitteeMember member, string user);
@@ -140,6 +142,9 @@ public class SurveyCommitteeService : ISurveyCommitteeService
                     new { name, description, plant, active = k.IsActive, user }, tx);
                 await _audit.WriteAsync(c, tx, EntityTypes.SurveyCommittee, id, ActionCodes.Created,
                     null, new { committee_name = name, plant, is_active = k.IsActive }, user);
+                // The caller gets the new id back on the object, so the page
+                // can lead straight into adding the first member.
+                k.CommitteeId = id;
             }
             else
             {

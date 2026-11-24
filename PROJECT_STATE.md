@@ -213,6 +213,11 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-11-24 (Survey committees: members are reachable from New committee)
+- **Why:** on the first day the user read the **New committee** dialog (name, branch, description) as "only a name is allowed". Picking a QMS user or typing an outside person was already there, but one step later, behind **Add member** on a card that only exists once the committee is saved.
+- **What changed:** saving a NEW committee redirects to `/SurveyCommittees?addMemberTo=<id>` and the page opens the member dialog for it (`SaveCommitteeAsync` now sets the new id on the object it was given). The dialog and the empty card say that a member is an existing QMS user or an outside person. No rule changed: internal members are still picked from `qms.AppUser`, external ones are typed and get no account.
+- **Tests clean their audit trail:** the survey tests act under made-up names (`decider`, `requester`, …) and were leaving ~800 `Survey` rows per run in the live `qms_audit_log`. `SurveyTestData` now deletes the audit rows of the surveys and test-branch committees it removes. Each run still uses up about 56 survey numbers.
+
 ### 2026-11-24 (Survey management — M44, M45, M46)
 - **What it is:** the internal, confidential record of a container that may need a formal survey. Built from `new featurs.md` (written by another AI with no access to the app) after checking every assumption in it against the code. The approved plan and the gap analysis are in `C:\Users\mohamed.tag\.claude\plans\1-if-a-container-vast-catmull.md`. **Built in three commits on `review-fixes` (`14c9bd9f`, `0fb58f8e`, `ddffa91b`); deployed 2026-11-24 13:07.**
 - **Decisions the user took that differ from the prompt:** claim approval stays ONE decision by the Claim Manager (no three-team sign-off); notifications are e-mail plus a new in-app bell; the arrival's existing **Joint Survey** Yes/No field IS the request (it was a placeholder for this feature); the survey wins over a manual marking unless the Claim Manager has decided; the Finish dialog no longer asks Potential Claim / No Potential Claim; an order finished with no confirmed survey is marked Passed QC automatically.

@@ -133,6 +133,9 @@ internal static class SurveyTestData
                     OR (entity_type = 'QualityOrder' AND entity_id IN (SELECT id FROM @qos));
 
             DELETE FROM qms_status_history WHERE entity_type = 'Survey' AND entity_id IN (SELECT id FROM @surveys);
+            -- The survey's audit trail goes too: these tests act under made-up
+            -- user names, which must not pile up in the live Activity log.
+            DELETE FROM qms_audit_log WHERE entity_type = 'Survey' AND entity_id IN (SELECT id FROM @surveys);
             DELETE FROM qms_survey WHERE arrival_id = @arrivalId;
             DELETE FROM qms_claim_read_marker WHERE claim_id IN
                 (SELECT claim_id FROM qms_claim WHERE quality_order_id IN (SELECT id FROM @qos));
@@ -149,12 +152,31 @@ internal static class SurveyTestData
             DELETE FROM qms_arrival WHERE arrival_id = @arrivalId;", new { arrivalId });
     }
 
-    /// <summary>Removes every committee a test set up for the test branches.
-    /// Members go with their committee (cascade).</summary>
-    public static async Task CleanupCommitteesAsync(QmsAppFactory factory)
+    /// <summary>For a test that removed its survey through the application
+    /// (deleting the arrival) and so never reaches <see cref="CleanupAsync"/>:
+    /// takes away the audit rows the survey left.</summary>
+    public static async Task ForgetSurveyAuditAsync(QmsAppFactory factory, long surveyId)
     {
         using var c = Db(factory);
         await c.ExecuteAsync(
-            "DELETE FROM qms_survey_committee WHERE plant IN (@a, @b)", new { a = TestPlant, b = TestPlantBare });
+            "DELETE FROM qms_audit_log WHERE entity_type = 'Survey' AND entity_id = @surveyId", new { surveyId });
+    }
+
+    /// <summary>Removes every committee a test set up for the test branches.
+    /// Members go with their committee (cascade). Their audit rows go as well,
+    /// including those of a committee the test itself deleted: such a row is
+    /// recognised by the test branch code in its values.</summary>
+    public static async Task CleanupCommitteesAsync(QmsAppFactory factory)
+    {
+        using var c = Db(factory);
+        await c.ExecuteAsync(@"
+            DECLARE @ids TABLE (id BIGINT);
+            INSERT INTO @ids SELECT committee_id FROM qms_survey_committee WHERE plant IN (@a, @b);
+            INSERT INTO @ids SELECT entity_id FROM qms_audit_log
+             WHERE entity_type = 'SurveyCommittee'
+               AND (ISNULL(old_values_json, '') + ISNULL(new_values_json, '') LIKE '%""plant"":""' + @a + '""%'
+                 OR ISNULL(old_values_json, '') + ISNULL(new_values_json, '') LIKE '%""plant"":""' + @b + '""%');
+            DELETE FROM qms_audit_log WHERE entity_type = 'SurveyCommittee' AND entity_id IN (SELECT id FROM @ids);
+            DELETE FROM qms_survey_committee WHERE plant IN (@a, @b);", new { a = TestPlant, b = TestPlantBare });
     }
 }
