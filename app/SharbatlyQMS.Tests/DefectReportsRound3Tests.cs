@@ -270,4 +270,37 @@ public class DefectReportsRound3Tests : IClassFixture<QmsAppFactory>
         Assert.Equal(System.Net.HttpStatusCode.OK, res.StatusCode);
         Assert.StartsWith("[", (await res.Content.ReadAsStringAsync()).TrimStart());
     }
+
+    // ---- Over tolerance -----------------------------------------------------
+
+    /// <summary>"Only containers over tolerance" keeps exactly the orders whose
+    /// QC report summary prints a line in red -- checked against the report's
+    /// own summary for a sample of orders on both sides of the line.</summary>
+    [Fact]
+    public async Task Over_tolerance_matches_the_red_lines_on_the_qc_report()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var svc  = scope.ServiceProvider.GetRequiredService<IDefectReportService>();
+        var qos  = scope.ServiceProvider.GetRequiredService<IQualityOrderService>();
+        var mara = scope.ServiceProvider.GetRequiredService<IMaraService>();
+        var d = await svc.GetDatasetAsync(From, To, PlantScope.All);
+        if (d.Units.Count == 0) return;
+        var over = d.OverTolerance.ToHashSet();
+        var all = d.Units.Select(u => Convert.ToInt64(u[0])).Distinct().ToList();
+        var sample = all.Where(over.Contains).Take(8).Concat(all.Where(q => !over.Contains(q)).Take(8)).ToList();
+        var units = await qos.GetReportUnitsAsync();
+        foreach (var qo in sample)
+        {
+            var mats = (await qos.GetMaterialsAsync(qo)).ToList();
+            var mm = await mara.LookupAsync(mats.Select(m => m.MaterialNo));
+            foreach (var m in mats) if (mm.TryGetValue(m.MaterialNo, out var x)) m.ApplyMara(x);
+            var summaries = await qos.BuildGroupSummariesAsync(qo, mats, units);
+            var red = summaries.Any(sm => sm.DefectSections.Any(sec => sec.ExceedsTolerance || sec.Rows.Any(r => r.ExceedsTolerance)));
+            Assert.True(red == over.Contains(qo), $"QO {qo}: report red={red}, filter={over.Contains(qo)}");
+        }
+
+        // The drill honours it too.
+        var drill = await svc.DrillAsync(new DefectDrillRequest { From = From, To = To, Tab = "major", RowKey = "__all", DefectKey = "T", OverTolerance = true }, PlantScope.All);
+        Assert.All(drill, o => Assert.Contains(o.QualityOrderId, over));
+    }
 }

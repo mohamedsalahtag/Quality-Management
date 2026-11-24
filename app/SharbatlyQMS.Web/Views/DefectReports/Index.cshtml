@@ -42,6 +42,10 @@
                     <input class="form-check-input" type="checkbox" id="fHide" checked>
                     <label class="form-check-label small" for="fHide">@Loc["Hide defects that never occurred"]</label>
                 </div>
+                <div class="form-check mb-0">
+                    <input class="form-check-input" type="checkbox" id="fOverTol">
+                    <label class="form-check-label small" for="fOverTol" title="@Loc["Containers whose QC report shows a defect or a category total at or above its tolerance (printed in red)."]">@Loc["Only containers over tolerance"]</label>
+                </div>
                 <span class="dr-loading" id="loading" hidden><span class="spinner-border spinner-border-sm me-1"></span>@Loc["Loading…"]</span>
             </div>
             <button type="button" class="btn btn-sm btn-outline-secondary" id="fReset">@Loc["Reset filters"]</button>
@@ -77,6 +81,7 @@
                     <li>@Loc["Cartons are the PO quantity of the inspected lines (mostly cartons; the tooltip splits it by unit)."]</li>
                     <li>@Loc["Pending containers: received in the period (with or without an arrival) whose inspection was not finished by the last day. Filtered by branch and supplier."]</li>
                     <li>@Loc["A blank cell means that defect does not exist for that fruit; 0.00 means it was checked and not found."]</li>
+                    <li>@Loc["Only containers over tolerance: keeps the containers whose QC report shows a defect or a category total at or above the tolerance set in the defect catalogue (the lines printed in red)."]</li>
                 </ul>
             </div>
         </div>

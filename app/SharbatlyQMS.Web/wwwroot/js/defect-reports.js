@@ -21,6 +21,7 @@
 
   // ---------- model (rebuilt on every load) --------------------------------
   let D, cats = [], catColor = {}, defs = [], units = [], factsBy = [], groupInfo = {}, nameOrder = {}, pending = [], bananas = [], weights = [];
+  let overTol = new Set();   // quality orders whose QC report shows a line over tolerance
   const catInk = hex => { const n = parseInt((hex || "#6c757d").slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255; return (0.299 * r + 0.587 * g + 0.114 * b) > 150 ? "#212529" : "#ffffff"; };
   function build(data) {
     D = data;
@@ -39,6 +40,7 @@
       for (const i of (D.groupDefects[g] || [])) { const d = defs[i]; byName[d.nm] = d.ct; catCount[d.ct] = (catCount[d.ct] || 0) + 1; }
       groupInfo[g] = { byName, catCount };
     }
+    overTol = new Set(D.overTolerance || []);
     nameOrder = {};
     for (const d of defs) { const k = d.ct + "|" + d.nm; if (!(k in nameOrder) || d.o < nameOrder[k]) nameOrder[k] = d.o; }
   }
@@ -58,7 +60,7 @@
 
   // ---------- state --------------------------------------------------------
   // Every filter holds a list of chosen values; empty means no filter.
-  const S = { plant: [], supplier: [], major: [], sub: [], cls: [], pw: [], origin: [], cat: [], hide: true, tab: "week", bySub: true };
+  const S = { overTol: false, plant: [], supplier: [], major: [], sub: [], cls: [], pw: [], origin: [], cat: [], hide: true, tab: "week", bySub: true };
   const expanded = new Set();
   const TABS = [
     { id: "week",   label: "Per week",            title: "Defects per week", hint: "Defects down the side, ISO weeks (Monday to Sunday) across. Arrows compare each week with the week before." },
@@ -83,7 +85,10 @@
     { id: "fWeight", key: "pw", s: "pw", all: "All pack weights", name: "Pack weight", order: () => D.packWeights },
     { id: "fOrigin", key: "og", s: "origin", all: "All origins", name: "Origin" }
   ];
+  // Containers over tolerance only: a QC order filter, so it narrows every tab.
+  const tolOk = q => !S.overTol || (q != null && overTol.has(q));
   function passes(u, skip) {
+    if (!tolOk(u.q)) return false;
     for (const f of FILTERS) if (S[f.s].length && skip !== f.s && !S[f.s].includes(u[f.key])) return false;
     return true;
   }
@@ -122,6 +127,7 @@
   }
   function filterText() {
     const bits = MS.filter(f => S[f.s].length).map(f => `${f.name}: ${S[f.s].map(msText(f)).join(", ")}`);
+    if (S.overTol) bits.unshift("Only containers over tolerance");
     return bits.length ? bits : ["No filters (everything in the period)"];
   }
   const catOk = c => !S.cat.length || S.cat.includes(c);
@@ -417,7 +423,7 @@
   // (text columns travel in each row's texts; see DefectReportExporter).
   const bananaRows = () => bananas.filter(b =>
     (!S.plant.length || S.plant.includes(b.plant)) && (!S.supplier.length || S.supplier.includes(b.supplier))
-    && (!S.pw.length || S.pw.includes(b.weight)) && (!S.origin.length || S.origin.includes(b.origin)));
+    && (!S.pw.length || S.pw.includes(b.weight)) && (!S.origin.length || S.origin.includes(b.origin)) && tolOk(b.qualityOrderId));
   const BANANA_COLS = [
     ["Container #", "text", b => b.containerNo], ["BOL #", "text", b => b.bolNo], ["PO #", "text", b => b.po],
     ["Receiving Branch", "text", b => plantName(b.plant)], ["Origin", "text", b => b.origin], ["Weight", "text", b => b.weight],
@@ -481,7 +487,7 @@
     (!S.plant.length || S.plant.includes(w.plant)) && (!S.supplier.length || S.supplier.includes(w.supplier))
     && (!S.major.length || S.major.includes(w.major)) && (!S.sub.length || S.sub.includes(w.sub))
     && (!S.cls.length || S.cls.includes(w.class)) && (!S.pw.length || S.pw.includes(w.weight))
-    && (!S.origin.length || S.origin.includes(w.origin)));
+    && (!S.origin.length || S.origin.includes(w.origin)) && tolOk(w.qualityOrderId));
   const NET_COLS = [
     ["Container #", "text", w => w.containerNo], ["BOL #", "text", w => w.bolNo], ["PO #", "text", w => w.po],
     ["Receiving Branch", "text", w => plantName(w.plant)], ["Major Category", "text", w => w.major], ["Sub-major Category", "text", w => w.sub],
@@ -697,6 +703,7 @@
     // One pair per value: the server binds each to a list.
     for (const [name, values] of [["Plant", S.plant], ["Supplier", S.supplier], ["Major", S.major], ["Sub", S.sub], ["Class", S.cls], ["PackWeight", S.pw], ["Origin", S.origin], ["Cat", S.cat]])
       for (const v of values) q.append(name, v);
+    if (S.overTol) q.append("OverTolerance", "true");
     openDrawer(d.what, context, [
       ["Defect %", sum("sz") ? (100 * sum("val") / sum("sz")).toFixed(2) + "%" : "—"],
       ["Orders", list.length.toLocaleString()],
@@ -817,8 +824,9 @@
   }
 
   // ---------- wiring -------------------------------------------------------
-  const update = () => { S.hide = $("fHide").checked; refreshOptions(); render(); };
+  const update = () => { S.hide = $("fHide").checked; S.overTol = $("fOverTol").checked; refreshOptions(); render(); };
   $("fHide").addEventListener("change", update);
+  $("fOverTol").addEventListener("change", update);
   const filterBox = document.querySelector(".dr-filters");
   const msOf = el => { const box = el.closest(".dr-ms"); return box ? MS.find(f => f.id === box.id) : null; };
   filterBox.addEventListener("change", e => {
@@ -844,7 +852,7 @@
   for (const id of ["fFrom", "fTo"]) $(id).addEventListener("change", load);
   $("fReset").addEventListener("click", () => {
     for (const f of MS) S[f.s] = [];
-    $("fHide").checked = true; update();
+    $("fHide").checked = true; $("fOverTol").checked = false; update();
   });
   function selectTab(id) { S.tab = id; store.set("defectReports.tab", id); try { history.replaceState(null, "", "#" + id); } catch (e) {} renderTabs(); render(); }
   $("tabs").addEventListener("click", e => { const b = e.target.closest("[data-tab]"); if (b) selectTab(b.dataset.tab); });

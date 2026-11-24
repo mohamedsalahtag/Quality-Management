@@ -81,7 +81,9 @@ public class DefectReportService : IDefectReportService
         w is > 0 ? $"{w.Value.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)} kg" : "(no weight)";
     private sealed record FactRow(long QoMaterialId, int DefectId, decimal Units, decimal PctSum);
     private sealed record GroupDefectRow(string MaterialGroup, int DefectId);
-    private sealed record DefectRow(int DefectId, string Name, string Category, string MaterialGroup, int SortOrder);
+    private sealed record DefectRow(int DefectId, string Name, string Category, string MaterialGroup, int SortOrder,
+                                    decimal? Tolerance, bool IsActive);
+    private sealed record CategoryToleranceRow(string MaterialGroup, string Category, decimal Tolerance);
     private sealed record CategoryRow(string Name, int SortOrder, string? Color);
 
     // One batch: the window's material lines into a temp table, then the four
@@ -154,7 +156,8 @@ public class DefectReportService : IDefectReportService
         DROP TABLE #u;";
 
     private sealed record Raw(List<UnitRow> Units, List<FactRow> Facts, List<GroupDefectRow> GroupDefects,
-                              List<DefectRow> Defects, List<CategoryRow> Categories);
+                              List<DefectRow> Defects, List<CategoryRow> Categories,
+                              List<CategoryToleranceRow> CategoryTolerances);
 
     private async Task<Raw> LoadAsync(DateTime from, DateTime to, PlantScope scope, CancellationToken ct)
     {
@@ -177,9 +180,61 @@ public class DefectReportService : IDefectReportService
         var ids = gd.Select(x => x.DefectId).Concat(facts.Select(f => f.DefectId)).Distinct().ToArray();
         var defects = ids.Length == 0 ? new List<DefectRow>() : (await c.QueryAsync<DefectRow>(@"
             SELECT defect_id AS DefectId, defect_name AS Name, defect_category AS Category,
-                   material_group AS MaterialGroup, sort_order AS SortOrder
+                   material_group AS MaterialGroup, sort_order AS SortOrder,
+                   tolerance AS Tolerance, is_active AS IsActive
             FROM   qms_defect_catalog WHERE defect_id IN @ids", new { ids })).ToList();
-        return new Raw(units, facts, gd, defects, cats);
+        var groups = units.Select(u => u.MaterialGroup).Where(g => g.Length > 0).Distinct().ToArray();
+        var catTol = groups.Length == 0 ? new List<CategoryToleranceRow>() : (await c.QueryAsync<CategoryToleranceRow>(@"
+            SELECT t.material_group AS MaterialGroup, dc.category_name AS Category, t.tolerance AS Tolerance
+            FROM   qms_defect_category_tolerance t
+            JOIN   qms_defect_category dc ON dc.category_id = t.category_id
+            WHERE  t.tolerance IS NOT NULL AND t.material_group IN @groups", new { groups })).ToList();
+        return new Raw(units, facts, gd, defects, cats, catTol);
+    }
+
+    /// <summary>
+    /// The finished orders whose QC report summary prints at least one line in
+    /// red: a defect, or a category total, at or above the tolerance agreed for
+    /// it. Same grouping and rules as QualityOrderService.BuildGroupSummariesAsync
+    /// -- per (material group, variety, grade, carton weight) of the order,
+    /// percentage = defective units / inspected units, inclusive, and only once
+    /// the defect (or category) has actually occurred; a category total adds
+    /// up its defects' percentages rounded to two places, as the report does.
+    /// </summary>
+    private static HashSet<long> OverTolerance(Raw raw)
+    {
+        var defectById = raw.Defects.Where(d => d.IsActive).ToDictionary(d => d.DefectId);
+        var catTol = raw.CategoryTolerances.ToDictionary(t => (t.MaterialGroup.ToUpperInvariant(), t.Category.ToUpperInvariant()), t => t.Tolerance);
+        var factsBy = raw.Facts.ToLookup(f => f.QoMaterialId);
+        var over = new HashSet<long>();
+        foreach (var g in raw.Units.GroupBy(u => (u.QualityOrderId, G: u.MaterialGroup.ToUpperInvariant(),
+                                                  V: u.Variety.Trim().ToUpperInvariant(), C: u.Class.Trim().ToUpperInvariant(),
+                                                  W: u.PackWeight is > 0 ? u.PackWeight : null)))
+        {
+            if (over.Contains(g.Key.QualityOrderId)) continue;
+            var size = g.Sum(u => u.Inspected);
+            if (size <= 0) continue;
+            var sums = g.SelectMany(u => factsBy[u.QoMaterialId])
+                        .Where(f => defectById.ContainsKey(f.DefectId))
+                        .GroupBy(f => f.DefectId).ToDictionary(x => x.Key, x => x.Sum(f => f.Units));
+            var catTotals = new Dictionary<string, (decimal Pct, decimal Units)>();
+            var breach = false;
+            foreach (var (id, units) in sums)
+            {
+                if (units <= 0) continue;
+                var d = defectById[id];
+                var pct = units / size * 100m;
+                if (d.Tolerance.HasValue && pct >= d.Tolerance.Value) { breach = true; break; }
+                var k = d.Category.ToUpperInvariant();
+                var t = catTotals.TryGetValue(k, out var x) ? x : (0m, 0m);
+                catTotals[k] = (t.Item1 + Math.Round(pct, 2, MidpointRounding.AwayFromZero), t.Item2 + units);
+            }
+            if (!breach)
+                breach = catTotals.Any(kv => kv.Value.Units > 0
+                                             && catTol.TryGetValue((g.Key.G, kv.Key), out var tol) && kv.Value.Pct >= tol);
+            if (breach) over.Add(g.Key.QualityOrderId);
+        }
+        return over;
     }
 
     public async Task<DefectReportDataset> GetDatasetAsync(DateTime from, DateTime to, PlantScope scope, CancellationToken ct = default)
@@ -247,6 +302,7 @@ public class DefectReportService : IDefectReportService
             Defects = defects.Select(d => new object[] { d.DefectId, d.Name, d.Category, d.MaterialGroup, d.SortOrder }).ToList(),
             GroupDefects = groupDefects.ToDictionary(kv => kv.Key, kv => kv.Value.OrderBy(x => x).ToList()),
             Facts = facts,
+            OverTolerance = OverTolerance(raw).OrderBy(x => x).ToList(),
             Categories = raw.Categories.Select(c => new DefectReportCategory(c.Name, c.SortOrder, c.Color)).ToList(),
             Generated = DateTime.Now.ToString("yyyy-MM-dd HH:mm")
         };
@@ -260,6 +316,7 @@ public class DefectReportService : IDefectReportService
     public async Task<IReadOnlyList<DefectDrillRow>> DrillAsync(DefectDrillRequest req, PlantScope scope, CancellationToken ct = default)
     {
         var raw = await LoadAsync(req.From, req.To, scope, ct);
+        var overTolerance = req.OverTolerance ? OverTolerance(raw) : null;
         var defectById = raw.Defects.ToDictionary(d => d.DefectId);
         var groupSets = raw.GroupDefects.GroupBy(x => x.MaterialGroup)
             .ToDictionary(g => g.Key, g => g.Select(x => defectById.TryGetValue(x.DefectId, out var d) ? d : null)
@@ -275,6 +332,7 @@ public class DefectReportService : IDefectReportService
         foreach (var u in raw.Units)
         {
             if (!PassesFilters(u, req) || !InRow(u, req)) continue;
+            if (overTolerance != null && !overTolerance.Contains(u.QualityOrderId)) continue;
             if (!groupSets.TryGetValue(u.MaterialGroup, out var set)) continue;
             var rows = set.Count(d => CatOk(d.Category) && Matches(d));
             if (rows == 0) continue;
@@ -643,6 +701,8 @@ public class DefectReportDataset
     public Dictionary<string, List<int>> GroupDefects { get; set; } = new();
     /// <summary>[unit#, defect#, defective units, sum of the samples' Defect %]</summary>
     public List<object[]> Facts { get; set; } = new();
+    /// <summary>Quality order ids whose QC report shows a line over tolerance.</summary>
+    public List<long> OverTolerance { get; set; } = new();
     public List<DefectReportCategory> Categories { get; set; } = new();
     public string Generated { get; set; } = "";
 }
@@ -662,6 +722,8 @@ public class DefectDrillRequest
     public List<string> PackWeight { get; set; } = new();
     public List<string> Origin { get; set; } = new();
     public List<string> Cat { get; set; } = new();
+    /// <summary>Only orders with a defect or category total over tolerance.</summary>
+    public bool OverTolerance { get; set; }
     public string Tab { get; set; } = "major";
     public string RowKey { get; set; } = "__all";
     public string DefectKey { get; set; } = "T";
