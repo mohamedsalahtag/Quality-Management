@@ -58,13 +58,27 @@ public class SurveyClaimTests : IClassFixture<QmsAppFactory>
         Assert.True(ok, error);
     }
 
-    /// <summary>Finishes a Submitted order the way the page does. The seeded
-    /// order has no samples, so the no-samples rule is bypassed with a reason.</summary>
-    private async Task FinishAsync(long qoId)
+    /// <summary>Finishes a Submitted order the way the page does, with the
+    /// finisher's claim assessment (No Potential Claim unless said otherwise).
+    /// The seeded order has no samples, so the no-samples rule is bypassed
+    /// with a reason.</summary>
+    private async Task FinishAsync(long qoId, bool? potentialClaim = false)
     {
         var (ok, error) = await With<IQualityOrderService, (bool ok, string? error)>(svc =>
-            svc.CloseAsync(qoId, "finisher", "Finished by a test", bypassNoSamples: true));
+            svc.CloseAsync(qoId, "finisher", "Finished by a test", bypassNoSamples: true, potentialClaim));
         Assert.True(ok, error);
+    }
+
+    /// <summary>Reopens a finished order and submits it again, ready for a
+    /// second finish.</summary>
+    private async Task ReopenAndResubmitAsync(long qoId)
+    {
+        var reopened = await With<IQualityOrderService, (bool ok, string? error)>(svc =>
+            svc.ReopenAsync(qoId, "manager", "Wrong assessment"));
+        Assert.True(reopened.ok, reopened.error);
+        var submitted = await With<IQualityOrderService, (bool ok, string? error)>(svc =>
+            svc.SubmitAsync(qoId, "operator", bypassNoSamples: true, reason: "Resubmitted by a test"));
+        Assert.True(submitted.ok, submitted.error);
     }
 
     private sealed class ClaimState
@@ -146,10 +160,11 @@ public class SurveyClaimTests : IClassFixture<QmsAppFactory>
             var surveyId = await RequestAsync(arrivalId, qoId);
             await FinishAsync(qoId!.Value);
 
-            // Open survey: the order waits, unclassified, with no claim row.
+            // Open survey: the order waits with no claim row, carrying the
+            // finisher's own answer for now.
             var waiting = await StateAsync(qoId.Value);
             Assert.Null(waiting.ClaimStatus);
-            Assert.Null(waiting.PotentialClaim);
+            Assert.False(waiting.PotentialClaim);
 
             await DecideAsync(surveyId, confirm: true);
 
@@ -188,11 +203,10 @@ public class SurveyClaimTests : IClassFixture<QmsAppFactory>
             Assert.Equal(ClaimStatus.PassedQC, (await StateAsync(qoId.Value)).ClaimStatus);
 
             var surveyId = await RequestAsync(arrivalId, qoId);
-            // Requested but undecided: the claim row does not move, and the
-            // order is unclassified again until somebody decides.
+            // Requested but undecided: nothing moves until somebody decides.
             var asked = await StateAsync(qoId.Value);
             Assert.Equal(ClaimStatus.PassedQC, asked.ClaimStatus);
-            Assert.Null(asked.PotentialClaim);
+            Assert.False(asked.PotentialClaim);
 
             await DecideAsync(surveyId, confirm: true);
             var s = await StateAsync(qoId.Value);
@@ -202,6 +216,138 @@ public class SurveyClaimTests : IClassFixture<QmsAppFactory>
             Assert.Equal(2, s.SystemNotes);             // the automatic pass, then the automatic raise
         }
         finally { await CleanupAsync(arrivalId); }
+    }
+
+    // ---- the finisher's own answer ----------------------------------
+
+    [Fact]
+    public async Task A_potential_claim_from_the_finisher_stays_pending_for_a_manager()
+    {
+        var (arrivalId, qoId, _) = await SeedAsync(ArrivalStatus.Completed, QualityOrderStatus.Submitted);
+        try
+        {
+            await FinishAsync(qoId!.Value, potentialClaim: true);
+
+            // No survey and a potential claim: nothing is marked by itself.
+            var s = await StateAsync(qoId.Value);
+            Assert.Equal(0, s.ClaimRows);
+            Assert.True(s.PotentialClaim);
+            using (var c = SurveyTestData.Db(_factory))
+                Assert.Equal("finisher", await c.ExecuteScalarAsync<string>(
+                    "SELECT potential_claim_by FROM qms_quality_order WHERE quality_order_id = @qoId", new { qoId }));
+
+            // Running the step again leaves it Pending.
+            var again = await With<ISurveyClaimSync, ClaimSyncResult>(svc => svc.AfterOrderFinishedAsync(qoId.Value));
+            Assert.Equal(ClaimSyncAction.None, again.Action);
+            Assert.Equal(0, (await StateAsync(qoId.Value)).ClaimRows);
+
+            // A manager raises it by hand, as before surveys.
+            Assert.True((await With<IClaimService, (bool ok, string? error)>(svc =>
+                svc.MarkClaimRequestAsync(qoId.Value, "Raised by hand", "manager", RoleCodes.Manager))).ok);
+            Assert.Equal(ClaimStatus.ClaimRequest, (await StateAsync(qoId.Value)).ClaimStatus);
+        }
+        finally { await CleanupAsync(arrivalId); }
+    }
+
+    [Fact]
+    public async Task The_finishers_potential_claim_outlives_a_passed_survey_and_a_confirmed_one_raises_it()
+    {
+        var (aPass, qPass, _) = await SeedAsync(ArrivalStatus.Completed, QualityOrderStatus.Submitted);
+        var (aConf, qConf, _) = await SeedAsync(ArrivalStatus.Completed, QualityOrderStatus.Submitted);
+        try
+        {
+            // Passed: "no formal survey" is not "no claim". Still Pending, still flagged.
+            var passed = await RequestAsync(aPass, qPass);
+            await FinishAsync(qPass!.Value, potentialClaim: true);
+            Assert.Equal(0, (await StateAsync(qPass.Value)).ClaimRows);
+            await DecideAsync(passed, confirm: false);
+            var p = await StateAsync(qPass.Value);
+            Assert.Equal(0, p.ClaimRows);
+            Assert.True(p.PotentialClaim);
+
+            // Confirmed: the claim request is raised, as for any confirmed survey.
+            var confirmed = await RequestAsync(aConf, qConf);
+            await FinishAsync(qConf!.Value, potentialClaim: true);
+            await DecideAsync(confirmed, confirm: true);
+            var k = await StateAsync(qConf.Value);
+            Assert.Equal(ClaimStatus.ClaimRequest, k.ClaimStatus);
+            Assert.True(k.PotentialClaim);
+        }
+        finally { await CleanupAsync(aPass); await CleanupAsync(aConf); }
+    }
+
+    [Fact]
+    public async Task A_confirmed_survey_wins_over_a_no_and_is_the_only_finish_that_needs_no_answer()
+    {
+        var (aNo, qNo, _)     = await SeedAsync(ArrivalStatus.Completed, QualityOrderStatus.Submitted);
+        var (aNone, qNone, _) = await SeedAsync(ArrivalStatus.Completed, QualityOrderStatus.Submitted);
+        var (aOpen, qOpen, _) = await SeedAsync(ArrivalStatus.Completed, QualityOrderStatus.Submitted);
+        try
+        {
+            Task<(bool ok, string? error)> FinishUnanswered(long qoId) => With<IQualityOrderService, (bool ok, string? error)>(svc =>
+                svc.CloseAsync(qoId, "finisher", "Finished by a test", bypassNoSamples: true));
+            async Task<string> StatusAsync(long qoId)
+            {
+                using var c = SurveyTestData.Db(_factory);
+                return await c.ExecuteScalarAsync<string>(
+                    "SELECT status_code FROM qms_quality_order WHERE quality_order_id = @qoId", new { qoId });
+            }
+
+            // Confirmed survey, finisher says No: still a potential claim.
+            await DecideAsync(await RequestAsync(aNo, qNo), confirm: true);
+            await FinishAsync(qNo!.Value, potentialClaim: false);
+            var s = await StateAsync(qNo.Value);
+            Assert.Equal(ClaimStatus.ClaimRequest, s.ClaimStatus);
+            Assert.True(s.PotentialClaim);
+
+            // No survey, or one still open: a finish with no answer is refused.
+            var refused = await FinishUnanswered(qNone!.Value);
+            Assert.False(refused.ok);
+            Assert.Contains("Choose Potential Claim or No Potential Claim", refused.error);
+            Assert.Equal(QualityOrderStatus.Submitted, await StatusAsync(qNone.Value));
+
+            var open = await RequestAsync(aOpen, qOpen);
+            Assert.False((await FinishUnanswered(qOpen!.Value)).ok);
+            Assert.Equal(QualityOrderStatus.Submitted, await StatusAsync(qOpen.Value));
+
+            // Once that survey is confirmed there is nothing left to answer.
+            await DecideAsync(open, confirm: true);
+            var accepted = await FinishUnanswered(qOpen.Value);
+            Assert.True(accepted.ok, accepted.error);
+            Assert.Equal(ClaimStatus.ClaimRequest, (await StateAsync(qOpen.Value)).ClaimStatus);
+        }
+        finally { await CleanupAsync(aNo); await CleanupAsync(aNone); await CleanupAsync(aOpen); }
+    }
+
+    [Fact]
+    public async Task Finishing_again_as_a_potential_claim_takes_the_automatic_pass_back_unless_a_person_wrote_on_it()
+    {
+        var (aClean, qClean, _)     = await SeedAsync(ArrivalStatus.Completed, QualityOrderStatus.Submitted);
+        var (aTouched, qTouched, _) = await SeedAsync(ArrivalStatus.Completed, QualityOrderStatus.Submitted);
+        try
+        {
+            // Finished as "no potential claim": passed automatically.
+            await FinishAsync(qClean!.Value, potentialClaim: false);
+            Assert.Equal(ClaimStatus.PassedQC, (await StateAsync(qClean.Value)).ClaimStatus);
+
+            // Reopened and finished with the other answer: Pending again.
+            await ReopenAndResubmitAsync(qClean.Value);
+            await FinishAsync(qClean.Value, potentialClaim: true);
+            var s = await StateAsync(qClean.Value);
+            Assert.Equal(0, s.ClaimRows);
+            Assert.True(s.PotentialClaim);
+
+            // The same, but somebody has written on the claim meanwhile: it stays.
+            await FinishAsync(qTouched!.Value, potentialClaim: false);
+            Assert.True((await With<IClaimService, (bool ok, string? error)>(svc =>
+                svc.AddNoteAsync(qTouched.Value, "Checked with the supplier", "manager", RoleCodes.Manager))).ok);
+            await ReopenAndResubmitAsync(qTouched.Value);
+            await FinishAsync(qTouched.Value, potentialClaim: true);
+            var t = await StateAsync(qTouched.Value);
+            Assert.Equal(ClaimStatus.PassedQC, t.ClaimStatus);
+            Assert.True(t.PotentialClaim);
+        }
+        finally { await CleanupAsync(aClean); await CleanupAsync(aTouched); }
     }
 
     // ---- never override a person ------------------------------------
@@ -458,32 +604,55 @@ public class SurveyClaimTests : IClassFixture<QmsAppFactory>
     }
 
     [Fact]
-    public async Task The_finish_dialog_no_longer_asks_for_a_claim_assessment()
+    public async Task The_finish_dialog_asks_for_a_claim_assessment_unless_the_survey_is_confirmed()
     {
-        var (arrivalId, qoId, _) = await SeedAsync(ArrivalStatus.Completed, QualityOrderStatus.Submitted);
+        var (arrivalId, qoId, _)   = await SeedAsync(ArrivalStatus.Completed, QualityOrderStatus.Submitted);
+        var (aConf, qConf, _)      = await SeedAsync(ArrivalStatus.Completed, QualityOrderStatus.Submitted);
         try
         {
             var admin = Admin();
-            var url = "/QualityOrders/Details/" + qoId;
-            var page = await admin.GetStringAsync(url);
-            Assert.DoesNotContain("name=\"potentialClaim\"", page);
-            Assert.Contains("No survey was requested for this container", page);
-
-            // Finishing posts no claim choice at all, and is accepted.
-            var res = await admin.PostAsync("/QualityOrders/Close/" + qoId, new FormUrlEncodedContent(new[]
+            async Task<HttpResponseMessage> FinishAsync(long id, string? claim) =>
+                await admin.PostAsync("/QualityOrders/Close/" + id, new FormUrlEncodedContent(new[]
+                {
+                    new KeyValuePair<string, string>("__RequestVerificationToken", await TokenAsync(admin, "/QualityOrders/Details/" + id)),
+                    new KeyValuePair<string, string>("reason", "Finished from the dialog"),
+                    new KeyValuePair<string, string>("bypassNoSamples", "true"),
+                }.Concat(claim == null
+                    ? Array.Empty<KeyValuePair<string, string>>()
+                    : new[] { new KeyValuePair<string, string>("potentialClaim", claim) })));
+            async Task<string> StatusAsync(long id)
             {
-                new KeyValuePair<string, string>("__RequestVerificationToken", await TokenAsync(admin, url)),
-                new KeyValuePair<string, string>("reason", "Finished from the dialog"),
-                new KeyValuePair<string, string>("bypassNoSamples", "true"),
-            }));
-            Assert.Equal(HttpStatusCode.Redirect, res.StatusCode);
+                using var c = SurveyTestData.Db(_factory);
+                return await c.ExecuteScalarAsync<string>(
+                    "SELECT status_code FROM qms_quality_order WHERE quality_order_id = @id", new { id });
+            }
 
-            using var c = SurveyTestData.Db(_factory);
-            Assert.Equal("Closed", await c.ExecuteScalarAsync<string>(
-                "SELECT status_code FROM qms_quality_order WHERE quality_order_id = @qoId", new { qoId }));
-            Assert.Equal(ClaimStatus.PassedQC, (await StateAsync(qoId!.Value)).ClaimStatus);
+            // No survey: the dialog asks, and says what each answer does.
+            var page = await admin.GetStringAsync("/QualityOrders/Details/" + qoId);
+            Assert.Contains("name=\"potentialClaim\"", page);
+            Assert.Contains("Potential Claim leaves the order Pending", page);
+
+            // A post without the answer finishes nothing.
+            Assert.Equal(HttpStatusCode.Redirect, (await FinishAsync(qoId!.Value, null)).StatusCode);
+            Assert.Equal(QualityOrderStatus.Submitted, await StatusAsync(qoId.Value));
+
+            // Potential Claim: finished, flagged, and left Pending for a manager.
+            Assert.Equal(HttpStatusCode.Redirect, (await FinishAsync(qoId.Value, "Yes")).StatusCode);
+            Assert.Equal(QualityOrderStatus.Closed, await StatusAsync(qoId.Value));
+            var s = await StateAsync(qoId.Value);
+            Assert.Equal(0, s.ClaimRows);
+            Assert.True(s.PotentialClaim);
+
+            // Confirmed survey: nothing to pick, and a post without it is accepted.
+            await DecideAsync(await RequestAsync(aConf, qConf), confirm: true);
+            var confirmedPage = await admin.GetStringAsync("/QualityOrders/Details/" + qConf);
+            Assert.DoesNotContain("name=\"potentialClaim\"", confirmedPage);
+            Assert.Contains("a claim notification request will be raised automatically", confirmedPage);
+            Assert.Equal(HttpStatusCode.Redirect, (await FinishAsync(qConf!.Value, null)).StatusCode);
+            Assert.Equal(QualityOrderStatus.Closed, await StatusAsync(qConf.Value));
+            Assert.Equal(ClaimStatus.ClaimRequest, (await StateAsync(qConf.Value)).ClaimStatus);
         }
-        finally { await CleanupAsync(arrivalId); }
+        finally { await CleanupAsync(arrivalId); await CleanupAsync(aConf); }
     }
 
     [Fact]

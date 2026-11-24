@@ -541,7 +541,7 @@ Two figures are worked out from those dates and are the same on every screen, th
 **Steps**
 1. Open a **Submitted** Quality Order.
 2. Review every sample and the operator's note.
-3. If everything is good, click **Finish** — the QO becomes **Closed** and the supplier email button unlocks. The dialog shows the **Claim assessment** that will be recorded. It comes from the container's survey, so you do not choose it.
+3. If everything is good, click **Finish** — the QO becomes **Closed** and the supplier email button unlocks. The dialog asks for the **Claim assessment**: choose **Potential Claim** if the shipment may need claim processing, otherwise **No Potential Claim**. When the container's survey is **Confirmed** there is nothing to choose: it is a potential claim.
 4. If something needs fixing, click **Cancel submission** — the QO goes back to **Open** so the operator can edit.
 
 **What you'll see next:** Either an email button you can use to send the supplier report, or the operator picks the QO back up.
@@ -577,7 +577,7 @@ Two figures are worked out from those dates and are the same on every screen, th
 
 **What you'll see next:** the claim appears in the list with its status badge and the supplier sees only the agreed copy.
 
-> **Tip** — Most finished orders are now marked automatically. A **Confirmed** survey raises a claim notification request. An order with no survey, or with a passed one, is marked **Passed QC**. A manager can still change that by hand until the Claim Manager decides.
+> **Tip** — A **Confirmed** survey raises a claim notification request automatically. Otherwise the answer given at **Finish** decides: **No Potential Claim** marks the order **Passed QC**, and **Potential Claim** leaves it **Pending** for a manager to raise the claim or pass it. A manager can still change an automatic marking by hand.
 
 ### Requesting a survey
 
@@ -602,7 +602,7 @@ Ask for a survey when a container looks bad enough that an independent surveyor 
 
 > **Warning** — A container can have only one survey, and a request cannot be taken back. Choose **NO** if no survey is needed.
 
-> **Tip** — Requesting a survey is now how you flag a possible claim. The Finish dialog no longer asks about it.
+> **Tip** — A survey is for a container that may need an independent surveyor. A possible claim with no survey is flagged when the order is finished, by choosing **Potential Claim** in the **Finish** dialog.
 
 > **For Admins** — Requesting needs `Surveys.Request` (Operator and above by default). It does not need the Surveys page, so an inspector can ask without being able to open the confidential survey. Photographs given in the dialog are stored with the survey, not as arrival photos, because arrival photos are printed in the supplier's QC report.
 
@@ -619,7 +619,7 @@ Ask for a survey when a container looks bad enough that an independent surveyor 
 
 **What you'll see next**
 - **Confirmed:** the committee for the branch is assigned and told. If the quality order is already finished, a claim notification request is raised on it straight away. If not, it is raised when the order is finished.
-- **Passed:** the red banner disappears from the quality order. A finished order is marked **Passed QC**.
+- **Passed:** the red banner disappears from the quality order. A finished order is marked **Passed QC**, unless it was finished as **Potential Claim**: that one stays **Pending** for a manager.
 
 > **Warning** — A decision cannot be changed afterwards.
 
@@ -873,8 +873,8 @@ You need Manager or SiteAdmin. Open the closed QO and click **Reopen**, type a s
 **I chose Joint Survey = YES by mistake.**
 A survey request cannot be taken back. Tell a manager or the claim manager: they can **Pass** the survey with the reason "requested by mistake". The red banner then disappears and the inspection carries on as normal.
 
-**The Finish dialog no longer asks "Potential Claim / No Potential Claim".**
-That is correct. The answer now comes from the container's survey. A confirmed survey means a potential claim, and no survey (or a passed one) means none. If a container should be claimed, request a survey before finishing.
+**When do I choose Potential Claim in the Finish dialog?**
+Whenever the shipment may need claim processing, with or without a survey. The order then stays **Pending** in the Claims window for a manager. **No Potential Claim** marks it **Passed QC**. If the container's survey is **Confirmed**, the dialog does not ask: a claim notification request is raised automatically.
 
 **I requested a survey but I can't open it.**
 Surveys are confidential. Inspectors can request one and can see its number and status on the arrival and the quality order, but only managers and claim managers can open it.

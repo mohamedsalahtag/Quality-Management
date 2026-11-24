@@ -213,6 +213,14 @@ When extending a QMS feature whose scope overlaps a pack, copy from the pack's `
 
 ## 8. Decisions log (newest first)
 
+### 2026-11-24 (Finish asks for the claim assessment again — reverses part of the survey decisions)
+- **Why:** a few hours after go-live the user asked for it back "for now": some quality orders must be raised as potential claims with no survey. In the 60 days before, 1,606 of 2,864 finished orders were finished as Potential Claim and managers picked about 100 of them to raise, so the pick is a wide net for a manager and not a claim in itself.
+- **Rule now (`SurveyClaimSync.PotentialClaimFor(surveyStatus, answer)`):** a CONFIRMED survey makes the order a potential claim whatever was picked, and is the only finish that needs no pick. Otherwise the flag is the finisher's answer. `CloseAsync` refuses a finish with no answer unless the survey is confirmed.
+- **Claim step:** confirmed survey → Claim Notification Request (unchanged). Otherwise **Potential Claim → nothing is marked: the order stays Pending for a manager**, exactly as before surveys and the same as a rejected container; **No Potential Claim → Passed QC automatically** (the earlier decision, kept). A survey still open waits, then follows the same two lines.
+- **Re-finish:** an order finished as No (passed automatically), reopened and finished as Potential Claim loses the automatic Passed QC and is Pending again, but only while nobody touched the claim (not decided, still the system's marking, no note by a person).
+- **Not chosen:** raising a Claim Notification Request straight from the finisher's Potential Claim. At ~27 a day it would bury the Claim Manager in requests and mail.
+- **Still true from the survey work:** Joint Survey = Yes requests a survey; the survey wins; a decision is final. "Pending" on the Claims page is again mostly finisher-flagged potential claims, plus orders waiting for a survey decision and rejected containers.
+
 ### 2026-11-24 (Survey committees: members are reachable from New committee)
 - **Why:** on the first day the user read the **New committee** dialog (name, branch, description) as "only a name is allowed". Picking a QMS user or typing an outside person was already there, but one step later, behind **Add member** on a card that only exists once the committee is saved.
 - **What changed:** saving a NEW committee redirects to `/SurveyCommittees?addMemberTo=<id>` and the page opens the member dialog for it (`SaveCommitteeAsync` now sets the new id on the object it was given). The dialog and the empty card say that a member is an existing QMS user or an outside person. No rule changed: internal members are still picked from `qms.AppUser`, external ones are typed and get no account.

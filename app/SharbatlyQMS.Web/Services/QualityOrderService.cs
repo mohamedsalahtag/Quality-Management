@@ -545,17 +545,21 @@ public class QualityOrderService : IQualityOrderService
     // finished state. Existing legacy 'Open' QOs cannot be closed directly any
     // more -- they must transit through Submit first.
     //
-    // The potential-claim assessment (M24) is no longer picked by the finisher:
-    // since surveys (M45) it comes from the container's survey, read inside the
-    // Finish transaction so a finished order still can never be missing it.
+    // The potential-claim assessment (M24) is the finisher's pick in the Finish
+    // dialog: true = Potential Claim, false = No Potential Claim. M45 took the
+    // pick away and read it off the container's survey; it came back on
+    // 2026-11-24, because some orders are potential claims with no survey. The
+    // survey still has the last word one way: a CONFIRMED survey makes the
+    // order a potential claim whatever was picked, and then no pick is needed.
     //
     // Once the finish has committed, the claim step settles the order's claim:
-    // a confirmed survey raises the claim request, no survey (or a passed one)
-    // marks it Passed QC. That step runs in its own transaction and never
-    // throws -- a problem there must not turn a finished order into an error.
-    public async Task<(bool ok, string? error)> CloseAsync(long qoId, string user, string? reason, bool bypassNoSamples = false)
+    // a confirmed survey raises the claim request; otherwise Potential Claim
+    // leaves the order Pending for a manager and No Potential Claim marks it
+    // Passed QC. That step runs in its own transaction and never throws -- a
+    // problem there must not turn a finished order into an error.
+    public async Task<(bool ok, string? error)> CloseAsync(long qoId, string user, string? reason, bool bypassNoSamples = false, bool? potentialClaim = null)
     {
-        var result = await Transition(qoId, user, reason, "Closed", new[] { "Submitted" }, bypassNoSamples);
+        var result = await Transition(qoId, user, reason, "Closed", new[] { "Submitted" }, bypassNoSamples, potentialClaim);
         if (result.ok) await _claimSync.AfterOrderFinishedAsync(qoId);
         return result;
     }
@@ -636,7 +640,7 @@ public class QualityOrderService : IQualityOrderService
     private static string PotentialClaimLabel(bool? v) =>
         v == true ? "Potential Claim" : v == false ? "No Potential Claim" : "Not classified";
 
-    private async Task<(bool ok, string? error)> Transition(long qoId, string user, string? reason, string toStatus, string[] fromStatuses, bool bypassNoSamples = false)
+    private async Task<(bool ok, string? error)> Transition(long qoId, string user, string? reason, string toStatus, string[] fromStatuses, bool bypassNoSamples = false, bool? finisherClaimAnswer = null)
     {
         using var c = Open();
         await c.OpenAsync();
@@ -744,24 +748,30 @@ public class QualityOrderService : IQualityOrderService
             ("Open", "Submitted")     => "UPDATE qms_quality_order SET status_code='Open' WHERE quality_order_id=@qoId AND status_code=@current",
             ("Submitted", _)          => "UPDATE qms_quality_order SET status_code='Submitted' WHERE quality_order_id=@qoId AND status_code=@current",
             // The potential-claim assessment is stamped with the finish, in
-            // the same guarded UPDATE. It is the survey's verdict (see above),
-            // written as it stands NOW -- including "not classified" while the
-            // survey is still open -- so a re-finish after a reopen never keeps
-            // an answer the survey has since overtaken.
+            // the same guarded UPDATE: the finisher's answer, or "potential
+            // claim" when the survey is confirmed (see CloseAsync). It is
+            // written as it stands NOW, so a re-finish after a reopen never
+            // keeps the answer of the first finish.
             ("Closed", _)             => "UPDATE qms_quality_order SET status_code='Closed',   closed_at=SYSUTCDATETIME(), closed_by=@user, close_reason=@reason, potential_claim=@potentialClaim, potential_claim_at=CASE WHEN @potentialClaim IS NULL THEN NULL ELSE SYSUTCDATETIME() END, potential_claim_by=CASE WHEN @potentialClaim IS NULL THEN NULL ELSE @user END WHERE quality_order_id=@qoId AND status_code=@current",
             ("Reopened", _)           => "UPDATE qms_quality_order SET status_code='Open',     reopened_at=SYSUTCDATETIME(), reopened_by=@user, reopen_reason=@reason WHERE quality_order_id=@qoId AND status_code=@current",
             ("Cancelled", _)          => "UPDATE qms_quality_order SET status_code='Cancelled' WHERE quality_order_id=@qoId AND status_code=@current",
             _ => throw new InvalidOperationException("Unknown target status.")
         };
-        // Confirmed survey = potential claim; no survey or a passed one = none;
-        // a survey still open = not classified until it is decided.
         bool? potentialClaim = null;
         if (toStatus == "Closed")
-            potentialClaim = SurveyClaimSync.PotentialClaimFor(await c.ExecuteScalarAsync<string?>(@"
+        {
+            var surveyStatus = await c.ExecuteScalarAsync<string?>(@"
                 SELECT s.status_code
                 FROM   qms_survey s
                 JOIN   qms_quality_order q ON q.arrival_id = s.arrival_id
-                WHERE  q.quality_order_id = @qoId", new { qoId }, tx));
+                WHERE  q.quality_order_id = @qoId", new { qoId }, tx);
+            // Classifying the shipment is part of finishing it, so a finish
+            // with no answer is refused rather than stored as "not classified".
+            // Only a confirmed survey answers for the finisher.
+            if (finisherClaimAnswer == null && surveyStatus != SurveyStatus.Confirm)
+                return (false, "Choose Potential Claim or No Potential Claim before finishing the order.");
+            potentialClaim = SurveyClaimSync.PotentialClaimFor(surveyStatus, finisherClaimAnswer);
+        }
         var affected = await c.ExecuteAsync(sql, new { qoId, user, reason, current, potentialClaim }, tx);
         if (affected != 1)
         {

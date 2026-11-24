@@ -51,12 +51,14 @@ public interface IQualityOrderService
     /// <summary>V31: Supervisor returns a Submitted QO to Open so the operator
     /// can fix mistakes. Reason optional but recorded in the audit log.</summary>
     Task<(bool ok, string? error)> CancelSubmitAsync(long qualityOrderId, string user, string? reason);
-    /// <summary>Finish the order. The potential-claim assessment is taken from
-    /// the container's survey (confirmed = potential claim, none or passed =
-    /// no potential claim, still open = not classified) and stamped in the same
-    /// guarded UPDATE as the status. After the finish commits, the claim step
+    /// <summary>Finish the order. <paramref name="potentialClaim"/> is the
+    /// finisher's answer in the Finish dialog -- true = Potential Claim,
+    /// false = No Potential Claim -- and is required, unless the container's
+    /// survey is confirmed: that makes the order a potential claim whatever is
+    /// passed. The assessment is stamped in the same guarded UPDATE as the
+    /// status. After the finish commits, the claim step
     /// (<see cref="ISurveyClaimSync"/>) settles the order's claim.</summary>
-    Task<(bool ok, string? error)> CloseAsync(long qualityOrderId, string user, string? reason, bool bypassNoSamples = false);
+    Task<(bool ok, string? error)> CloseAsync(long qualityOrderId, string user, string? reason, bool bypassNoSamples = false, bool? potentialClaim = null);
     Task<(bool ok, string? error)> ReopenAsync(long qualityOrderId, string user, string? reason);
 
     /// <summary>

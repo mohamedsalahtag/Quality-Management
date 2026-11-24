@@ -21,13 +21,21 @@ public record ClaimSyncResult(ClaimSyncAction Action, long? QualityOrderId, stri
 
 /// <summary>
 /// The claim step: the ONE place that decides what a finished order's claim
-/// should be, given its container's survey. It runs after each of the two
-/// events that can make the answer change -- an order being finished, and a
-/// survey being decided -- so it does not matter which happens first.
+/// should be, given its container's survey and the finisher's own answer in
+/// the Finish dialog. It runs after each of the two events that can make the
+/// answer change -- an order being finished, and a survey being decided -- so
+/// it does not matter which happens first.
 ///
-///   survey Confirmed          -> Claim Notification Request
-///   no survey, or survey Passed -> Passed QC
-///   survey still Open         -> nothing yet; it is settled when decided
+///   survey Confirmed                         -> Claim Notification Request
+///   survey still Open                        -> nothing yet; settled when decided
+///   no survey, or survey Passed:
+///     finisher chose Potential Claim         -> nothing: the order stays Pending
+///                                               for a manager, as before surveys
+///     finisher chose No Potential Claim      -> Passed QC
+///
+/// The finisher's choice was taken out of the Finish dialog with M45 and put
+/// back on 2026-11-24: some orders must be raised as potential claims without
+/// a survey. A confirmed survey still wins over a "No" from the finisher.
 ///
 /// It never overrides a person. A claim the Claim Manager has decided is left
 /// alone, and so is a claim request a manager raised by hand on an order with
@@ -52,11 +60,6 @@ public interface ISurveyClaimSync
 {
     Task<ClaimSyncResult> AfterOrderFinishedAsync(long qualityOrderId);
     Task<ClaimSyncResult> AfterSurveyDecidedAsync(long arrivalId);
-
-    /// <summary>What the finisher's order will be marked, for the Finish
-    /// dialog: true = potential claim, false = none, null = waiting for the
-    /// survey decision.</summary>
-    Task<bool?> PotentialClaimForArrivalAsync(long arrivalId);
 }
 
 public class SurveyClaimSync : ISurveyClaimSync
@@ -82,24 +85,19 @@ public class SurveyClaimSync : ISurveyClaimSync
     }
 
     /// <summary>
-    /// The survey's verdict as the order's potential-claim flag. Used inside
-    /// the Finish transaction (so a finished order is never missing it) and by
-    /// the claim step when a survey is decided later.
+    /// The order's potential-claim flag. A confirmed survey makes it a
+    /// potential claim whatever anybody chose; otherwise it is the finisher's
+    /// own answer. With no answer at all (an order finished while the dialog
+    /// did not ask) it is "no", or "not classified" while a survey is open.
+    ///
+    /// Used inside the Finish transaction, so a finished order is never
+    /// missing it, and by the claim step when a survey is decided later --
+    /// where <paramref name="answer"/> is the flag the order already carries.
     /// </summary>
-    public static bool? PotentialClaimFor(string? surveyStatus) => surveyStatus switch
-    {
-        SurveyStatus.Confirm => true,
-        SurveyStatus.Open    => null,
-        _                    => false      // no survey, or Passed
-    };
-
-    public async Task<bool?> PotentialClaimForArrivalAsync(long arrivalId)
-    {
-        using var c = new SqlConnection(_cs);
-        var status = await c.ExecuteScalarAsync<string?>(
-            "SELECT status_code FROM qms_survey WHERE arrival_id = @arrivalId", new { arrivalId });
-        return PotentialClaimFor(status);
-    }
+    public static bool? PotentialClaimFor(string? surveyStatus, bool? answer) =>
+        surveyStatus == SurveyStatus.Confirm
+            ? true
+            : answer ?? (surveyStatus == SurveyStatus.Open ? null : false);
 
     public Task<ClaimSyncResult> AfterOrderFinishedAsync(long qualityOrderId) =>
         RunAsync(qualityOrderId, null);
@@ -127,9 +125,10 @@ public class SurveyClaimSync : ISurveyClaimSync
 
     private sealed class ClaimRow
     {
-        public long      ClaimId     { get; set; }
-        public string    ClaimStatus { get; set; } = "";
-        public DateTime? DecidedAt   { get; set; }
+        public long      ClaimId       { get; set; }
+        public string    ClaimStatus   { get; set; } = "";
+        public DateTime? DecidedAt     { get; set; }
+        public string?   LastChangedBy { get; set; }
     }
 
     private async Task<ClaimSyncResult> RunAsync(long? qoId, long? arrivalId)
@@ -203,9 +202,12 @@ public class SurveyClaimSync : ISurveyClaimSync
             return (new ClaimSyncResult(ClaimSyncAction.None, ctx?.QoId, null), ctx?.SurveyId);
         }
 
-        // ---- The potential-claim flag follows the survey. A rejected
-        //      container keeps the flag it was created with.
-        var flag = PotentialClaimFor(ctx.SurveyStatus);
+        // ---- The potential-claim flag: the finisher's answer, which a
+        //      confirmed survey overrides. A rejected container keeps the flag
+        //      it was created with.
+        var flag = ctx.ContainerRejected
+            ? ctx.PotentialClaim
+            : PotentialClaimFor(ctx.SurveyStatus, ctx.PotentialClaim);
         if (!ctx.ContainerRejected && flag != ctx.PotentialClaim)
         {
             var by = ctx.SurveyStatus is SurveyStatus.Confirm or SurveyStatus.Pass
@@ -226,22 +228,23 @@ public class SurveyClaimSync : ISurveyClaimSync
         }
 
         // ---- The claim row.
+        // A potential claim with no confirmed survey behind it -- the
+        // finisher's own call, or a rejected container -- is for a manager to
+        // judge: the order stays Pending, exactly as before surveys existed.
         string? target = ctx.SurveyStatus switch
         {
             SurveyStatus.Confirm => ClaimStatus.ClaimRequest,
             SurveyStatus.Open    => null,
-            _                    => ctx.ContainerRejected ? null : ClaimStatus.PassedQC
+            _                    => flag == true ? null : ClaimStatus.PassedQC
         };
         if (target == null)
         {
+            if (flag == true) await WithdrawAutomaticPassAsync(c, tx, ctx.QoId);
             tx.Commit();
             return (new ClaimSyncResult(ClaimSyncAction.None, ctx.QoId, null), ctx.SurveyId);
         }
 
-        var claim = await c.QuerySingleOrDefaultAsync<ClaimRow>(@"
-            SELECT claim_id AS ClaimId, claim_status AS ClaimStatus, decided_at AS DecidedAt
-            FROM   qms_claim WITH (UPDLOCK, HOLDLOCK)
-            WHERE  quality_order_id = @id", new { id = ctx.QoId }, tx);
+        var claim = await ReadClaimAsync(c, tx, ctx.QoId);
 
         long claimId;
         string? oldStatus = null;
@@ -309,6 +312,46 @@ public class SurveyClaimSync : ISurveyClaimSync
             ctx.QoId, null), ctx.SurveyId);
     }
 
+    private static Task<ClaimRow?> ReadClaimAsync(SqlConnection c, SqlTransaction tx, long qoId) =>
+        c.QuerySingleOrDefaultAsync<ClaimRow>(@"
+            SELECT claim_id AS ClaimId, claim_status AS ClaimStatus, decided_at AS DecidedAt,
+                   last_changed_by AS LastChangedBy
+            FROM   qms_claim WITH (UPDLOCK, HOLDLOCK)
+            WHERE  quality_order_id = @qoId", new { qoId }, tx)!;
+
+    /// <summary>
+    /// An order the claim step marked Passed QC by itself is now a potential
+    /// claim: it was finished as "no potential claim", reopened, and finished
+    /// again with the other answer. The automatic marking spoke for the first
+    /// answer only, so it is taken back and the order is Pending again.
+    ///
+    /// Only while nobody has touched the claim: not decided, still the
+    /// system's own Passed QC, and no note written by a person. Anything a
+    /// person did stays.
+    /// </summary>
+    private async Task WithdrawAutomaticPassAsync(SqlConnection c, SqlTransaction tx, long qoId)
+    {
+        var claim = await ReadClaimAsync(c, tx, qoId);
+        if (claim == null || claim.DecidedAt != null || claim.ClaimStatus != ClaimStatus.PassedQC
+            || claim.LastChangedBy != SystemActor)
+            return;
+        var claimId = claim.ClaimId;
+        if (await c.ExecuteScalarAsync<int>(
+                "SELECT COUNT(*) FROM qms_claim_note WHERE claim_id = @claimId AND created_by <> @actor",
+                new { claimId, actor = SystemActor }, tx) > 0)
+            return;
+
+        await c.ExecuteAsync(@"
+            DELETE FROM qms_claim_read_marker WHERE claim_id = @claimId;
+            DELETE FROM qms_claim_note        WHERE claim_id = @claimId;
+            DELETE FROM qms_claim             WHERE claim_id = @claimId;", new { claimId }, tx);
+        await _audit.WriteAsync(c, tx,
+            EntityTypes.Claim, claimId, ActionCodes.Deleted,
+            oldValues: new { claim_status = ClaimStatus.PassedQC },
+            newValues: new { note = "Automatic Passed QC withdrawn: the order was finished again as a potential claim." },
+            actor: SystemActor);
+    }
+
     private static string NoteFor(Ctx ctx, string target)
     {
         if (target == ClaimStatus.ClaimRequest)
@@ -317,7 +360,7 @@ public class SurveyClaimSync : ISurveyClaimSync
         if (ctx.SurveyStatus == SurveyStatus.Pass)
             return $"Passed QC automatically: survey {ctx.SurveyNo} was passed by {ctx.DecidedBy}."
                  + (string.IsNullOrWhiteSpace(ctx.DecisionComments) ? "" : " Reason: " + ctx.DecisionComments!.Trim());
-        return "Passed QC automatically: no survey was requested for this container.";
+        return "Passed QC automatically: finished as No Potential Claim, and no survey was requested for this container.";
     }
 
     // ---- Failure bookkeeping (best effort; never throws) --------------
