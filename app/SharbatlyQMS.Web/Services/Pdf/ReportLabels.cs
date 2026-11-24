@@ -87,7 +87,6 @@ public static class ReportLabelCatalog
         "External damage to container",
         "Grade",
         "Inspection Date",
-        "Joint Survey",
         "Loading Date",
         "Loading Port",
         "Logger Serial",

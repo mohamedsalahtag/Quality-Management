@@ -1,0 +1,46 @@
+@using SharbatlyQMS.Web.Extensions
+@model string
+@inject ISurveyService SurveySvc
+@*
+    The tab strip of Claim Management: Claims, Archived, Survey. Three lists,
+    three URLs -- filters are NOT carried across the tabs, because a supplier
+    that narrows one list to three rows would silently narrow another to none.
+
+    Each tab shows only to a user who may open it, so a claim manager without
+    the Surveys screen sees two tabs and an insurance user without Claims sees
+    one. The model is the active tab: "claims", "archived" or "surveys".
+*@
+@{
+    var active     = Model ?? "claims";
+    var canClaims  = Perms.CanView(Screens.Claims);
+    var canSurveys = Perms.CanView(Screens.Surveys);
+    // Open surveys are the ones waiting for somebody to decide.
+    var openSurveys = canSurveys ? (await SurveySvc.CountsAsync(User.GetPlantScope())).Open : 0;
+}
+<ul class="nav nav-tabs mb-3">
+    @if (canClaims)
+    {
+        <li class="nav-item">
+            <a class="nav-link @(active == "claims" ? "active" : "")" asp-controller="ClaimManagement" asp-action="Index">
+                <i class="bi bi-list-check me-1"></i>@Loc["Claims"]
+            </a>
+        </li>
+        <li class="nav-item">
+            <a class="nav-link @(active == "archived" ? "active" : "")" asp-controller="ClaimManagement" asp-action="Archived">
+                <i class="bi bi-archive me-1"></i>@Loc["Archived"]
+            </a>
+        </li>
+    }
+    @if (canSurveys)
+    {
+        <li class="nav-item">
+            <a class="nav-link @(active == "surveys" ? "active" : "")" asp-controller="Surveys" asp-action="Index">
+                <i class="bi bi-binoculars me-1"></i>@Loc["Survey"]
+                @if (openSurveys > 0)
+                {
+                    <span class="badge bg-warning text-dark ms-1" title="@Loc["Open surveys waiting for a decision"]">@openSurveys</span>
+                }
+            </a>
+        </li>
+    }
+</ul>

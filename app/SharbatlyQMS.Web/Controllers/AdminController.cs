@@ -390,6 +390,8 @@ public class AdminController : Controller
             ("claim_note",             "DELETE FROM qms_claim_note"),
             ("claim",                  "DELETE FROM qms_claim"),
             ("qo_report_send",         "DELETE FROM qms_qo_report_send"),
+            // Surveys reference both the arrival and (optionally) an order.
+            ("survey",                 "DELETE FROM qms_survey"),
             ("quality_order",          "DELETE FROM qms_quality_order"),
             ("arrival_checklist",      "DELETE FROM qms_arrival_checklist"),
             ("arrival_item",           "DELETE FROM qms_arrival_item"),
@@ -414,7 +416,7 @@ public class AdminController : Controller
         {
             "qms_sample_defect","qms_sample_reading","qms_sample_observation","qms_sample",
             "qms_quality_order_material","qms_quality_order",
-            "qms_claim_read_marker","qms_claim_note","qms_claim","qms_qo_report_send",
+            "qms_claim_read_marker","qms_claim_note","qms_claim","qms_qo_report_send","qms_survey",
             "qms_arrival_checklist","qms_arrival_item","qms_arrival_sap_snapshot",
             "qms_shipment_snapshot","qms_arrival",
             "qms_image_link","qms_image_asset",
@@ -422,7 +424,7 @@ public class AdminController : Controller
         };
 
         // Reseed the auto-numbered sequences (arrival_no, shipment_no, quality_order_no).
-        var sequences = new[] { "seq_qms_arrival_no", "seq_qms_shipment_no", "seq_qms_quality_order_no" };
+        var sequences = new[] { "seq_qms_arrival_no", "seq_qms_shipment_no", "seq_qms_quality_order_no", "seq_qms_survey_no" };
 
         var totalDeleted = 0;
         var perTable = new List<string>();

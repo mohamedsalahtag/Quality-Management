@@ -289,7 +289,9 @@ public static class QualityReportPdfSoft
             (L("Seal No"),                            V(JoinLines(cl?.SealNo))),
             (L("Temperature"),                        cl?.LoggerTemperature?.ToString() ?? "—"),
             (L("Pulp Temperature"),                   V(JoinTemps(cl))),
-            (L("Joint Survey"),                       YN(s?.JointSurvey)),
+            // Joint Survey is NOT printed (2026-11-24): answering it Yes now
+            // requests an internal survey, and nothing about a survey may reach
+            // the supplier. It stays on the screens.
             (L("Seal Intact?"),                       YN(cl?.SealIntact)),
             (L("External damage to container"),       YN(cl?.ExternalDamageExists)),
             (L("Visual cargo condition acceptable"),  YN(cl?.VisualCargoAcceptable)),

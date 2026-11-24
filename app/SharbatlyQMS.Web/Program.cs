@@ -55,6 +55,7 @@ builder.Services.AddScoped<IArrivalService, ArrivalService>();
 builder.Services.AddScoped<IQualityOrderService, QualityOrderService>();
 builder.Services.AddScoped<IClaimService, ClaimService>();
 builder.Services.AddScoped<IClaimArchiveService, ClaimArchiveService>();
+builder.Services.AddScoped<ISurveyService, SurveyService>();
 builder.Services.AddScoped<IAuditContext, AuditContext>();
 builder.Services.AddScoped<IAuditService, AuditService>();
 builder.Services.AddScoped<IPermissionLogService, PermissionLogService>();

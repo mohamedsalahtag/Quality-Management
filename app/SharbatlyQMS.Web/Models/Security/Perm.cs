@@ -86,6 +86,18 @@ public static class Perm
         public const string Archive          = Screens.Claims + ".Archive";
     }
 
+    public static class Surveys
+    {
+        /// <summary>Ask for a survey: Joint Survey = Yes on the arrival, or
+        /// Potential Survey on the quality order. Its screen has no read-only /
+        /// edit level, so holding this does not require seeing the Surveys page.</summary>
+        public const string Request = Screens.Surveys + ".Request";
+        /// <summary>Confirm or Pass an open survey. Being able to open the page
+        /// never implies this.</summary>
+        public const string Decide  = Screens.Surveys + ".Decide";
+        public const string Export  = Screens.Surveys + ".Export";
+    }
+
     public static class Attachments
     {
         public const string Download    = Screens.Attachments + ".Download";

@@ -27,6 +27,12 @@ public static class Screens
     public const string QoIndex            = "QualityOrders.Index";   // levelled
     public const string QoDetails          = "QualityOrders.Details"; // levelled
     public const string Claims             = "Claims";                // levelled
+    /// <summary>Survey management (M44): the confidential, internal record of a
+    /// container that may need a formal survey. A tab of Claim Management.
+    /// Deliberately NOT levelled: each thing a user may do (request, decide,
+    /// ...) is its own permission, and an inspector must be able to hold
+    /// Surveys.Request without being able to open this page.</summary>
+    public const string Surveys            = "Surveys";
     /// <summary>Every container SAP sent, with the days between its arrival and
     /// the moment QC finished. Admin-only by default (Seed.AdminOnly on the
     /// controller); granted onward from the Security screen. Filed under Records
@@ -72,7 +78,7 @@ public static class Screens
     {
         Dashboard, Attachments,
         ArrivalsPending, ArrivalsIndex, ArrivalsSearch, ArrivalsDetails,
-        QoIndex, QoDetails, Claims, TimeBar,
+        QoIndex, QoDetails, Claims, Surveys, TimeBar,
         ReportsDataHub, ReportsBuilder, ReportsDefects, ReportsKpi,
         DefectCatalog, DefectCategories, ReadingTypes, SampleHeaders,
         ArrivalFields, ArrivalFieldRules, ReportUnits, CodeDescriptions, MailTemplate,

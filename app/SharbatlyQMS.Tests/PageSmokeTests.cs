@@ -73,6 +73,11 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         "/ClaimManagement/Archived",
         "/ClaimManagement/Archived?from=2026-07-01&to=2026-08-17",
         "/ClaimManagement?container=A&po=4&supplier=&plant=&closedBy=&claimOwner=&material=apple",
+        // The Survey tab of Claim Management (M44): every filter shape once.
+        "/Surveys",
+        "/Surveys?status=Open&status=Confirm&source=Arrival&milestone=awaitingqo&from=2026-07-01&to=2026-12-31",
+        "/Surveys?search=a&plant=JD01&supplier=x&milestone=withclaim&page=2&pageSize=25",
+        "/Surveys/Export?status=Pass",
         "/Audit",
         "/Audit/Security",
         // Audit filters: the noise toggle, an admin entity type (previously

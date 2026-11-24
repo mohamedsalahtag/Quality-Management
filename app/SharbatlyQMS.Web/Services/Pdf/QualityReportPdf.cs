@@ -318,7 +318,9 @@ public static class QualityReportPdf
                     Field(c, "Seal No",                        JoinLines(cl?.SealNo),               labelWidth: w);
                     Field(c, "Temperature",                    cl?.LoggerTemperature?.ToString(),   labelWidth: w);
                     Field(c, "Pulp Temperature",               JoinTemps(cl),                       labelWidth: w);
-                    Field(c, "Joint Survey",                   YN(s?.JointSurvey),                  labelWidth: w);
+                    // Joint Survey is NOT printed (2026-11-24): answering it Yes
+                    // now requests an internal survey, and nothing about a survey
+                    // may reach the supplier. It stays on the screens.
                     Field(c, "Seal Intact?",                   YN(cl?.SealIntact),                  labelWidth: w);
                     Field(c, "External damage to container",   YN(cl?.ExternalDamageExists),        labelWidth: w);
                     Field(c, "Visual cargo condition acceptable", YN(cl?.VisualCargoAcceptable),    labelWidth: w);

@@ -1,0 +1,428 @@
+@using SharbatlyQMS.Web.Models
+@using SharbatlyQMS.Web.ViewModels
+@model IReadOnlyList<SurveyListRow>
+@{
+    ViewData["Title"] = Loc["Surveys"];
+    var f      = ViewBag.Filter as SurveyListFilter ?? new SurveyListFilter();
+    var opts   = ViewBag.FilterOptions as SurveyFilterOptions ?? new SurveyFilterOptions();
+    var counts = ViewBag.Counts as SurveyCounts ?? new SurveyCounts();
+    var plantScopeLocked = ViewBag.PlantScopeLocked as string;
+    var panelOpen = f.AnyPanelFilter;
+    string D(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "";
+
+    var totalCount = ViewBag.TotalCount as int? ?? Model.Count;
+    var pageNo     = ViewBag.PageNo    as int? ?? 1;
+    var pageSize   = ViewBag.PageSize  as int? ?? 50;
+    var pageCount  = (int)Math.Ceiling(totalCount / (double)Math.Max(1, pageSize));
+    var firstRow   = totalCount == 0 ? 0 : ((pageNo - 1) * pageSize) + 1;
+    var lastRow    = Math.Min(pageNo * pageSize, totalCount);
+
+    // A query STRING, not route data: a dictionary cannot repeat a key, so the
+    // multi-select filters would collapse to one value each on page 2.
+    string FilterQuery()
+    {
+        var q = new List<string>();
+        void Add(string k, string? v)
+        {
+            if (!string.IsNullOrWhiteSpace(v))
+                q.Add($"{Uri.EscapeDataString(k)}={Uri.EscapeDataString(v!)}");
+        }
+        foreach (var v in f.Status)   Add("status", v);
+        foreach (var v in f.Plant)    Add("plant", v);
+        foreach (var v in f.Supplier) Add("supplier", v);
+        Add("source", f.Source);       Add("milestone", f.Milestone);
+        Add("search", f.Search);
+        Add("from", D(f.From));        Add("to", D(f.To));
+        return string.Join("&", q);
+    }
+    var filterQuery = FilterQuery();
+    string PageQuery(int pg, int size) =>
+        "?" + (filterQuery.Length > 0 ? filterQuery + "&" : "") + $"page={pg}&pageSize={size}";
+
+    var chips = new (string Value, string Label, string OutlineCss)[]
+    {
+        (SurveyStatus.Open,    SurveyStatus.Label(SurveyStatus.Open),    "btn-outline-warning"),
+        (SurveyStatus.Confirm, SurveyStatus.Label(SurveyStatus.Confirm), "btn-outline-danger"),
+        (SurveyStatus.Pass,    SurveyStatus.Label(SurveyStatus.Pass),    "btn-outline-secondary"),
+    };
+    bool ChipOn(string v) => f.Status.Contains(v, StringComparer.OrdinalIgnoreCase);
+
+    // Milestones are computed from the survey and what is linked to it. None
+    // of them is a status: a survey behind any of these chips is still Confirmed.
+    var milestones = new (string Value, string Label)[]
+    {
+        ("",                              "All"),
+        (SurveyMilestone.AwaitingQcOrder, "Confirmed, no QC order yet"),
+        (SurveyMilestone.WithClaim,       "Confirmed, with claim request"),
+    };
+
+    // requested_at, decided_at and updated_at are UTC, and Dapper returns them
+    // with Kind=Unspecified, so the conversion is explicit.
+    string TsUtc(DateTime? d) => d.HasValue
+        ? DateTime.SpecifyKind(d.Value, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+        : "—";
+    string Txt(string? v) => string.IsNullOrWhiteSpace(v) ? "—" : v;
+}
+<style>
+    .tooltip-inner { max-width: 460px; text-align: left; }
+    .srv-tip    { margin: 0; padding: 0; list-style: none; font-size: .8rem; }
+    .srv-tip li { padding: 2px 0; border-bottom: 1px dashed rgba(255,255,255,.18); }
+    .srv-tip li:last-child { border-bottom: 0; }
+    .srv-tile { display: block; text-decoration: none; color: inherit; border: 1px solid var(--bs-border-color);
+                border-radius: .5rem; padding: .5rem .75rem; background: var(--bs-body-bg); height: 100%; }
+    .srv-tile:hover { border-color: var(--bs-primary); }
+    .srv-tile.on { border-color: var(--bs-primary); box-shadow: 0 0 0 1px var(--bs-primary); }
+    .srv-tile .n { font-size: 1.5rem; font-weight: 700; line-height: 1.1; }
+    .srv-tile .t { font-size: .78rem; color: var(--bs-secondary-color); }
+    .srv-reason { max-width: 22rem; white-space: normal; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h1 class="h3 mb-0">
+        <i class="bi bi-shield-exclamation me-1 text-danger"></i>@Loc["Claims"]
+        <small class="text-muted fs-6 fw-normal ms-2">@Loc["Surveys — internal and confidential; nothing here is shown to suppliers"]</small>
+    </h1>
+    @if (Perms.CanRead(Perm.Surveys.Export))
+    {
+        <a class="btn btn-outline-success" href="@Url.Action("Export")@(filterQuery.Length > 0 ? "?" + filterQuery : "")"
+           title="@Loc["Exports every survey matching the current filters."]">
+            <i class="bi bi-file-earmark-excel me-1"></i>@Loc["Export to Excel"]
+        </a>
+    }
+</div>
+
+<partial name="_ClaimTabs" model="@("surveys")" />
+
+@* Indicator tiles. Each one is also a shortcut to that slice of the list. The
+   numbers cover the user's branches and ignore the filters below. *@
+<div class="row g-2 mb-3">
+    <div class="col-6 col-md-2">
+        <a class="srv-tile @(!f.Any ? "on" : "")" asp-action="Index" data-filter-clear>
+            <div class="n">@counts.Total</div><div class="t">@Loc["Total surveys"]</div>
+        </a>
+    </div>
+    <div class="col-6 col-md-2">
+        <a class="srv-tile" asp-action="Index" asp-route-status="@SurveyStatus.Open">
+            <div class="n text-warning">@counts.Open</div><div class="t">@Loc["Open — waiting for a decision"]</div>
+        </a>
+    </div>
+    <div class="col-6 col-md-2">
+        <a class="srv-tile" asp-action="Index" asp-route-status="@SurveyStatus.Confirm">
+            <div class="n text-danger">@counts.Confirmed</div><div class="t">@Loc["Confirmed"]</div>
+        </a>
+    </div>
+    <div class="col-6 col-md-2">
+        <a class="srv-tile" asp-action="Index" asp-route-status="@SurveyStatus.Pass">
+            <div class="n text-secondary">@counts.Passed</div><div class="t">@Loc["Passed"]</div>
+        </a>
+    </div>
+    <div class="col-6 col-md-2">
+        <a class="srv-tile" asp-action="Index" asp-route-milestone="@SurveyMilestone.AwaitingQcOrder">
+            <div class="n">@counts.AwaitingQcOrder</div><div class="t">@Loc["Confirmed, no QC order yet"]</div>
+        </a>
+    </div>
+    <div class="col-6 col-md-2">
+        <a class="srv-tile" asp-action="Index" asp-route-milestone="@SurveyMilestone.WithClaim">
+            <div class="n">@counts.WithClaim</div><div class="t">@Loc["Confirmed, with claim request"]</div>
+        </a>
+    </div>
+</div>
+
+<form method="get" class="mb-3" data-filter-memory="survey">
+    @* Enter inside a field does this plain submit rather than a chip. *@
+    <button type="submit" class="visually-hidden" tabindex="-1" aria-hidden="true"></button>
+    <div class="row g-2 align-items-stretch">
+        <div class="col-auto d-flex gap-2">
+            <button class="btn btn-outline-secondary" type="button"
+                    data-bs-toggle="collapse" data-bs-target="#surveyFilters"
+                    aria-expanded="@(panelOpen ? "true" : "false")" aria-controls="surveyFilters">
+                <i class="bi bi-funnel me-1"></i>@Loc["Filters"]
+                @if (f.PanelFilterCount > 0)
+                {
+                    <span class="badge bg-primary ms-1">@f.PanelFilterCount</span>
+                }
+            </button>
+            @if (f.Any)
+            {
+                <a asp-action="Index" class="btn btn-outline-secondary" title="@Loc["Clear every filter"]" data-filter-clear>@Loc["Clear"]</a>
+            }
+            <div class="dropdown" data-coltoggle-ui="surveys-list">
+                <button type="button" class="btn btn-outline-secondary dropdown-toggle"
+                        data-bs-toggle="dropdown" data-bs-auto-close="outside" aria-expanded="false"
+                        title="@Loc["Choose which columns to show. Your choice is remembered on this device."]">
+                    <i class="bi bi-layout-three-columns me-1"></i>@Loc["Columns"]<span class="badge bg-secondary ms-1 d-none"
+                         data-coltoggle-count title="@Loc["Columns currently hidden"]"></span>
+                </button>
+                <div class="dropdown-menu dropdown-menu-end p-2" data-coltoggle-menu style="min-width: 13rem;"></div>
+            </div>
+        </div>
+        <div class="col-md-4">
+            <input type="text" name="search" value="@f.Search" class="form-control"
+                   placeholder='@Loc["Search by survey #, arrival #, QO #, container, BOL, PO, supplier or requester..."]' />
+        </div>
+        <div class="col-auto">
+            <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label='@Loc["Filter by survey status"]'>
+                <button type="button"
+                        class="btn @(f.Status.Count == 0 ? "btn-secondary active" : "btn-outline-secondary")"
+                        onclick="this.closest('form').querySelectorAll('input[name=status]').forEach(b =&gt; b.checked = false); this.closest('form').requestSubmit();">@Loc["All"]</button>
+                @foreach (var c in chips)
+                {
+                    <input type="checkbox" class="btn-check" name="status" value="@c.Value"
+                           id="survey-status-@c.Value" autocomplete="off" checked="@ChipOn(c.Value)"
+                           onchange="this.form.requestSubmit()" />
+                    <label class="btn @c.OutlineCss" for="survey-status-@c.Value">@c.Label</label>
+                }
+            </div>
+        </div>
+    </div>
+    <div class="row g-2 align-items-center mt-1">
+        <div class="col-auto">
+            <span class="text-muted small"><i class="bi bi-signpost-split me-1"></i>@Loc["Progress"]</span>
+        </div>
+        <div class="col-auto">
+            <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label='@Loc["Filter by progress"]'>
+                @foreach (var m in milestones)
+                {
+                    var mid = string.IsNullOrEmpty(m.Value) ? "all" : m.Value;
+                    <input type="radio" class="btn-check" name="milestone" value="@m.Value"
+                           id="survey-milestone-@mid" autocomplete="off" checked="@((f.Milestone ?? "") == m.Value)"
+                           onchange="this.form.requestSubmit()" />
+                    <label class="btn btn-outline-secondary" for="survey-milestone-@mid">@Loc[m.Label]</label>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="collapse @(panelOpen ? "show" : "")" id="surveyFilters">
+        <div class="card card-body mt-2 bg-body-tertiary">
+            <div class="row g-2">
+                <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                    Name = "supplier", Label = Loc["Supplier"], AllLabel = Loc["All suppliers"],
+                    ColumnCss = "col-12 col-md-4", Selected = f.Supplier,
+                    Searchable = true, SearchPlaceholder = Loc["Search supplier name…"],
+                    Options = opts.Suppliers.Select(x => new MultiSelectOption(x, x)).ToList() })" />
+                @if (plantScopeLocked != null)
+                {
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">@Loc["Branch"]</label>
+                        <div class="form-control form-control-sm bg-light d-flex align-items-center"
+                             title="@Loc["Your account is restricted to this branch."]">
+                            <i class="bi bi-lock-fill text-muted me-1"></i>
+                            <span class="small">@Codes.PlantLabel(plantScopeLocked)</span>
+                        </div>
+                        <input type="hidden" data-filter-ignore name="plant" value="@plantScopeLocked" />
+                    </div>
+                }
+                else
+                {
+                    <partial name="_MultiSelectFilter" model="@(new MultiSelectFilterVm {
+                        Name = "plant", Label = Loc["Branch"], AllLabel = Loc["All branches"],
+                        ColumnCss = "col-6 col-md-3", Selected = f.Plant,
+                        Options = opts.Plants.Select(x => new MultiSelectOption(x, Codes.PlantLabel(x))).ToList() })" />
+                }
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["Requested from"]</label>
+                    <select name="source" class="form-select form-select-sm">
+                        <option value="">@Loc["Either"]</option>
+                        <option value="@SurveySource.Arrival" selected="@(f.Source == SurveySource.Arrival)">@Loc["Arrival"]</option>
+                        <option value="@SurveySource.QualityOrder" selected="@(f.Source == SurveySource.QualityOrder)">@Loc["QC order"]</option>
+                    </select>
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["Requested on or after"]</label>
+                    <input type="date" name="from" value="@D(f.From)" class="form-control form-control-sm" />
+                </div>
+                <div class="col-6 col-md-2">
+                    <label class="form-label small mb-1">@Loc["Requested on or before"]</label>
+                    <input type="date" name="to" value="@D(f.To)" class="form-control form-control-sm" />
+                </div>
+            </div>
+            <div class="mt-2 d-flex gap-2">
+                <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel me-1"></i>@Loc["Apply filters"]</button>
+            </div>
+        </div>
+    </div>
+</form>
+
+<div class="card">
+    <div class="table-responsive">
+        @* data-no-pager: tablekit sorts the page you are on; the pager below is
+           the server's. Column keys are stable names for the Columns menu. *@
+        <table id="surveys-list" class="table table-hover align-middle mb-0 qms-index-table"
+               data-tablekit data-no-pager data-coltoggle>
+            <thead class="table-light">
+                <tr>
+                    <th data-sort data-col-key="surveyno" data-col-lock>@Loc["Survey"]</th>
+                    <th data-sort data-col-key="status">@Loc["Status"]</th>
+                    <th data-sort data-col-key="source">@Loc["Requested from"]</th>
+                    <th data-sort data-col-key="arrivalno">@Loc["Arrival"]</th>
+                    <th data-sort data-col-key="qono">@Loc["QC order"]</th>
+                    <th data-sort data-col-key="container">@Loc["Container"]</th>
+                    <th data-sort data-col-key="supplier">@Loc["Supplier"]</th>
+                    <th class="text-center" data-col-key="products">@Loc["Products"]</th>
+                    <th data-sort data-col-key="origin" data-col-off>@Loc["Origin"]</th>
+                    <th data-sort data-col-key="branch">@Loc["Branch"]</th>
+                    <th data-sort data-col-key="received">@Loc["Receive date"]</th>
+                    <th data-sort data-col-key="requestedby">@Loc["Requested by"]</th>
+                    <th data-sort data-col-key="requestedat">@Loc["Requested"]</th>
+                    <th data-col-key="reason">@Loc["Reason"]</th>
+                    <th data-sort data-col-key="decidedby" data-col-off>@Loc["Decided by"]</th>
+                    <th data-sort data-col-key="decidedat" data-col-off>@Loc["Decided"]</th>
+                    <th data-sort data-col-key="qostatus">@Loc["QC order status"]</th>
+                    <th data-sort data-col-key="claim">@Loc["Claim"]</th>
+                    <th data-sort data-col-key="updated" data-col-off>@Loc["Last updated"]</th>
+                    <th class="text-end" data-col-key="open" data-col-lock>@Loc["Open"]</th>
+                </tr>
+            </thead>
+            <tbody>
+                @if (!Model.Any())
+                {
+                    <tr><td colspan="20" class="text-center text-muted py-4">
+                        @(f.Any ? Loc["No surveys match the current filters."] : Loc["No survey has been requested yet. A survey is requested by answering Joint Survey = Yes on an arrival, or with Potential Survey on a quality order."])
+                    </td></tr>
+                }
+                else
+                {
+                    foreach (var r in Model)
+                    {
+                        var products = string.IsNullOrWhiteSpace(r.Products)
+                            ? Array.Empty<string>()
+                            : r.Products.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                        const int tipMax = 15;
+                        var productTip = products.Length == 0
+                            ? ""
+                            : "<ul class='srv-tip'>" +
+                              string.Concat(products.Take(tipMax)
+                                  .Select(pn => "<li>" + System.Net.WebUtility.HtmlEncode(pn) + "</li>")) +
+                              (products.Length > tipMax ? $"<li>… and {products.Length - tipMax} more</li>" : "") +
+                              "</ul>";
+                        <tr>
+                            <td>
+                                <a asp-action="Details" asp-route-id="@r.SurveyId" class="fw-semibold text-decoration-none">@r.SurveyNo</a>
+                                @if (!string.IsNullOrWhiteSpace(r.FollowupError))
+                                {
+                                    <i class="bi bi-exclamation-triangle-fill text-warning ms-1" title="@Loc["A follow-up step failed. Open the survey to retry."]"></i>
+                                }
+                            </td>
+                            <td><span class="badge @SurveyStatus.BadgeCss(r.StatusCode)">@Loc[SurveyStatus.Label(r.StatusCode)]</span></td>
+                            <td>@Loc[SurveySource.Label(r.SourceCode)]</td>
+                            <td>
+                                @if (Perms.CanView(Screens.ArrivalsDetails))
+                                {
+                                    <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@r.ArrivalId" class="text-decoration-none">@r.ArrivalNo</a>
+                                }
+                                else { @r.ArrivalNo }
+                            </td>
+                            <td>
+                                @if (r.QualityOrderId.HasValue && Perms.CanView(Screens.QoDetails))
+                                {
+                                    <a asp-controller="QualityOrders" asp-action="Details" asp-route-id="@r.QualityOrderId" class="text-decoration-none">@r.QualityOrderNo</a>
+                                }
+                                else { @Txt(r.QualityOrderNo) }
+                            </td>
+                            <td>@Txt(r.ContainerNo)</td>
+                            <td>@Txt(r.VendorName)</td>
+                            <td class="text-center">
+                                @if (products.Length > 0)
+                                {
+                                    <span class="badge bg-light text-dark border" data-bs-toggle="tooltip" data-bs-html="true"
+                                          title="@productTip">@r.ProductCount</span>
+                                }
+                                else { <span class="text-muted">—</span> }
+                            </td>
+                            <td>@Txt(r.Origins)</td>
+                            <td><span title="@r.Plant">@(string.IsNullOrWhiteSpace(r.Plant) ? "—" : Codes.PlantDisplay(r.Plant))</span></td>
+                            <td>@(r.ReceiveDate?.ToString("yyyy-MM-dd") ?? "—")</td>
+                            <td>@r.RequestedBy</td>
+                            <td>@TsUtc(r.RequestedAt)</td>
+                            <td class="srv-reason small">@r.RequestReason</td>
+                            <td>@Txt(r.DecidedBy)</td>
+                            <td>@TsUtc(r.DecidedAt)</td>
+                            <td>
+                                @if (r.QualityOrderId.HasValue)
+                                {
+                                    @Loc[QualityOrderStatus.DisplayName(r.QualityOrderStatus)]
+                                }
+                                else { <span class="text-muted">@Loc["Not created"]</span> }
+                            </td>
+                            <td>
+                                @if (r.ClaimStatus != null)
+                                {
+                                    var claimLabel = ClaimStatus.LabelFor(r.ClaimStatus, r.QualityOrderStatus ?? "");
+                                    @if (Perms.CanView(Screens.Claims))
+                                    {
+                                        <a asp-controller="ClaimManagement" asp-action="Details" asp-route-id="@r.QualityOrderId" class="text-decoration-none">
+                                            <span class="badge @ClaimStatus.BadgeCssFor(r.ClaimStatus, r.QualityOrderStatus ?? "")">@claimLabel</span>
+                                        </a>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge @ClaimStatus.BadgeCssFor(r.ClaimStatus, r.QualityOrderStatus ?? "")">@claimLabel</span>
+                                    }
+                                }
+                                else { <span class="text-muted">—</span> }
+                            </td>
+                            <td>@TsUtc(r.UpdatedAt)</td>
+                            <td class="text-end">
+                                <a asp-action="Details" asp-route-id="@r.SurveyId" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                </a>
+                            </td>
+                        </tr>
+                    }
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (totalCount > 0)
+    {
+        <div class="tk-pager d-flex justify-content-between align-items-center flex-wrap gap-2 px-3 py-2 border-top">
+            <div class="d-flex align-items-center gap-2 small text-muted">
+                <label class="mb-0">@Loc["Show"]</label>
+                <select class="form-select form-select-sm" style="width:auto" data-pagesize-select>
+                    @foreach (var n in new[] { 25, 50, 100 })
+                    {
+                        <option value="@n" selected="@(n == pageSize)">@n</option>
+                    }
+                </select>
+                <span>@Loc["per page"]</span>
+            </div>
+
+            <span class="text-muted small">Showing @firstRow&ndash;@lastRow of @totalCount</span>
+
+            @if (pageCount > 1)
+            {
+                <nav aria-label='@Loc["Survey pages"]'>
+                    <ul class="pagination pagination-sm mb-0">
+                        @{
+                            var pFrom = Math.Max(1, pageNo - 2);
+                            var pTo   = Math.Min(pageCount, pageNo + 2);
+                        }
+                        <li class="page-item @(pageNo == 1 ? "disabled" : "")">
+                            <a class="page-link" href="@PageQuery(pageNo - 1, pageSize)" aria-label='@Loc["Previous"]'>&laquo;</a>
+                        </li>
+                        @for (var pp = pFrom; pp <= pTo; pp++)
+                        {
+                            <li class="page-item @(pp == pageNo ? "active" : "")">
+                                <a class="page-link" href="@PageQuery(pp, pageSize)">@pp</a>
+                            </li>
+                        }
+                        <li class="page-item @(pageNo == pageCount ? "disabled" : "")">
+                            <a class="page-link" href="@PageQuery(pageNo + 1, pageSize)" aria-label='@Loc["Next"]'>&raquo;</a>
+                        </li>
+                    </ul>
+                </nav>
+            }
+        </div>
+    }
+</div>
+
+@section Scripts {
+    <script src="~/js/list-filter-memory.js" asp-append-version="true"></script>
+    <script src="~/js/list-pager.js" asp-append-version="true"></script>
+    <script>
+        document.querySelectorAll('#surveys-list [data-bs-toggle="tooltip"]')
+            .forEach(function (el) { new bootstrap.Tooltip(el, { sanitize: false }); });
+    </script>
+}

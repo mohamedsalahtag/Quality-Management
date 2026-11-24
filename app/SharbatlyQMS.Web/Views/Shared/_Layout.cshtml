@@ -126,10 +126,15 @@
                                 </a>
                             </li>
                         }
-                        @if (Perms.CanView(Screens.Claims))
+                        @* Surveys are a tab of Claim Management, so the two share
+                           one menu entry. Somebody who holds only the Surveys
+                           screen lands on that tab. *@
+                        @if (Perms.CanView(Screens.Claims) || Perms.CanView(Screens.Surveys))
                         {
+                            var claimsNavOn = NavOn("ClaimManagement") || NavOn("Surveys");
                             <li class="nav-item">
-                                <a class="nav-link @(NavOn("ClaimManagement") ? "active" : "")" aria-current="@(NavOn("ClaimManagement") ? "page" : null)" asp-controller="ClaimManagement" asp-action="Index">
+                                <a class="nav-link @(claimsNavOn ? "active" : "")" aria-current="@(claimsNavOn ? "page" : null)"
+                                   asp-controller="@(Perms.CanView(Screens.Claims) ? "ClaimManagement" : "Surveys")" asp-action="Index">
                                     <i class="bi bi-shield-exclamation me-1"></i>@Loc["Claims"]
                                 </a>
                             </li>

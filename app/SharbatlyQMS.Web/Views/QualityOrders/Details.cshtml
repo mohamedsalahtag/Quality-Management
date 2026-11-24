@@ -1,6 +1,7 @@
 ﻿@using SharbatlyQMS.Web.Models
 @using SharbatlyQMS.Web.ViewModels
 @using SharbatlyQMS.Web.Services.Pdf
+@inject SharbatlyQMS.Web.Services.ISurveyService SurveySvc
 @model QualityOrder
 @{
     ViewData["Title"] = "QO " + Model.QualityOrderNo;
@@ -35,6 +36,15 @@
     // Grouped summary (claim context only) — the exact rollup the QC report prints.
     var groupSummaries = ViewBag.GroupSummaries as IReadOnlyList<MaterialGroupSummary>
                          ?? new List<MaterialGroupSummary>();
+    // Survey management (M44). The survey belongs to the ARRIVAL, so it is the
+    // same one whichever of the container's orders is on screen. Requesting is
+    // its own permission and deliberately ignores the gates above: an order
+    // that is finished, or shown read-only, can still be put forward.
+    var survey           = await SurveySvc.GetBriefForArrivalAsync(Model.ArrivalId);
+    var canViewSurvey    = Perms.CanView(Screens.Surveys);
+    var canRequestSurvey = survey == null && !isClaimContext && Perms.Can(Perm.Surveys.Request)
+                           && Model.StatusCode != QualityOrderStatus.Cancelled
+                           && !Model.IsFrozen && !Model.IsArchived;
     // Combined "user may interact with mutating buttons on this page".
     // editable carries the QO-status guard; role carries the per-user guard.
     var canAct       = editable && canEdit;
@@ -110,6 +120,21 @@
         <button type="button" class="btn btn-outline-secondary qo-docs-btn" data-bs-toggle="modal" data-bs-target="#documentsModal">
             <i class="bi bi-paperclip me-1"></i>@Loc["Documents"]
         </button>
+        @* Ask for a survey on this container. Gone once one exists -- an
+           arrival has a single survey, whatever was decided about it. *@
+        @if (canRequestSurvey)
+        {
+            <button type="button" class="btn btn-outline-danger" data-survey-request
+                    title="@Loc["Put this container forward for a survey. The QC process carries on as normal."]">
+                <i class="bi bi-binoculars me-1"></i>@Loc["Potential Survey"]
+            </button>
+        }
+        @if (survey != null && canViewSurvey)
+        {
+            <a asp-controller="Surveys" asp-action="Details" asp-route-id="@survey.SurveyId" class="btn btn-outline-danger">
+                <i class="bi bi-binoculars me-1"></i>@Loc["View survey"]
+            </a>
+        }
         @if (Model.StatusCode == QualityOrderStatus.Initial && canEdit)
         {
             <form asp-action="Open" asp-route-id="@Model.QualityOrderId" method="post"
@@ -225,6 +250,35 @@
            and the Claims panel's. *@
     </div>
 </div>
+
+@* ---- Under survey. Shown while the survey is Open or Confirmed, and for a
+       confirmed survey it stays for good -- attendance, the surveyor's
+       inspection and finishing this order do not take it away. A passed
+       survey shows nothing. Internal only: none of this reaches the QC
+       report. The number and status are for everyone who can open the order;
+       the link only for those who may open the survey. ---- *@
+@if (survey != null && survey.IsUnderSurvey)
+{
+    <div class="alert alert-danger d-flex align-items-center" role="alert">
+        <i class="bi bi-binoculars-fill fs-4 me-3"></i>
+        <div class="flex-grow-1">
+            <strong class="fs-5">@Loc["UNDER SURVEY"]</strong>
+            <span class="ms-2">@survey.SurveyNo</span>
+            <span class="badge @SurveyStatus.BadgeCss(survey.StatusCode) ms-2">@Loc[SurveyStatus.Label(survey.StatusCode)]</span>
+            <div class="small mt-1">
+                @(survey.StatusCode == SurveyStatus.Open
+                    ? Loc["A survey was requested for this container and is waiting for a decision. The inspection carries on as normal."]
+                    : Loc["A survey was confirmed for this container. The inspection carries on as normal."])
+            </div>
+        </div>
+        @if (canViewSurvey)
+        {
+            <a asp-controller="Surveys" asp-action="Details" asp-route-id="@survey.SurveyId" class="btn btn-sm btn-light ms-3">
+                <i class="bi bi-box-arrow-up-right me-1"></i>@Loc["View survey"]
+            </a>
+        }
+    </div>
+}
 
 @* ---- Reinspection: say which of the two orders this is before anything
        else on the page, because the reader's next question is always
@@ -1118,7 +1172,22 @@
     @await Html.PartialAsync("~/Views/ClaimManagement/_ClaimChatPanel.cshtml", Model)
 }
 
+@if (canRequestSurvey && arrival != null)
+{
+    var surveyProducts = materials.Select(m => m.MaterialDesc).Where(d => !string.IsNullOrWhiteSpace(d)).Distinct().ToList();
+    <partial name="_SurveyRequestModal" model="@(new SurveyRequestVm {
+        ArrivalId = arrival.ArrivalId, ArrivalNo = arrival.ArrivalNo,
+        QualityOrderId = Model.QualityOrderId, QualityOrderNo = Model.QualityOrderNo,
+        ContainerNo = arrival.ContainerNo, VendorName = arrival.VendorName,
+        ProductSummary = string.Join(", ", surveyProducts.Take(3)) + (surveyProducts.Count > 3 ? $" (+{surveyProducts.Count - 3})" : ""),
+        ReceiveDate = shipment?.ReceiveDate ?? shipment?.ArrivalDate })" />
+}
+
 @section Scripts {
+@if (canRequestSurvey && arrival != null)
+{
+    <script src="~/js/survey-request.js" asp-append-version="true"></script>
+}
 <script>
     // ---- Refresh materials from SAP: the preview is fetched each time the
     //      dialog opens, so it always shows what SAP says now. The server

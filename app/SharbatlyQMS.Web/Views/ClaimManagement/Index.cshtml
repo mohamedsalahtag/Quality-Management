@@ -191,22 +191,11 @@
     </div>
 }
 
-@* Two lists, two URLs. The active tab is the day-to-day worklist; Archived
-   holds the pre-go-live backlog, whatever each order's status. Filters are
-   NOT carried across the tabs -- a supplier that narrows one list to three
-   rows would silently narrow the other to none. *@
-<ul class="nav nav-tabs mb-3">
-    <li class="nav-item">
-        <a class="nav-link @(f.Archived ? "" : "active")" asp-action="Index">
-            <i class="bi bi-list-check me-1"></i>@Loc["Claims"]
-        </a>
-    </li>
-    <li class="nav-item">
-        <a class="nav-link @(f.Archived ? "active" : "")" asp-action="Archived">
-            <i class="bi bi-archive me-1"></i>@Loc["Archived"]
-        </a>
-    </li>
-</ul>
+@* The active tab is the day-to-day worklist; Archived holds the pre-go-live
+   backlog, whatever each order's status; Survey is the survey worklist. The
+   strip is shared with the Surveys page -- see _ClaimTabs for why filters are
+   not carried across. *@
+<partial name="_ClaimTabs" model="@(f.Archived ? "archived" : "claims")" />
 
 @* One form for everything: the always-visible quick bar and the collapsible
    panel below it. Collapsed inputs still submit (display:none is not disabled),

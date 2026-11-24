@@ -1,0 +1,69 @@
+@model SharbatlyQMS.Web.ViewModels.SurveyRequestVm
+@*
+    The one dialog that asks for a survey. Rendered on the arrival page (opened
+    by answering Joint Survey = Yes) and on the quality order page (opened by
+    Potential Survey); both post to Surveys/RequestSurvey through
+    wwwroot/js/survey-request.js.
+
+    Shipment facts are shown, never re-typed: they come from the arrival. Only
+    the reason and the comments are the user's to enter.
+*@
+<div class="modal fade" id="surveyRequestModal" tabindex="-1" aria-labelledby="surveyRequestTitle"
+     data-url="@Url.Action("RequestSurvey", "Surveys")"
+     data-url-lines="@(Model.QualityOrderId.HasValue ? Url.Action("OverTolerance", "Surveys", new { qualityOrderId = Model.QualityOrderId }) : "")"
+     data-arrival-id="@Model.ArrivalId"
+     data-qo-id="@Model.QualityOrderId">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <span id="surveyRequestToken" hidden>@Html.AntiForgeryToken()</span>
+            <div class="modal-header bg-danger text-white">
+                <h5 class="modal-title" id="surveyRequestTitle"><i class="bi bi-binoculars me-1"></i>@Loc["Request a survey"]</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="@Loc["Close"]"></button>
+            </div>
+            <div class="modal-body">
+                <dl class="row small mb-2">
+                    <dt class="col-4 text-muted">@Loc["Arrival"]</dt><dd class="col-8 mb-1">@Model.ArrivalNo</dd>
+                    @if (!string.IsNullOrWhiteSpace(Model.QualityOrderNo))
+                    {
+                        <dt class="col-4 text-muted">@Loc["QC order"]</dt><dd class="col-8 mb-1">@Model.QualityOrderNo</dd>
+                    }
+                    <dt class="col-4 text-muted">@Loc["Container"]</dt><dd class="col-8 mb-1">@(string.IsNullOrWhiteSpace(Model.ContainerNo) ? "—" : Model.ContainerNo)</dd>
+                    <dt class="col-4 text-muted">@Loc["Supplier"]</dt><dd class="col-8 mb-1">@(string.IsNullOrWhiteSpace(Model.VendorName) ? "—" : Model.VendorName)</dd>
+                    <dt class="col-4 text-muted">@Loc["Products"]</dt><dd class="col-8 mb-1">@(string.IsNullOrWhiteSpace(Model.ProductSummary) ? "—" : Model.ProductSummary)</dd>
+                    <dt class="col-4 text-muted">@Loc["Receive date"]</dt><dd class="col-8 mb-1">@(Model.ReceiveDate?.ToString("yyyy-MM-dd") ?? "—")</dd>
+                </dl>
+
+                @* Filled by survey-request.js from the order's own QC summary. *@
+                <div id="surveyRequestLines" class="mb-2" hidden>
+                    <div class="small fw-semibold mb-1">@Loc["Results at or over tolerance on this order"]</div>
+                    <div class="table-responsive">
+                        <table class="table table-sm small mb-0">
+                            <thead class="table-light">
+                                <tr><th>@Loc["Defect"]</th><th class="text-end">@Loc["Result"]</th><th class="text-end">@Loc["Tolerance"]</th><th class="text-end">@Loc["Over by"]</th></tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <label class="form-label small mb-0" for="surveyRequestReason">@Loc["Why is a survey needed? (required)"]</label>
+                <textarea id="surveyRequestReason" class="form-control form-control-sm mb-2" rows="2" maxlength="500"
+                          placeholder="@Loc["For example: mould on several pallets, cartons wet and collapsed"]"></textarea>
+                <label class="form-label small mb-0" for="surveyRequestComments">@Loc["Additional comments"]</label>
+                <textarea id="surveyRequestComments" class="form-control form-control-sm" rows="2" maxlength="2000"></textarea>
+
+                <div class="small text-muted mt-2">
+                    <i class="bi bi-info-circle me-1"></i>@Loc["The survey is internal. It goes to the people who decide surveys, and the QC process carries on as normal."]
+                </div>
+                <div id="surveyRequestError" class="alert alert-danger py-2 small mt-2 mb-0" hidden></div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                <button type="button" class="btn btn-danger" id="surveyRequestSubmit" disabled>
+                    <span class="spinner-border spinner-border-sm me-1" hidden></span>
+                    <i class="bi bi-binoculars me-1"></i>@Loc["Request survey"]
+                </button>
+            </div>
+        </div>
+    </div>
+</div>

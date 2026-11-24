@@ -1139,6 +1139,15 @@ public class ArrivalService : IArrivalService
             new { arrivalId }, tx)).Where(p => !string.IsNullOrWhiteSpace(p)).ToList();
         await c.ExecuteAsync("DELETE FROM qms_document WHERE owner_type='Arrival' AND owner_id=@arrivalId", new { arrivalId }, tx);
 
+        // The arrival's survey (M44). Its FK is NO ACTION like the others, and
+        // its status history is polymorphic; the audit rows stay, as always.
+        await c.ExecuteAsync(@"
+            DELETE FROM qms_status_history
+            WHERE  entity_type = 'Survey'
+              AND  entity_id IN (SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId)",
+            new { arrivalId }, tx);
+        await c.ExecuteAsync("DELETE FROM qms_survey                WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
+
         await c.ExecuteAsync("DELETE FROM qms_arrival_sap_snapshot  WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
         await c.ExecuteAsync("DELETE FROM qms_arrival_item          WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
         await c.ExecuteAsync("DELETE FROM qms_arrival_checklist     WHERE arrival_id=@arrivalId", new { arrivalId }, tx);

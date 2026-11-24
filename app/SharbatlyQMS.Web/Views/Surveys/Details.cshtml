@@ -1,0 +1,380 @@
+@using SharbatlyQMS.Web.Models
+@model Survey
+@{
+    ViewData["Title"] = Loc["Survey"] + " " + Model.SurveyNo;
+    var shipment = ViewBag.Shipment as ShipmentSnapshot;
+    var lines    = ViewBag.ToleranceLines as IReadOnlyList<SurveyToleranceLine> ?? Array.Empty<SurveyToleranceLine>();
+    var history  = ViewBag.History as IReadOnlyList<AuditEntryListRow> ?? Array.Empty<AuditEntryListRow>();
+    var canDecide = Model.IsOpen && Perms.Can(Perm.Surveys.Decide);
+
+    // requested_at, decided_at and the audit stamps are UTC; Dapper returns
+    // them with Kind=Unspecified, so the conversion is explicit.
+    string TsUtc(DateTime? d) => d.HasValue
+        ? DateTime.SpecifyKind(d.Value, DateTimeKind.Utc).ToLocalTime().ToString("yyyy-MM-dd HH:mm")
+        : "—";
+    string Dt(DateTime? d) => d?.ToString("yyyy-MM-dd") ?? "—";
+    string Txt(string? v) => string.IsNullOrWhiteSpace(v) ? "—" : v;
+    string Pct(decimal v) => v.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + "%";
+
+    var products = string.IsNullOrWhiteSpace(Model.Products)
+        ? Array.Empty<string>()
+        : Model.Products.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    var qoFinished = Model.QualityOrderStatus == QualityOrderStatus.Closed;
+
+    // What happened, in plain words. The audit row's own action code is the
+    // source; a diff's field names are developer names, so they are relabelled.
+    string HistoryTitle(string action) => action switch
+    {
+        ActionCodes.Created         => "Survey requested",
+        ActionCodes.SurveyConfirmed => "Survey confirmed",
+        ActionCodes.SurveyPassed    => "Survey passed",
+        _                           => AuditNarrator.ActionChip(action)
+    };
+    string? FieldLabel(string field) => field switch
+    {
+        "request_reason"    => "Reason",
+        "request_comments"  => "Comments",
+        "decision_comments" => "Decision comments",
+        "source_code"       => "Requested from",
+        _                   => null   // identifiers and status are already in the title
+    };
+}
+<style>
+    .srv-dl dt { font-weight: 600; color: var(--bs-secondary-color); font-size: .8rem; }
+    .srv-dl dd { margin-bottom: .5rem; }
+    .srv-pre   { white-space: pre-line; }
+</style>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <div>
+        <h1 class="h3 mb-1"><i class="bi bi-binoculars me-1"></i>@Model.SurveyNo</h1>
+        <span class="badge @SurveyStatus.BadgeCss(Model.StatusCode) fs-6">@Loc[SurveyStatus.Label(Model.StatusCode)]</span>
+        <span class="text-muted small ms-2">
+            @Loc["requested"] @TsUtc(Model.RequestedAt) @Loc["by"] @Model.RequestedBy
+        </span>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>@Loc["Back"]</a>
+        @if (Perms.CanView(Screens.ArrivalsDetails))
+        {
+            <a asp-controller="Arrivals" asp-action="Details" asp-route-id="@Model.ArrivalId" class="btn btn-outline-secondary">
+                <i class="bi bi-box-arrow-in-down me-1"></i>@Loc["View arrival"]
+            </a>
+        }
+        @if (Model.QualityOrderId.HasValue && Perms.CanView(Screens.QoDetails))
+        {
+            <a asp-controller="QualityOrders" asp-action="Details" asp-route-id="@Model.QualityOrderId" class="btn btn-outline-secondary">
+                <i class="bi bi-clipboard-data me-1"></i>@Loc["View QC order"]
+            </a>
+        }
+        @if (canDecide)
+        {
+            <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#confirmSurveyModal">
+                <i class="bi bi-check2-circle me-1"></i>@Loc["Confirm survey"]
+            </button>
+            <button type="button" class="btn btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#passSurveyModal">
+                <i class="bi bi-slash-circle me-1"></i>@Loc["Pass survey"]
+            </button>
+        }
+    </div>
+</div>
+
+<div class="alert alert-secondary py-2 small d-flex align-items-center" role="note">
+    <i class="bi bi-eye-slash me-2"></i>
+    @Loc["Internal and confidential. Nothing on this page is printed on the QC report or sent to the supplier."]
+</div>
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold"><i class="bi bi-info-circle me-1"></i>@Loc["General information"]</div>
+            <div class="card-body">
+                <dl class="row srv-dl mb-0">
+                    <dt class="col-sm-4">@Loc["Survey number"]</dt><dd class="col-sm-8">@Model.SurveyNo</dd>
+                    <dt class="col-sm-4">@Loc["Status"]</dt>
+                    <dd class="col-sm-8"><span class="badge @SurveyStatus.BadgeCss(Model.StatusCode)">@Loc[SurveyStatus.Label(Model.StatusCode)]</span></dd>
+                    <dt class="col-sm-4">@Loc["Requested from"]</dt>
+                    <dd class="col-sm-8">
+                        @Loc[SurveySource.Label(Model.SourceCode)]
+                        @if (!string.IsNullOrWhiteSpace(Model.SourceQoNo))
+                        {
+                            <span class="text-muted">(@Model.SourceQoNo)</span>
+                        }
+                    </dd>
+                    <dt class="col-sm-4">@Loc["How"]</dt><dd class="col-sm-8">@Loc[Model.MethodCode == SurveyMethod.Manual ? "Requested by a person" : "Raised by a rule"]</dd>
+                    <dt class="col-sm-4">@Loc["Requested by"]</dt><dd class="col-sm-8">@Model.RequestedBy</dd>
+                    <dt class="col-sm-4">@Loc["Requested at"]</dt><dd class="col-sm-8">@TsUtc(Model.RequestedAt)</dd>
+                    <dt class="col-sm-4">@Loc["Reason"]</dt><dd class="col-sm-8 srv-pre">@Model.RequestReason</dd>
+                    <dt class="col-sm-4">@Loc["Comments"]</dt><dd class="col-sm-8 srv-pre">@Txt(Model.RequestComments)</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold"><i class="bi bi-truck me-1"></i>@Loc["Shipment"]</div>
+            <div class="card-body">
+                <dl class="row srv-dl mb-0">
+                    <dt class="col-sm-4">@Loc["Arrival"]</dt>
+                    <dd class="col-sm-8">@Model.ArrivalNo <span class="text-muted">(@Loc[Model.ArrivalStatus ?? ""])</span></dd>
+                    <dt class="col-sm-4">@Loc["Container"]</dt><dd class="col-sm-8">@Txt(Model.ContainerNo)</dd>
+                    <dt class="col-sm-4">@Loc["BOL"] / @Loc["PO"]</dt><dd class="col-sm-8">@Txt(Model.BolNo) / @Txt(Model.Ebeln)</dd>
+                    <dt class="col-sm-4">@Loc["Supplier"]</dt>
+                    <dd class="col-sm-8">@Txt(Model.VendorName) @if (!string.IsNullOrWhiteSpace(Model.VendorNo)) { <span class="text-muted">(@Model.VendorNo)</span> }</dd>
+                    <dt class="col-sm-4">@Loc["Products"]</dt>
+                    <dd class="col-sm-8">
+                        @if (products.Length == 0) { <span>—</span> }
+                        else
+                        {
+                            <ul class="mb-0 ps-3">
+                                @foreach (var p in products.Take(8)) { <li>@p</li> }
+                                @if (products.Length > 8) { <li class="text-muted">@Loc["and"] @(products.Length - 8) @Loc["more"]</li> }
+                            </ul>
+                        }
+                    </dd>
+                    <dt class="col-sm-4">@Loc["Country of origin"]</dt><dd class="col-sm-8">@Txt(Model.Origins)</dd>
+                    <dt class="col-sm-4">@Loc["Branch"]</dt>
+                    <dd class="col-sm-8">@(string.IsNullOrWhiteSpace(Model.Plant) ? "—" : Codes.PlantLabel(Model.Plant))</dd>
+                    <dt class="col-sm-4">@Loc["Receive date"]</dt><dd class="col-sm-8">@Dt(Model.ReceiveDate)</dd>
+                    @if (shipment != null)
+                    {
+                        <dt class="col-sm-4">@Loc["Vessel"]</dt>
+                        <dd class="col-sm-8">@Txt(shipment.VesselName) @if (!string.IsNullOrWhiteSpace(shipment.VoyageNumber)) { <span class="text-muted">(@shipment.VoyageNumber)</span> }</dd>
+                        <dt class="col-sm-4">@Loc["Loading port"]</dt><dd class="col-sm-8">@Txt(shipment.LoadingPort)</dd>
+                        <dt class="col-sm-4">@Loc["Loading date"]</dt><dd class="col-sm-8">@Dt(shipment.SailingDate)</dd>
+                        <dt class="col-sm-4">@Loc["Discharge date"]</dt><dd class="col-sm-8">@Dt(shipment.DischargeDate)</dd>
+                    }
+                </dl>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold"><i class="bi bi-check2-square me-1"></i>@Loc["Survey decision"]</div>
+            <div class="card-body">
+                @if (Model.IsOpen)
+                {
+                    <p class="mb-2">@Loc["Waiting for a decision. Confirm means a formal survey is required; Pass means it is not."]</p>
+                    @if (!canDecide)
+                    {
+                        <p class="text-muted small mb-0"><i class="bi bi-lock me-1"></i>@Loc["You can see this survey but are not allowed to decide it."]</p>
+                    }
+                }
+                else
+                {
+                    <dl class="row srv-dl mb-0">
+                        <dt class="col-sm-4">@Loc["Decision"]</dt>
+                        <dd class="col-sm-8"><span class="badge @SurveyStatus.BadgeCss(Model.StatusCode)">@Loc[SurveyStatus.Label(Model.StatusCode)]</span></dd>
+                        <dt class="col-sm-4">@Loc["Decided by"]</dt><dd class="col-sm-8">@Txt(Model.DecidedBy)</dd>
+                        <dt class="col-sm-4">@Loc["Decided at"]</dt><dd class="col-sm-8">@TsUtc(Model.DecidedAt)</dd>
+                        <dt class="col-sm-4">@Loc[Model.IsConfirmed ? "Comments" : "Reason"]</dt>
+                        <dd class="col-sm-8 srv-pre">@Txt(Model.DecisionComments)</dd>
+                    </dl>
+                    <p class="text-muted small mb-0 mt-2">@Loc["A decision cannot be changed."]</p>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-6">
+        <div class="card h-100">
+            <div class="card-header fw-semibold"><i class="bi bi-shield-exclamation me-1"></i>@Loc["Related claim"]</div>
+            <div class="card-body">
+                @if (Model.ClaimId.HasValue)
+                {
+                    <dl class="row srv-dl mb-0">
+                        <dt class="col-sm-4">@Loc["Claim on"]</dt><dd class="col-sm-8">@Model.QualityOrderNo</dd>
+                        <dt class="col-sm-4">@Loc["Claim status"]</dt>
+                        <dd class="col-sm-8">
+                            <span class="badge @ClaimStatus.BadgeCssFor(Model.ClaimStatus, Model.QualityOrderStatus ?? "")">@ClaimStatus.LabelFor(Model.ClaimStatus, Model.QualityOrderStatus ?? "")</span>
+                        </dd>
+                        <dt class="col-sm-4">@Loc["Created"]</dt><dd class="col-sm-8">@TsUtc(Model.ClaimCreatedAt)</dd>
+                    </dl>
+                    @if (Perms.CanView(Screens.Claims))
+                    {
+                        <a asp-controller="ClaimManagement" asp-action="Details" asp-route-id="@Model.QualityOrderId" class="btn btn-sm btn-outline-primary mt-2">
+                            <i class="bi bi-box-arrow-up-right me-1"></i>@Loc["Open the claim"]
+                        </a>
+                    }
+                }
+                else
+                {
+                    <p class="text-muted mb-0">@Loc["No claim has been raised on this container's quality order."]</p>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header fw-semibold d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-clipboard-data me-1"></i>@Loc["QC inspection"]</span>
+                @if (Model.QualityOrderId.HasValue)
+                {
+                    <span class="small fw-normal">
+                        @Model.QualityOrderNo
+                        <span class="badge bg-light text-dark border ms-1">@Loc[QualityOrderStatus.DisplayName(Model.QualityOrderStatus)]</span>
+                    </span>
+                }
+            </div>
+            <div class="card-body">
+                @if (!Model.QualityOrderId.HasValue)
+                {
+                    <p class="text-muted mb-0">
+                        @(Model.ArrivalStatus == ArrivalStatus.Draft
+                            ? Loc["No quality order yet: the arrival is still a draft. The order is opened once the arrival is completed."]
+                            : Loc["No quality order has been created for this arrival yet."])
+                    </p>
+                }
+                else
+                {
+                    @if (lines.Count == 0)
+                    {
+                        <p class="text-muted mb-2">
+                            @(qoFinished
+                                ? Loc["No defect or category total reached its tolerance on this order."]
+                                : Loc["Nothing has reached its tolerance so far. The inspection is still in progress, so this can change."])
+                        </p>
+                    }
+                    else
+                    {
+                        <p class="small text-muted mb-2">
+                            @Loc["Results at or over their tolerance — the lines the QC report prints in red."]
+                            @if (!qoFinished) { <span>@Loc["The inspection is still in progress, so this can change."]</span> }
+                        </p>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-2">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>@Loc["Material"]</th>
+                                        <th>@Loc["Defect"]</th>
+                                        <th class="text-end">@Loc["Result"]</th>
+                                        <th class="text-end">@Loc["Tolerance"]</th>
+                                        <th class="text-end">@Loc["Over by"]</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var l in lines)
+                                    {
+                                        <tr>
+                                            <td>@l.Group</td>
+                                            <td>
+                                                @l.Item
+                                                @if (l.IsCategoryTotal) { <span class="badge bg-light text-dark border ms-1">@Loc["category total"]</span> }
+                                            </td>
+                                            <td class="text-end text-danger fw-semibold">@Pct(l.Result)</td>
+                                            <td class="text-end">@Pct(l.Tolerance)</td>
+                                            <td class="text-end">@Pct(l.Over)</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                    @if (Perms.CanView(Screens.QoDetails))
+                    {
+                        <a asp-controller="QualityOrders" asp-action="Details" asp-route-id="@Model.QualityOrderId" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-clipboard-data me-1"></i>@Loc["Open the QC order"]
+                        </a>
+                    }
+                    @if (Perms.CanRead(Perm.Qo.Pdf))
+                    {
+                        <a asp-controller="Reports" asp-action="QualityOrderPdf" asp-route-id="@Model.QualityOrderId" target="_blank" class="btn btn-sm btn-outline-danger">
+                            <i class="bi bi-file-earmark-pdf me-1"></i>@Loc["QC report"]
+                        </a>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header fw-semibold"><i class="bi bi-clock-history me-1"></i>@Loc["History"]</div>
+            <div class="card-body p-0">
+                @if (history.Count == 0)
+                {
+                    <p class="text-muted m-3">@Loc["Nothing recorded yet."]</p>
+                }
+                else
+                {
+                    <ul class="list-group list-group-flush">
+                        @foreach (var h in history)
+                        {
+                            <li class="list-group-item">
+                                <div class="d-flex justify-content-between flex-wrap gap-2">
+                                    <span class="fw-semibold">@Loc[HistoryTitle(h.ActionCode)]</span>
+                                    <span class="text-muted small">@TsUtc(h.ChangedAt) · @h.ChangedBy</span>
+                                </div>
+                                @foreach (var d in h.DiffRows)
+                                {
+                                    var fl = FieldLabel(d.FieldName);
+                                    if (fl != null && !string.IsNullOrWhiteSpace(d.NewValue))
+                                    {
+                                        <div class="small"><span class="text-muted">@Loc[fl]:</span> <span class="srv-pre">@d.NewValue</span></div>
+                                    }
+                                }
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (canDecide)
+{
+    @* Confirm: a formal survey IS required. Comments optional. *@
+    <div class="modal fade" id="confirmSurveyModal" tabindex="-1">
+        <div class="modal-dialog">
+            <form asp-action="Confirm" asp-route-id="@Model.SurveyId" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title"><i class="bi bi-check2-circle me-1"></i>@Loc["Confirm survey"]</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <dl class="row srv-dl mb-2">
+                        <dt class="col-5">@Loc["Survey"]</dt><dd class="col-7">@Model.SurveyNo</dd>
+                        <dt class="col-5">@Loc["Container"]</dt><dd class="col-7">@Txt(Model.ContainerNo)</dd>
+                        <dt class="col-5">@Loc["Arrival"]</dt><dd class="col-7">@Model.ArrivalNo</dd>
+                        <dt class="col-5">@Loc["QC order"]</dt><dd class="col-7">@(Model.QualityOrderNo ?? Loc["Not created yet"])</dd>
+                    </dl>
+                    <p class="small">@Loc["Confirming says a formal survey is required for this container. The decision cannot be changed afterwards."]</p>
+                    <label class="form-label small mb-0" for="confirmComments">@Loc["Decision comments (optional)"]</label>
+                    <textarea name="comments" id="confirmComments" class="form-control form-control-sm" rows="3" maxlength="2000"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-danger"><i class="bi bi-check2-circle me-1"></i>@Loc["Confirm survey"]</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    @* Pass: no survey is required. The reason is mandatory. *@
+    <div class="modal fade" id="passSurveyModal" tabindex="-1">
+        <div class="modal-dialog">
+            <form asp-action="Pass" asp-route-id="@Model.SurveyId" method="post" class="modal-content">
+                @Html.AntiForgeryToken()
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-slash-circle me-1"></i>@Loc["Pass survey"]</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small">@Loc["Passing says no formal survey is required for"] <strong>@Model.SurveyNo</strong> (@Txt(Model.ContainerNo)). @Loc["The normal QC process carries on. The decision cannot be changed afterwards."]</p>
+                    <label class="form-label small mb-0" for="passReason">@Loc["Reason (required)"]</label>
+                    <textarea name="comments" id="passReason" class="form-control form-control-sm" rows="3"
+                              required minlength="5" maxlength="2000"></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">@Loc["Cancel"]</button>
+                    <button type="submit" class="btn btn-primary"><i class="bi bi-slash-circle me-1"></i>@Loc["Pass survey"]</button>
+                </div>
+            </form>
+        </div>
+    </div>
+}

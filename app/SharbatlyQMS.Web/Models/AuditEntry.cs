@@ -146,6 +146,8 @@ public static class EntityTypes
     public const string SampleDefect         = "SampleDefect";
     public const string Claim                = "Claim";
     public const string ClaimNote            = "ClaimNote";
+    /// <summary>A survey request and its decision (M44).</summary>
+    public const string Survey               = "Survey";
 
     // Administrative / master-data entity types (added 2026-07-02 to close the
     // audit-coverage gap: user-role, catalog, and configuration changes that the
@@ -182,7 +184,7 @@ public static class EntityTypes
         Arrival, ArrivalItem, ArrivalChecklist,
         QualityOrder, QualityOrderMaterial,
         Sample, SampleReading, SampleDefect,
-        Claim, ClaimNote
+        Claim, ClaimNote, Survey
     };
 
     /// <summary>Administrative / master-data entity types (user, config, catalog, purge).</summary>
@@ -238,6 +240,10 @@ public static class ActionCodes
     public const string Approved           = "Approved";
     public const string Hold               = "Hold";
 
+    // Survey decisions (the request itself is audited as Created)
+    public const string SurveyConfirmed    = "SurveyConfirmed";
+    public const string SurveyPassed       = "SurveyPassed";
+
     // Material size overrides
     public const string Override           = "Override";
     public const string OverrideCleared    = "OverrideCleared";
@@ -251,6 +257,7 @@ public static class ActionCodes
         Created, Updated, Deleted,
         Opened, Submitted, CancelSubmit, Closed, Reopened, Cancelled,
         ClaimRequest, PassedQC, Approved, Hold,
+        SurveyConfirmed, SurveyPassed,
         Override, OverrideCleared,
         PasswordReset, Purged
     };

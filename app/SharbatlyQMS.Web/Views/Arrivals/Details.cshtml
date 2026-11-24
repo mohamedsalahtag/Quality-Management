@@ -1,5 +1,6 @@
 ﻿@using SharbatlyQMS.Web.Models
 @inject SharbatlyQMS.Web.Services.IDocumentService DocSvc
+@inject SharbatlyQMS.Web.Services.ISurveyService SurveySvc
 @model Arrival
 @{
     ViewData["Title"] = "Arrival " + Model.ArrivalNo;
@@ -34,6 +35,13 @@
         ArrivalFieldRegistry.All.Where(f => f.Form == ArrivalFieldRegistry.Checklist).Any(f => fieldEditable(f.Key))
         || fieldEditable("__photo_flags__");   // true for Draft (all) or admin
     var hasQo     = Model.QualityOrderId.HasValue;
+    // Survey management (M44). Joint Survey = Yes IS the request for a survey:
+    // picking it opens the request dialog, and once a survey exists the answer
+    // is locked at Yes. An arrival has at most one survey, for good.
+    var survey           = await SurveySvc.GetBriefForArrivalAsync(Model.ArrivalId);
+    var canRequestSurvey = survey == null && Perms.Can(Perm.Surveys.Request)
+                           && Model.StatusCode != ArrivalStatus.Cancelled;
+    var canViewSurvey    = Perms.CanView(Screens.Surveys);
     // One helper, shared with the list and the dashboard. Each of the three
     // used to carry its own switch on raw string literals, so adding a status
     // meant finding all of them -- and they had already drifted apart.
@@ -79,10 +87,24 @@
     <div>
         <h1 class="h3 mb-1"><i class="bi bi-box-arrow-in-down me-1"></i>@Model.ArrivalNo</h1>
         <span class="badge bg-@cls fs-6">@label</span>
+        @if (survey != null)
+        {
+            @* Number and status are for everyone who can open the arrival; the
+               link only for those who may open the survey itself. *@
+            <span class="badge @SurveyStatus.BadgeCss(survey.StatusCode) fs-6 ms-1" title="@Loc["A survey was requested for this container"]">
+                <i class="bi bi-binoculars me-1"></i>@Loc["Survey"] @survey.SurveyNo · @Loc[SurveyStatus.Label(survey.StatusCode)]
+            </span>
+        }
         <span class="text-muted small ms-2">created @Model.CreatedAt.ToLocalTime().ToString("g") by @Model.CreatedBy</span>
     </div>
     <div class="d-flex gap-2">
         <a asp-action="Index" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>@Loc["Back"]</a>
+        @if (survey != null && canViewSurvey)
+        {
+            <a asp-controller="Surveys" asp-action="Details" asp-route-id="@survey.SurveyId" class="btn btn-outline-danger">
+                <i class="bi bi-binoculars me-1"></i>@Loc["View survey"]
+            </a>
+        }
         <a asp-controller="Reports" asp-action="ArrivalChecklistPdf" asp-route-id="@Model.ArrivalId"
            class="btn btn-outline-danger" target="_blank" title="Download Arrival Checklist PDF">
             <i class="bi bi-file-earmark-pdf me-1"></i>@Loc["Download checklist PDF"]
@@ -366,7 +388,36 @@
                            independently of the surrounding form. *@
                         <div class="col-md-4">
                             <label class="form-label d-block">@Loc["Joint Survey"]@(FMand("joint_survey") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
-                            <fieldset class="border-0 p-0 m-0" @FDis("joint_survey")>@Html.Raw(TriRadio("JointSurvey", shipment?.JointSurvey))</fieldset>
+                            @if (survey != null)
+                            {
+                                @* Locked: the survey exists and cannot be taken back. *@
+                                <fieldset class="border-0 p-0 m-0" disabled>@Html.Raw(TriRadio("JointSurvey", true))</fieldset>
+                                <div class="mt-1" id="jointSurveyNote">
+                                    <span class="badge @SurveyStatus.BadgeCss(survey.StatusCode)">@survey.SurveyNo · @Loc[SurveyStatus.Label(survey.StatusCode)]</span>
+                                    @if (canViewSurvey)
+                                    {
+                                        <a asp-controller="Surveys" asp-action="Details" asp-route-id="@survey.SurveyId" class="ms-2 small">@Loc["View survey"]</a>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <fieldset class="border-0 p-0 m-0" @FDis("joint_survey")>@Html.Raw(TriRadio("JointSurvey", shipment?.JointSurvey))</fieldset>
+                                <div class="mt-1" id="jointSurveyNote">
+                                    @if (canRequestSurvey && shipment?.JointSurvey == true)
+                                    {
+                                        @* Answered Yes before surveys existed: no survey was created then. *@
+                                        <button type="button" class="btn btn-sm btn-outline-danger" data-survey-request>
+                                            <i class="bi bi-binoculars me-1"></i>@Loc["Request survey"]
+                                        </button>
+                                    }
+                                </div>
+                                <small class="text-muted d-block">
+                                    @(canRequestSurvey
+                                        ? Loc["Yes requests a survey: you will be asked why. It cannot be undone."]
+                                        : Loc["Yes requests a survey. You are not allowed to request one."])
+                                </small>
+                            }
                         </div>
                         <div class="col-md-4">
                             <label class="form-label d-block">@Loc["Time Bar Exceeded"]@(FMand("time_bar_exceeded") ? Html.Raw(" <span class='text-danger fw-bold'>*</span>") : null)</label>
@@ -809,7 +860,26 @@
 @* Per-entity audit panel removed 2026-06-13. Filter the master audit log
    at /Audit (Admin menu) by entity type + id to see this Arrival's history. *@
 
+@if (canRequestSurvey)
+{
+    var surveyProducts = items.Select(i => i.MaterialDesc).Where(d => !string.IsNullOrWhiteSpace(d)).Distinct().ToList();
+    <partial name="_SurveyRequestModal" model="@(new SharbatlyQMS.Web.ViewModels.SurveyRequestVm {
+        ArrivalId = Model.ArrivalId, ArrivalNo = Model.ArrivalNo,
+        ContainerNo = Model.ContainerNo, VendorName = Model.VendorName,
+        ProductSummary = string.Join(", ", surveyProducts.Take(3)) + (surveyProducts.Count > 3 ? $" (+{surveyProducts.Count - 3})" : ""),
+        ReceiveDate = shipment?.ReceiveDate ?? shipment?.ArrivalDate })" />
+}
+
 @section Scripts {
+@if (canRequestSurvey)
+{
+    <script src="~/js/survey-request.js" asp-append-version="true"></script>
+}
+else if (survey == null)
+{
+    @* Not allowed to request: Yes would have nothing to open, so it is off. *@
+    <script>(function () { var y = document.getElementById("JointSurvey-y"); if (y && !y.checked) y.disabled = true; })();</script>
+}
 <script>
     // The checklist UI shows the same photo-taken flag in two places: inline in
     // its own section AND as a tick in the section-6 "Photo Attachments

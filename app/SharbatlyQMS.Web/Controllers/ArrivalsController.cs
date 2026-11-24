@@ -689,7 +689,8 @@ public class ArrivalsController : Controller
 
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Arrivals.SaveShipment, Seed.OperatorOrAbove, "Save shipment details")]
-    public async Task<IActionResult> SaveShipment(ShipmentSnapshot shipment, [FromServices] ISettingsService settings)
+    public async Task<IActionResult> SaveShipment(ShipmentSnapshot shipment, [FromServices] ISettingsService settings,
+        [FromServices] ISurveyService surveys)
     {
         if (await EnsureCanReadArrivalAsync(shipment.ArrivalId) is { } block) return block;
         var arrival = await _arrivals.GetAsync(shipment.ArrivalId);
@@ -712,6 +713,15 @@ public class ArrivalsController : Controller
         if (!editable("arrival_place"))     shipment.ArrivalPlace    = cur.ArrivalPlace;
         if (!editable("inspection_point"))  shipment.InspectionPoint = cur.InspectionPoint;
         if (!editable("joint_survey"))      shipment.JointSurvey     = cur.JointSurvey;
+        // Joint Survey = Yes IS a survey request (M44). It is answered by the
+        // request dialog, which creates the survey and sets the answer in one
+        // transaction -- so this form can never turn it to Yes by itself, and
+        // once a survey exists it can never turn it back. (A locked radio posts
+        // nothing at all, which would otherwise arrive here as "unanswered".)
+        if (await surveys.GetBriefForArrivalAsync(shipment.ArrivalId) != null)
+            shipment.JointSurvey = true;
+        else if (shipment.JointSurvey == true && cur.JointSurvey != true)
+            shipment.JointSurvey = cur.JointSurvey;
         if (!editable("time_bar_exceeded")) shipment.TimeBarExceeded = cur.TimeBarExceeded;
         var dateProblems = ShipmentDates.EnteredDateProblems(cur.SailingDate,
             new EnteredDates(shipment.DischargeDate, shipment.UnloadingDate, shipment.PullOutDate),

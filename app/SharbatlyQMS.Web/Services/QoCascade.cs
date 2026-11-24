@@ -94,6 +94,10 @@ public static class QoCascade
         await c.ExecuteAsync("DELETE FROM qms_claim_note        WHERE claim_id IN (SELECT claim_id FROM qms_claim WHERE quality_order_id IN @qoIds)", new { qoIds }, tx);
         await c.ExecuteAsync("DELETE FROM qms_claim             WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
 
+        // A survey belongs to the arrival and outlives the order it was asked
+        // from; it only forgets which order that was (FK is NO ACTION).
+        await c.ExecuteAsync("UPDATE qms_survey SET source_qo_id = NULL WHERE source_qo_id IN @qoIds", new { qoIds }, tx);
+
         await c.ExecuteAsync("DELETE FROM qms_quality_order WHERE quality_order_id IN @qoIds", new { qoIds }, tx);
 
         // Status history is polymorphic with no FK, so it survives the QO and

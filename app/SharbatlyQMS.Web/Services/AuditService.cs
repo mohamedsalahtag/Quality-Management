@@ -673,6 +673,7 @@ public class AuditService : IAuditService
         var itemIds    = IdsOf(EntityTypes.ArrivalItem);
         var claimIds   = IdsOf(EntityTypes.Claim);
         var noteIds    = IdsOf(EntityTypes.ClaimNote);
+        var surveyIds  = IdsOf(EntityTypes.Survey);
         var userIds    = IdsOf(EntityTypes.User);
 
         var qo      = new Dictionary<long, RecordKey>();
@@ -682,6 +683,7 @@ public class AuditService : IAuditService
         var item    = new Dictionary<long, RecordKey>();
         var claim   = new Dictionary<long, RecordKey>();
         var note    = new Dictionary<long, RecordKey>();
+        var survey  = new Dictionary<long, RecordKey>();
         var users   = new Dictionary<long, string>();
 
         const string QoCols = @"qo.quality_order_no AS QoNo, a.container_no AS ContainerNo";
@@ -747,6 +749,15 @@ public class AuditService : IAuditService
                 WHERE  cn.note_id IN @ids", new { ids = noteIds }))
                 note[r.Id] = new RecordKey(r.QoNo, r.ContainerNo, null);
 
+        if (surveyIds.Length > 0)
+            foreach (var r in await c.QueryAsync<RecordKeyRow>(@"
+                SELECT s.survey_id AS Id, NULL AS QoNo, a.container_no AS ContainerNo,
+                       s.survey_no AS Extra
+                FROM   qms_survey s
+                JOIN   qms_arrival a ON a.arrival_id = s.arrival_id
+                WHERE  s.survey_id IN @ids", new { ids = surveyIds }))
+                survey[r.Id] = new RecordKey(null, r.ContainerNo, r.Extra);
+
         if (userIds.Length > 0)
             foreach (var r in await c.QueryAsync<UserKeyRow>(@"
                 SELECT UserId AS Id, Username FROM portal.[User] WHERE UserId IN @ids",
@@ -766,6 +777,7 @@ public class AuditService : IAuditService
                 EntityTypes.ArrivalItem          => Look(item,    r.EntityId),
                 EntityTypes.Claim                => Look(claim,   r.EntityId),
                 EntityTypes.ClaimNote            => Look(note,    r.EntityId),
+                EntityTypes.Survey               => Look(survey,  r.EntityId),
                 _                                => null
             };
 
