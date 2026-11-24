@@ -1,0 +1,31 @@
+@inject INotificationService BellSvc
+@*
+    The bell in the top bar (M45). The unread count is rendered with the page;
+    the list is fetched when the dropdown opens (wwwroot/js/notification-bell.js).
+    A notification is only a pointer -- the page it leads to does its own
+    permission check.
+*@
+@{
+    var bellUserId = int.TryParse(User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value, out var bid) ? bid : (int?)null;
+    var bellCount  = bellUserId.HasValue ? await BellSvc.UnreadCountAsync(bellUserId.Value) : 0;
+}
+@if (bellUserId.HasValue)
+{
+    <li class="nav-item dropdown" id="notifBell" data-url-recent="@Url.Action("Recent", "Inbox")">
+        <a class="nav-link position-relative" href="#" data-bs-toggle="dropdown" data-bs-auto-close="outside"
+           aria-expanded="false" title="@Loc["Notifications"]" aria-label="@Loc["Notifications"]">
+            <i class="bi bi-bell"></i>
+            <span class="position-absolute top-0 start-100 translate-middle badge rounded-pill bg-danger @(bellCount > 0 ? "" : "d-none")"
+                  id="notifCount" style="font-size:.65rem">@(bellCount > 99 ? "99+" : bellCount.ToString())</span>
+        </a>
+        <div class="dropdown-menu dropdown-menu-end p-0" style="min-width: 22rem; max-width: 26rem;">
+            <div class="px-3 py-2 border-bottom fw-semibold">@Loc["Notifications"]</div>
+            <div id="notifList" style="max-height: 24rem; overflow-y: auto;">
+                <div class="px-3 py-3 text-muted small">@Loc["Loading…"]</div>
+            </div>
+            <div class="px-3 py-2 border-top small">
+                <a asp-controller="Inbox" asp-action="Index">@Loc["See all notifications"]</a>
+            </div>
+        </div>
+    </li>
+}

@@ -740,13 +740,18 @@ public class ArrivalsController : Controller
 
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Arrivals.Complete, Seed.OperatorOrAbove, "Complete an arrival")]
-    public async Task<IActionResult> Complete(long id)
+    public async Task<IActionResult> Complete(long id, [FromServices] ISurveyService surveys)
     {
         if (await EnsureCanReadArrivalAsync(id) is { } block) return block;
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
         var (ok, error) = await _arrivals.CompleteAsync(id, user);
+        // A survey confirmed while this arrival was a draft has been waiting
+        // for a quality order it could not have until now.
+        var surveyQoId = ok ? await surveys.AfterArrivalCompletedAsync(id, user) : null;
         TempData[ok ? "Success" : "Error"] = ok
-            ? "Arrival completed. You can now open a Quality Order."
+            ? (surveyQoId.HasValue
+                ? "Arrival completed. A Quality Order was created because this container's survey is confirmed."
+                : "Arrival completed. You can now open a Quality Order.")
             : error;
         return RedirectToAction(nameof(Details), new { id });
     }
@@ -758,7 +763,7 @@ public class ArrivalsController : Controller
     /// </summary>
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Arrivals.Reject, Seed.SupervisorOrAbove, "Reject a container in bad condition")]
-    public async Task<IActionResult> Reject(long id, string? reason)
+    public async Task<IActionResult> Reject(long id, string? reason, [FromServices] ISurveyClaimSync claimSync)
     {
         if (await EnsureCanReadArrivalAsync(id) is { } block) return block;
         var user = User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
@@ -769,6 +774,10 @@ public class ArrivalsController : Controller
             TempData["Error"] = error;
             return RedirectToAction(nameof(Details), new { id });
         }
+        // The rejection order is born finished. If this container's survey is
+        // already confirmed, that is the moment its claim request is due. (With
+        // no confirmed survey the claim step leaves a rejected container alone.)
+        await claimSync.AfterSurveyDecidedAsync(id);
 
         _logger.LogInformation("{User} rejected arrival {ArrivalId}; claim order {QoId} raised", user, id, qoId);
         TempData["Success"] = "Container rejected. A finished quality order carrying a potential claim "

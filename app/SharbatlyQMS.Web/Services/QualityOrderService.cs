@@ -15,14 +15,16 @@ public class QualityOrderService : IQualityOrderService
     private readonly IMaraService _mara;
     // Only used by DeleteAsync, to unlink attachment files after the commit.
     private readonly IDocumentService _docs;
+    private readonly ISurveyClaimSync _claimSync;
     public QualityOrderService(IConfiguration config, IAuditService audit, IMaraService mara,
-        IDocumentService docs)
+        IDocumentService docs, ISurveyClaimSync claimSync)
     {
         _cs = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
         _audit = audit;
         _mara  = mara;
         _docs  = docs;
+        _claimSync = claimSync;
     }
     private SqlConnection Open() => new(_cs);
 
@@ -542,10 +544,21 @@ public class QualityOrderService : IQualityOrderService
     // Supervisor/Manager review step is mandatory between operator entry and
     // finished state. Existing legacy 'Open' QOs cannot be closed directly any
     // more -- they must transit through Submit first.
-    // potentialClaim (M24) is the QC assessment picked in the Finish dialog:
-    // true = Potential Claim, false = No Potential Claim. It is written in the
-    // same statement as the status so a finished order can never be missing it.
-    public Task<(bool ok, string? error)> CloseAsync(long qoId, string user, string? reason, bool bypassNoSamples = false, bool? potentialClaim = null)  => Transition(qoId, user, reason, "Closed",   new[] { "Submitted" }, bypassNoSamples, potentialClaim);
+    //
+    // The potential-claim assessment (M24) is no longer picked by the finisher:
+    // since surveys (M45) it comes from the container's survey, read inside the
+    // Finish transaction so a finished order still can never be missing it.
+    //
+    // Once the finish has committed, the claim step settles the order's claim:
+    // a confirmed survey raises the claim request, no survey (or a passed one)
+    // marks it Passed QC. That step runs in its own transaction and never
+    // throws -- a problem there must not turn a finished order into an error.
+    public async Task<(bool ok, string? error)> CloseAsync(long qoId, string user, string? reason, bool bypassNoSamples = false)
+    {
+        var result = await Transition(qoId, user, reason, "Closed", new[] { "Submitted" }, bypassNoSamples);
+        if (result.ok) await _claimSync.AfterOrderFinishedAsync(qoId);
+        return result;
+    }
     // Reopen folds back into Open -- the user explicitly didn't want a
     // separate "Reopened" status. Audit columns (reopened_at / by /
     // reason) still record that the QO was re-opened.
@@ -623,7 +636,7 @@ public class QualityOrderService : IQualityOrderService
     private static string PotentialClaimLabel(bool? v) =>
         v == true ? "Potential Claim" : v == false ? "No Potential Claim" : "Not classified";
 
-    private async Task<(bool ok, string? error)> Transition(long qoId, string user, string? reason, string toStatus, string[] fromStatuses, bool bypassNoSamples = false, bool? potentialClaim = null)
+    private async Task<(bool ok, string? error)> Transition(long qoId, string user, string? reason, string toStatus, string[] fromStatuses, bool bypassNoSamples = false)
     {
         using var c = Open();
         await c.OpenAsync();
@@ -730,14 +743,25 @@ public class QualityOrderService : IQualityOrderService
             // record who cancelled the submit and when.
             ("Open", "Submitted")     => "UPDATE qms_quality_order SET status_code='Open' WHERE quality_order_id=@qoId AND status_code=@current",
             ("Submitted", _)          => "UPDATE qms_quality_order SET status_code='Submitted' WHERE quality_order_id=@qoId AND status_code=@current",
-            // M24: the potential-claim assessment is stamped with the finish,
-            // in the same guarded UPDATE. COALESCE keeps an earlier answer if a
-            // caller somehow omits it (re-finish after a reopen passes it again).
-            ("Closed", _)             => "UPDATE qms_quality_order SET status_code='Closed',   closed_at=SYSUTCDATETIME(), closed_by=@user, close_reason=@reason, potential_claim=COALESCE(@potentialClaim, potential_claim), potential_claim_at=CASE WHEN @potentialClaim IS NULL THEN potential_claim_at ELSE SYSUTCDATETIME() END, potential_claim_by=CASE WHEN @potentialClaim IS NULL THEN potential_claim_by ELSE @user END WHERE quality_order_id=@qoId AND status_code=@current",
+            // The potential-claim assessment is stamped with the finish, in
+            // the same guarded UPDATE. It is the survey's verdict (see above),
+            // written as it stands NOW -- including "not classified" while the
+            // survey is still open -- so a re-finish after a reopen never keeps
+            // an answer the survey has since overtaken.
+            ("Closed", _)             => "UPDATE qms_quality_order SET status_code='Closed',   closed_at=SYSUTCDATETIME(), closed_by=@user, close_reason=@reason, potential_claim=@potentialClaim, potential_claim_at=CASE WHEN @potentialClaim IS NULL THEN NULL ELSE SYSUTCDATETIME() END, potential_claim_by=CASE WHEN @potentialClaim IS NULL THEN NULL ELSE @user END WHERE quality_order_id=@qoId AND status_code=@current",
             ("Reopened", _)           => "UPDATE qms_quality_order SET status_code='Open',     reopened_at=SYSUTCDATETIME(), reopened_by=@user, reopen_reason=@reason WHERE quality_order_id=@qoId AND status_code=@current",
             ("Cancelled", _)          => "UPDATE qms_quality_order SET status_code='Cancelled' WHERE quality_order_id=@qoId AND status_code=@current",
             _ => throw new InvalidOperationException("Unknown target status.")
         };
+        // Confirmed survey = potential claim; no survey or a passed one = none;
+        // a survey still open = not classified until it is decided.
+        bool? potentialClaim = null;
+        if (toStatus == "Closed")
+            potentialClaim = SurveyClaimSync.PotentialClaimFor(await c.ExecuteScalarAsync<string?>(@"
+                SELECT s.status_code
+                FROM   qms_survey s
+                JOIN   qms_quality_order q ON q.arrival_id = s.arrival_id
+                WHERE  q.quality_order_id = @qoId", new { qoId }, tx));
         var affected = await c.ExecuteAsync(sql, new { qoId, user, reason, current, potentialClaim }, tx);
         if (affected != 1)
         {

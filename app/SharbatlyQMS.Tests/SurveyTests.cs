@@ -90,30 +90,7 @@ public class SurveyTests : IClassFixture<QmsAppFactory>
         return (arrivalId, qoId, tag);
     }
 
-    private async Task CleanupAsync(long arrivalId)
-    {
-        using var c = Db();
-        await c.OpenAsync();
-        await c.ExecuteAsync(@"
-            DECLARE @qos TABLE (id BIGINT);
-            INSERT INTO @qos SELECT quality_order_id FROM qms_quality_order WHERE arrival_id = @arrivalId;
-
-            DELETE FROM qms_status_history
-             WHERE entity_type = 'Survey'
-               AND entity_id IN (SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId);
-            DELETE FROM qms_survey WHERE arrival_id = @arrivalId;
-            DELETE FROM qms_claim_note WHERE claim_id IN
-                (SELECT claim_id FROM qms_claim WHERE quality_order_id IN (SELECT id FROM @qos));
-            DELETE FROM qms_claim WHERE quality_order_id IN (SELECT id FROM @qos);
-            DELETE FROM qms_status_history
-             WHERE (entity_type = 'QualityOrder' AND entity_id IN (SELECT id FROM @qos))
-                OR (entity_type = 'Arrival' AND entity_id = @arrivalId);
-            DELETE FROM qms_quality_order_material WHERE quality_order_id IN (SELECT id FROM @qos);
-            DELETE FROM qms_quality_order WHERE arrival_id = @arrivalId;
-            DELETE FROM qms_shipment_snapshot WHERE arrival_id = @arrivalId;
-            DELETE FROM qms_arrival_item WHERE arrival_id = @arrivalId;
-            DELETE FROM qms_arrival WHERE arrival_id = @arrivalId;", new { arrivalId });
-    }
+    private Task CleanupAsync(long arrivalId) => SurveyTestData.CleanupAsync(_factory, arrivalId);
 
     private async Task<T> WithSurveysAsync<T>(Func<ISurveyService, Task<T>> work)
     {

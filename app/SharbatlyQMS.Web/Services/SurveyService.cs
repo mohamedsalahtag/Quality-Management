@@ -14,12 +14,21 @@ public class SurveyService : ISurveyService
 
     private readonly string _cs;
     private readonly IAuditService _audit;
+    private readonly IQualityOrderService _qos;
+    private readonly ISurveyClaimSync _claimSync;
+    private readonly ISurveyNotifier _notifier;
+    private readonly ILogger<SurveyService> _log;
 
-    public SurveyService(IConfiguration config, IAuditService audit)
+    public SurveyService(IConfiguration config, IAuditService audit, IQualityOrderService qos,
+        ISurveyClaimSync claimSync, ISurveyNotifier notifier, ILogger<SurveyService> log)
     {
         _cs = config.GetConnectionString("Default")
             ?? throw new InvalidOperationException("ConnectionStrings:Default missing");
         _audit = audit;
+        _qos = qos;
+        _claimSync = claimSync;
+        _notifier = notifier;
+        _log = log;
     }
 
     private SqlConnection Open() => new(_cs);
@@ -399,7 +408,15 @@ public class SurveyService : ISurveyService
             },
             actor: user);
 
+        // Tell the people who decide. Written in this transaction, so the
+        // notice exists exactly when the survey does.
+        await _notifier.RequestedAsync(c, tx, surveyId, user);
+
         tx.Commit();
+
+        // An order that is already finished goes back to "not classified"
+        // while its new survey is open; its claim is settled at the decision.
+        await _claimSync.AfterSurveyDecidedAsync(arrivalId);
         return new SurveyRequestResult(true, false, surveyId, surveyNo, SurveyStatus.Open, null);
     }
 
@@ -461,7 +478,97 @@ public class SurveyService : ISurveyService
             newValues: new { status_code = newStatus, decision_comments = comments },
             actor: user);
 
+        await _notifier.DecidedAsync(c, tx, surveyId, user);
+
         tx.Commit();
+
+        // The decision stands from here. What follows from it (the quality
+        // order, the claim) is done afterwards and cannot undo it.
+        await RunFollowUpsAsync(surveyId, user);
         return (true, null);
+    }
+
+    // ---- What follows from a decision ---------------------------------
+
+    /// <summary>
+    /// Everything a decision sets in motion, in order, each step safe to
+    /// repeat:
+    ///   1. Confirmed, and the completed arrival has no quality order: create
+    ///      one through the ordinary creation path (an existing order is always
+    ///      reused -- the arrival can only hold one live order). A draft
+    ///      arrival cannot take an order yet; that is not a failure, and
+    ///      <see cref="AfterArrivalCompletedAsync"/> picks it up.
+    ///   2. The claim step, which settles the order's claim if it is finished.
+    /// Never throws. A failure is stored on the survey and returned, and the
+    /// Retry button runs this again.
+    /// </summary>
+    public async Task<string?> RunFollowUpsAsync(long surveyId, string user)
+    {
+        string? error = null;
+        try
+        {
+            var s = await GetAsync(surveyId);
+            if (s == null || s.IsOpen) return null;
+
+            if (s.IsConfirmed && !s.QualityOrderId.HasValue && s.ArrivalStatus == ArrivalStatus.Completed)
+                error = await CreateOrderAsync(s.ArrivalId, user);
+
+            if (error == null)
+                error = (await _claimSync.AfterSurveyDecidedAsync(s.ArrivalId)).Error;
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Follow-up for survey {SurveyId} failed", surveyId);
+            error = "A follow-up step failed: " + ex.Message;
+        }
+
+        try
+        {
+            if (error is { Length: > 1000 }) error = error[..1000];
+            using var c = Open();
+            await c.ExecuteAsync(@"
+                UPDATE qms_survey
+                SET    followup_error     = @error,
+                       followup_failed_at = CASE WHEN @error IS NULL THEN NULL ELSE SYSUTCDATETIME() END
+                WHERE  survey_id = @surveyId AND (followup_error IS NOT NULL OR @error IS NOT NULL)",
+                new { error, surveyId });
+        }
+        catch (Exception ex)
+        {
+            _log.LogError(ex, "Could not record the follow-up result on survey {SurveyId}", surveyId);
+        }
+        return error;
+    }
+
+    /// <summary>Creates the arrival's quality order, or returns why it could
+    /// not. Finding that someone else created it in the meantime is success.</summary>
+    private async Task<string?> CreateOrderAsync(long arrivalId, string user)
+    {
+        try
+        {
+            await _qos.CreateForArrivalAsync(arrivalId, user);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            using var c = Open();
+            var exists = await c.ExecuteScalarAsync<int>(@"
+                SELECT COUNT(1) FROM qms_quality_order
+                WHERE  arrival_id = @arrivalId AND status_code <> 'Cancelled' AND superseded_at IS NULL",
+                new { arrivalId }) > 0;
+            if (exists) return null;
+            _log.LogError(ex, "Could not create the quality order for arrival {ArrivalId}", arrivalId);
+            return "The quality order could not be created: " + ex.Message;
+        }
+    }
+
+    public async Task<long?> AfterArrivalCompletedAsync(long arrivalId, string user)
+    {
+        var brief = await GetBriefForArrivalAsync(arrivalId);
+        if (brief == null || brief.StatusCode != SurveyStatus.Confirm) return null;
+        var before = await GetAsync(brief.SurveyId);
+        if (before == null || before.QualityOrderId.HasValue) return null;
+        await RunFollowUpsAsync(brief.SurveyId, user);
+        return (await GetAsync(brief.SurveyId))?.QualityOrderId;
     }
 }

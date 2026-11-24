@@ -830,33 +830,31 @@
                               placeholder='@Loc["Add a note about this order…"]'></textarea>
                     <div class="form-text">@Loc["If you add a comment, it appears as a message under your name on the claim page."]</div>
                 </div>
-                @* M24: QC's claim assessment. Required -- the Finish button
-                   stays disabled until one is picked, and the server refuses a
-                   post without it. It feeds the Claims window's QC assessment
-                   column and filter; it does NOT decide the claim itself. *@
+                @* The claim assessment is not picked here any more (M45): it
+                   comes from the container's survey. This only says what
+                   finishing will record, so the finisher is not surprised. *@
                 <div class="mb-2">
-                    <label class="form-label d-block mb-1">
-                        @Loc["Claim assessment"] <span class="text-danger fw-bold">*</span>
-                    </label>
-                    <div class="d-flex flex-column gap-1">
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="potentialClaim"
-                                   id="pcYes" value="Yes" required data-finish-claim />
-                            <label class="form-check-label" for="pcYes">
-                                <span class="badge bg-danger me-1">@Loc["Potential Claim"]</span>
-                                this shipment may need claim processing.
-                            </label>
-                        </div>
-                        <div class="form-check">
-                            <input class="form-check-input" type="radio" name="potentialClaim"
-                                   id="pcNo" value="No" required data-finish-claim />
-                            <label class="form-check-label" for="pcNo">
-                                <span class="badge bg-success me-1">@Loc["No Potential Claim"]</span>
-                                nothing to claim on this shipment.
-                            </label>
-                        </div>
-                    </div>
-                    <div class="form-text">@Loc["Shown in the Claims window so claims can be picked up faster."]</div>
+                    <label class="form-label d-block mb-1">@Loc["Claim assessment"]</label>
+                    @if (survey == null)
+                    {
+                        <span class="badge bg-success me-1">@Loc["No Potential Claim"]</span>
+                        <span class="small">@Loc["No survey was requested for this container, so the order will be marked Passed QC. If it should be claimed, cancel and request a survey first (Potential Survey)."]</span>
+                    }
+                    else if (survey.StatusCode == SurveyStatus.Confirm)
+                    {
+                        <span class="badge bg-danger me-1">@Loc["Potential Claim"]</span>
+                        <span class="small">@Loc["Survey"] @survey.SurveyNo @Loc["is confirmed, so a claim notification request will be raised automatically."]</span>
+                    }
+                    else if (survey.StatusCode == SurveyStatus.Open)
+                    {
+                        <span class="badge bg-warning text-dark me-1">@Loc["Waiting for the survey decision"]</span>
+                        <span class="small">@Loc["Survey"] @survey.SurveyNo @Loc["is still open. The claim is settled when the survey is decided."]</span>
+                    }
+                    else
+                    {
+                        <span class="badge bg-success me-1">@Loc["No Potential Claim"]</span>
+                        <span class="small">@Loc["Survey"] @survey.SurveyNo @Loc["was passed, so the order will be marked Passed QC."]</span>
+                    }
                 </div>
                 <div class="form-check mt-3">
                     <input class="form-check-input" type="checkbox" id="finishAckCheck">
@@ -879,20 +877,13 @@
         var chk = document.getElementById('finishAckCheck');
         var btn = document.getElementById('finishBtn');
         if (!chk || !btn) return;
-        // M24: finishing needs BOTH the acknowledgement and a claim assessment.
-        // The server refuses a post without the assessment anyway; this just
-        // stops the user hitting that error.
-        var claims = Array.prototype.slice.call(document.querySelectorAll('[data-finish-claim]'));
-        function claimPicked() { return claims.some(function (r) { return r.checked; }); }
-        function sync() { btn.disabled = !(chk.checked && claimPicked()); }
+        function sync() { btn.disabled = !chk.checked; }
         chk.addEventListener('change', sync);
-        claims.forEach(function (r) { r.addEventListener('change', sync); });
         // Reset ack each time the modal opens so a previously-acknowledged
         // state doesn't carry across cancellations.
         var modal = document.getElementById('closeModal');
         modal.addEventListener('show.bs.modal', function () {
             chk.checked = false;
-            claims.forEach(function (r) { r.checked = false; });
             btn.disabled = true;
         });
     })();
@@ -905,7 +896,6 @@
 {
     var bypassAction = TempData["BypassAction"] as string == "Close" ? "Close" : "Submit";
     var bypassReason = TempData["BypassReason"] as string;
-    var bypassClaim  = TempData["BypassClaim"] as string;
     var bypassVerb   = bypassAction == "Close" ? "Finish" : "Submit";
     <div class="modal fade" id="bypassWarnModal" tabindex="-1">
         <div class="modal-dialog modal-dialog-centered">
@@ -938,35 +928,6 @@
                                   required maxlength="500"
                                   placeholder='@Loc["e.g. Supplier sample not available; proceeding with QM approval"]'>@bypassReason</textarea>
                         <div class="form-text">@Loc["Required. Recorded in this Quality Order's audit trail."]</div>
-                        @if (bypassAction == "Close")
-                        {
-                            @* M24: this form is the other way into Close, so it has
-                               to carry the claim assessment too -- the server
-                               refuses a finish without one. Pre-selected from the
-                               first attempt so the pick isn't made twice. *@
-                            <hr class="my-3" />
-                            <label class="form-label mb-1 fw-semibold">
-                                @Loc["Claim assessment"] <span class="text-danger">*</span>
-                            </label>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="potentialClaim"
-                                       id="pcBypassYes" value="Yes" required
-                                       checked="@(bypassClaim == "Yes")" />
-                                <label class="form-check-label" for="pcBypassYes">
-                                    <span class="badge bg-danger me-1">@Loc["Potential Claim"]</span>
-                                    this shipment may need claim processing.
-                                </label>
-                            </div>
-                            <div class="form-check">
-                                <input class="form-check-input" type="radio" name="potentialClaim"
-                                       id="pcBypassNo" value="No" required
-                                       checked="@(bypassClaim == "No")" />
-                                <label class="form-check-label" for="pcBypassNo">
-                                    <span class="badge bg-success me-1">@Loc["No Potential Claim"]</span>
-                                    nothing to claim on this shipment.
-                                </label>
-                            </div>
-                        }
                     </div>
                     <div class="modal-footer py-2">
                         <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">
@@ -1169,6 +1130,7 @@
    forced to false) so this panel is the only interactive UI on the page. *@
 @if (isClaimContext)
 {
+    ViewData["Survey"] = survey;
     @await Html.PartialAsync("~/Views/ClaimManagement/_ClaimChatPanel.cshtml", Model)
 }
 

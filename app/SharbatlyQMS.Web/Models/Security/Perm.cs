@@ -96,6 +96,8 @@ public static class Perm
         /// never implies this.</summary>
         public const string Decide  = Screens.Surveys + ".Decide";
         public const string Export  = Screens.Surveys + ".Export";
+        /// <summary>Send a survey e-mail again from its notification log.</summary>
+        public const string Notify  = Screens.Surveys + ".Notify";
     }
 
     public static class Attachments

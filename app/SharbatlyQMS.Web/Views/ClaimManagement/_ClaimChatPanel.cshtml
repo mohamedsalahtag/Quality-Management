@@ -47,6 +47,11 @@
 
     var currentLabel = ClaimStatus.LabelFor(claim?.ClaimStatus, Model.StatusCode);
     var currentBadge = ClaimStatus.BadgeCssFor(claim?.ClaimStatus, Model.StatusCode);
+
+    // The container's survey, handed down by the host page (M45). Shown here
+    // whatever its status: a passed survey has no banner on the page above,
+    // but it is still why this order was marked the way it was.
+    var survey = ViewData["Survey"] as SurveyBrief;
 }
 
 <style>
@@ -88,6 +93,18 @@
             <i class="bi bi-shield-exclamation me-1 text-danger"></i>
             <strong>@Loc["Claim review"]</strong>
             <span class="badge @currentBadge ms-2 fs-6">@currentLabel</span>
+            @if (survey != null)
+            {
+                <span class="small ms-2">
+                    <i class="bi bi-binoculars me-1"></i>@Loc["Survey"]
+                    @if (Perms.CanView(Screens.Surveys))
+                    {
+                        <a asp-controller="Surveys" asp-action="Details" asp-route-id="@survey.SurveyId">@survey.SurveyNo</a>
+                    }
+                    else { @survey.SurveyNo }
+                    <span class="badge @SurveyStatus.BadgeCss(survey.StatusCode)">@Loc[SurveyStatus.Label(survey.StatusCode)]</span>
+                </span>
+            }
             @if (claim?.DecidedAt != null)
             {
                 <span class="text-muted small ms-2">

@@ -1146,6 +1146,17 @@ public class ArrivalService : IArrivalService
             WHERE  entity_type = 'Survey'
               AND  entity_id IN (SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId)",
             new { arrivalId }, tx);
+        // Its notices go with it (M45): a bell entry would lead nowhere, and a
+        // message still waiting in the outbox must not be sent about a survey
+        // that no longer exists.
+        await c.ExecuteAsync(@"
+            DELETE FROM qms_notification
+            WHERE  entity_type = 'Survey'
+              AND  entity_id IN (SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId);
+            DELETE FROM qms_mail_outbox
+            WHERE  entity_type = 'Survey'
+              AND  entity_id IN (SELECT survey_id FROM qms_survey WHERE arrival_id = @arrivalId);",
+            new { arrivalId }, tx);
         await c.ExecuteAsync("DELETE FROM qms_survey                WHERE arrival_id=@arrivalId", new { arrivalId }, tx);
 
         await c.ExecuteAsync("DELETE FROM qms_arrival_sap_snapshot  WHERE arrival_id=@arrivalId", new { arrivalId }, tx);

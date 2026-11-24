@@ -5,6 +5,7 @@
     var shipment = ViewBag.Shipment as ShipmentSnapshot;
     var lines    = ViewBag.ToleranceLines as IReadOnlyList<SurveyToleranceLine> ?? Array.Empty<SurveyToleranceLine>();
     var history  = ViewBag.History as IReadOnlyList<AuditEntryListRow> ?? Array.Empty<AuditEntryListRow>();
+    var mails    = ViewBag.Mails as IReadOnlyList<OutboxRow> ?? Array.Empty<OutboxRow>();
     var canDecide = Model.IsOpen && Perms.Can(Perm.Surveys.Decide);
 
     // requested_at, decided_at and the audit stamps are UTC; Dapper returns
@@ -83,6 +84,28 @@
     <i class="bi bi-eye-slash me-2"></i>
     @Loc["Internal and confidential. Nothing on this page is printed on the QC report or sent to the supplier."]
 </div>
+
+@* A step that follows from the decision (creating the quality order, raising
+   the claim request) failed. The decision itself is saved; this is the
+   controlled way to run the step again. *@
+@if (!string.IsNullOrWhiteSpace(Model.FollowupError))
+{
+    <div class="alert alert-warning d-flex align-items-start" role="alert">
+        <i class="bi bi-exclamation-triangle-fill me-2 mt-1"></i>
+        <div class="flex-grow-1">
+            <strong>@Loc["A step after the decision did not complete"]</strong>
+            <div class="small mt-1 srv-pre">@Model.FollowupError</div>
+            <div class="small text-muted mt-1">@Loc["The decision itself is saved."] @TsUtc(Model.FollowupFailedAt)</div>
+        </div>
+        @if (Perms.Can(Perm.Surveys.Decide))
+        {
+            <form asp-action="RetryFollowUp" asp-route-id="@Model.SurveyId" method="post" class="ms-3">
+                @Html.AntiForgeryToken()
+                <button type="submit" class="btn btn-sm btn-warning"><i class="bi bi-arrow-repeat me-1"></i>@Loc["Retry"]</button>
+            </form>
+        }
+    </div>
+}
 
 <div class="row g-3">
     <div class="col-lg-6">
@@ -292,6 +315,74 @@
 
     <div class="col-12">
         <div class="card">
+            <div class="card-header fw-semibold"><i class="bi bi-envelope me-1"></i>@Loc["Notification log"]</div>
+            <div class="card-body p-0">
+                @if (mails.Count == 0)
+                {
+                    <p class="text-muted m-3">@Loc["No e-mail has been sent for this survey."]</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>@Loc["Created"]</th>
+                                    <th>@Loc["To"]</th>
+                                    <th>@Loc["Subject"]</th>
+                                    <th>@Loc["Delivery"]</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var m in mails)
+                                {
+                                    <tr>
+                                        <td class="text-nowrap">@TsUtc(m.CreatedAt)</td>
+                                        <td>@(string.IsNullOrWhiteSpace(m.ToName) ? m.ToAddress : m.ToName)<div class="small text-muted">@m.ToAddress</div></td>
+                                        <td>@m.Subject</td>
+                                        <td>
+                                            @if (m.StatusCode == OutboxStatus.Sent)
+                                            {
+                                                <span class="badge bg-success">@Loc["Sent"]</span>
+                                                <span class="small text-muted">@TsUtc(m.SentAt)</span>
+                                            }
+                                            else if (m.StatusCode == OutboxStatus.Failed)
+                                            {
+                                                <span class="badge bg-danger">@Loc["Failed"]</span>
+                                                <div class="small text-muted">@Loc["after"] @m.Attempts @Loc["attempts"]: @m.LastError</div>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-warning text-dark">@Loc["Waiting"]</span>
+                                                @if (m.Attempts > 0)
+                                                {
+                                                    <div class="small text-muted">@Loc["attempt"] @m.Attempts @Loc["of"] @MailOutbox.MaxAttempts @Loc["failed"]: @m.LastError</div>
+                                                }
+                                            }
+                                        </td>
+                                        <td class="text-end">
+                                            @if (m.StatusCode != OutboxStatus.Sent && Perms.Can(Perm.Surveys.Notify))
+                                            {
+                                                <form asp-action="ResendMail" asp-route-id="@Model.SurveyId" method="post" class="d-inline">
+                                                    @Html.AntiForgeryToken()
+                                                    <input type="hidden" name="outboxId" value="@m.OutboxId" />
+                                                    <button type="submit" class="btn btn-sm btn-outline-secondary">@Loc["Send now"]</button>
+                                                </form>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-12">
+        <div class="card">
             <div class="card-header fw-semibold"><i class="bi bi-clock-history me-1"></i>@Loc["History"]</div>
             <div class="card-body p-0">
                 @if (history.Count == 0)
@@ -344,6 +435,25 @@
                         <dt class="col-5">@Loc["QC order"]</dt><dd class="col-7">@(Model.QualityOrderNo ?? Loc["Not created yet"])</dd>
                     </dl>
                     <p class="small">@Loc["Confirming says a formal survey is required for this container. The decision cannot be changed afterwards."]</p>
+                    @* What confirming sets in motion, so nobody is surprised by it. *@
+                    <div class="alert alert-info py-2 small mb-2">
+                        @if (qoFinished)
+                        {
+                            <span><i class="bi bi-lightning-charge me-1"></i>@Loc["The quality order is already finished, so a claim notification request is raised on it as soon as you confirm."]</span>
+                        }
+                        else if (Model.QualityOrderId.HasValue)
+                        {
+                            <span>@Loc["When the quality order is finished, a claim notification request is raised on it automatically."]</span>
+                        }
+                        else if (Model.ArrivalStatus == ArrivalStatus.Completed)
+                        {
+                            <span>@Loc["This arrival has no quality order yet. One is created when you confirm."]</span>
+                        }
+                        else
+                        {
+                            <span>@Loc["This arrival is still a draft. Its quality order is created when the arrival is completed."]</span>
+                        }
+                    </div>
                     <label class="form-label small mb-0" for="confirmComments">@Loc["Decision comments (optional)"]</label>
                     <textarea name="comments" id="confirmComments" class="form-control form-control-sm" rows="3" maxlength="2000"></textarea>
                 </div>
@@ -366,6 +476,10 @@
                 </div>
                 <div class="modal-body">
                     <p class="small">@Loc["Passing says no formal survey is required for"] <strong>@Model.SurveyNo</strong> (@Txt(Model.ContainerNo)). @Loc["The normal QC process carries on. The decision cannot be changed afterwards."]</p>
+                    @if (qoFinished && !Model.ClaimId.HasValue)
+                    {
+                        <div class="alert alert-info py-2 small mb-2">@Loc["The quality order is already finished, so it is marked Passed QC as soon as you pass the survey."]</div>
+                    }
                     <label class="form-label small mb-0" for="passReason">@Loc["Reason (required)"]</label>
                     <textarea name="comments" id="passReason" class="form-control form-control-sm" rows="3"
                               required minlength="5" maxlength="2000"></textarea>

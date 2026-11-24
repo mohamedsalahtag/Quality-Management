@@ -530,37 +530,18 @@ public class QualityOrdersController : Controller
         return await TransitionAsync(id, (qos, user, r) => qos.CancelSubmitAsync(id, user, r), reason);
     }
 
-    /// <summary>The Finish dialog posts "Yes" / "No"; anything else (including
-    /// a dialog submitted without a pick) is "unanswered" and blocks the
-    /// finish.</summary>
-    private static bool? ParsePotentialClaim(string? v) => v?.Trim().ToLowerInvariant() switch
-    {
-        "yes" or "true"  => true,
-        "no"  or "false" => false,
-        _                => null
-    };
-
     /// <summary>"Finish order" — V31 (2026-06-20): policy widened to
     /// SupervisorOrAbove; source status is now Submitted (was Open). The same
     /// "all materials sampled" precondition still applies as a safety net,
     /// though the Submit step should have enforced it earlier.</summary>
     [HttpPost, ValidateAntiForgeryToken]
     [RequirePermission(Perm.Qo.Finish, Seed.SupervisorOrAbove, "Finish a quality order")]
-    public async Task<IActionResult> Close(long id, string? reason, bool bypassNoSamples = false,
-        string? potentialClaim = null)
+    public async Task<IActionResult> Close(long id, string? reason, bool bypassNoSamples = false)
     {
         if (await EnsureCanReadQoAsync(id) is { } block) return block;
 
-        // M24: classifying the shipment is part of finishing the report, so an
-        // unanswered dialog is refused rather than silently stored as "not
-        // classified" -- the Claims window is only useful if every finished
-        // order carries a verdict.
-        var claimVerdict = ParsePotentialClaim(potentialClaim);
-        if (claimVerdict == null)
-        {
-            TempData["Error"] = "Choose Potential Claim or No Potential Claim before finishing the order.";
-            return RedirectToAction(nameof(Details), new { id });
-        }
+        // The finisher no longer classifies the shipment (M45): the claim
+        // assessment comes from the container's survey, inside CloseAsync.
         // V38: bypassable, mirroring Submit — otherwise a QO submitted with the
         // bypass could never be finished by the supervisor.
         if (!bypassNoSamples && await CheckAllMaterialsSampledAsync(id) is { } err)
@@ -568,7 +549,6 @@ public class QualityOrdersController : Controller
             TempData["BypassWarning"] = err;
             TempData["BypassAction"]  = "Close";
             TempData["BypassReason"]  = reason;
-            TempData["BypassClaim"]   = potentialClaim;
             return RedirectToAction(nameof(Details), new { id });
         }
         // Finishing while bypassing the no-samples rule also requires a reason.
@@ -580,7 +560,7 @@ public class QualityOrdersController : Controller
             TempData["Error"] = "A reason is required to finish with materials that have no samples.";
             return RedirectToAction(nameof(Details), new { id });
         }
-        var result = await TransitionAsync(id, (qos, user, r) => qos.CloseAsync(id, user, r, bypassNoSamples, claimVerdict), reason);
+        var result = await TransitionAsync(id, (qos, user, r) => qos.CloseAsync(id, user, r, bypassNoSamples), reason);
 
         // Tell whoever Parameters -> Notifications lists. Deliberately after the
         // transition and deliberately not awaited into the response: the order is

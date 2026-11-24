@@ -35,11 +35,13 @@ public class SurveysController : Controller
     private readonly IMaraService _mara;
     private readonly IAuditService _audit;
     private readonly IUserPermissions _me;
+    private readonly IMailOutbox _outbox;
 
     public SurveysController(ISurveyService surveys, IArrivalService arrivals, IQualityOrderService qos,
-        IMaraService mara, IAuditService audit, IUserPermissions me)
+        IMaraService mara, IAuditService audit, IUserPermissions me, IMailOutbox outbox)
     {
         _surveys = surveys; _arrivals = arrivals; _qos = qos; _mara = mara; _audit = audit; _me = me;
+        _outbox = outbox;
     }
 
     private string CurrentUser => User.FindFirst(ClaimTypes.Name)?.Value ?? "system";
@@ -143,7 +145,28 @@ public class SurveysController : Controller
             ? await OverToleranceLinesAsync(survey.QualityOrderId.Value)
             : (IReadOnlyList<SurveyToleranceLine>)Array.Empty<SurveyToleranceLine>();
         ViewBag.History = await _audit.GetForRecordAsync(EntityTypes.Survey, id);
+        // The delivery log: every e-mail this survey caused, sent or not.
+        ViewBag.Mails   = await _outbox.ListForEntityAsync(EntityTypes.Survey, id);
         return View(survey);
+    }
+
+    /// <summary>Sends one of this survey's e-mails again -- the way out for a
+    /// message the worker gave up on.</summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Surveys.Notify, Seed.ManagerOrClaimManagerOrAdmin, "Resend a survey notification")]
+    public async Task<IActionResult> ResendMail(long id, long outboxId)
+    {
+        var survey = await _surveys.GetAsync(id);
+        if (survey == null) return NotFound();
+        if (!User.GetPlantScope().Allows(survey.Plant)) return Forbid();
+        // Only a message that belongs to THIS survey.
+        var mails = await _outbox.ListForEntityAsync(EntityTypes.Survey, id);
+        if (mails.All(m => m.OutboxId != outboxId)) return NotFound();
+
+        var sent = await _outbox.DispatchOneAsync(outboxId);
+        if (sent) TempData["Success"] = "The message was sent.";
+        else TempData["Error"] = "The message could not be sent. The notification log shows the reason.";
+        return RedirectToAction(nameof(Details), new { id });
     }
 
     /// <summary>The lines of an order's QC summary that are at or over their
@@ -273,12 +296,44 @@ public class SurveysController : Controller
         if (!User.GetPlantScope().Allows(survey.Plant)) return Forbid();
 
         var (ok, error) = await _surveys.DecideAsync(id, confirm, comments, CurrentUser);
-        if (ok)
-            TempData["Success"] = confirm
-                ? $"Survey {survey.SurveyNo} confirmed."
-                : $"Survey {survey.SurveyNo} passed. No survey is required for this container.";
-        else
+        if (!ok)
+        {
             TempData["Error"] = error;
+            return RedirectToAction(nameof(Details), new { id });
+        }
+
+        // Say what the decision set in motion. A failed follow-up is shown by
+        // the page itself, with a Retry button.
+        var after = await _surveys.GetAsync(id);
+        var msg = confirm
+            ? $"Survey {survey.SurveyNo} confirmed."
+            : $"Survey {survey.SurveyNo} passed. No survey is required for this container.";
+        if (after != null && after.FollowupError == null)
+        {
+            if (confirm && !survey.QualityOrderId.HasValue && after.QualityOrderId.HasValue)
+                msg += $" Quality order {after.QualityOrderNo} was created.";
+            if (after.ClaimStatus != survey.ClaimStatus && after.ClaimStatus == ClaimStatus.ClaimRequest)
+                msg += $" A claim notification request was raised on {after.QualityOrderNo}.";
+            else if (after.ClaimStatus != survey.ClaimStatus && after.ClaimStatus == ClaimStatus.PassedQC)
+                msg += $" {after.QualityOrderNo} was marked Passed QC.";
+        }
+        TempData["Success"] = msg;
+        return RedirectToAction(nameof(Details), new { id });
+    }
+
+    /// <summary>Runs a decided survey's follow-up steps again after one failed
+    /// (creating the quality order, raising the claim request).</summary>
+    [HttpPost, ValidateAntiForgeryToken]
+    [RequirePermission(Perm.Surveys.Decide, Seed.ManagerOrClaimManagerOrAdmin, "Confirm / Pass a survey")]
+    public async Task<IActionResult> RetryFollowUp(long id)
+    {
+        var survey = await _surveys.GetAsync(id);
+        if (survey == null) return NotFound();
+        if (!User.GetPlantScope().Allows(survey.Plant)) return Forbid();
+
+        var error = await _surveys.RunFollowUpsAsync(id, CurrentUser);
+        if (error == null) TempData["Success"] = "Done. The follow-up steps completed.";
+        else TempData["Error"] = error;
         return RedirectToAction(nameof(Details), new { id });
     }
 }

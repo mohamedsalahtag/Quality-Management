@@ -61,6 +61,16 @@ public class QmsAppFactory : WebApplicationFactory<Program>
                 services.Remove(d);
             services.AddSingleton<SharbatlyQMS.Web.Services.IEmailService>(RecordingEmailService.Instance);
 
+            // Survey notifications (M45) are written to real tables that the
+            // deployed application reads. A test must never put a notice in a
+            // real person's bell, or a message where the deployed mail worker
+            // would send it -- see SurveyTestDoubles for what replaces them.
+            foreach (var d in services.Where(s => s.ServiceType == typeof(SharbatlyQMS.Web.Services.ISurveyRecipients)
+                                               || s.ServiceType == typeof(SharbatlyQMS.Web.Services.IMailOutbox)).ToList())
+                services.Remove(d);
+            services.AddScoped<SharbatlyQMS.Web.Services.ISurveyRecipients, TestSurveyRecipients>();
+            services.AddScoped<SharbatlyQMS.Web.Services.IMailOutbox, ParkedMailOutbox>();
+
             services.AddAuthentication(o =>
             {
                 o.DefaultAuthenticateScheme = TestAuthHandler.Scheme;

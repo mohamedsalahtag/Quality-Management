@@ -78,6 +78,9 @@ public class PageSmokeTests : IClassFixture<QmsAppFactory>
         "/Surveys?status=Open&status=Confirm&source=Arrival&milestone=awaitingqo&from=2026-07-01&to=2026-12-31",
         "/Surveys?search=a&plant=JD01&supplier=x&milestone=withclaim&page=2&pageSize=25",
         "/Surveys/Export?status=Pass",
+        // The bell's own page and the dropdown's feed (M45).
+        "/Inbox",
+        "/Inbox/Recent",
         "/Audit",
         "/Audit/Security",
         // Audit filters: the noise toggle, an admin entity type (previously

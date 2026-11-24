@@ -38,6 +38,22 @@ public interface ISurveyService
     /// </summary>
     Task<(bool ok, string? error)> DecideAsync(long surveyId, bool confirm, string? comments, string user);
 
+    /// <summary>
+    /// Runs what a decision sets in motion: for a confirmed survey, making sure
+    /// the completed arrival has a quality order; then the claim step. Called
+    /// by <see cref="DecideAsync"/> itself, and again by Retry. Never throws;
+    /// returns the failure (also stored on the survey), or null.
+    /// </summary>
+    Task<string?> RunFollowUpsAsync(long surveyId, string user);
+
+    /// <summary>
+    /// A survey confirmed while its arrival was still a draft could not get a
+    /// quality order then. Called when the arrival is completed: creates the
+    /// order if the survey is confirmed and none exists. Returns its id, or
+    /// null when nothing was created.
+    /// </summary>
+    Task<long?> AfterArrivalCompletedAsync(long arrivalId, string user);
+
     Task<SurveyPage> ListAsync(SurveyListFilter filter, PlantScope scope);
 
     /// <summary>Every row matching the filter, for the Excel export (capped).</summary>
